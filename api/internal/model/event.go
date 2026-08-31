@@ -1,0 +1,390 @@
+package model
+
+import (
+	"encoding/json"
+	"time"
+)
+
+// BaseEvent 事件接口
+type BaseEvent interface {
+	// GetType 返回事件类型
+	GetType() EventType
+	// ToJSON 将事件转换为 JSON 字符串
+	ToJSON() string
+}
+
+// ExecutionStatus 执行状态
+type ExecutionStatus string
+
+const (
+	ExecutionStatusPending   ExecutionStatus = "pending"
+	ExecutionStatusRunning   ExecutionStatus = "running"
+	ExecutionStatusCompleted ExecutionStatus = "completed"
+	ExecutionStatusFailed    ExecutionStatus = "failed"
+)
+
+// EventType 事件类型
+type EventType string
+
+const (
+	EventTypeMessage EventType = "message"
+	EventTypePlan    EventType = "plan"
+	EventTypeTool    EventType = "tool"
+	EventTypeStep    EventType = "step"
+	EventTypeError   EventType = "error"
+	EventTypeTitle   EventType = "title"
+	EventTypeWait    EventType = "wait"
+	EventTypeDone    EventType = "done"
+	EventTypeBrowser EventType = "browser"
+	EventTypeSearch  EventType = "search"
+	EventTypeShell   EventType = "shell"
+	EventTypeFile    EventType = "file"
+	EventTypeMCP     EventType = "mcp"
+	EventTypeA2A     EventType = "a2a"
+)
+
+// PlanEventStatus 计划事件状态
+type PlanEventStatus string
+
+const (
+	PlanEventStatusCreated   PlanEventStatus = "created"
+	PlanEventStatusUpdated   PlanEventStatus = "updated"
+	PlanEventStatusCompleted PlanEventStatus = "completed"
+)
+
+// StepEventStatus 步骤事件状态
+type StepEventStatus string
+
+const (
+	StepEventStatusStarted   StepEventStatus = "started"
+	StepEventStatusCompleted StepEventStatus = "completed"
+	StepEventStatusFailed    StepEventStatus = "failed"
+)
+
+// Event 事件模型
+type Event struct {
+	ID        string          `json:"id"`
+	Type      EventType       `json:"type"`
+	CreatedAt time.Time       `json:"created_at"`
+	Data      json.RawMessage `json:"data"`
+}
+
+// ToJSON 将事件转换为 JSON 字符串
+func (e *Event) ToJSON() string {
+	data, _ := json.Marshal(e)
+	return string(data)
+}
+
+// MessageEvent 消息事件
+// 对齐 Python 版本的 MessageEvent
+type MessageEvent struct {
+	Type        EventType `json:"type"`
+	Role        string    `json:"role"`        // 消息角色: user, assistant
+	Message     string    `json:"message"`     // 消息本身
+	Attachments []File    `json:"attachments"` // 附件列表
+}
+
+// GetType 返回事件类型
+func (e *MessageEvent) GetType() EventType {
+	return EventTypeMessage
+}
+
+// ToJSON 将事件转换为 JSON 字符串
+func (e *MessageEvent) ToJSON() string {
+	data, _ := json.Marshal(e)
+	return string(data)
+}
+
+// PlanEvent 计划事件
+type PlanEvent struct {
+	Plan *Plan `json:"plan"`
+}
+
+// Plan 计划
+type Plan struct {
+	ID       string          `json:"id"`
+	Title    string          `json:"title"`
+	Goal     string          `json:"goal"`
+	Language string          `json:"language"`
+	Steps    []PlanStep      `json:"steps"`
+	Message  string          `json:"message"`
+	Status   ExecutionStatus `json:"status"`
+	Error    string          `json:"error,omitempty"`
+}
+
+// Done 是否完成
+func (p *Plan) Done() bool {
+	return p.Status == ExecutionStatusCompleted || p.Status == ExecutionStatusFailed
+}
+
+// GetNextStep 获取下一个未完成的步骤
+func (p *Plan) GetNextStep() *PlanStep {
+	for i := range p.Steps {
+		if !p.Steps[i].Done() {
+			return &p.Steps[i]
+		}
+	}
+	return nil
+}
+
+// PlanStep 计划步骤
+type PlanStep struct {
+	ID           string          `json:"id"`
+	Description  string          `json:"description"`
+	Status       ExecutionStatus `json:"status"`
+	Result       string          `json:"result,omitempty"`
+	Error        string          `json:"error,omitempty"`
+	Success      bool            `json:"success"`
+	Attachments  []string        `json:"attachments"`
+	UserQuestion string          `json:"user_question,omitempty"` // 等待用户输入时的问题
+}
+
+// Done 步骤是否完成
+func (s *PlanStep) Done() bool {
+	return s.Status == ExecutionStatusCompleted || s.Status == ExecutionStatusFailed
+}
+
+// ToolEvent 工具事件
+type ToolEvent struct {
+	Tool   string `json:"tool"`
+	Input  string `json:"input"`
+	Output string `json:"output,omitempty"`
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+}
+
+// ErrorEvent 错误事件
+type ErrorEvent struct {
+	Message string `json:"message"`
+}
+
+// GetType 返回事件类型
+func (e *ErrorEvent) GetType() EventType {
+	return EventTypeError
+}
+
+// ToJSON 将事件转换为 JSON 字符串
+func (e *ErrorEvent) ToJSON() string {
+	data, _ := json.Marshal(e)
+	return string(data)
+}
+
+// DoneEvent 完成事件
+type DoneEvent struct {
+	Message string `json:"message,omitempty"`
+}
+
+// GetType 返回事件类型
+func (e *DoneEvent) GetType() EventType {
+	return EventTypeDone
+}
+
+// ToJSON 将事件转换为 JSON 字符串
+func (e *DoneEvent) ToJSON() string {
+	data, _ := json.Marshal(e)
+	return string(data)
+}
+
+// StepEvent 步骤事件
+type StepEvent struct {
+	Step     int    `json:"step"`
+	Content  string `json:"content"`
+	Finished bool   `json:"finished"`
+}
+
+// BrowserEvent 浏览器事件
+type BrowserEvent struct {
+	URL        string `json:"url"`
+	Action     string `json:"action"`  // navigate/click/input/screenshot
+	Content    string `json:"content"` // 页面内容或截图
+	Screenshot string `json:"screenshot,omitempty"`
+}
+
+// SearchEvent 搜索事件
+type SearchEvent struct {
+	Query  string         `json:"query"`
+	Result *SearchResults `json:"result,omitempty"`
+}
+
+// ShellEvent Shell 执行事件
+type ShellEvent struct {
+	Command  string `json:"command"`
+	Output   string `json:"output,omitempty"`
+	Error    string `json:"error,omitempty"`
+	ExitCode int    `json:"exit_code"`
+}
+
+// FileEvent 文件操作事件
+type FileEvent struct {
+	Path    string `json:"path"`
+	Action  string `json:"action"` // read/write/delete
+	Content string `json:"content,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// TitleEvent 标题事件
+type TitleEvent struct {
+	Title string `json:"title"`
+}
+
+// GetType 返回事件类型
+func (e *TitleEvent) GetType() EventType {
+	return EventTypeTitle
+}
+
+// ToJSON 将事件转换为 JSON 字符串
+func (e *TitleEvent) ToJSON() string {
+	data, _ := json.Marshal(e)
+	return string(data)
+}
+
+// WaitEvent 等待事件
+type WaitEvent struct {
+	Message string `json:"message,omitempty"`
+}
+
+// GetType 返回事件类型
+func (e *WaitEvent) GetType() EventType {
+	return EventTypeWait
+}
+
+// ToJSON 将事件转换为 JSON 字符串
+func (e *WaitEvent) ToJSON() string {
+	data, _ := json.Marshal(e)
+	return string(data)
+}
+
+// FullPlanEvent 完整计划事件（用于 Agent 间传递）
+type FullPlanEvent struct {
+	Plan   *Plan           `json:"plan"`
+	Status PlanEventStatus `json:"status"`
+}
+
+// GetType 返回事件类型
+func (e *FullPlanEvent) GetType() EventType {
+	return EventTypePlan
+}
+
+// ToJSON 将事件转换为 JSON 字符串
+func (e *FullPlanEvent) ToJSON() string {
+	data, _ := json.Marshal(e)
+	return string(data)
+}
+
+// FullStepEvent 完整步骤事件（用于 Agent 间传递）
+type FullStepEvent struct {
+	Step   *PlanStep       `json:"step"`
+	Status StepEventStatus `json:"status"`
+}
+
+// GetType 返回事件类型
+func (e *FullStepEvent) GetType() EventType {
+	return EventTypeStep
+}
+
+// ToJSON 将事件转换为 JSON 字符串
+func (e *FullStepEvent) ToJSON() string {
+	data, _ := json.Marshal(e)
+	return string(data)
+}
+
+// NewErrorEvent 创建错误事件
+func NewErrorEvent(message string) *ErrorEvent {
+	return &ErrorEvent{Message: message}
+}
+
+// NewTitleEvent 创建标题事件
+func NewTitleEvent(title string) *TitleEvent {
+	return &TitleEvent{Title: title}
+}
+
+// NewMessageEvent 创建消息事件
+func NewMessageEvent(role, content string) *MessageEvent {
+	return &MessageEvent{
+		Type:    EventTypeMessage,
+		Role:    role,
+		Message: content,
+	}
+}
+
+// NewPlanEvent 创建计划事件
+func NewPlanEvent(plan *Plan, status PlanEventStatus) *FullPlanEvent {
+	return &FullPlanEvent{
+		Plan:   plan,
+		Status: status,
+	}
+}
+
+// NewStepEvent 创建步骤事件
+func NewStepEvent(step *PlanStep, status StepEventStatus) *FullStepEvent {
+	return &FullStepEvent{
+		Step:   step,
+		Status: status,
+	}
+}
+
+// NewDoneEvent 创建完成事件
+func NewDoneEvent() *DoneEvent {
+	return &DoneEvent{}
+}
+
+// NewWaitEvent 创建等待事件
+func NewWaitEvent() *WaitEvent {
+	return &WaitEvent{}
+}
+
+// ToolCallingEvent 工具调用中事件
+type ToolCallingEvent struct {
+	ToolCallID   string                 `json:"tool_call_id"`
+	FunctionName string                 `json:"function_name"`
+	Arguments    map[string]interface{} `json:"arguments"`
+}
+
+// GetType 返回事件类型
+func (e *ToolCallingEvent) GetType() EventType {
+	return EventTypeTool
+}
+
+// ToJSON 将事件转换为 JSON 字符串
+func (e *ToolCallingEvent) ToJSON() string {
+	data, _ := json.Marshal(e)
+	return string(data)
+}
+
+// ToolCalledEvent 工具调用完成事件
+type ToolCalledEvent struct {
+	ToolCallID   string                 `json:"tool_call_id"`
+	FunctionName string                 `json:"function_name"`
+	Arguments    map[string]interface{} `json:"arguments"`
+	Result       *ToolResult            `json:"result"`
+}
+
+// GetType 返回事件类型
+func (e *ToolCalledEvent) GetType() EventType {
+	return EventTypeTool
+}
+
+// ToJSON 将事件转换为 JSON 字符串
+func (e *ToolCalledEvent) ToJSON() string {
+	data, _ := json.Marshal(e)
+	return string(data)
+}
+
+// NewToolCallingEvent 创建工具调用中事件
+func NewToolCallingEvent(toolCallID, functionName string, arguments map[string]interface{}) *ToolCallingEvent {
+	return &ToolCallingEvent{
+		ToolCallID:   toolCallID,
+		FunctionName: functionName,
+		Arguments:    arguments,
+	}
+}
+
+// NewToolCalledEvent 创建工具调用完成事件
+func NewToolCalledEvent(toolCallID, functionName string, arguments map[string]interface{}, result *ToolResult) *ToolCalledEvent {
+	return &ToolCalledEvent{
+		ToolCallID:   toolCallID,
+		FunctionName: functionName,
+		Arguments:    arguments,
+		Result:       result,
+	}
+}

@@ -1,0 +1,64 @@
+env: development
+log_level: info
+app_config_filepath: config.yaml
+
+database:
+  host: postgres
+  port: 5432
+  user: postgres
+  password: postgres
+  database: manus
+  max_open_conns: 25
+  max_idle_conns: 10
+
+redis:
+  host: redis
+  port: 6379
+  db: 0
+  password: ""
+
+cos:
+  endpoint: http://minio:9000
+  secret_id: minioadmin
+  secret_key: minioadmin
+  region: us-east-1
+  bucket: go-manus-files
+
+sandbox:
+  address: http://sandbox:8080
+  image: ""
+  name_prefix: manus
+  ttl_minutes: 60
+  network: ""
+  chrome_args: ""
+  https_proxy: ""
+  http_proxy: ""
+  no_proxy: ""
+
+# LLM 配置：实际值由 .env 通过环境变量覆盖（env 优先级 > yaml）
+# 这里的 base_url/model_name 仅作占位，最终生效值见根目录 .env
+llm:
+  base_url: "https://api.gmi-serving.com/v1"
+  api_key: ""
+  model_name: "MiniMaxAI/MiniMax-M2.7"
+  temperature: 0.7
+  max_tokens: 4096
+  tool_call_timeout: 15
+
+search:
+  provider: "bing"
+  bing_api_key: ""
+  google_api_key: ""
+  search_engine_id: ""
+
+mcp:
+  timeout: 60
+  servers: []
+
+a2a:
+  timeout: 30
+  agents: []
+
+server:
+  host: 0.0.0.0
+  port: 8080

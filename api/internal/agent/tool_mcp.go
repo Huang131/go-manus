@@ -1,0 +1,266 @@
+package agent
+
+import (
+	"context"
+	"sync"
+
+	"github.com/mooc-manus/go-manus/api/internal/external"
+	"github.com/mooc-manus/go-manus/api/internal/model"
+	"go.uber.org/zap"
+
+	"github.com/mooc-manus/go-manus/api/pkg/logger"
+)
+
+// MCPTool MCP 工具 (Model Context Protocol)
+type MCPTool struct {
+	mu      sync.RWMutex
+	config  *MCPConfig
+	manager *external.MCPClientManager
+	tools   map[string]map[string]external.MCPToolInfo // serverName -> toolName -> toolInfo
+}
+
+// NewMCPTool 创建 MCP 工具
+func NewMCPTool() *MCPTool {
+	return &MCPTool{
+		tools: make(map[string]map[string]external.MCPToolInfo),
+	}
+}
+
+// Name 返回工具名称
+func (t *MCPTool) Name() string {
+	return "mcp"
+}
+
+// Description 返回工具描述
+func (t *MCPTool) Description() string {
+	return "用于调用 MCP (Model Context Protocol) 服务器提供的工具。"
+}
+
+// Parameters 返回工具参数定义
+func (t *MCPTool) Parameters() map[string]interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"server": map[string]interface{}{
+				"type":        "string",
+				"description": "MCP 服务器名称",
+			},
+			"tool": map[string]interface{}{
+				"type":        "string",
+				"description": "工具名称",
+			},
+			"params": map[string]interface{}{
+				"type":        "object",
+				"description": "工具参数",
+			},
+		},
+		"required": []string{"server", "tool"},
+	}
+}
+
+// Invoke 调用工具
+func (t *MCPTool) Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
+	serverName, _ := params["server"].(string)
+	toolName, _ := params["tool"].(string)
+	paramsRaw, _ := params["params"].(map[string]interface{})
+
+	if paramsRaw == nil {
+		paramsRaw = make(map[string]interface{})
+	}
+
+	t.mu.RLock()
+	manager := t.manager
+	t.mu.RUnlock()
+
+	if manager == nil {
+		return model.NewToolError("MCP manager not initialized"), nil
+	}
+
+	client, ok := manager.GetClient(serverName)
+	if !ok {
+		return model.NewToolError("MCP server not found: " + serverName), nil
+	}
+
+	logger.Info("调用 MCP 工具",
+		zap.String("server", serverName),
+		zap.String("tool", toolName))
+
+	// 调用 MCP 工具
+	result, err := client.CallTool(ctx, toolName, paramsRaw)
+	if err != nil {
+		logger.Error("MCP 工具调用失败",
+			zap.String("server", serverName),
+			zap.String("tool", toolName),
+			zap.Error(err))
+		return model.NewToolError(err.Error()), nil
+	}
+
+	// 处理结果
+	if result.IsError {
+		var errorMsg string
+		for _, content := range result.Content {
+			errorMsg += content.Text + "\n"
+		}
+		return model.NewToolError(errorMsg), nil
+	}
+
+	// 构建成功结果
+	var message string
+	for _, content := range result.Content {
+		if content.Type == "text" {
+			message += content.Text + "\n"
+		}
+	}
+
+	return model.NewToolResultWithMessage(message, map[string]interface{}{
+		"server": serverName,
+		"tool":   toolName,
+		"result": result,
+	}), nil
+}
+
+// Initialize 初始化 MCP 工具
+func (t *MCPTool) Initialize(cfg *MCPConfig) error {
+	if cfg == nil {
+		return nil
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.config = cfg
+
+	// 将 agent.MCPConfig 转换为 external.MCPConfig
+	externalConfig := &external.MCPConfig{
+		Timeout: cfg.Timeout,
+	}
+	for _, server := range cfg.Servers {
+		externalConfig.Servers = append(externalConfig.Servers, external.MCPConfigServer{
+			Name:    server.Name,
+			Command: server.Command,
+			Args:    server.Args,
+			Env:     server.Env,
+		})
+	}
+
+	// 创建 MCP 客户端管理器
+	t.manager = external.NewMCPClientManager(externalConfig)
+
+	// 初始化所有 MCP 客户端
+	ctx := context.Background()
+	if err := t.manager.Initialize(ctx); err != nil {
+		logger.Warn("MCP 客户端管理器初始化失败", zap.Error(err))
+		// 不返回错误，继续运行
+	}
+
+	// 获取所有工具列表
+	if t.manager != nil {
+		allTools, err := t.manager.ListAllTools(ctx)
+		if err != nil {
+			logger.Warn("获取 MCP 工具列表失败", zap.Error(err))
+		} else {
+			// 转换为 map[string]map[string]MCPToolInfo
+			t.tools = make(map[string]map[string]external.MCPToolInfo)
+			for serverName, tools := range allTools {
+				t.tools[serverName] = make(map[string]external.MCPToolInfo)
+				for _, tool := range tools {
+					t.tools[serverName][tool.Name] = tool
+				}
+			}
+			// 统计工具数量
+			total := 0
+			for _, tools := range allTools {
+				total += len(tools)
+			}
+			logger.Info("MCP 工具加载成功",
+				zap.Int("servers", len(allTools)),
+				zap.Int("tools", total))
+		}
+	}
+
+	return nil
+}
+
+// GetToolsForLLM 获取所有 MCP 工具的 schema 列表
+func (t *MCPTool) GetToolsForLLM() []map[string]interface{} {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	var result []map[string]interface{}
+
+	for serverName, tools := range t.tools {
+		for _, tool := range tools {
+			// 生成工具名称：mcp_{serverName}_{toolName}
+			toolName := "mcp_" + serverName + "_" + tool.Name
+
+			// 描述前缀
+			description := "[" + serverName + "] " + tool.Description
+			if description == "["+serverName+"] " {
+				description = "[" + serverName + "] " + tool.Name
+			}
+
+			// 输入 Schema
+			inputSchema := tool.InputSchema
+			if inputSchema == nil {
+				inputSchema = map[string]interface{}{
+					"type":       "object",
+					"properties": map[string]interface{}{},
+				}
+			}
+
+			result = append(result, map[string]interface{}{
+				"type": "function",
+				"function": map[string]interface{}{
+					"name":        toolName,
+					"description": description,
+					"parameters":  inputSchema,
+				},
+			})
+		}
+	}
+
+	return result
+}
+
+// HasTool 检查工具是否存在
+func (t *MCPTool) HasTool(toolName string) bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	for _, tools := range t.tools {
+		for _, tool := range tools {
+			// 支持两种格式的检查：mcp_{server}_{name} 或 {name}
+			expectedName := tool.Name
+			fullName := "mcp_" + t.getServerNamePrefix() + "_" + tool.Name
+
+			if toolName == expectedName || toolName == fullName {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// getServerNamePrefix 获取服务器名称前缀
+func (t *MCPTool) getServerNamePrefix() string {
+	// 返回第一个服务器名称作为前缀
+	for serverName := range t.tools {
+		return serverName
+	}
+	return ""
+}
+
+// Cleanup 清理 MCP 资源
+func (t *MCPTool) Cleanup() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.manager != nil {
+		t.manager.Close()
+	}
+
+	t.tools = make(map[string]map[string]external.MCPToolInfo)
+	t.config = nil
+
+	return nil
+}

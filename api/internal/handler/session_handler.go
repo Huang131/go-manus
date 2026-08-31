@@ -1,0 +1,388 @@
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/mooc-manus/go-manus/api/internal/agent"
+	"github.com/mooc-manus/go-manus/api/internal/external"
+	"github.com/mooc-manus/go-manus/api/internal/model"
+	"github.com/mooc-manus/go-manus/api/internal/service"
+	"github.com/mooc-manus/go-manus/api/pkg/logger"
+	"github.com/mooc-manus/go-manus/api/pkg/response"
+	"go.uber.org/zap"
+)
+
+// SessionHandler 会话处理器
+type SessionHandler struct {
+	service service.SessionService
+	agent   *agent.AgentService
+	sandbox external.Sandbox
+}
+
+// NewSessionHandler 创建会话处理器
+func NewSessionHandler(svc service.SessionService, agentService *agent.AgentService, sandbox external.Sandbox) *SessionHandler {
+	return &SessionHandler{
+		service: svc,
+		agent:   agentService,
+		sandbox: sandbox,
+	}
+}
+
+// Service 返回底层 SessionService，用于路由层组装 handler（如 VNC WS 代理）。
+func (h *SessionHandler) Service() service.SessionService {
+	return h.service
+}
+
+// Create 创建会话 (固定标题为"新对话")
+func (h *SessionHandler) Create(c *gin.Context) {
+	session, err := h.service.CreateSession(c.Request.Context())
+	if err != nil {
+		response.Error(c, err.Error())
+		return
+	}
+	response.Success(c, session)
+}
+
+// Get 获取会话
+func (h *SessionHandler) Get(c *gin.Context) {
+	id := c.Param("id")
+	session, err := h.service.GetSession(c.Request.Context(), id)
+	if err != nil {
+		response.Error(c, err.Error())
+		return
+	}
+	// 用户打开会话时自动清零未读数，并更新返回值
+	session.UnreadMessageCount = 0
+	_ = h.service.ClearUnreadCount(c.Request.Context(), id)
+	response.Success(c, session)
+}
+
+// List 获取会话列表
+func (h *SessionHandler) List(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+
+	sessions, total, err := h.service.ListSessions(c.Request.Context(), limit, offset)
+	if err != nil {
+		response.Error(c, err.Error())
+		return
+	}
+	response.SuccessWithTotal(c, sessions, total)
+}
+
+// Delete 删除会话 (POST /{session_id}/delete)
+func (h *SessionHandler) Delete(c *gin.Context) {
+	id := c.Param("id")
+	if err := h.service.DeleteSession(c.Request.Context(), id); err != nil {
+		response.Error(c, err.Error())
+		return
+	}
+	response.Success(c, nil)
+}
+
+// ClearUnread 清除未读数 (POST /{session_id}/clear-unread)
+func (h *SessionHandler) ClearUnread(c *gin.Context) {
+	id := c.Param("id")
+	if err := h.service.ClearUnreadCount(c.Request.Context(), id); err != nil {
+		response.Error(c, err.Error())
+		return
+	}
+	response.Success(c, nil)
+}
+
+// Stream SSE 流式推送所有会话列表
+func (h *SessionHandler) Stream(c *gin.Context) {
+	// SSE 流需要长时间保持连接，设置必要的响应头
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Transfer-Encoding", "chunked")
+	c.Header("X-Accel-Buffering", "no") // 禁用 nginx 缓冲
+
+	clientGone := c.Request.Context().Done()
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-clientGone:
+			return
+		case <-ticker.C:
+			sessions, err := h.service.GetAllSessions(c.Request.Context())
+			if err != nil {
+				continue
+			}
+			data, _ := json.Marshal(sessions)
+			c.SSEvent("sessions", string(data))
+			c.Writer.Flush()
+		}
+	}
+}
+
+// Chat 聊天 (SSE 流式)
+func (h *SessionHandler) Chat(c *gin.Context) {
+	id := c.Param("id")
+
+	// 区分两种调用语义（对齐原 mooc-manus Python 版本 agent_service.chat 的 if message 分支）：
+	//   1. 发送新消息：body 含 "message" 键（非空字符串），进入 chat 流程
+	//   2. 空流续读：body 不含 "message" 键 或 message 为空，仅传 event_id 订阅当前 task 的事件流
+	// 之前所有路径都 h.agent.Chat(...)，导致 startEmptyStream 触发"空消息"被 LLM 误读为合法输入。
+	rawBody, _ := c.GetRawData()
+	hasMessage := strings.Contains(string(rawBody), `"message"`)
+
+	var req struct {
+		Message     string   `json:"message"`
+		Attachments []string `json:"attachments"`
+		// 兼容两种命名：前端 startEmptyStream 发的 event_id，HTTP 标准 SSE 的 Last-Event-ID
+		EventID string `json:"event_id"`
+	}
+	if len(rawBody) > 0 {
+		if err := json.Unmarshal(rawBody, &req); err != nil {
+			response.Error(c, err.Error())
+			return
+		}
+	}
+
+	if hasMessage && strings.TrimSpace(req.Message) == "" {
+		response.Error(c, "消息内容不能为空")
+		return
+	}
+
+	// 设置 SSE 响应头（空流续读也要带）
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Transfer-Encoding", "chunked")
+	c.Header("X-Accel-Buffering", "no") // 禁用 nginx 缓冲
+
+	// 创建独立的 context 用于事件获取，不受 HTTP 请求影响
+	// 这样即使 HTTP 客户端断开，只要 Agent 还在运行，就会继续推送事件
+	eventCtx, eventCancel := context.WithCancel(context.Background())
+	defer eventCancel()
+
+	// 检测 HTTP 连接断开，但使用独立的 timeout
+	clientGone := c.Request.Context().Done()
+	// SSE 流最长持续 30 分钟
+	streamTimeout := time.AfterFunc(30*time.Minute, eventCancel)
+
+	var taskID string
+
+	// 仅当"显式发送新消息"时才进入 chat 流程；空流续读跳过此步。
+	if hasMessage && strings.TrimSpace(req.Message) != "" {
+		// 创建消息对象
+		msg := &model.Message{
+			Role:        "user",
+			Message:     req.Message,
+			Attachments: req.Attachments,
+		}
+
+		// 调用 AgentService 处理聊天消息（异步执行）
+		// 注意：AgentService.Chat 内部会创建自己的 context，不受 HTTP 请求影响
+		var err error
+		taskID, err = h.agent.Chat(c.Request.Context(), id, msg)
+		if err != nil {
+			response.Error(c, err.Error())
+			return
+		}
+
+		// 先推送用户消息事件（让前端能立即展示用户发送的内容）
+		userPayload, _ := json.Marshal(map[string]interface{}{
+			"event_id":   "",
+			"created_at": time.Now().Unix(),
+			"role":       msg.Role,
+			"message":    msg.Message,
+		})
+		c.SSEvent("message", string(userPayload))
+		c.Writer.Flush()
+
+		// 再推送 task_id 事件（单独业务类型，前端可识别）
+		taskIDData, _ := json.Marshal(map[string]interface{}{"task_id": taskID})
+		c.SSEvent("task_id", string(taskIDData))
+		c.Writer.Flush()
+	} else {
+		// 空流续读：从 session 当前活跃 task 续接事件流
+		var err error
+		taskID, err = h.agent.GetActiveTaskID(c.Request.Context(), id)
+		if err != nil || taskID == "" {
+			// 没有活跃 task：保持长连接空闲等待，每 15s 推一个心跳注释避免前端超时。
+			// 前端 startEmptyStream 不再因立即关闭而 500ms 死循环重连。
+			// 当新 chat 请求创建 task 后再向该 session 推流（见 createTaskNotify 后续扩展）。
+			logger.Info("空流续读: session 无活跃 task，保持长连接心跳",
+				zap.String("session_id", id))
+			heartbeat := time.NewTicker(15 * time.Second)
+			defer heartbeat.Stop()
+			for {
+				select {
+				case <-clientGone:
+					return
+				case <-eventCtx.Done():
+					return
+				case <-heartbeat.C:
+					if _, err := c.Writer.WriteString(": heartbeat\n\n"); err != nil {
+						return
+					}
+					c.Writer.Flush()
+				}
+			}
+		}
+		logger.Info("空流续读: 订阅 session 活跃 task 事件流",
+			zap.String("session_id", id),
+			zap.String("task_id", taskID),
+			zap.String("start_event_id", req.EventID))
+	}
+
+	startID := req.EventID // 从前端 lastEventIdRef 续读；空字符串表示从头开始
+
+	for {
+		select {
+		case <-clientGone:
+			logger.Info("HTTP client disconnected, continuing with independent context")
+		case <-eventCtx.Done():
+			logger.Info("SSE stream ended", zap.String("task_id", taskID))
+			return
+		default:
+			events, err := h.agent.GetTaskEvents(eventCtx, taskID, startID)
+			if err != nil {
+				if eventCtx.Err() != nil {
+					return
+				}
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+
+			for _, event := range events {
+				startID = event.ID
+
+				// 对齐 Python 版本：event 字段为业务类型，data 字段平铺业务 payload。
+				payload := mergeEventMetadata(event)
+				c.SSEvent(string(event.Type), string(payload))
+				c.Writer.Flush()
+
+				if event.Type == model.EventTypeDone {
+					streamTimeout.Stop()
+					eventCancel()
+					return
+				}
+			}
+
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+}
+
+// GetFiles 获取会话文件
+func (h *SessionHandler) GetFiles(c *gin.Context) {
+	id := c.Param("id")
+	files, err := h.service.GetSessionFiles(c.Request.Context(), id)
+	if err != nil {
+		response.Error(c, err.Error())
+		return
+	}
+	response.Success(c, files)
+}
+
+// ReadFile 查看沙箱文件内容（对齐原项目 POST /sessions/:id/file）
+func (h *SessionHandler) ReadFile(c *gin.Context) {
+	_ = c.Param("id")
+	var req struct {
+		Filepath string `json:"filepath"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, "请求参数错误: "+err.Error())
+		return
+	}
+	if strings.TrimSpace(req.Filepath) == "" {
+		response.Error(c, "filepath 不能为空")
+		return
+	}
+	if h.sandbox == nil {
+		response.Error(c, "沙箱服务未配置")
+		return
+	}
+	result, err := h.sandbox.ReadFile(c.Request.Context(), req.Filepath, nil, nil, false, 0)
+	if err != nil {
+		response.Error(c, "读取文件失败: "+err.Error())
+		return
+	}
+	if !result.Success {
+		response.Error(c, result.Message)
+		return
+	}
+	response.Success(c, result.Data)
+}
+
+// ReadShell 查看 Shell 输出（对齐原项目 POST /sessions/:id/shell）
+func (h *SessionHandler) ReadShell(c *gin.Context) {
+	_ = c.Param("id")
+	var req struct {
+		ShellSessionID string `json:"shell_session_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, "请求参数错误: "+err.Error())
+		return
+	}
+	if strings.TrimSpace(req.ShellSessionID) == "" {
+		response.Error(c, "shell_session_id 不能为空")
+		return
+	}
+	if h.sandbox == nil {
+		response.Error(c, "沙箱服务未配置")
+		return
+	}
+	result, err := h.sandbox.ReadShellOutput(c.Request.Context(), req.ShellSessionID, true)
+	if err != nil {
+		response.Error(c, "读取 Shell 输出失败: "+err.Error())
+		return
+	}
+	if !result.Success {
+		response.Error(c, result.Message)
+		return
+	}
+	response.Success(c, result.Data)
+}
+
+// Stop 停止会话
+func (h *SessionHandler) Stop(c *gin.Context) {
+	id := c.Param("id")
+	if err := h.agent.StopSession(c.Request.Context(), id); err != nil {
+		response.Error(c, err.Error())
+		return
+	}
+	response.Success(c, nil)
+}
+
+// mergeEventMetadata 将 model.Event 的 Data 业务 payload 与元数据（event_id、created_at）合并
+// 对齐原 Python 版本的 BaseEventData 平铺结构。
+// 当 Data 解析失败时（极少见），退化为只包含元数据，保证前端不卡死。
+func mergeEventMetadata(event *model.Event) []byte {
+	createdAt := event.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
+
+	if len(event.Data) == 0 {
+		out, _ := json.Marshal(map[string]interface{}{
+			"event_id":   event.ID,
+			"created_at": createdAt.Unix(),
+		})
+		return out
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(event.Data, &payload); err != nil {
+		// 业务 payload 不是对象，无法平铺。直接返回原始 Data，由前端按 type 自行解析。
+		return event.Data
+	}
+	payload["event_id"] = event.ID
+	payload["created_at"] = createdAt.Unix()
+	out, err := json.Marshal(payload)
+	if err != nil {
+		return event.Data
+	}
+	return out
+}

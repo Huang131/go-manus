@@ -1,0 +1,72 @@
+env: development
+log_level: info
+app_config_filepath: config.yaml
+
+database:
+  host: localhost
+  port: 5432
+  user: postgres
+  password: postgres
+  database: manus
+  max_open_conns: 25
+  max_idle_conns: 10
+
+redis:
+  host: localhost
+  port: 6379
+  db: 0
+  password: ""
+
+cos:
+  secret_id: ""
+  secret_key: ""
+  region: ap-guangzhou
+  scheme: https
+  bucket: ""
+  domain: ""
+
+sandbox:
+  address: ""
+  image: ""
+  name_prefix: manus
+  ttl_minutes: 60
+  network: ""
+  chrome_args: ""
+  https_proxy: ""
+  http_proxy: ""
+  no_proxy: ""
+
+llm:
+  base_url: "https://api.openai.com/v1"
+  api_key: ""
+  model_name: "gpt-4o"
+  temperature: 0.7
+  max_tokens: 4096
+
+search:
+  provider: "bing"
+  bing_api_key: ""
+  google_api_key: ""
+  search_engine_id: ""
+
+mcp:
+  timeout: 60
+  servers:
+    # - name: "filesystem"
+    #   command: "npx"
+    #   args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    # - name: "memory"
+    #   command: "npx"
+    #   args: ["-y", "@modelcontextprotocol/server-memory"]
+
+a2a:
+  timeout: 30
+  agents:
+    # - name: "planner"
+    #   url: "http://localhost:8081"
+    #   metadata:
+    #     description: "任务规划助手"
+
+server:
+  host: 0.0.0.0
+  port: 8080
