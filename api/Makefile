@@ -101,4 +101,5 @@ deps-view:
 # 检查本地服务健康状态
 health:
 	@echo "检查服务健康状态..."
-	@curl -s http://localhost:8080/api/v1/status | jq '.' || echo "服务未启动"
+	@curl -s http://localhost:8080/health | jq '.' || echo "服务未启动"
+	@curl -s http://localhost:8080/api/status | jq '.' || echo "服务未启动"

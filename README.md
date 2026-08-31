@@ -127,7 +127,6 @@ go-manus/
 ├── nginx/                  # Nginx 网关配置（含 conf.d）
 ├── docs/                   # 技术文档
 ├── docker-compose.yml      # 主部署配置（含 nginx 网关）
-├── docker-compose.dev.yml  # 旧版简化配置（已弃用，仅作参考）
 └── Makefile
 ```
 
@@ -242,24 +241,36 @@ go-manus/
 | go-manus-redis | Redis | 6379 | 6379 |
 | go-manus-minio | MinIO | 9000 | 9000 / 9001（控制台）|
 
-### 测试环境使用
+### 本地开发
 
-如果需要连接远程测试环境资源（远程 PG/Redis/MinIO），参考 `.env.test` 文件：
+**推荐方式：启动 Docker 基础设施，本地运行 API 和 UI 源码**
 
 ```bash
-# 方式1：直接使用 .env.test
-cp .env.test .env
-docker-compose up -d
+# 1. 启动基础设施容器（postgres / redis / minio / sandbox）
+docker-compose up -d postgres redis minio sandbox
 
-# 方式2：本地运行 API（连接远程数据库，不走 docker）
-cd api
-go run cmd/server/main.go
+# 2. 准备环境变量
+cp api/.env.example .env
+# 编辑 .env 填入 LLM 配置
+
+# 3. 本地运行 API（热重载）
+cd api && go run cmd/server/main.go
+# API 监听 localhost:8080，连接容器内的 postgres/redis/minio
+
+# 4. 本地运行 UI（热重载，另开终端）
+cd ui && npm run dev
+# UI 监听 localhost:3000，请求 http://localhost:8080/api（需配置 .env 中 LLM）
 ```
 
-**注意**：
-- `.env.test` 包含敏感信息，已在 `.gitignore` 中忽略，不会提交到 Git
-- 当前项目仅支持 PostgreSQL 数据库
-- ES 配置已预留，但暂未集成到代码中
+**其他方式：全量 Docker 部署（nginx 网关模式）**
+
+```bash
+cp api/.env.example .env
+# 编辑 .env 填入 LLM 配置
+make up          # 启动全部 7 个容器
+```
+
+> **注意**：`.env.test` 包含敏感信息，已在 `.gitignore` 中忽略，不会提交到 Git。
 
 ## 常用命令
 
@@ -274,6 +285,14 @@ make down
 # 或
 docker-compose down
 
+# 停止并删除数据卷（完全清理）
+make down-v
+# 或
+docker-compose down -v
+
+# 构建所有镜像（不启动）
+make build
+
 # 查看服务状态
 make ps
 
@@ -281,24 +300,37 @@ make ps
 make logs
 
 # 查看特定服务日志
-make logs-api      # API 日志
-make logs-ui       # UI 日志
-make logs-nginx    # Nginx 日志
-make logs-sandbox  # 沙箱日志
+make logs-api        # API 日志
+make logs-ui         # UI 日志
+make logs-nginx      # Nginx 日志
+make logs-sandbox    # 沙箱日志
+make logs-postgres   # Postgres 日志
+make logs-redis      # Redis 日志
 
 # 重启所有服务
 make restart
 
 # 重启特定服务
-make rebuild-api   # 重建 API 服务
+make restart-api     # 重启 API
+make restart-ui      # 重启 UI
+make restart-sandbox # 重启沙箱
+
+# 重建特定服务（重新构建镜像）
+make rebuild-api     # 重建 API 镜像
+make rebuild-ui      # 重建 UI 镜像
+make rebuild-sandbox # 重建沙箱镜像
 
 # 进入容器
-make shell-api     # 进入 API 容器
-make shell-sandbox # 进入沙箱容器
+make shell-api       # 进入 API 容器
+make shell-sandbox   # 进入沙箱容器
+make shell-postgres  # 进入 Postgres 容器
+
+# 健康检查
+make health
 
 # 清理 Docker 资源
-make clean         # 清理未使用的资源
-make clean-all     # 完全清理（谨慎）
+make clean           # 清理未使用的资源
+make clean-all       # 完全清理（谨慎）
 ```
 
 ## 本地开发
@@ -308,32 +340,54 @@ make clean-all     # 完全清理（谨慎）
 ```bash
 cd api
 
+# 安装依赖
+make deps            # go mod download + tidy
+
 # 编译
-make build
+make build           # 输出 bin/go-manus
 
 # 运行测试
-make test
+make test            # 全部测试 + 覆盖率
+make test-cover      # 生成 coverage.html
 
 # 代码检查
-make lint
+make lint            # go vet + golangci-lint（可选）
 
-# 本地运行（需要 Postgres + Redis）
+# 格式化
+make fmt
+
+# 本地运行（需 Postgres + Redis 已启动）
 make run
 ```
+
+> **注意**：`make run` 直接跑 `go run ./cmd/server`，需要本地有 Postgres + Redis。
+> 如果用 Docker 启动基础设施后想让 API 连容器，可通过 `.env` 覆盖
+> `DATABASE_HOST=localhost`、`REDIS_HOST=localhost`（取决于端口暴露方式）。
 
 ### 健康检查
 
 ```bash
+# 顶层：检查 API /health、/api/status 接口 + 列出容器状态
 make health
+
+# api 层：检查 /health + /api/status 接口
+cd api && make health
 ```
 
 ## API 文档
 
 启动服务后访问：
-- API 健康检查: `http://localhost:8080/api/v1/status`
-- API 直接访问: `http://localhost:8080`
-- **VNC 远程桌面**（WebSocket）: `ws://localhost:8080/api/sessions/:id/vnc`
-  - 前端"虚拟机浏览器"按钮连接此端点，通过 sandbox 内 websockify 转发到 VNC (:5901)
+
+- 🌐 **通过网关（推荐）**：
+  - API 健康检查: `http://localhost/health`
+  - 服务状态: `http://localhost/api/status`
+  - 会话列表: `http://localhost/api/sessions`
+  - VNC WebSocket: `ws://localhost/api/sessions/:id/vnc`
+- 直连（调试用）：
+  - API 健康检查: `http://localhost:8080/health`
+  - API 状态: `http://localhost:8080/api/status`
+  - VNC WebSocket: `ws://localhost:8080/api/sessions/:id/vnc`
+- **VNC 远程桌面**：前端"虚拟机浏览器"按钮连接 `/api/sessions/:id/vnc`，经 nginx 转发到 API，再由 sandbox 内 websockify 桥接到 VNC 端口 (:5901)
 
 
 ## 许可证

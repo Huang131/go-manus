@@ -1,7 +1,8 @@
 # ============================================================
 # go-manus 一站式运维脚本
 # ============================================================
-# 包含: API (Go) + 沙箱服务 (Python) + 前端 (Next.js)
+# 标准部署: docker-compose.yml (nginx 网关模式)
+# 包含: nginx 网关 + UI (Next.js) + API (Go) + 沙箱 (Python) + postgres + redis + minio
 # ============================================================
 
 .PHONY: help
@@ -10,29 +11,28 @@
 help:
 	@echo "go-manus 一站式运维脚本"
 	@echo ""
-	@echo "=== 本地开发 (推荐) ==="
-	@echo "  make dev-up        - 启动所有服务 (简化版，无需 nginx)"
-	@echo "  make dev-down      - 停止所有服务 (简化版)"
-	@echo ""
-	@echo "=== 生产部署 (通过 nginx 网关) ==="
+	@echo "=== 标准部署 (nginx 网关) ==="
 	@echo "  make up            - 启动所有服务 (含 nginx 网关)"
 	@echo "  make down          - 停止所有服务"
+	@echo "  make down-v        - 停止并删除数据卷（慎用）"
 	@echo ""
-	@echo "=== 服务管理 ==="
+	@echo "=== 服务状态 ==="
+	@echo "  make health        - 检查 API 健康状态 + 容器状态"
+	@echo ""
+	@echo "=== 构建 ==="
 	@echo "  make build         - 构建所有 Docker 镜像"
-	@echo "  make logs          - 查看所有服务日志"
-	@echo "  make ps            - 查看服务状态"
-	@echo "  make restart       - 重启所有服务"
+	@echo "  make rebuild-api   - 重建并启动 API (同 rebuild-ui / rebuild-sandbox)"
+	@echo "  make restart-api   - 重启指定服务 (同 restart-ui / restart-sandbox)"
 	@echo ""
-	@echo "=== 单独服务日志 ==="
-	@echo "  make logs-api      - API 服务日志"
-	@echo "  make logs-ui       - UI 服务日志"
-	@echo "  make logs-sandbox  - 沙箱服务日志"
-	@echo "  make logs-postgres - 数据库日志"
-	@echo "  make logs-redis    - Redis 日志"
+	@echo "=== 日志查看 ==="
+	@echo "  make logs          - 所有服务日志"
+	@echo "  make logs-api      - API 日志"
+	@echo "  make logs-nginx    - nginx 日志 (排查 502 必备)"
+	@echo "  make logs-ui       - UI 日志 (同 logs-sandbox / logs-postgres / logs-redis)"
 	@echo ""
 	@echo "=== 进入容器 ==="
 	@echo "  make shell-api     - 进入 API 容器"
+	@echo "  make shell-postgres - 进入 PostgreSQL 命令行"
 	@echo "  make shell-sandbox - 进入沙箱容器"
 	@echo ""
 	@echo "=== 开发命令 (在 api/ 目录) ==="
@@ -42,59 +42,26 @@ help:
 	@echo ""
 	@echo "=== 清理 ==="
 	@echo "  make clean         - 清理未使用的 Docker 资源"
+	@echo "  make down-v        - 停止并删除数据卷（慎用）"
 	@echo ""
 
 # ============================================================
-# 本地开发 (简化版，无需 nginx)
+# 标准部署 (含 nginx 网关)
 # ============================================================
 
-# 启动所有服务 (本地开发版)
-dev-up:
-	@echo "启动所有服务 (本地开发版)..."
-	docker-compose -f docker-compose.dev.yml up -d
-	@echo ""
-	@echo "服务已启动!"
-	@echo "  - API:      http://localhost:8080"
-	@echo "  - API 文档: http://localhost:8080/health"
-	@echo "  - UI:       http://localhost:3000"
-	@echo "  - Sandbox:  http://localhost:8090"
-	@echo "  - Postgres: localhost:5432"
-	@echo "  - Redis:    localhost:6379"
-	@echo ""
-	@echo "查看日志: make dev-logs"
-	@echo "停止服务: make dev-down"
-
-# 停止所有服务 (本地开发版)
-dev-down:
-	@echo "停止所有服务 (本地开发版)..."
-	docker-compose -f docker-compose.dev.yml down
-
-# 查看本地开发服务日志
-dev-logs:
-	docker-compose -f docker-compose.dev.yml logs -f
-
-# 查看特定服务日志 (本地开发版)
-dev-logs-api:
-	docker-compose -f docker-compose.dev.yml logs -f api
-
-dev-logs-ui:
-	docker-compose -f docker-compose.dev.yml logs -f ui
-
-# ============================================================
-# 生产部署 (含 nginx 网关)
-# ============================================================
-
-# 启动所有服务 (生产版)
+# 启动所有服务 (nginx 网关模式)
 up:
-	@echo "启动所有服务 (生产版)..."
+	@echo "启动所有服务 (nginx 网关模式)..."
 	docker-compose up -d
 	@echo ""
 	@echo "服务已启动!"
-	@echo "  - 网关:    http://localhost (端口 80)"
+	@echo "  - 网关:    http://localhost (端口 80) ← 统一入口"
 	@echo "  - API:     http://localhost:8080"
 	@echo "  - UI:      http://localhost:3000"
+	@echo "  - Sandbox: http://localhost:8090"
 	@echo "  - Postgres: localhost:5432"
 	@echo "  - Redis:   localhost:6379"
+	@echo "  - MinIO:   localhost:9000 (S3 API) / localhost:9001 (控制台)"
 	@echo ""
 	@echo "查看日志: make logs"
 
@@ -126,7 +93,7 @@ build-no-cache:
 # 服务状态
 # ============================================================
 
-# 查看服务状态
+# 查看服务状态 (建议使用 make health 获取更详细的状态)
 ps:
 	docker-compose ps
 
@@ -134,8 +101,11 @@ ps:
 health:
 	@echo "检查服务健康状态..."
 	@echo ""
-	@echo "=== API 健康检查 ==="
-	@curl -s http://localhost:8080/api/v1/status 2>/dev/null | jq '.' || echo "API 服务未启动"
+	@echo "=== API /health ==="
+	@curl -s http://localhost:8080/health 2>/dev/null | jq '.' || echo "API 服务未启动"
+	@echo ""
+	@echo "=== API /api/status ==="
+	@curl -s http://localhost:8080/api/status 2>/dev/null | jq '.' || echo "API 服务未启动"
 	@echo ""
 	@echo "=== Docker 服务状态 ==="
 	docker-compose ps
@@ -214,15 +184,10 @@ clean:
 
 # 完整清理 (包括镜像)
 clean-all:
-	@echo "完整清理 Docker 资源..."
-	@read -p "确定要删除所有 go-manus 相关镜像吗? (yes/no): " confirm; \
-	if [ "$$confirm" = "yes" ]; then \
-		docker-compose down --rmi local; \
-		docker system prune -f; \
-		echo "清理完成!"; \
-	else \
-		echo "取消操作"; \
-	fi
+	@echo "完整清理 Docker 资源 (删除 go-manus 所有镜像)..."
+	docker-compose down --rmi local
+	docker system prune -f
+	@echo "清理完成!"
 
 # ============================================================
 # 重建特定服务

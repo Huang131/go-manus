@@ -1,529 +1,220 @@
 # 部署指南
 
-## 1. 部署方式概览
+## 1. 部署方式
 
-| 部署方式 | 适用场景 | 推荐程度 |
-|---------|---------|---------|
-| Docker Compose (本地开发) | 本地开发、演示 | ⭐⭐⭐⭐⭐ |
-| Docker Compose (生产) | 小规模生产部署 | ⭐⭐⭐⭐ |
-| Kubernetes | 大规模生产部署 | ⭐⭐⭐⭐⭐ |
-| 单机直接部署 | 最小化部署 | ⭐⭐⭐ |
+统一使用 [docker-compose.yml](docker-compose.yml)，通过 nginx 网关统一接入前端、API 和沙箱服务，适用于标准部署、演示和小规模生产。
 
-## 2. 本地开发部署
+## 2. 架构总览
 
-### 2.1 前置要求
+```
+浏览器 ──► nginx (80) ──┬─► /api/      ──► api:8080 (Go)
+                        ├─► /sandbox/  ──► sandbox:8080 (Python)
+                        └─► /          ──► ui:3000 (Next.js)
+                                   │
+                    api ──► postgres / redis / minio
+```
+
+| 容器 | 内部端口 | 外部端口 | 说明 |
+|------|---------|---------|------|
+| nginx | 80 | 80 | 统一网关，路由 `/api/`、`/sandbox/`、`/` |
+| ui | 3000 | 3000 | Next.js 前端 |
+| api | 8080 | 8080 | Go API 服务 |
+| sandbox | 8080 | 8090 | Python 沙箱服务（Shell / 文件） |
+| postgres | 5432 | 5432 | PostgreSQL 16 |
+| redis | 6379 | 6379 | Redis 7（含消息队列） |
+| minio | 9000/9001 | 9000/9001 | 对象存储（S3 兼容，本地替代 COS） |
+
+## 3. 前置要求
 
 - Docker >= 20.10
 - Docker Compose >= 2.0
 - 至少 4GB 内存
+- `docker-compose.yml` 中 `sandbox` 使用 `privileged: true` 并挂载 Docker Socket，请确认宿主 Docker 已启动
 
-### 2.2 快速启动
+## 4. 快速启动（nginx 网关模式，推荐）
+
+### 4.1 准备环境变量
 
 ```bash
-# 1. 进入项目目录
 cd go-manus
 
-# 2. 复制环境变量模板
+# 复制环境变量模板
 cp api/.env.example .env
 
-# 3. 配置环境变量（编辑 .env）
+# 编辑 .env，至少配置 LLM 相关变量（见第 5 节）
 vim .env
-
-# 4. 启动服务
-docker-compose -f docker-compose.dev.yml up -d --build
-
-# 5. 查看服务状态
-docker-compose -f docker-compose.dev.yml ps
 ```
 
-### 2.3 访问服务
-
-- 前端 UI：http://localhost:3000
-- API 服务：http://localhost:8080
-- 健康检查：http://localhost:8080/api/v1/status
-
-### 2.4 常用命令
+### 4.2 一键启动
 
 ```bash
-# 查看日志
-docker-compose -f docker-compose.dev.yml logs -f
+# 构建并启动所有服务（含 nginx 网关）
+docker-compose up -d --build
 
-# 查看特定服务日志
-docker-compose -f docker-compose.dev.yml logs -f api
-
-# 重启服务
-docker-compose -f docker-compose.dev.yml restart
-
-# 停止服务
-docker-compose -f docker-compose.dev.yml down
-
-# 清理所有数据（慎用）
-docker-compose -f docker-compose.dev.yml down -v
+# 查看服务状态（等待全部 healthy）
+docker-compose ps
 ```
 
-## 3. 生产环境部署 (Docker)
+等待 `postgres`、`redis`、`minio`、`api`、`ui` 全部变为 `healthy`，`nginx` 变为 `Up`。
 
-### 3.1 环境要求
+### 4.3 访问入口（统一走 nginx）
 
-- Docker >= 24.0
-- Docker Compose >= 2.20
-- 至少 8GB 内存
-- 50GB 磁盘空间
+| 入口 | 说明 |
+|------|------|
+| `http://localhost/` | 前端 UI（nginx 反代到 ui:3000） |
+| `http://localhost/api/...` | API 接口（反代到 api:8080） |
+| `http://localhost/sandbox/...` | 沙箱服务（反代到 sandbox:8080） |
+| `http://localhost/health` | API 健康检查（经网关） |
 
-### 3.2 配置生产环境
-
-创建 `docker-compose.prod.yml`：
-
-```yaml
-version: '3.8'
-
-services:
-  postgres:
-    image: postgres:16-alpine
-    restart: always
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - go-manus-prod
-
-  redis:
-    image: redis:7-alpine
-    restart: always
-    command: redis-server --appendonly yes --maxmemory 512mb
-    volumes:
-      - redis_data:/data
-    networks:
-      - go-manus-prod
-
-  api:
-    image: go-manus-api:latest
-    restart: always
-    environment:
-      - DATABASE_HOST=postgres
-      - REDIS_HOST=redis
-      - ENV=production
-      - LOG_LEVEL=info
-    networks:
-      - go-manus-prod
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-
-  ui:
-    image: go-manus-ui:latest
-    restart: always
-    networks:
-      - go-manus-prod
-
-  sandbox:
-    image: go-manus-sandbox:latest
-    restart: always
-    privileged: true
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    networks:
-      - go-manus-prod
-
-networks:
-  go-manus-prod:
-    driver: bridge
-
-volumes:
-  postgres_data:
-  redis_data:
-```
-
-### 3.3 启动生产环境
-
-```bash
-# 构建并启动
-docker-compose -f docker-compose.prod.yml up -d --build
-
-# 配置健康检查
-docker-compose -f docker-compose.prod.yml ps
-```
-
-## 4. Kubernetes 部署
-
-### 4.1 环境要求
-
-- Kubernetes >= 1.28
-- Helm >= 3.12
-- Ingress Controller (Traefik 或 Nginx)
-
-### 4.2 目录结构
-
-```
-k8s/
-├── namespace.yaml
-├── postgres/
-│   ├── deployment.yaml
-│   └── service.yaml
-├── redis/
-│   ├── deployment.yaml
-│   └── service.yaml
-├── api/
-│   ├── deployment.yaml
-│   ├── service.yaml
-│   └── hpa.yaml
-├── ui/
-│   ├── deployment.yaml
-│   └── service.yaml
-├── sandbox/
-│   ├── deployment.yaml
-│   └── service.yaml
-└── ingress.yaml
-```
-
-### 4.3 部署步骤
-
-```bash
-# 1. 创建命名空间
-kubectl apply -f k8s/namespace.yaml
-
-# 2. 部署基础设施（PostgreSQL、Redis）
-kubectl apply -f k8s/postgres/
-kubectl apply -f k8s/redis/
-
-# 3. 等待基础设施就绪
-kubectl wait --for=condition=available deployment/postgres --timeout=300s
-kubectl wait --for=condition=available deployment/redis --timeout=300s
-
-# 4. 部署应用
-kubectl apply -f k8s/api/
-kubectl apply -f k8s/ui/
-kubectl apply -f k8s/sandbox/
-
-# 5. 配置 Ingress
-kubectl apply -f k8s/ingress.yaml
-
-# 6. 检查部署状态
-kubectl get all -n go-manus
-kubectl get ingress -n go-manus
-```
-
-### 4.4 关键配置
-
-#### API Deployment
-
-```yaml
-# k8s/api/deployment.yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: go-manus-api
-  namespace: go-manus
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: api
-  template:
-    spec:
-      containers:
-      - name: api
-        image: go-manus-api:latest
-        ports:
-        - containerPort: 8080
-        env:
-        - name: DATABASE_HOST
-          value: "postgres"
-        - name: REDIS_HOST
-          value: "redis"
-        - name: ENV
-          value: "production"
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "100m"
-          limits:
-            memory: "2Gi"
-            cpu: "1000m"
-```
-
-#### Ingress 配置
-
-```yaml
-# k8s/ingress.yaml
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: go-manus
-  namespace: go-manus
-  annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "86400"
-spec:
-  ingressClassName: nginx
-  rules:
-  - host: api.example.com
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: ui
-            port:
-              number: 3000
-      - path: /api/
-        pathType: Prefix
-        backend:
-          service:
-            name: api
-            port:
-              number: 8080
-      - path: /sandbox/
-        pathType: Prefix
-        backend:
-          service:
-            name: sandbox
-            port:
-              number: 8080
-  tls:
-  - hosts:
-    - api.example.com
-    secretName: go-manus-tls
-```
+> **⚠️ 重要提示**：浏览器必须通过 **80 端口 nginx**（`http://localhost/`）访问。若直连 `http://localhost:3000` 或 `http://localhost:8080`，前端请求的 `/api` 相对路径缺少网关前缀，会出现 404。
 
 ## 5. 环境变量配置
 
-### 5.1 必需配置
+### 5.1 `.env` 模板（`api/.env.example`）
 
 ```bash
-# 数据库
-DATABASE_HOST=postgres
+# 数据库（docker-compose 内会覆盖为容器地址）
+DATABASE_HOST=localhost
 DATABASE_PORT=5432
 DATABASE_USER=postgres
-DATABASE_PASSWORD=your_secure_password
+DATABASE_PASSWORD=postgres
 DATABASE_DATABASE=manus
 
 # Redis
-REDIS_HOST=redis
+REDIS_HOST=localhost
 REDIS_PORT=6379
+REDIS_DB=0
+REDIS_PASSWORD=
 
-# LLM 配置（必需）
-LLM_BASE_URL=https://api.openai.com
-LLM_API_KEY=sk-your-api-key
+# COS 对象存储（本地用 MinIO，生产用腾讯云 COS）
+COS_ENDPOINT=http://localhost:9000
+COS_SECRET_ID=minioadmin
+COS_SECRET_KEY=minioadmin
+COS_REGION=us-east-1
+COS_BUCKET=go-manus-files
+
+# 服务配置
+SERVER_HOST=0.0.0.0
+SERVER_PORT=8080
+```
+
+### 5.2 必须在 `.env` 中补充的变量
+
+以下变量由 [docker-compose.yml](docker-compose.yml) 从 `.env` 读取并注入 API 容器，**按需填写**：
+
+```bash
+# LLM 配置（必需，否则 Agent 无法调用模型）
+LLM_BASE_URL=https://api.openai.com   # 或其他 OpenAI 兼容 API
+LLM_API_KEY=your_api_key
 LLM_MODEL_NAME=gpt-4
 
-# COS 配置（文件存储）
-COS_SECRET_ID=your_cos_secret_id
-COS_SECRET_KEY=your_cos_secret_key
-COS_REGION=ap-guangzhou
-COS_BUCKET=your_bucket_name
+# 可选：覆盖默认端口
+API_PORT=8080
+UI_PORT=3000
+SANDBOX_PORT=8090
+NGINX_PORT=80
+POSTGRES_PORT=5432
+REDIS_PORT=6379
 ```
 
-### 5.2 可选配置
+> 说明：docker-compose 内 API 容器地址固定为 `postgres` / `redis` / `minio` / `sandbox`（容器间通信），`.env` 中的 `localhost` 地址仅用于本地直接运行时。
+
+## 6. 常用运维命令
+
+### 6.1 通过 Makefile
 
 ```bash
-# 服务端口（默认）
-SERVER_PORT=8080
-
-# 日志级别（默认 info）
-LOG_LEVEL=debug
-
-# 环境（默认 development）
-ENV=production
-
-# 沙箱服务地址（默认从环境获取）
-SANDBOX_ADDRESS=http://sandbox:8080
+make up              # 启动所有服务（含 nginx 网关）
+make down            # 停止所有服务
+make down-v          # 停止并删除数据卷（慎用，清空数据）
+make ps              # 查看服务状态
+make health          # 检查 API /health、/api/status + 容器状态
+make logs            # 查看所有日志
+make logs-api        # API 日志（同理 logs-ui / logs-sandbox / logs-nginx / logs-postgres / logs-redis）
+make build           # 构建镜像
+make restart-api     # 重启 API（同理 restart-ui / restart-sandbox）
+make rebuild-api     # 重建并启动 API（同理 rebuild-ui / rebuild-sandbox）
+make shell-api       # 进入 API 容器
+make shell-postgres  # 进入 PostgreSQL 命令行
+make clean           # 清理未使用的 Docker 资源
 ```
 
-## 6. 数据持久化
-
-### 6.1 PostgreSQL 数据
+### 6.2 直接使用 docker-compose
 
 ```bash
-# 本地 Docker
--v postgres_data:/var/lib/postgresql/data
-
-# K8s
-# 使用 PVC
-spec:
-  volumes:
-  - name: postgres-data
-    persistentVolumeClaim:
-      claimName: postgres-pvc
+docker-compose up -d --build
+docker-compose down
+docker-compose logs -f api
+docker-compose restart nginx
 ```
 
-### 6.2 Redis 数据
+## 7. 健康检查
+
+| 检查项 | 命令 | 预期 |
+|--------|------|------|
+| API 健康检查 | `curl http://localhost:8080/health` | 200，返回 JSON |
+| API 状态 | `curl http://localhost:8080/api/status` | 200，返回 JSON |
+| 经网关访问 | `curl http://localhost/api/sessions` | 200，返回会话列表 |
+| UI | `curl -I http://localhost/` | 200 |
+
+容器级健康检查在 [docker-compose.yml](docker-compose.yml) 中定义：
+
+- `postgres`：`pg_isready`
+- `redis`：`redis-cli ping`
+- `minio`：`mc ready local`
+- `api`：`wget /health`
+- `ui`：`wget http://127.0.0.1:3000`
+
+## 8. 数据持久化
+
+数据卷定义于 [docker-compose.yml](docker-compose.yml)：
+
+| 卷 | 挂载点 | 说明 |
+|----|--------|------|
+| `go-manus-postgres-data` | `/var/lib/postgresql/data` | PostgreSQL 数据 |
+| `go-manus-redis-data` | `/data` | Redis AOF 持久化 |
+| `go-manus-minio-data` | `/data` | MinIO 对象数据 |
 
 ```bash
-# 本地 Docker
--v redis_data:/data
-
-# K8s
-# 使用 PVC 或空目录（Redis 可丢失）
+# 备份 PostgreSQL（进入容器后执行）
+docker exec -it go-manus-postgres pg_dump -U postgres -d manus > backup_$(date +%Y%m%d).sql
 ```
 
-### 6.3 备份策略
+## 9. 安全与网络
 
-```bash
-# PostgreSQL 备份
-pg_dump -h postgres -U postgres -d manus > backup_$(date +%Y%m%d).sql
+- 所有容器位于 `go-manus-network` 桥接网络，容器间通过服务名通信。
+- `sandbox` 以 `privileged: true` 运行并挂载 `/var/run/docker.sock`（支持 Docker in Docker），仅用于可信环境。
+- 如需 HTTPS，在 [docker-compose.yml](docker-compose.yml) 中取消 `nginx` 的 `443` 端口注释并挂载证书，同时在 `nginx/conf.d/default.conf` 中配置 TLS。
+- 生产环境应将 `minio` 的默认账号 `minioadmin/minioadmin` 与 `.env` 中的 COS 密钥替换为强密码。
 
-# 恢复
-psql -h postgres -U postgres -d manus < backup_20240101.sql
-```
+## 10. 故障排查
 
-## 7. 监控与日志
-
-### 7.1 日志收集
-
-```yaml
-# K8s 配置日志收集
-spec:
-  containers:
-  - name: api
-    volumeMounts:
-    - name: varlog
-      mountPath: /var/log
-```
-
-### 7.2 健康检查
-
-```yaml
-livenessProbe:
-  httpGet:
-    path: /api/v1/status
-    port: 8080
-  initialDelaySeconds: 30
-  periodSeconds: 10
-
-readinessProbe:
-  httpGet:
-    path: /api/v1/status
-    port: 8080
-  initialDelaySeconds: 5
-  periodSeconds: 5
-```
-
-### 7.3 资源限制
-
-建议配置：
-- API：2CPU, 2GB 内存
-- UI：1CPU, 512MB 内存
-- Sandbox：2CPU, 2GB 内存
-- PostgreSQL：2CPU, 4GB 内存
-- Redis：1CPU, 1GB 内存
-
-## 8. 安全配置
-
-### 8.1 网络策略 (K8s)
-
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: api-network-policy
-spec:
-  podSelector:
-    matchLabels:
-      app: api
-  policyTypes:
-  - Ingress
-  - Egress
-  ingress:
-  - from:
-    - podSelector:
-        matchLabels:
-          app: ingress
-  egress:
-  - to:
-    - podSelector:
-        matchLabels:
-          app: postgres
-    - podSelector:
-        matchLabels:
-          app: redis
-```
-
-### 8.2 Secret 管理
-
-```bash
-# 创建 Secret
-kubectl create secret generic go-manus-secrets \
-  --from-literal=LLM_API_KEY=sk-xxx \
-  --from-literal=DATABASE_PASSWORD=xxx \
-  -n go-manus
-
-# 使用 Secret
-env:
-- name: LLM_API_KEY
-  valueFrom:
-    secretKeyRef:
-      name: go-manus-secrets
-      key: LLM_API_KEY
-```
-
-## 9. 故障排除
-
-### 9.1 常见问题
+### 10.1 常见问题
 
 | 问题 | 解决方案 |
 |------|---------|
-| 服务启动失败 | 检查日志：`docker-compose logs api` |
-| 数据库连接失败 | 确认网络和凭据 |
-| 前端无法访问 API | 检查 CORS 和代理配置 |
-| 沙箱执行超时 | 增加超时时间或资源 |
+| 前端页面 404 | 确认通过 `http://localhost/`（80 端口）访问，不要直连 3000/8080 |
+| `/api/sessions/stream` 404 | 前端 `NEXT_PUBLIC_API_BASE_URL` 必须为 `/api`（见 ui/Dockerfile），不要写成绝对地址 |
+| nginx 502 Bad Gateway | 服务重启后 nginx 缓存的 upstream IP 可能过期，执行 `docker-compose restart nginx` |
+| API 无法连接数据库 | 查看 `docker-compose logs api`，确认 `postgres` 已 healthy |
+| 容器一直重启 | 查看 `docker-compose ps` 的健康状态，`docker-compose logs <service>` 定位原因 |
+| LLM 调用失败 | 确认 `.env` 中 `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL_NAME` 已正确配置并 `docker-compose up -d api` 重启 |
 
-### 9.2 日志查看
-
-```bash
-# Docker
-docker-compose logs -f [service]
-
-# K8s
-kubectl logs -f deployment/api -n go-manus
-kubectl describe pod [pod-name] -n go-manus
-```
-
-## 10. 性能优化
-
-### 10.1 数据库优化
-
-```sql
--- 创建索引
-CREATE INDEX idx_sessions_user_id ON sessions(user_id);
-CREATE INDEX idx_messages_session_id ON messages(session_id);
-
--- 连接池配置
-ALTER SYSTEM SET max_connections = 100;
-```
-
-### 10.2 Redis 优化
+### 10.2 日志查看
 
 ```bash
-# 限制内存
-redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+make logs          # 全部服务
+make logs-api      # 仅 API
+make logs-nginx    # 仅 nginx
+docker-compose logs -f nginx | grep -i error   # nginx 错误
 ```
 
-### 10.3 API 优化
+### 10.3 完全重置
 
-```yaml
-# K8s HPA 自动扩缩容
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: api-hpa
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: go-manus-api
-  minReplicas: 2
-  maxReplicas: 10
-  metrics:
-  - type: Resource
-    resource:
-      name: cpu
-      target:
-        type: Utilization
-        averageUtilization: 70
+```bash
+# 停止并删除所有容器 + 数据卷（会清空数据库、Redis、MinIO 数据）
+docker-compose down -v
+
+# 重新部署
+docker-compose up -d --build
 ```
