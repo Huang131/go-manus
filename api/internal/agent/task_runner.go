@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mooc-manus/go-manus/api/internal/agent/attachment"
 	"github.com/mooc-manus/go-manus/api/internal/external"
 	"github.com/mooc-manus/go-manus/api/internal/model"
 	"github.com/mooc-manus/go-manus/api/internal/repository"
@@ -37,6 +38,7 @@ type AgentTaskRunner struct {
 	fileRep     repository.FileRepository
 	sandbox     external.Sandbox
 	fileStorage COSFileStorage
+	attLoader   *attachment.Loader
 }
 
 // COSFileStorage 文件存储接口（简化版）
@@ -69,6 +71,9 @@ func NewAgentTaskRunner(cfg *AgentTaskRunnerConfig) *AgentTaskRunner {
 		fileRep:     cfg.FileRep,
 		sandbox:     cfg.Sandbox,
 		fileStorage: cfg.FileStorage,
+	}
+	if cfg.FileStorage != nil {
+		runner.attLoader = attachment.NewLoader(cfg.FileStorage)
 	}
 
 	// 创建流程
@@ -186,11 +191,24 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 				zap.Error(err))
 		}
 
+		// 加载附件内容到 LLM 上下文（解决"只列计划"问题）
+		var attachmentContexts interface{}
+		if r.attLoader != nil && len(inputEvent.Attachments) > 0 {
+			contexts := r.attLoader.Load(ctx, inputEvent.Attachments, inputEvent.Message)
+			attachmentContexts = contexts
+			if len(contexts) > 0 {
+				logger.Info("已加载附件内容到 LLM 上下文",
+					zap.String("session_id", r.sessionID),
+					zap.Int("count", len(contexts)))
+			}
+		}
+
 		// 转换为 Flow 需要的 Message
 		message := &model.Message{
-			Role:        inputEvent.Role,
-			Message:     inputEvent.Message,
-			Attachments: attachments,
+			Role:               inputEvent.Role,
+			Message:            inputEvent.Message,
+			Attachments:        attachments,
+			AttachmentContexts: attachmentContexts,
 		}
 
 		// 运行 Flow

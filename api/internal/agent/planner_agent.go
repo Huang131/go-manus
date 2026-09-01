@@ -38,10 +38,14 @@ func (a *PlannerAgent) CreatePlan(ctx context.Context, message *model.Message) (
 		attachments += fmt.Sprintf("- %s\n", att)
 	}
 
+	// 构建附件内容段（已加载到 LLM 上下文的文件正文）
+	contextSection := BuildAttachmentContextSection(message.AttachmentContexts)
+
 	// 构建提示词
 	prompt := CreatePlanPrompt
 	prompt = strings.Replace(prompt, "{message}", message.Message, 1)
 	prompt = strings.Replace(prompt, "{attachments}", attachments, 1)
+	prompt = strings.Replace(prompt, "{context}", contextSection, 1)
 
 	// 添加系统提示词
 	systemPrompt := SystemPrompt + "\n" + PlannerSystemPrompt

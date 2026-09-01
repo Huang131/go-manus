@@ -136,6 +136,8 @@ const ExecutionPrompt = `你正在执行任务中的一个步骤。
 附件：
 {attachments}
 
+{context}
+
 当前步骤：
 语言：{language}
 描述：{step}
@@ -147,7 +149,12 @@ const ExecutionPrompt = `你正在执行任务中的一个步骤。
   "success": true或false,
   "result": "执行结果描述",
   "attachments": ["文件路径（如有）"]
-}}`
+}}
+
+注意：
+- 优先基于已内联的"附件内容"作答
+- 必要时再调用 file.read 工具读取完整文件
+- 如附件是二进制或截断状态，请显式说明`
 
 // SummarizePrompt 总结提示词
 const SummarizePrompt = `所有任务步骤已完成，现在请总结整个任务的执行情况。

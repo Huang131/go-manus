@@ -7,6 +7,8 @@ type Message struct {
 	Message     string                   `json:"message"`     // 用户发送的消息内容
 	Attachments []string                 `json:"attachments"` // 用户发送的附件列表 (file_id)
 	ToolCalls   []map[string]interface{} `json:"tool_calls"`  // 工具调用信息 (仅 assistant 角色)
+	// AttachmentContexts 附件已加载内容（运行期由 agent.AttachmentLoader 注入）
+	AttachmentContexts interface{} `json:"attachment_contexts,omitempty"`
 }
 
 // NewUserMessage 创建用户消息
