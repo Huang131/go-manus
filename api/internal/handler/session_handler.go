@@ -144,6 +144,9 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 		Attachments []string `json:"attachments"`
 		// 兼容两种命名：前端 startEmptyStream 发的 event_id，HTTP 标准 SSE 的 Last-Event-ID
 		EventID string `json:"event_id"`
+		// 本次 chat 要用的模型 ID（可选）。空表示走 default。
+		// 用于"会话中途临时切换模型"，不影响其他 session 也不改 DB 的 default。
+		ModelID string `json:"model_id"`
 	}
 	if len(rawBody) > 0 {
 		if err := json.Unmarshal(rawBody, &req); err != nil {
@@ -188,7 +191,8 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 		// 调用 AgentService 处理聊天消息（异步执行）
 		// 注意：AgentService.Chat 内部会创建自己的 context，不受 HTTP 请求影响
 		var err error
-		taskID, err = h.agent.Chat(c.Request.Context(), id, msg)
+		chatCtx := external.WithModelID(c.Request.Context(), req.ModelID)
+		taskID, err = h.agent.Chat(chatCtx, id, msg)
 		if err != nil {
 			response.Error(c, err.Error())
 			return

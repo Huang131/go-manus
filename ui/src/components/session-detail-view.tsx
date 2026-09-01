@@ -171,10 +171,10 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
   }, [initialMessage, initialAttachments, session, loading, streaming, sendMessage, sessionId, router])
 
   const handleSend = useCallback(
-    async (message: string, uploadedFiles: FileInfo[]) => {
+    async (message: string, uploadedFiles: FileInfo[], modelId?: string) => {
       try {
         const attachmentIds = uploadedFiles.map((f) => f.id)
-        await sendMessage(message, attachmentIds)
+        await sendMessage(message, attachmentIds, modelId)
       } catch (e) {
         toast.error(e instanceof Error ? e.message : '发送失败，请重试')
         throw e

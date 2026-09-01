@@ -1,6 +1,6 @@
 'use client'
 
-import {useState, useRef, forwardRef, useImperativeHandle} from 'react'
+import {useState, useRef, useEffect, forwardRef, useImperativeHandle} from 'react'
 import {cn, formatFileSize} from '@/lib/utils'
 import {ScrollArea, ScrollBar} from '@/components/ui/scroll-area'
 import {Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle} from '@/components/ui/item'
@@ -8,13 +8,14 @@ import {Avatar, AvatarGroupCount} from '@/components/ui/avatar'
 import {ArrowUp, FileText, Paperclip, XCircle, Loader2, Pause} from 'lucide-react'
 import {Button} from '@/components/ui/button'
 import {fileApi} from '@/lib/api/file'
+import {configApi} from '@/lib/api/config'
 import type {FileInfo} from '@/lib/api/types'
 import {toast} from 'sonner'
 
 interface ChatInputProps {
   className?: string
   onInputValueChange?: (value: string) => void
-  onSend?: (message: string, files: FileInfo[]) => Promise<void>
+  onSend?: (message: string, files: FileInfo[], modelId?: string) => Promise<void>
   disabled?: boolean
   /** 当前会话 ID，上传附件时会关联到该会话 */
   sessionId?: string | null
@@ -32,6 +33,35 @@ export interface ChatInputRef {
 
 export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
   ({ className, onInputValueChange, onSend, disabled = false, sessionId, isRunning = false, onStop }, ref) => {
+  // 当前会话选中的模型 ID（用户可在输入框上方切换；空字符串=走 default）
+  const [currentModelId, setCurrentModelId] = useState<string>('')
+  const [models, setModels] = useState<Array<{id: string; name: string; model_name: string; is_default?: boolean}>>([])
+  const [modelsLoading, setModelsLoading] = useState(false)
+  useEffect(() => {
+    let alive = true
+    setModelsLoading(true)
+    configApi.listLLMModels()
+      .then((data) => {
+        if (!alive) return
+        const enabled = (data.models || []).filter((m) => m.is_enabled !== false)
+        setModels(enabled)
+        // 默认选中 default
+        if (!currentModelId) {
+          const def = enabled.find((m) => m.is_default) || enabled[0]
+          if (def) setCurrentModelId(def.id)
+        }
+      })
+      .catch(() => {/* 静默失败，模型选择降级为不可用 */})
+      .finally(() => alive && setModelsLoading(false))
+    return () => { alive = false }
+  }, [])
+
+  // 切会话时，重置模型选择为 default（避免上一个会话的选模型"串"到新会话）
+  useEffect(() => {
+    // 直接选 default（models 已加载）
+    const def = models.find((m) => m.is_default) || models[0]
+    setCurrentModelId(def ? def.id : '')
+  }, [sessionId])
     const [files, setFiles] = useState<FileInfo[]>([])
     const [uploading, setUploading] = useState(false)
     const [sending, setSending] = useState(false)
@@ -120,7 +150,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
       if (onSend) {
         setSending(true)
         try {
-          await onSend(trimmedMessage, files)
+          await onSend(trimmedMessage, files, currentModelId)
           // 发送成功后清空输入框和文件列表
           setInputValue('')
           setFiles([])
@@ -202,9 +232,9 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
         />
       </div>
       {/* 底部上传&发送按钮 */}
-      <footer className="flex flex-row justify-between w-full px-3">
-        {/* 上传按钮 */}
-        <div className="flex gap-2">
+      <footer className="flex flex-row justify-between items-center w-full px-3 gap-2">
+        {/* 左侧：模型选择 + 上传 */}
+        <div className="flex gap-2 items-center min-w-0 flex-1">
           <input
             ref={fileInputRef}
             type="file"
@@ -215,7 +245,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
           />
           <Button
             variant="outline"
-            className="rounded-full w-8 h-8 cursor-pointer"
+            className="rounded-full w-8 h-8 cursor-pointer flex-shrink-0"
             onClick={handleUploadClick}
             disabled={uploading}
           >
@@ -225,6 +255,22 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
               <Paperclip/>
             )}
           </Button>
+          {/* 模型选择下拉（原生 select，零依赖；用户切换即下次发送生效） */}
+          {models.length > 0 && (
+            <select
+              value={currentModelId}
+              onChange={(e) => setCurrentModelId(e.target.value)}
+              disabled={modelsLoading}
+              className="text-xs bg-transparent border rounded-full px-2 py-1 max-w-[180px] truncate cursor-pointer hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-primary"
+              title={models.find((m) => m.id === currentModelId)?.model_name || '选择模型'}
+            >
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.is_default ? '★ ' : ''}{m.name} · {m.model_name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
         {/* 发送/暂停按钮 */}
         <div className="flex gap-2">

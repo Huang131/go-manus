@@ -14,7 +14,7 @@ export type UseSessionDetailResult = {
   error: Error | null
   refresh: () => Promise<void>
   refreshFiles: () => Promise<void>
-  sendMessage: (message: string, attachmentIds: string[]) => Promise<void>
+  sendMessage: (message: string, attachmentIds: string[], modelId?: string) => Promise<void>
   streaming: boolean
 }
 
@@ -219,7 +219,7 @@ export function useSessionDetail(
   }, [])
 
   const sendMessage = useCallback(
-    async (message: string, attachmentIds: string[]) => {
+    async (message: string, attachmentIds: string[], modelId?: string) => {
       if (!sessionId) return
       stopEmptyStream()
       // 清理已有的消息流连接（如 waiting 状态时用户再次发送）
@@ -263,7 +263,7 @@ export function useSessionDetail(
       }
       const messageStreamCleanup = sessionApi.chat(
         sessionId,
-        { message, attachments: attachmentIds },
+        { message, attachments: attachmentIds, model_id: modelId },
         onEvent,
         (err) => {
           if (err.name === 'AbortError') {

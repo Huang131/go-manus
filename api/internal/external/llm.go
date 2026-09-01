@@ -4,6 +4,27 @@ import (
 	"context"
 )
 
+// llmModelIDKey ctx 中携带"本次请求要用的模型 ID"的 key。
+// DynamicLLM 的 provider 闭包会从 ctx 读这个 key，
+// 用于实现"单次 chat 临时切换模型"而无需改 default。
+type llmModelIDKey struct{}
+
+// WithModelID 返回带 modelID 的 ctx。空 modelID 等于未设置（走 default）。
+func WithModelID(ctx context.Context, modelID string) context.Context {
+	if modelID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, llmModelIDKey{}, modelID)
+}
+
+// ModelIDFromContext 读取 ctx 中的 modelID，未设置时返回空字符串。
+func ModelIDFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(llmModelIDKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
 // LLMRequest LLM 请求参数
 type LLMRequest struct {
 	Messages       []map[string]interface{} `json:"messages"`

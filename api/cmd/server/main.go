@@ -119,7 +119,22 @@ func main() {
 	if cfg.LLM.BaseURL != "" {
 		llm = external.NewDynamicLLM(
 			func(ctx context.Context) (*external.OpenAIClientConfig, error) {
-				// 优先：llm_models 表 default 模型
+				// 0. 优先：ctx 中显式指定的 modelId（前端 chat 时选的"本次模型"）
+				if mid := external.ModelIDFromContext(ctx); mid != "" {
+					chosen, err := llmModelRepo.GetByID(ctx, mid)
+					if err == nil && chosen != nil && chosen.IsEnabled {
+						return &external.OpenAIClientConfig{
+							BaseURL:         chosen.BaseURL,
+							APIKey:          chosen.APIKey,
+							ModelName:       chosen.ModelName,
+							Temperature:     chosen.Temperature,
+							MaxTokens:       chosen.MaxTokens,
+							ToolCallTimeout: cfg.LLM.ToolCallTimeout,
+						}, nil
+					}
+					// 指定 ID 不存在/已停用，落到下面的 default 逻辑
+				}
+				// 1. llm_models 表 default 模型
 				def, err := llmModelRepo.GetDefault(ctx)
 				if err == nil && def != nil && def.IsEnabled {
 					return &external.OpenAIClientConfig{
@@ -131,7 +146,7 @@ func main() {
 						ToolCallTimeout: cfg.LLM.ToolCallTimeout,
 					}, nil
 				}
-				// 兜底：llm_models 第一个 enabled
+				// 2. 兜底：llm_models 第一个 enabled
 				first, err := llmModelRepo.GetFirstEnabled(ctx)
 				if err == nil && first != nil {
 					return &external.OpenAIClientConfig{
@@ -143,7 +158,7 @@ func main() {
 						ToolCallTimeout: cfg.LLM.ToolCallTimeout,
 					}, nil
 				}
-				// 兜底 2：env
+				// 3. 兜底 2：env
 				return nil, nil
 			},
 			fallbackLLMCfg,
