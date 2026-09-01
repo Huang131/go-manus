@@ -192,7 +192,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 		}
 
 		// 加载附件内容到 LLM 上下文（解决"只列计划"问题）
-		var attachmentContexts interface{}
+		var attachmentContexts []attachment.FileContext
 		if r.attLoader != nil && len(inputEvent.Attachments) > 0 {
 			contexts := r.attLoader.Load(ctx, inputEvent.Attachments, inputEvent.Message)
 			attachmentContexts = contexts

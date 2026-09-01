@@ -28,23 +28,3 @@ func TestBuildAttachmentContextSection_Typed(t *testing.T) {
 		t.Errorf("missing mode")
 	}
 }
-
-func TestBuildAttachmentContextSection_FromMap(t *testing.T) {
-	// 模拟从 JSON 反序列化后传入
-	m := []map[string]interface{}{
-		{
-			"filename": "b.md",
-			"filepath": "/b.md",
-			"mode":     "truncated",
-			"content":  "头...尾",
-			"notice":   "中文件",
-		},
-	}
-	got := BuildAttachmentContextSection(m)
-	if !strings.Contains(got, "头...尾") {
-		t.Errorf("missing content: %s", got)
-	}
-	if !strings.Contains(got, "truncated") {
-		t.Errorf("missing mode")
-	}
-}

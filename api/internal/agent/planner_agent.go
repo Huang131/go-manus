@@ -81,27 +81,20 @@ func (a *PlannerAgent) CreatePlan(ctx context.Context, message *model.Message) (
 	}
 
 	if err := a.jsonParser.Parse(resp.Content, &result); err != nil {
-		// 降级：模型未按 JSON 格式输出计划（常见于简单问候场景，推理模型直接给出对话式回答）。
-		// 把原始文本作为 assistant 回复，返回空步骤计划，让 flow 走"无步骤直接完成"路径。
-		logger.Warn("计划 JSON 解析失败，降级为直接回复",
+		// 这里不再把解析失败伪装成成功计划。
+		// 计划阶段必须给出结构化 JSON；如果模型没做到，说明当前模型能力或 prompt 契约不满足。
+		logger.Warn("计划 JSON 解析失败",
 			zap.String("session_id", a.sessionID),
 			zap.Int("content_len", len(resp.Content)),
 			zap.Error(err))
 		reply := strings.TrimSpace(resp.Content)
 		if reply == "" {
-			return nil, "", fmt.Errorf("解析计划失败: %w", err)
+			reply = strings.TrimSpace(resp.ReasoningContent)
 		}
-		title := []rune(reply)
-		if len(title) > 20 {
-			title = title[:20]
+		if reply == "" {
+			reply = "当前模型未返回可解析的计划结果"
 		}
-		return &model.Plan{
-			Title:    string(title),
-			Language: "zh",
-			Message:  reply,
-			Status:   model.ExecutionStatusCompleted,
-			Steps:    []model.PlanStep{},
-		}, reply, nil
+		return nil, reply, fmt.Errorf("解析计划失败: %w", err)
 	}
 
 	// 构建 Plan

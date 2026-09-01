@@ -7,6 +7,7 @@ import (
 	"io"
 	"testing"
 
+	"github.com/mooc-manus/go-manus/api/internal/agent/attachment"
 	"github.com/mooc-manus/go-manus/api/internal/external"
 	"github.com/mooc-manus/go-manus/api/internal/model"
 	"github.com/mooc-manus/go-manus/api/internal/repository"
@@ -189,6 +190,7 @@ func TestAgentTaskRunner_SyncUserAttachmentsToSandbox(t *testing.T) {
 	runner := &AgentTaskRunner{
 		sessionID:   "session-1",
 		fileStorage: &attachmentStorage{data: []byte("file content")},
+		attLoader:   attachment.NewLoader(&attachmentStorage{data: []byte("file content")}),
 		sandbox:     sandbox,
 	}
 

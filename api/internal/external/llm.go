@@ -14,9 +14,11 @@ type LLMRequest struct {
 
 // LLMResponse LLM 响应
 type LLMResponse struct {
-	ID      string                   `json:"id"`
-	Content string                   `json:"content"`
-	ToolUse []map[string]interface{} `json:"tool_calls,omitempty"`
+	ID               string                   `json:"id"`
+	Content          string                   `json:"content"`
+	ReasoningContent string                   `json:"reasoning_content,omitempty"`
+	RawContent       string                   `json:"raw_content,omitempty"`
+	ToolUse          []map[string]interface{} `json:"tool_calls,omitempty"`
 }
 
 // LLM LLM 接口
@@ -67,7 +69,11 @@ func (d *DynamicLLM) Invoke(ctx context.Context, req *LLMRequest) (*LLMResponse,
 			cfg = c
 		}
 	}
-	return NewOpenAIClient(cfg).Invoke(ctx, req)
+	resp, err := NewOpenAIClient(cfg).Invoke(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return NormalizeLLMResponse(resp), nil
 }
 
 // ModelName 返回模型名称（fallback）。

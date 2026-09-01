@@ -210,7 +210,7 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMResp
 		}
 	}
 
-	return result, nil
+	return NormalizeLLMResponse(result), nil
 }
 
 // ModelName 返回模型名称

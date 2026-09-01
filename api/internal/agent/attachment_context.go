@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -9,32 +8,13 @@ import (
 )
 
 // BuildAttachmentContextSection 将已加载的附件内容拼成可注入 prompt 的字符串。
-// 若 message.AttachmentContexts 为空，返回一个空段（占位符仍可替换）。
+// 若附件上下文为空，返回一个空段。
 func BuildAttachmentContextSection(raw interface{}) string {
 	if raw == nil {
 		return ""
 	}
-	// 支持两种传入形式：
-	// 1) []attachment.FileContext（直接传入）
-	// 2) []map[string]interface{}（跨包/序列化后传入）
-	var contexts []attachment.FileContext
-	switch v := raw.(type) {
-	case []attachment.FileContext:
-		contexts = v
-	case []map[string]interface{}:
-		bytes, _ := json.Marshal(v)
-		_ = json.Unmarshal(bytes, &contexts)
-	default:
-		// 尝试 JSON 序列化 + 反序列化兜底
-		bytes, err := json.Marshal(raw)
-		if err != nil {
-			return ""
-		}
-		if err := json.Unmarshal(bytes, &contexts); err != nil {
-			return ""
-		}
-	}
-	if len(contexts) == 0 {
+	contexts, ok := raw.([]attachment.FileContext)
+	if !ok || len(contexts) == 0 {
 		return ""
 	}
 

@@ -125,9 +125,11 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, message *model.Message) <
 			case FlowStatusExecuting:
 				// 执行状态 -> 获取下一个步骤并执行
 				if f.plan == nil || len(f.plan.Steps) == 0 {
-					logger.Info("计划为空，进入总结阶段")
+					logger.Warn("计划为空，无法进入执行阶段",
+						zap.String("session_id", f.sessionID))
+					ch <- model.NewErrorEvent("计划为空，无法执行")
 					f.mu.Lock()
-					f.status = FlowStatusSummarizing
+					f.status = FlowStatusCompleted
 					f.mu.Unlock()
 					break
 				}
@@ -227,12 +229,9 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, message *model.Message) <
 				f.mu.Unlock()
 
 			case FlowStatusSummarizing:
-				// 无步骤的计划（如简单问答）：跳过 Summarize 直接完成，避免 LLM 再次挂起
-				if len(f.plan.Steps) == 0 {
-					logger.Info("计划无步骤，跳过 Summarize 直接完成",
-						zap.String("session_id", f.sessionID))
-				} else {
-					// 有步骤的计划：调用 ReAct 总结任务
+				// 只有真正执行过步骤的计划才进入总结。
+				// 空步骤计划如果流转到这里，说明上游已经出了结构化输出问题。
+				if len(f.plan.Steps) > 0 {
 					summary, attachments, err := f.react.Summarize(ctx)
 					if err != nil {
 						logger.Warn("ReActAgent 总结任务失败", zap.Error(err))
@@ -242,6 +241,9 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, message *model.Message) <
 							logger.Info("任务生成附件", zap.String("filepath", att))
 						}
 					}
+				} else {
+					logger.Warn("跳过空步骤计划的总结阶段",
+						zap.String("session_id", f.sessionID))
 				}
 
 				f.mu.Lock()

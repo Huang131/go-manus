@@ -168,6 +168,7 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMRespons
 
 	// 转换响应
 	content := chatResp.Choices[0].Message.Content
+	reasoning := chatResp.Choices[0].Message.Reasoning
 	// 推理模型（如 MiniMax-M2.7）可能把输出放在 reasoning_content，content 为空。
 	// 此时用 reasoning_content 兜底，否则下游 planner JSON 解析会拿到空串报错。
 	if content == "" && chatResp.Choices[0].Message.Reasoning != "" {
@@ -176,8 +177,10 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMRespons
 		content = chatResp.Choices[0].Message.Reasoning
 	}
 	result := &LLMResponse{
-		ID:      chatResp.ID,
-		Content: content,
+		ID:               chatResp.ID,
+		Content:          content,
+		ReasoningContent: reasoning,
+		RawContent:       chatResp.Choices[0].Message.Content,
 	}
 
 	// 转换工具调用
@@ -192,7 +195,7 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMRespons
 		}
 	}
 
-	return result, nil
+	return NormalizeLLMResponse(result), nil
 }
 
 // ModelName 返回模型名称
