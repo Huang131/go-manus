@@ -589,7 +589,11 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall map[string]inte
 	var result *model.ToolResult
 	var err error
 	for retry := 0; retry < a.config.MaxRetries; retry++ {
-		result, err = tool.Invoke(ctx, arguments)
+		if multiTool, ok := tool.(MultiFunctionTool); ok {
+			result, err = multiTool.InvokeWithName(functionName, ctx, arguments)
+		} else {
+			result, err = tool.Invoke(ctx, arguments)
+		}
 		if err == nil {
 			break
 		}

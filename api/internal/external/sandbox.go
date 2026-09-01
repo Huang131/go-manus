@@ -354,7 +354,7 @@ func (c *SandboxClient) UploadFile(ctx context.Context, fileData []byte, filepat
 		return model.NewToolError("sandbox address not configured"), fmt.Errorf("sandbox address not configured")
 	}
 
-	url := fmt.Sprintf("%s/api/file/upload", c.address)
+	url := fmt.Sprintf("%s/api/file/upload-file", c.address)
 
 	// 创建 multipart form
 	body := &bytes.Buffer{}

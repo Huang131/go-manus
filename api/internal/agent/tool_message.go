@@ -31,22 +31,17 @@ func (t *MessageTool) GetTools() []map[string]interface{} {
 	return []map[string]interface{}{
 		{
 			"type":        "function",
-			"name":        "message_send",
-			"description": "向用户发送消息。用于向用户展示信息、结果或通知。",
+			"name":        "message_notify_user",
+			"description": "向用户发送消息，且无需用户回复。用于确认收到消息、提供进度更新、报告任务完成情况，或解释处理方式的变更。",
 			"parameters": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"message": map[string]interface{}{
+					"text": map[string]interface{}{
 						"type":        "string",
-						"description": "要发送的消息内容",
-					},
-					"role": map[string]interface{}{
-						"type":        "string",
-						"description": "消息角色: assistant, system",
-						"enum":        []string{"assistant", "system"},
+						"description": "要显示给用户的消息文本",
 					},
 				},
-				"required": []string{"message"},
+				"required": []string{"text"},
 			},
 		},
 		{
@@ -83,27 +78,31 @@ func (t *MessageTool) GetTools() []map[string]interface{} {
 func (t *MessageTool) Parameters() map[string]interface{} {
 	tools := t.GetTools()
 	if len(tools) > 0 {
-		return tools[0]
+		if parameters, ok := tools[0]["parameters"].(map[string]interface{}); ok {
+			return parameters
+		}
 	}
 	return nil
 }
 
 // Invoke 调用工具
 func (t *MessageTool) Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
-	message := ""
-	if v, ok := params["message"].(string); ok {
-		message = v
+	text := ""
+	if v, ok := params["text"].(string); ok {
+		text = v
+	} else if v, ok := params["message"].(string); ok {
+		text = v
 	}
 
 	return model.NewToolResultWithMessage("", map[string]interface{}{
-		"message_sent": message,
+		"message_sent": text,
 	}), nil
 }
 
 // InvokeWithName 根据函数名调用工具
 func (t *MessageTool) InvokeWithName(functionName string, ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
 	switch functionName {
-	case "message_send":
+	case "message_notify_user":
 		return t.invokeMessageSend(params)
 	case "message_ask_user":
 		return t.invokeMessageAskUser(params)
@@ -114,13 +113,15 @@ func (t *MessageTool) InvokeWithName(functionName string, ctx context.Context, p
 
 // invokeMessageSend 发送消息
 func (t *MessageTool) invokeMessageSend(params map[string]interface{}) (*model.ToolResult, error) {
-	message := ""
-	if v, ok := params["message"].(string); ok {
-		message = v
+	text := ""
+	if v, ok := params["text"].(string); ok {
+		text = v
+	} else if v, ok := params["message"].(string); ok {
+		text = v
 	}
 
 	return model.NewToolResultWithMessage("", map[string]interface{}{
-		"message_sent": message,
+		"message_sent": text,
 	}), nil
 }
 

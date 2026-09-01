@@ -261,6 +261,7 @@ func main() {
 		browser,
 		search,
 		mq,
+		cos,
 	)
 	logger.Info("Agent service initialized",
 		zap.Bool("browser_enabled", browser != nil),

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/mooc-manus/go-manus/api/internal/external"
@@ -26,6 +27,7 @@ type AgentService struct {
 	a2aConfig    *A2AConfig
 	browser      external.Browser
 	searchEngine external.SearchEngine
+	fileStorage  COSFileStorage
 	mcpTool      *MCPTool
 	a2aTool      *A2ATool
 	mq           external.MessageQueue
@@ -50,6 +52,7 @@ func NewAgentService(
 	browser external.Browser,
 	searchEngine external.SearchEngine,
 	mq external.MessageQueue,
+	fileStorage COSFileStorage,
 ) *AgentService {
 	// 初始化 MCP 工具
 	mcpTool := NewMCPTool()
@@ -74,6 +77,7 @@ func NewAgentService(
 		a2aConfig:     a2aConfig,
 		browser:       browser,
 		searchEngine:  searchEngine,
+		fileStorage:   fileStorage,
 		mcpTool:       mcpTool,
 		a2aTool:       a2aTool,
 		runningTasks:  make(map[string]*AgentTaskRunner),
@@ -119,10 +123,9 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *mode
 		logger.Warn("添加用户消息事件失败", zap.String("session_id", sessionID), zap.Error(err))
 	}
 
-	// 创建独立的 task context，不受 HTTP 请求 context 影响
-	// 注意：这里不使用 defer cancel()，让 context 保持活跃直到 Agent 任务完成
-	// 这样当 HTTP 请求返回后，Agent 任务仍能继续运行
-	taskCtx, _ := context.WithCancel(context.Background())
+	// 创建独立的 task context，不受 HTTP 请求取消影响，但保留请求中的 trace 等 values。
+	// 任务真正的取消由 RedisStreamTask.Invoke 创建并管理，避免这里遗留未释放的 cancel 函数。
+	taskCtx := context.WithoutCancel(ctx)
 
 	// 获取或创建 RedisStreamTask
 	task, err := s.getOrCreateTask(ctx, session, s.getTools())
@@ -142,6 +145,9 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *mode
 		Role:    message.Role,
 		Message: message.Message,
 	}
+	if len(message.Attachments) > 0 {
+		msgEvent.Attachments = s.resolveMessageAttachments(taskCtx, sessionID, message.Attachments)
+	}
 	if _, err := task.PutInput(taskCtx, msgEvent); err != nil {
 		logger.Error("放入消息失败", zap.String("session_id", sessionID), zap.Error(err))
 		return task.ID(), fmt.Errorf("放入消息失败: %w", err)
@@ -152,6 +158,35 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *mode
 		zap.String("task_id", task.ID()))
 
 	return task.ID(), nil
+}
+
+// resolveMessageAttachments 将 API 传入的文件 ID 解析为文件元数据。
+// 输入流携带完整文件对象，runner 才能在异步执行阶段下载并同步到沙箱。
+func (s *AgentService) resolveMessageAttachments(ctx context.Context, sessionID string, fileIDs []string) []model.File {
+	if s.fileRep == nil {
+		return nil
+	}
+
+	attachments := make([]model.File, 0, len(fileIDs))
+	for _, fileID := range fileIDs {
+		fileID = strings.TrimSpace(fileID)
+		if fileID == "" {
+			continue
+		}
+
+		file, err := s.fileRep.GetByID(ctx, fileID)
+		if err != nil {
+			logger.Warn("获取聊天附件失败",
+				zap.String("session_id", sessionID),
+				zap.String("file_id", fileID),
+				zap.Error(err))
+			continue
+		}
+		if file != nil {
+			attachments = append(attachments, *file)
+		}
+	}
+	return attachments
 }
 
 // StopSession 停止会话
@@ -213,6 +248,7 @@ func (s *AgentService) getOrCreateTaskRunner(session *model.Session, tools []Too
 		SessionRep:  s.sessionRep,
 		FileRep:     s.fileRep,
 		Sandbox:     s.sandbox,
+		FileStorage: s.fileStorage,
 	})
 
 	s.runningTasks[session.ID] = runner
@@ -283,6 +319,7 @@ func (s *AgentService) getOrCreateTask(ctx context.Context, session *model.Sessi
 		SessionRep:  s.sessionRep,
 		FileRep:     s.fileRep,
 		Sandbox:     s.sandbox,
+		FileStorage: s.fileStorage,
 	})
 
 	task := NewRedisStreamTask(s.mq, runner)

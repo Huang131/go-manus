@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -178,11 +179,18 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 			continue
 		}
 
+		attachments, err := r.syncUserAttachmentsToSandbox(ctx, inputEvent.Attachments)
+		if err != nil {
+			logger.Warn("同步用户附件失败",
+				zap.String("session_id", r.sessionID),
+				zap.Error(err))
+		}
+
 		// 转换为 Flow 需要的 Message
 		message := &model.Message{
 			Role:        inputEvent.Role,
 			Message:     inputEvent.Message,
-			Attachments: []string{}, // TODO: 转换 Attachments
+			Attachments: attachments,
 		}
 
 		// 运行 Flow
@@ -407,6 +415,82 @@ func (r *AgentTaskRunner) syncFileToStorage(ctx context.Context, filepath string
 	}
 
 	return nil
+}
+
+// syncUserAttachmentsToSandbox 将用户上传文件同步到沙箱，并返回可供 LLM 使用的文件路径。
+// 这里不直接把 file_id 透传给模型，因为模型侧只能消费沙箱内可读路径。
+func (r *AgentTaskRunner) syncUserAttachmentsToSandbox(ctx context.Context, attachments []model.File) ([]string, error) {
+	if len(attachments) == 0 {
+		return nil, nil
+	}
+	if r.fileStorage == nil || r.sandbox == nil {
+		result := make([]string, 0, len(attachments))
+		for _, attachment := range attachments {
+			if attachment.Filepath != "" {
+				result = append(result, attachment.Filepath)
+			}
+		}
+		return result, nil
+	}
+
+	result := make([]string, 0, len(attachments))
+	for _, file := range attachments {
+		if file.ID == "" || file.Key == "" {
+			continue
+		}
+
+		reader, err := r.fileStorage.Download(ctx, file.Key)
+		if err != nil {
+			logger.Warn("下载用户附件失败",
+				zap.String("session_id", r.sessionID),
+				zap.String("file_id", file.ID),
+				zap.Error(err))
+			continue
+		}
+
+		data, err := io.ReadAll(reader)
+		closeErr := reader.Close()
+		if err != nil {
+			logger.Warn("读取用户附件失败",
+				zap.String("session_id", r.sessionID),
+				zap.String("file_id", file.ID),
+				zap.Error(err))
+			continue
+		}
+		if closeErr != nil {
+			logger.Warn("关闭用户附件失败",
+				zap.String("session_id", r.sessionID),
+				zap.String("file_id", file.ID),
+				zap.Error(closeErr))
+		}
+
+		filename := filepath.Base(file.Filename)
+		if filename == "." || filename == string(filepath.Separator) || filename == "" {
+			filename = file.ID
+		}
+		sandboxPath := filepath.Join("/home/ubuntu/upload", r.sessionID, filename)
+		if _, err := r.sandbox.UploadFile(ctx, data, sandboxPath, filename); err != nil {
+			logger.Warn("上传用户附件到沙箱失败",
+				zap.String("session_id", r.sessionID),
+				zap.String("file_id", file.ID),
+				zap.String("sandbox_path", sandboxPath),
+				zap.Error(err))
+			continue
+		}
+
+		sandboxFile := file
+		sandboxFile.Filepath = sandboxPath
+		result = append(result, sandboxFile.Filepath)
+
+		if r.sessionRep != nil {
+			existing, findErr := r.sessionRep.GetFileByPath(ctx, r.sessionID, sandboxFile.Filepath)
+			if findErr != nil || existing == nil {
+				_ = r.sessionRep.AddFile(ctx, r.sessionID, &sandboxFile)
+			}
+		}
+	}
+
+	return result, nil
 }
 
 // readerWrapper io.Reader 实现

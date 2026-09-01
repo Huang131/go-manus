@@ -18,20 +18,44 @@ type Tool interface {
 	Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error)
 }
 
+// MultiFunctionTool 一个工具包可以向 LLM 暴露多个函数。
+// MessageTool 使用该接口同时提供通知用户和询问用户两个函数。
+type MultiFunctionTool interface {
+	Tool
+	GetTools() []map[string]interface{}
+	InvokeWithName(functionName string, ctx context.Context, params map[string]interface{}) (*model.ToolResult, error)
+}
+
 // ToolRegistry 工具注册表
 type ToolRegistry struct {
-	tools map[string]Tool
+	tools      map[string]Tool
+	schemas    map[string]map[string]interface{}
+	registered map[string]Tool
 }
 
 // NewToolRegistry 创建工具注册表
 func NewToolRegistry() *ToolRegistry {
 	return &ToolRegistry{
-		tools: make(map[string]Tool),
+		tools:      make(map[string]Tool),
+		schemas:    make(map[string]map[string]interface{}),
+		registered: make(map[string]Tool),
 	}
 }
 
 // Register 注册工具
 func (r *ToolRegistry) Register(tool Tool) {
+	r.registered[tool.Name()] = tool
+	if multiTool, ok := tool.(MultiFunctionTool); ok {
+		for _, schema := range multiTool.GetTools() {
+			name, ok := schema["name"].(string)
+			if !ok || name == "" {
+				continue
+			}
+			r.tools[name] = tool
+			r.schemas[name] = schema
+		}
+		return
+	}
 	r.tools[tool.Name()] = tool
 }
 
@@ -43,8 +67,8 @@ func (r *ToolRegistry) Get(name string) (Tool, bool) {
 
 // List 返回所有工具
 func (r *ToolRegistry) List() []Tool {
-	result := make([]Tool, 0, len(r.tools))
-	for _, tool := range r.tools {
+	result := make([]Tool, 0, len(r.registered))
+	for _, tool := range r.registered {
 		result = append(result, tool)
 	}
 	return result
@@ -53,11 +77,26 @@ func (r *ToolRegistry) List() []Tool {
 // GetToolsForLLM 返回适合 LLM 调用的工具格式
 func (r *ToolRegistry) GetToolsForLLM() []map[string]interface{} {
 	result := make([]map[string]interface{}, 0, len(r.tools))
-	for _, tool := range r.tools {
+	for name, schema := range r.schemas {
+		parameters, _ := schema["parameters"].(map[string]interface{})
 		result = append(result, map[string]interface{}{
 			"type": "function",
 			"function": map[string]interface{}{
-				"name":        tool.Name(),
+				"name":        name,
+				"description": schema["description"],
+				"parameters":  parameters,
+			},
+		})
+	}
+
+	for name, tool := range r.registered {
+		if _, ok := tool.(MultiFunctionTool); ok {
+			continue
+		}
+		result = append(result, map[string]interface{}{
+			"type": "function",
+			"function": map[string]interface{}{
+				"name":        name,
 				"description": tool.Description(),
 				"parameters":  tool.Parameters(),
 			},

@@ -402,8 +402,8 @@ func TestHTTPIntegration_DeleteSession(t *testing.T) {
 	}
 }
 
-// TestHTTPIntegration_Chat 测试聊天 API
-func TestHTTPIntegration_Chat(t *testing.T) {
+// TestHTTPIntegration_ChatWithoutAgentService 验证 Agent 服务未配置时不会触发空指针。
+func TestHTTPIntegration_ChatWithoutAgentService(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	// 创建 mock 服务
@@ -427,9 +427,9 @@ func TestHTTPIntegration_Chat(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	// 验证响应
-	if w.Code != http.StatusOK {
-		t.Errorf("状态码应为 200，实际: %d", w.Code)
+	// AgentService 未配置时应返回明确错误，而不是 panic。
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("状态码应为 400，实际: %d", w.Code)
 	}
 
 	var resp response.Response
@@ -438,8 +438,8 @@ func TestHTTPIntegration_Chat(t *testing.T) {
 		t.Errorf("响应解析失败: %v", err)
 	}
 
-	if resp.Code != 0 {
-		t.Errorf("响应 code 应为 0，实际: %d", resp.Code)
+	if resp.Code != http.StatusBadRequest {
+		t.Errorf("响应 code 应为 400，实际: %d", resp.Code)
 	}
 }
 

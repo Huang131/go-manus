@@ -127,6 +127,10 @@ func (h *SessionHandler) Stream(c *gin.Context) {
 // Chat 聊天 (SSE 流式)
 func (h *SessionHandler) Chat(c *gin.Context) {
 	id := c.Param("id")
+	if h.agent == nil {
+		response.Error(c, "Agent 服务未配置")
+		return
+	}
 
 	// 区分两种调用语义（对齐原 mooc-manus Python 版本 agent_service.chat 的 if message 分支）：
 	//   1. 发送新消息：body 含 "message" 键（非空字符串），进入 chat 流程

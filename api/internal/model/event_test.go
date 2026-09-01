@@ -121,11 +121,11 @@ func TestNewTitleEvent(t *testing.T) {
 
 func TestNewMessageEvent(t *testing.T) {
 	event := NewMessageEvent("assistant", "Hello!")
-	if event.Content != "Hello!" {
-		t.Errorf("NewMessageEvent() content = %s, want Hello!", event.Content)
+	if event.Message != "Hello!" {
+		t.Errorf("NewMessageEvent() message = %s, want Hello!", event.Message)
 	}
-	if event.IsUser {
-		t.Error("NewMessageEvent() IsUser should be false for assistant")
+	if event.Role != "assistant" {
+		t.Errorf("NewMessageEvent() role = %s, want assistant", event.Role)
 	}
 	if event.GetType() != EventTypeMessage {
 		t.Errorf("NewMessageEvent() type = %v, want EventTypeMessage", event.GetType())
