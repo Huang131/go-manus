@@ -2,7 +2,6 @@
 
 import {useRef, useState} from 'react'
 import {useRouter} from 'next/navigation'
-import {ChatHeader} from '@/components/chat-header'
 import {ChatInput, type ChatInputRef} from '@/components/chat-input'
 import {SuggestedQuestions} from '@/components/suggested-questions'
 import {sessionApi} from '@/lib/api/session'
@@ -47,8 +46,7 @@ export default function Page() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* 顶部header */}
-      <ChatHeader/>
+      {/* 顶部 header 已在 root layout 提供（GlobalHeader） */}
       {/* 中间对话框 - 垂直居中，视觉上移一个导航栏高度 */}
       <div className="flex-1 flex items-center justify-center px-4 py-6 sm:py-8 -mt-12 sm:-mt-16">
         <div className="w-full max-w-full sm:max-w-[768px] sm:min-w-[390px] mx-auto">

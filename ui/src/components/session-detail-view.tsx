@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { SessionHeader } from '@/components/session-header'
 import { ChatInput } from '@/components/chat-input'
@@ -19,7 +19,8 @@ import type { ToolEvent, FileInfo } from '@/lib/api/types'
 import type { AttachmentFile, TimelineItem } from '@/lib/session-events'
 import { sessionApi } from '@/lib/api/session'
 import { toast } from 'sonner'
-import { Loader2 } from 'lucide-react'
+import { ArrowDown, Loader2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 
 export interface SessionDetailViewProps {
   sessionId: string
@@ -69,6 +70,7 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
   const [previewFile, setPreviewFile] = useState<AttachmentFile | null>(null)
   const [previewTool, setPreviewTool] = useState<ToolEvent | null>(null)
   const [vncOpen, setVncOpen] = useState(false)
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false)
   const initialMessageSentRef = useRef(false)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const prevToolCountRef = useRef(0)
@@ -118,6 +120,34 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
     }
     prevToolCountRef.current = toolCount
   }, [timeline, session?.status, vncOpen])
+
+  // 进入会话（sessionId 变化）时重置"已就位"标记
+  const scrolledForSessionRef = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    scrolledForSessionRef.current = null
+  }, [sessionId])
+
+  // 滚到底：仅当当前会话还没滚过、且内容已加载
+  useLayoutEffect(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    if (scrolledForSessionRef.current === sessionId) return
+    if (timeline.length > 0 || streaming) {
+      el.scrollTop = el.scrollHeight
+      scrolledForSessionRef.current = sessionId
+    }
+  })
+
+  useEffect(() => {
+    const el = scrollContainerRef.current
+    if (!el) return
+    const onScroll = () => {
+      const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+      setShowJumpToBottom(distanceToBottom > 200)
+    }
+    el.addEventListener('scroll', onScroll, {passive: true})
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [])
 
   useEffect(() => {
     if (
@@ -252,11 +282,11 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
 
   return (
     <>
-      <div className="flex flex-row h-screen w-full overflow-hidden">
-        {/* 主内容区 */}
-        <div className="flex flex-col flex-1 min-w-0 h-full overflow-hidden">
-          <div className={`flex flex-col h-full mx-auto w-full min-w-0 px-4 ${hasPreview ? '' : 'max-w-[768px]'}`}>
-            <div className="flex-shrink-0">
+      <div className="relative flex flex-row h-full w-full overflow-hidden">
+        {/* 主内容区 - flex column：header / scroll / input */}
+        <div className="relative flex flex-col flex-1 min-w-0 min-h-0 h-full overflow-hidden">
+          <div className={`flex flex-col h-full w-full mx-auto min-w-0 px-4 ${hasPreview ? '' : 'max-w-[768px]'}`}>
+            <div className="flex-shrink-0 z-10 bg-[#f8f8f7]">
               <SessionHeader
                 title={session.title}
                 files={files}
@@ -267,7 +297,26 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
               />
             </div>
 
-            <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
+            <div
+              ref={scrollContainerRef}
+              className="relative flex-1 overflow-y-auto pb-2"
+              style={{overflowAnchor: 'none', minHeight: 0}}
+            >
+              {showJumpToBottom && (
+                <Button
+                  size="icon-sm"
+                  variant="secondary"
+                  className="sticky bottom-4 z-20 ml-auto mr-2 rounded-full shadow-md cursor-pointer block"
+                  onClick={() => {
+                    const el = scrollContainerRef.current
+                    if (!el) return
+                    el.scrollTo({top: el.scrollHeight, behavior: 'smooth'})
+                  }}
+                  title="跳到最新"
+                >
+                  <ArrowDown/>
+                </Button>
+              )}
               <div className="flex flex-col w-full gap-3 pt-3">
                 {timeline.length === 0 && !streaming && !hasInitialMessage && (
                   <div className="flex items-center justify-center py-8 text-sm text-gray-500">
@@ -290,12 +339,10 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
                     <span>正在思考中...</span>
                   </div>
                 )}
-
-                <div className="h-[140px]" />
               </div>
             </div>
 
-            <div className="flex-shrink-0 bg-[#f8f8f7] py-4">
+            <div className="flex-shrink-0 bg-[#f8f8f7] py-3">
               <PlanPanel className="mb-2" steps={planSteps} />
               <ChatInput
                 onSend={handleSend}

@@ -102,9 +102,10 @@ func main() {
 	// 6. 初始化外部服务层
 	logger.Info("Initializing external services...")
 
-	// 6.1 LLM 客户端 (OpenAI 兼容) — 支持从 app_configs 表动态加载配置
+	// 6.1 LLM 客户端 (OpenAI 兼容) — 支持从 llm_models 表动态加载配置
 	// 提前创建配置仓库，供 LLM 动态配置 provider 复用（后续步骤 8 复用该实例）。
 	configRepo := repository.NewAppConfigRepository(db)
+	llmModelRepo := repository.NewLLMModelRepository(db)
 
 	var llm external.LLM
 	fallbackLLMCfg := &external.OpenAIClientConfig{
@@ -118,35 +119,36 @@ func main() {
 	if cfg.LLM.BaseURL != "" {
 		llm = external.NewDynamicLLM(
 			func(ctx context.Context) (*external.OpenAIClientConfig, error) {
-				dbCfg, err := service.NewAppConfigService(configRepo).GetLLMConfig(ctx)
-				if err != nil {
-					return nil, err
+				// 优先：llm_models 表 default 模型
+				def, err := llmModelRepo.GetDefault(ctx)
+				if err == nil && def != nil && def.IsEnabled {
+					return &external.OpenAIClientConfig{
+						BaseURL:         def.BaseURL,
+						APIKey:          def.APIKey,
+						ModelName:       def.ModelName,
+						Temperature:     def.Temperature,
+						MaxTokens:       def.MaxTokens,
+						ToolCallTimeout: cfg.LLM.ToolCallTimeout,
+					}, nil
 				}
-				if dbCfg == nil {
-					return nil, nil // DB 无配置，使用 env 兜底
+				// 兜底：llm_models 第一个 enabled
+				first, err := llmModelRepo.GetFirstEnabled(ctx)
+				if err == nil && first != nil {
+					return &external.OpenAIClientConfig{
+						BaseURL:         first.BaseURL,
+						APIKey:          first.APIKey,
+						ModelName:       first.ModelName,
+						Temperature:     first.Temperature,
+						MaxTokens:       first.MaxTokens,
+						ToolCallTimeout: cfg.LLM.ToolCallTimeout,
+					}, nil
 				}
-				// 字段级合并：DB 中已填写的字段覆盖 env 兜底，未填写的保留 env 值
-				merged := *fallbackLLMCfg
-				if dbCfg.BaseURL != "" {
-					merged.BaseURL = dbCfg.BaseURL
-				}
-				if dbCfg.APIKey != "" {
-					merged.APIKey = dbCfg.APIKey
-				}
-				if dbCfg.ModelName != "" {
-					merged.ModelName = dbCfg.ModelName
-				}
-				if dbCfg.MaxTokens > 0 {
-					merged.MaxTokens = dbCfg.MaxTokens
-				}
-				if dbCfg.Temperature != 0 {
-					merged.Temperature = dbCfg.Temperature
-				}
-				return &merged, nil
+				// 兜底 2：env
+				return nil, nil
 			},
 			fallbackLLMCfg,
 		)
-		logger.Info("LLM client initialized (dynamic config)",
+		logger.Info("LLM client initialized (dynamic, llm_models table)",
 			zap.String("base_url", cfg.LLM.BaseURL),
 			zap.String("model", cfg.LLM.ModelName),
 		)
@@ -205,6 +207,7 @@ func main() {
 	fileService := service.NewFileService(fileRepo, cos)
 	statusService := service.NewStatusService(db, redis, cos)
 	appConfigService := service.NewAppConfigService(configRepo)
+	llmModelService := service.NewLLMModelService(llmModelRepo)
 	logger.Info("Service layer initialized")
 
 	// 9.1 构造 MCP 配置
@@ -282,6 +285,7 @@ func main() {
 	fileHandler := handler.NewFileHandler(fileService)
 	statusHandler := handler.NewStatusHandler(statusService)
 	appConfigHandler := handler.NewAppConfigHandler(appConfigService)
+	llmModelHandler := handler.NewLLMModelHandler(llmModelService)
 	logger.Info("Handler layer initialized")
 
 	// 11. 创建 Gin 引擎
@@ -297,6 +301,7 @@ func main() {
 		File:      fileHandler,
 		Status:    statusHandler,
 		AppConfig: appConfigHandler,
+		LLMModel:  llmModelHandler,
 	})
 	logger.Info("Routes registered")
 

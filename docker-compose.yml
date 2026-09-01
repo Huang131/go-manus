@@ -21,6 +21,8 @@ services:
       - ./api/migrations/001_create_sessions.sql:/docker-entrypoint-initdb.d/001_create_sessions.sql
       - ./api/migrations/002_create_files.sql:/docker-entrypoint-initdb.d/002_create_files.sql
       - ./api/migrations/003_create_app_configs.sql:/docker-entrypoint-initdb.d/003_create_app_configs.sql
+      - ./api/migrations/004_create_llm_models.sql:/docker-entrypoint-initdb.d/004_create_llm_models.sql
+      - ./api/migrations/005_migrate_llm_config.sql:/docker-entrypoint-initdb.d/005_migrate_llm_config.sql
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     networks:

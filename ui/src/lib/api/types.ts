@@ -42,6 +42,33 @@ export type LLMConfig = {
 };
 
 /**
+ * LLM 模型条目（多模型管理）
+ */
+export type LLMModel = {
+  id: string;
+  name: string;
+  provider: string;
+  base_url: string;
+  api_key?: string;
+  model_name: string;
+  temperature: number;
+  max_tokens: number;
+  tags: string[];
+  is_default: boolean;
+  is_enabled: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * 多模型列表响应
+ */
+export type LLMModelsData = {
+  models: LLMModel[];
+};
+
+/**
  * Agent 通用配置
  */
 export type AgentConfig = {

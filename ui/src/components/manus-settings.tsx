@@ -23,6 +23,7 @@ import {Switch} from '@/components/ui/switch'
 import {Textarea} from '@/components/ui/textarea'
 import {configApi} from '@/lib/api'
 import type {AgentConfig, LLMConfig, ListMCPServerItem, ListA2AServerItem} from '@/lib/api'
+import {ModelConfigManager} from '@/components/model-config-manager'
 
 // ==================== 通用配置 ====================
 
@@ -803,7 +804,7 @@ export function ManusSettings() {
                   <CommonSetting config={agentConfig} onChange={setAgentConfig}/>
                 )}
                 {activeSetting === 'llm-setting' && (
-                  <LLMSetting config={llmConfig} onChange={setLlmConfig}/>
+                  <ModelConfigManager/>
                 )}
               </>
             )}
@@ -828,14 +829,14 @@ export function ManusSettings() {
           </div>
         </div>
 
-        {/* 底部按钮 */}
+        {/* 底部按钮（llm-setting 内部已自管保存，禁用底部） */}
         <DialogFooter className="border-t pt-4">
           <DialogClose asChild>
-            <Button variant="outline" className="cursor-pointer">取消</Button>
+            <Button variant="outline" className="cursor-pointer">关闭</Button>
           </DialogClose>
           <Button
             className="cursor-pointer"
-            disabled={saving}
+            disabled={saving || activeSetting === 'llm-setting'}
             onClick={handleSave}
           >
             {saving && <Loader2 className="animate-spin"/>}

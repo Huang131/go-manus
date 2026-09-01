@@ -1,4 +1,4 @@
-import { get, post } from "./fetch";
+import { get, post, put, del } from "./fetch";
 import type {
   LLMConfig,
   AgentConfig,
@@ -6,6 +6,8 @@ import type {
   MCPServersData,
   A2AServersData,
   CreateA2AServerParams,
+  LLMModel,
+  LLMModelsData,
 } from "./types";
 
 /**
@@ -24,6 +26,28 @@ export const configApi = {
    */
   updateLLMConfig: (config: LLMConfig): Promise<LLMConfig> => {
     return post<LLMConfig>("/app-config/llm", config);
+  },
+
+  /**
+   * 多模型管理（v1 新增）
+   */
+  listLLMModels: (): Promise<LLMModelsData> => {
+    return get<LLMModelsData>("/llm-models");
+  },
+  getDefaultLLMModel: (): Promise<LLMModel> => {
+    return get<LLMModel>("/llm-models/default");
+  },
+  createLLMModel: (m: Partial<LLMModel>): Promise<LLMModel> => {
+    return post<LLMModel>("/llm-models", m);
+  },
+  updateLLMModel: (id: string, m: Partial<LLMModel>): Promise<LLMModel> => {
+    return put<LLMModel>(`/llm-models/${id}`, m);
+  },
+  deleteLLMModel: (id: string): Promise<void> => {
+    return del<void>(`/llm-models/${id}`);
+  },
+  setDefaultLLMModel: (id: string): Promise<void> => {
+    return post<void>(`/llm-models/${id}/default`, {});
   },
 
   /**

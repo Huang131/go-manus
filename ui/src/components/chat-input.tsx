@@ -143,7 +143,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
     }
 
     return (
-    <div className={cn('flex flex-col bg-white w-full rounded-2xl py-3 border', className)}>
+    <div className={cn('flex flex-col bg-white w-full rounded-2xl py-3 border shadow-sm', className)}>
       {/* 顶部的文件列表 */}
       {files.length > 0 && (
         <div className="w-full px-4 mb-1">

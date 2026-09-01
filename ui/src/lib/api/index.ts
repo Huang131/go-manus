@@ -28,6 +28,8 @@ export type {
   MCPServerConfig,
   MCPConfig,
   MCPServersData,
+  LLMModel,
+  LLMModelsData,
   ListA2AServerItem,
   A2AServersData,
   CreateA2AServerParams,

@@ -12,6 +12,7 @@ type Handlers struct {
 	File      *handler.FileHandler
 	Status    *handler.StatusHandler
 	AppConfig *handler.AppConfigHandler
+	LLMModel  *handler.LLMModelHandler
 }
 
 // SetupRoutes 设置所有路由
@@ -65,6 +66,18 @@ func SetupRoutes(engine *gin.Engine, h *Handlers) {
 			appConfig.POST("/mcp-servers/:server_name/delete", h.AppConfig.DeleteMCPServer)
 			appConfig.GET("/a2a-servers", h.AppConfig.GetA2AConfig)
 			appConfig.POST("/a2a-servers", h.AppConfig.UpdateA2AConfig)
+		}
+
+		// 多模型管理（v1 新增，替代 app-config/llm 的单值模式）
+		llmModels := api.Group("/llm-models")
+		{
+			llmModels.GET("", h.LLMModel.List)
+			llmModels.GET("/default", h.LLMModel.GetDefault)
+			llmModels.POST("", h.LLMModel.Create)
+			llmModels.GET("/:id", h.LLMModel.Get)
+			llmModels.PUT("/:id", h.LLMModel.Update)
+			llmModels.DELETE("/:id", h.LLMModel.Delete)
+			llmModels.POST("/:id/default", h.LLMModel.SetDefault)
 		}
 	}
 }
