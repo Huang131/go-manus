@@ -21,17 +21,21 @@ type OpenAIClient struct {
 	temperature     float64
 	maxTokens       int
 	toolCallTimeout time.Duration // tool calling 请求超时
+	requestPolicy   llmcore.RequestPolicy
+	costPolicy      llmcore.CostPolicy
 	httpClient      *http.Client
 }
 
 // OpenAIClientConfig OpenAI 客户端配置
 type OpenAIClientConfig struct {
-	BaseURL         string  `mapstructure:"base_url"`
-	APIKey          string  `mapstructure:"api_key"`
-	ModelName       string  `mapstructure:"model_name"`
-	Temperature     float64 `mapstructure:"temperature"`
-	MaxTokens       int     `mapstructure:"max_tokens"`
-	ToolCallTimeout int     `mapstructure:"tool_call_timeout"` // tool calling 请求超时秒数，默认 15
+	BaseURL         string                `mapstructure:"base_url"`
+	APIKey          string                `mapstructure:"api_key"`
+	ModelName       string                `mapstructure:"model_name"`
+	Temperature     float64               `mapstructure:"temperature"`
+	MaxTokens       int                   `mapstructure:"max_tokens"`
+	ToolCallTimeout int                   `mapstructure:"tool_call_timeout"` // tool calling 请求超时秒数，默认 15
+	RequestPolicy   llmcore.RequestPolicy `mapstructure:"request_policy"`
+	CostPolicy      llmcore.CostPolicy    `mapstructure:"cost_policy"`
 }
 
 func (c *OpenAIClientConfig) setDefaults() {
@@ -50,6 +54,8 @@ func NewOpenAIClient(cfg *OpenAIClientConfig) *OpenAIClient {
 		temperature:     cfg.Temperature,
 		maxTokens:       cfg.MaxTokens,
 		toolCallTimeout: time.Duration(cfg.ToolCallTimeout) * time.Second,
+		requestPolicy:   cfg.RequestPolicy,
+		costPolicy:      cfg.CostPolicy,
 		httpClient: &http.Client{
 			Timeout: 120 * time.Second,
 		},
@@ -57,16 +63,47 @@ func NewOpenAIClient(cfg *OpenAIClientConfig) *OpenAIClient {
 }
 
 // openAIChatRequest OpenAI Chat API 请求 wire format
-// 阶段 1d：Messages / Tools / ResponseFormat 改用 llmcore 强类型 → 直接 marshal
 type openAIChatRequest struct {
-	Model          string                  `json:"model"`
-	Messages       []llmcore.Message       `json:"messages"`
-	Tools          []llmcore.ToolSpec      `json:"tools,omitempty"`
-	ToolChoice     interface{}             `json:"tool_choice,omitempty"`
-	Temperature    *float64                `json:"temperature,omitempty"`
-	MaxTokens      *int                    `json:"max_tokens,omitempty"`
-	Stream         bool                    `json:"stream,omitempty"`
-	ResponseFormat *llmcore.ResponseFormat `json:"response_format,omitempty"`
+	Model           string                  `json:"model"`
+	Messages        []openAIMessage         `json:"messages"`
+	Tools           []openAIToolSpec        `json:"tools,omitempty"`
+	ToolChoice      interface{}             `json:"tool_choice,omitempty"`
+	Temperature     *float64                `json:"temperature,omitempty"`
+	MaxTokens       *int                    `json:"max_tokens,omitempty"`
+	Stream          bool                    `json:"stream,omitempty"`
+	ResponseFormat  *llmcore.ResponseFormat `json:"response_format,omitempty"`
+	ReasoningEffort *string                 `json:"reasoning_effort,omitempty"`
+}
+
+type openAIMessage struct {
+	Role       string           `json:"role"`
+	Content    interface{}      `json:"content,omitempty"`
+	Name       string           `json:"name,omitempty"`
+	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string           `json:"tool_call_id,omitempty"`
+}
+
+type openAIToolCall struct {
+	ID       string             `json:"id"`
+	Type     string             `json:"type"`
+	Function openAIFunctionCall `json:"function"`
+}
+
+type openAIFunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+type openAIToolSpec struct {
+	Type     string             `json:"type"`
+	Function openAIToolFunction `json:"function"`
+}
+
+type openAIToolFunction struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Parameters  map[string]interface{} `json:"parameters"`
+	Strict      bool                   `json:"strict,omitempty"`
 }
 
 // openAIChatResponse OpenAI Chat API 响应 wire format
@@ -125,16 +162,17 @@ type openAIChatResponse struct {
 //     但 ToolUse 改 []llmcore.ToolCall；Message 结构由调用方按需构造
 func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMResponse, error) {
 	// 构建 wire format 请求
-	temp := c.temperature
-	maxTok := c.maxTokens
+	temp := c.effectiveTemperature()
+	maxTok := c.effectiveMaxTokens()
 	chatReq := openAIChatRequest{
 		Model:          c.modelName,
-		Messages:       req.Messages,
-		Tools:          req.Tools,
+		Messages:       toOpenAIMessages(req.Messages),
+		Tools:          toOpenAITools(req.Tools),
 		Temperature:    &temp,
 		MaxTokens:      &maxTok,
 		ResponseFormat: req.ResponseFormat,
 	}
+	chatReq.ReasoningEffort = c.effectiveReasoningEffort()
 	if req.ToolChoice != "" {
 		chatReq.ToolChoice = req.ToolChoice
 	}
@@ -253,8 +291,114 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMRespons
 		ReasoningContent: reasoning,
 		RawContent:       choice.Message.Content,
 		ToolUse:          toolCalls,
+		Usage: llmcore.Usage{
+			PromptTokens:     chatResp.Usage.PromptTokens,
+			CompletionTokens: chatResp.Usage.CompletionTokens,
+			TotalTokens:      chatResp.Usage.TotalTokens,
+			ReasoningTokens:  reasoningTokens(chatResp.Usage.ReasoningTokens, chatResp.Usage.CompletionDetails.ReasoningTokens),
+		},
 	}
+	out.CostUSD = estimateCostUSD(c.costPolicy, out.Usage)
 	return out, nil
+}
+
+func (c *OpenAIClient) effectiveTemperature() float64 {
+	if c.requestPolicy.DefaultTemperature != nil {
+		return *c.requestPolicy.DefaultTemperature
+	}
+	return c.temperature
+}
+
+func (c *OpenAIClient) effectiveMaxTokens() int {
+	if c.requestPolicy.DefaultMaxTokens != nil {
+		return *c.requestPolicy.DefaultMaxTokens
+	}
+	return c.maxTokens
+}
+
+func (c *OpenAIClient) effectiveReasoningEffort() *string {
+	switch c.requestPolicy.ReasoningMode {
+	case llmcore.ReasoningOff:
+		v := "none"
+		return &v
+	case llmcore.ReasoningLow:
+		v := "low"
+		return &v
+	case llmcore.ReasoningHigh:
+		v := "high"
+		return &v
+	}
+
+	if extra, ok := c.requestPolicy.Extra["reasoning_effort"]; ok {
+		var v string
+		if err := json.Unmarshal(extra.Raw, &v); err == nil && v != "" {
+			return &v
+		}
+	}
+	return nil
+}
+
+func reasoningTokens(topLevel, details int) int {
+	if details != 0 {
+		return details
+	}
+	return topLevel
+}
+
+func estimateCostUSD(policy llmcore.CostPolicy, usage llmcore.Usage) float64 {
+	if policy.InputPricePerMTokens == 0 && policy.OutputPricePerMTokens == 0 {
+		return 0
+	}
+	in := float64(usage.PromptTokens) / 1_000_000.0 * policy.InputPricePerMTokens
+	out := float64(usage.CompletionTokens) / 1_000_000.0 * policy.OutputPricePerMTokens
+	return in + out
+}
+
+func toOpenAIMessages(messages []llmcore.Message) []openAIMessage {
+	out := make([]openAIMessage, 0, len(messages))
+	for _, msg := range messages {
+		wire := openAIMessage{
+			Role:       string(msg.Role),
+			Name:       msg.Name,
+			ToolCallID: msg.ToolCallID,
+		}
+		if len(msg.ContentParts) > 0 {
+			wire.Content = msg.ContentParts
+		} else {
+			wire.Content = msg.ContentText
+		}
+		if len(msg.ToolCalls) > 0 {
+			wire.ToolCalls = make([]openAIToolCall, 0, len(msg.ToolCalls))
+			for _, tc := range msg.ToolCalls {
+				wire.ToolCalls = append(wire.ToolCalls, openAIToolCall{
+					ID:   tc.ID,
+					Type: tc.Type,
+					Function: openAIFunctionCall{
+						Name:      tc.Name,
+						Arguments: tc.Arguments,
+					},
+				})
+			}
+		}
+		out = append(out, wire)
+	}
+	return out
+}
+
+func toOpenAITools(tools []llmcore.ToolSpec) []openAIToolSpec {
+	out := make([]openAIToolSpec, 0, len(tools))
+	for _, t := range tools {
+		out = append(out, openAIToolSpec{
+			Type: t.Type,
+			Function: openAIToolFunction{
+				Name:        t.Function.Name,
+				Description: t.Function.Description,
+				Parameters:  t.Function.Parameters,
+				Strict:      t.Function.Strict,
+			},
+		})
+	}
+	return out
 }
 
 // classifyHTTPError 把 HTTP 状态码分类为 llmcore.ErrorKind

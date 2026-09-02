@@ -65,6 +65,11 @@ func (t *A2ATool) Parameters() map[string]interface{} {
 	}
 }
 
+// ReadOnly A2A 会触发远程 Agent 执行，保守视为有副作用。
+func (t *A2ATool) ReadOnly() bool {
+	return false
+}
+
 // Invoke 调用工具
 // 参考 Python 版本的 call_remote_agent 工具
 func (t *A2ATool) Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {

@@ -25,22 +25,23 @@ type LLMModel struct {
 
 	// ===== 阶段 0 新增：能力画像 / 请求策略 / 成本策略 =====
 	// 用 JSON 字段透传到 DB，repository 层负责序列化
-	Capabilities   ModelCapabilities `json:"capabilities"`
+	Capabilities  ModelCapabilities `json:"capabilities"`
 	RequestPolicy RequestPolicy     `json:"request_policy"`
 	CostPolicy    CostPolicy        `json:"cost_policy"`
+	RuntimeHealth RuntimeHealth     `json:"runtime_health"`
 }
 
 // ModelCapabilities 模型能力画像
 // 字段是 LLM Control Plane 决策依据
 type ModelCapabilities struct {
-	SupportsText                 bool `json:"supports_text"`
-	SupportsToolCalls            bool `json:"supports_tool_calls"`
-	SupportsStructuredOutput     bool `json:"supports_structured_output"`
-	SupportsJSONMode             bool `json:"supports_json_mode"`
+	SupportsText                   bool `json:"supports_text"`
+	SupportsToolCalls              bool `json:"supports_tool_calls"`
+	SupportsStructuredOutput       bool `json:"supports_structured_output"`
+	SupportsJSONMode               bool `json:"supports_json_mode"`
 	SupportsStrictStructuredOutput bool `json:"supports_strict_structured_output"`
-	SupportsStreaming            bool `json:"supports_streaming"`
-	SupportsVision               bool `json:"supports_vision"`
-	SupportsReasoning            bool `json:"supports_reasoning"`
+	SupportsStreaming              bool `json:"supports_streaming"`
+	SupportsVision                 bool `json:"supports_vision"`
+	SupportsReasoning              bool `json:"supports_reasoning"`
 
 	MaxContextTokens int `json:"max_context_tokens"`
 	MaxOutputTokens  int `json:"max_output_tokens"`
@@ -62,7 +63,7 @@ type RequestPolicy struct {
 	// DefaultTemperature 默认温度（pointer：nil 表示用上游默认）
 	DefaultTemperature *float64 `json:"default_temperature,omitempty"`
 	// DefaultMaxTokens 默认 max_tokens（pointer：nil 表示用上游默认）
-	DefaultMaxTokens *int    `json:"default_max_tokens,omitempty"`
+	DefaultMaxTokens *int          `json:"default_max_tokens,omitempty"`
 	ReasoningMode    ReasoningMode `json:"reasoning_mode"`
 	// Extra provider 白名单参数
 	// 例：sensenova deepseek-v4-flash → {"reasoning_effort": "none"}
@@ -75,6 +76,14 @@ type CostPolicy struct {
 	InputPricePerMTokens  float64 `json:"input_price_per_m_tokens"`
 	OutputPricePerMTokens float64 `json:"output_price_per_m_tokens"`
 	Currency              string  `json:"currency"` // USD / CNY
+}
+
+// RuntimeHealth 模型运行时健康快照
+// 仅用于路由排序和 fallback 决策，不承载完整监控数据。
+type RuntimeHealth struct {
+	Status           string `json:"status"`
+	RecentFailures   int    `json:"recent_failures"`
+	AverageLatencyMS int    `json:"average_latency_ms"`
 }
 
 // EstimateCostUSD 估算一次调用的成本（美元）
@@ -108,4 +117,19 @@ func DefaultCapabilities() ModelCapabilities {
 		MaxContextTokens:               128000,
 		MaxOutputTokens:                8192,
 	}
+}
+
+// MergeDefaultCapabilities 仅为缺省字段补默认值，不覆盖已配置能力。
+func MergeDefaultCapabilities(c ModelCapabilities) ModelCapabilities {
+	def := DefaultCapabilities()
+	if c == (ModelCapabilities{}) {
+		return def
+	}
+	if c.MaxContextTokens == 0 {
+		c.MaxContextTokens = def.MaxContextTokens
+	}
+	if c.MaxOutputTokens == 0 {
+		c.MaxOutputTokens = def.MaxOutputTokens
+	}
+	return c
 }

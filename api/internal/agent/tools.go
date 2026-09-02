@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 
 	"github.com/mooc-manus/go-manus/api/internal/llmcore"
 	"github.com/mooc-manus/go-manus/api/internal/model"
@@ -15,6 +16,8 @@ type Tool interface {
 	Description() string
 	// Parameters 返回工具参数定义 (JSON Schema)
 	Parameters() map[string]interface{}
+	// ReadOnly 标记工具是否只读，供 fallback 规则判断
+	ReadOnly() bool
 	// Invoke 调用工具
 	Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error)
 }
@@ -96,6 +99,7 @@ func (r *ToolRegistry) GetToolsForLLM() []llmcore.ToolSpec {
 				Description: description,
 				Parameters:  parameters,
 			},
+			ReadOnly: isReadOnlyToolSchema(name),
 		})
 	}
 
@@ -110,7 +114,22 @@ func (r *ToolRegistry) GetToolsForLLM() []llmcore.ToolSpec {
 				Description: tool.Description(),
 				Parameters:  tool.Parameters(),
 			},
+			ReadOnly: tool.ReadOnly(),
 		})
 	}
 	return result
+}
+
+// isReadOnlyToolSchema 根据工具名给出保守的只读判断。
+// 先保证 shell/browser/a2a 这类显式写操作默认为 false，其余默认 true。
+func isReadOnlyToolSchema(name string) bool {
+	if strings.HasPrefix(name, "message_") {
+		return false
+	}
+	switch name {
+	case "shell", "browser", "a2a", "file", "message":
+		return false
+	default:
+		return true
+	}
 }

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,10 +35,44 @@ func rawOK(w http.ResponseWriter, payload interface{}) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+func newTransportClient(t *testing.T, handler func(*http.Request) (*http.Response, error)) *OpenAIClient {
+	t.Helper()
+	c := NewOpenAIClient(&OpenAIClientConfig{
+		BaseURL:     "https://example.invalid",
+		APIKey:      "test-key",
+		ModelName:   "test-model",
+		Temperature: 0.7,
+		MaxTokens:   1024,
+	})
+	c.httpClient = &http.Client{
+		Timeout:   5 * time.Second,
+		Transport: roundTripperFunc(handler),
+	}
+	return c
+}
+
+func responseJSON(status int, payload interface{}) (*http.Response, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Response{
+		StatusCode: status,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(string(body))),
+	}, nil
+}
+
 // === 1. content-only ===
 
 func TestOpenAIClient_ContentOnly(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	c := newTransportClient(t, func(r *http.Request) (*http.Response, error) {
 		// 校验基本请求
 		body, _ := io.ReadAll(r.Body)
 		var got map[string]interface{}
@@ -46,7 +80,7 @@ func TestOpenAIClient_ContentOnly(t *testing.T) {
 		if got["model"] != "test-model" {
 			t.Errorf("request.model = %v, want test-model", got["model"])
 		}
-		rawOK(w, map[string]interface{}{
+		return responseJSON(http.StatusOK, map[string]interface{}{
 			"id":    "chatcmpl-1",
 			"model": "test-model",
 			"choices": []map[string]interface{}{
@@ -65,10 +99,7 @@ func TestOpenAIClient_ContentOnly(t *testing.T) {
 				"total_tokens":      18,
 			},
 		})
-	}))
-	defer srv.Close()
-
-	c := newTestClient(t, srv.URL)
+	})
 	resp, err := c.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
 			{Role: llmcore.RoleUser, ContentText: "hi"},
@@ -88,6 +119,74 @@ func TestOpenAIClient_ContentOnly(t *testing.T) {
 	}
 }
 
+// === 1b. request wire format ===
+
+func TestOpenAIClient_RequestWireFormat(t *testing.T) {
+	c := newTransportClient(t, func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		var got map[string]interface{}
+		_ = json.Unmarshal(body, &got)
+
+		msgs, ok := got["messages"].([]interface{})
+		if !ok || len(msgs) != 1 {
+			t.Fatalf("messages = %v, want 1 message", got["messages"])
+		}
+		first, _ := msgs[0].(map[string]interface{})
+		if _, ok := first["content_text"]; ok {
+			t.Fatalf("wire message should not contain content_text: %v", first)
+		}
+		if first["content"] != "hello" {
+			t.Fatalf("wire message content = %v, want hello", first["content"])
+		}
+		if first["role"] != "user" {
+			t.Fatalf("wire message role = %v, want user", first["role"])
+		}
+
+		tools, ok := got["tools"].([]interface{})
+		if !ok || len(tools) != 1 {
+			t.Fatalf("tools = %v, want 1 tool", got["tools"])
+		}
+		tool, _ := tools[0].(map[string]interface{})
+		if _, ok := tool["read_only"]; ok {
+			t.Fatalf("wire tool should not contain read_only: %v", tool)
+		}
+		return responseJSON(http.StatusOK, map[string]interface{}{
+			"id":    "chatcmpl-wire",
+			"model": "test-model",
+			"choices": []map[string]interface{}{
+				{
+					"index":         0,
+					"finish_reason": "stop",
+					"message": map[string]interface{}{
+						"role":    "assistant",
+						"content": "ok",
+					},
+				},
+			},
+			"usage": map[string]interface{}{},
+		})
+	})
+	_, err := c.Invoke(context.Background(), &LLMRequest{
+		Messages: []llmcore.Message{
+			{Role: llmcore.RoleUser, ContentText: "hello"},
+		},
+		Tools: []llmcore.ToolSpec{
+			{
+				Type: "function",
+				Function: llmcore.ToolSpecFunction{
+					Name:        "search",
+					Description: "search",
+					Parameters:  map[string]interface{}{"type": "object"},
+				},
+				ReadOnly: true,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+}
+
 // === 2. reasoning-only：验证协议层不做 reasoning→content 兜底 ===
 //
 // 阶段 1d 关键断言：OpenAIClient.Invoke 是协议层出口，不该做"业务兜底"。
@@ -97,8 +196,8 @@ func TestOpenAIClient_ContentOnly(t *testing.T) {
 
 func TestOpenAIClient_ReasoningOnly_NoContentLeak(t *testing.T) {
 	// glm-5.2 默认思考模式：上游只返回 reasoning_content，无 content
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rawOK(w, map[string]interface{}{
+	c := newTransportClient(t, func(r *http.Request) (*http.Response, error) {
+		return responseJSON(http.StatusOK, map[string]interface{}{
 			"id":    "chatcmpl-2",
 			"model": "glm-5.2",
 			"choices": []map[string]interface{}{
@@ -118,10 +217,7 @@ func TestOpenAIClient_ReasoningOnly_NoContentLeak(t *testing.T) {
 				"total_tokens":      11,
 			},
 		})
-	}))
-	defer srv.Close()
-
-	c := newTestClient(t, srv.URL)
+	})
 	resp, err := c.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
 			{Role: llmcore.RoleUser, ContentText: "hi"},
@@ -147,8 +243,8 @@ func TestOpenAIClient_ReasoningOnly_NoContentLeak(t *testing.T) {
 // === 3. content + reasoning 同时返回 ===
 
 func TestOpenAIClient_ContentAndReasoning_Separated(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rawOK(w, map[string]interface{}{
+	c := newTransportClient(t, func(r *http.Request) (*http.Response, error) {
+		return responseJSON(http.StatusOK, map[string]interface{}{
 			"id":    "chatcmpl-3",
 			"model": "deepseek-v4-flash",
 			"choices": []map[string]interface{}{
@@ -164,10 +260,7 @@ func TestOpenAIClient_ContentAndReasoning_Separated(t *testing.T) {
 			},
 			"usage": map[string]interface{}{},
 		})
-	}))
-	defer srv.Close()
-
-	c := newTestClient(t, srv.URL)
+	})
 	resp, err := c.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
 			{Role: llmcore.RoleUser, ContentText: "hi"},
@@ -191,8 +284,8 @@ func TestOpenAIClient_ContentAndReasoning_Separated(t *testing.T) {
 // === 3b. reasoning_content 缺位、reasoning 字段命中（部分厂商命名差异） ===
 
 func TestOpenAIClient_ReasoningAltField(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rawOK(w, map[string]interface{}{
+	c := newTransportClient(t, func(r *http.Request) (*http.Response, error) {
+		return responseJSON(http.StatusOK, map[string]interface{}{
 			"id":    "chatcmpl-3b",
 			"model": "some-vendor",
 			"choices": []map[string]interface{}{
@@ -208,10 +301,7 @@ func TestOpenAIClient_ReasoningAltField(t *testing.T) {
 			},
 			"usage": map[string]interface{}{},
 		})
-	}))
-	defer srv.Close()
-
-	c := newTestClient(t, srv.URL)
+	})
 	resp, err := c.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
 			{Role: llmcore.RoleUser, ContentText: "hi"},
@@ -231,8 +321,8 @@ func TestOpenAIClient_ReasoningAltField(t *testing.T) {
 // === 4. tool_call 返回 ===
 
 func TestOpenAIClient_ToolCall(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rawOK(w, map[string]interface{}{
+	c := newTransportClient(t, func(r *http.Request) (*http.Response, error) {
+		return responseJSON(http.StatusOK, map[string]interface{}{
 			"id":    "chatcmpl-4",
 			"model": "test-model",
 			"choices": []map[string]interface{}{
@@ -260,10 +350,7 @@ func TestOpenAIClient_ToolCall(t *testing.T) {
 				"total_tokens":      13,
 			},
 		})
-	}))
-	defer srv.Close()
-
-	c := newTestClient(t, srv.URL)
+	})
 	resp, err := c.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
 			{Role: llmcore.RoleUser, ContentText: "上海天气"},
@@ -297,22 +384,90 @@ func TestOpenAIClient_ToolCall(t *testing.T) {
 	}
 }
 
+func TestOpenAIClient_RequestPolicyAndCost(t *testing.T) {
+	var got map[string]interface{}
+
+	temp := 0.2
+	maxTokens := 4096
+	c := newTransportClient(t, func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &got)
+		return responseJSON(http.StatusOK, map[string]interface{}{
+			"id":    "chatcmpl-policy",
+			"model": "test-model",
+			"choices": []map[string]interface{}{
+				{
+					"index":         0,
+					"finish_reason": "stop",
+					"message": map[string]interface{}{
+						"role":    "assistant",
+						"content": "ok",
+					},
+				},
+			},
+			"usage": map[string]interface{}{
+				"prompt_tokens":     1000,
+				"completion_tokens": 2000,
+				"total_tokens":      3000,
+			},
+		})
+	})
+	c.requestPolicy = llmcore.RequestPolicy{
+		DefaultTemperature: &temp,
+		DefaultMaxTokens:   &maxTokens,
+		ReasoningMode:      llmcore.ReasoningOff,
+		Extra: map[string]llmcore.ExtraParam{
+			"reasoning_effort": {Kind: "json", Raw: json.RawMessage(`"high"`)},
+			"bad_param":        {Kind: "json", Raw: json.RawMessage(`"leak"`)},
+		},
+	}
+	c.costPolicy = llmcore.CostPolicy{
+		InputPricePerMTokens:  1,
+		OutputPricePerMTokens: 2,
+		Currency:              "USD",
+	}
+
+	resp, err := c.Invoke(context.Background(), &LLMRequest{
+		Messages: []llmcore.Message{
+			{Role: llmcore.RoleUser, ContentText: "hello"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+
+	if got["temperature"] != 0.2 {
+		t.Fatalf("temperature = %v, want 0.2", got["temperature"])
+	}
+	if got["max_tokens"] != float64(4096) {
+		t.Fatalf("max_tokens = %v, want 4096", got["max_tokens"])
+	}
+	if got["reasoning_effort"] != "none" {
+		t.Fatalf("reasoning_effort = %v, want none", got["reasoning_effort"])
+	}
+	if _, ok := got["bad_param"]; ok {
+		t.Fatalf("bad_param should not be forwarded: %v", got)
+	}
+	if resp.Usage.PromptTokens != 1000 || resp.Usage.CompletionTokens != 2000 || resp.Usage.TotalTokens != 3000 {
+		t.Fatalf("usage = %+v, want 1000/2000/3000", resp.Usage)
+	}
+	if resp.CostUSD != 0.005 {
+		t.Fatalf("cost = %v, want 0.005", resp.CostUSD)
+	}
+}
+
 // === 5. 401 → KindAuth, not Fallbackable ===
 
 func TestOpenAIClient_401_Auth(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	c := newTransportClient(t, func(r *http.Request) (*http.Response, error) {
+		return responseJSON(http.StatusUnauthorized, map[string]interface{}{
 			"error": map[string]interface{}{
 				"message": "Invalid API key",
 				"type":    "invalid_request_error",
 				"code":    "invalid_api_key",
 			},
 		})
-	}))
-	defer srv.Close()
-
-	c := newTestClient(t, srv.URL)
+	})
 	_, err := c.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
 			{Role: llmcore.RoleUser, ContentText: "hi"},
@@ -339,18 +494,14 @@ func TestOpenAIClient_401_Auth(t *testing.T) {
 // === 6. 429 → KindRateLimit, Retryable, Fallbackable ===
 
 func TestOpenAIClient_429_RateLimit(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	c := newTransportClient(t, func(r *http.Request) (*http.Response, error) {
+		return responseJSON(http.StatusTooManyRequests, map[string]interface{}{
 			"error": map[string]interface{}{
 				"message": "Rate limit exceeded",
 				"type":    "rate_limit_error",
 			},
 		})
-	}))
-	defer srv.Close()
-
-	c := newTestClient(t, srv.URL)
+	})
 	_, err := c.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
 			{Role: llmcore.RoleUser, ContentText: "hi"},
@@ -374,15 +525,11 @@ func TestOpenAIClient_429_RateLimit(t *testing.T) {
 // === 7. 5xx → KindServer ===
 
 func TestOpenAIClient_5xx_Server(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusBadGateway)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	c := newTransportClient(t, func(r *http.Request) (*http.Response, error) {
+		return responseJSON(http.StatusBadGateway, map[string]interface{}{
 			"error": map[string]interface{}{"message": "upstream down"},
 		})
-	}))
-	defer srv.Close()
-
-	c := newTestClient(t, srv.URL)
+	})
 	_, err := c.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
 			{Role: llmcore.RoleUser, ContentText: "hi"},
@@ -403,14 +550,13 @@ func TestOpenAIClient_5xx_Server(t *testing.T) {
 // === 8. 协议错误 → KindUnknown, not Retryable, not Fallbackable ===
 
 func TestOpenAIClient_ProtocolError_NotFallbackable(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 返回非 JSON
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("not json at all"))
-	}))
-	defer srv.Close()
-
-	c := newTestClient(t, srv.URL)
+	c := newTransportClient(t, func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader("not json at all")),
+		}, nil
+	})
 	_, err := c.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
 			{Role: llmcore.RoleUser, ContentText: "hi"},

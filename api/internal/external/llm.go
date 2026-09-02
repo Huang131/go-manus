@@ -31,19 +31,21 @@ func ModelIDFromContext(ctx context.Context) string {
 //
 // 业务侧只看到 llmcore 类型，看不到任何厂商协议；Adapter 负责把 llmcore 转 wire format。
 type LLMRequest struct {
-	Messages       []llmcore.Message    `json:"messages"`
-	Tools          []llmcore.ToolSpec   `json:"tools,omitempty"`
+	Messages       []llmcore.Message       `json:"messages"`
+	Tools          []llmcore.ToolSpec      `json:"tools,omitempty"`
 	ResponseFormat *llmcore.ResponseFormat `json:"response_format,omitempty"`
-	ToolChoice     string               `json:"tool_choice,omitempty"`
+	ToolChoice     string                  `json:"tool_choice,omitempty"`
 }
 
 // LLMResponse LLM 响应（阶段 1d：ToolUse 改 []llmcore.ToolCall）
 type LLMResponse struct {
-	ID               string            `json:"id"`
-	Content          string            `json:"content"`
-	ReasoningContent string            `json:"reasoning_content,omitempty"`
-	RawContent       string            `json:"raw_content,omitempty"`
+	ID               string             `json:"id"`
+	Content          string             `json:"content"`
+	ReasoningContent string             `json:"reasoning_content,omitempty"`
+	RawContent       string             `json:"raw_content,omitempty"`
 	ToolUse          []llmcore.ToolCall `json:"tool_calls,omitempty"`
+	Usage            llmcore.Usage      `json:"usage,omitempty"`
+	CostUSD          float64            `json:"cost_usd,omitempty"`
 }
 
 // LLM LLM 接口
@@ -64,7 +66,7 @@ type LLM interface {
 // LLMConfigProvider 每次调用前获取最新 LLM 配置。
 // 返回 (nil, nil) 表示当前无 DB 配置，DynamicLLM 应回退到 fallback。
 // 返回 error 表示读取失败，DynamicLLM 同样回退到 fallback。
-type LLMConfigProvider func(ctx context.Context) (*OpenAIClientConfig, error)
+type LLMConfigProvider func(ctx context.Context) (*LLMRuntimeConfig, error)
 
 // DynamicLLM 动态配置 LLM 客户端。
 //
@@ -75,15 +77,42 @@ type LLMConfigProvider func(ctx context.Context) (*OpenAIClientConfig, error)
 // 生产代码不依赖它们做运行时决策（仅在测试中使用）。
 type DynamicLLM struct {
 	provider LLMConfigProvider
-	fallback *OpenAIClientConfig
+	factory  LLMClientFactory
+	fallback *LLMRuntimeConfig
 }
 
+// LLMClientFactory 根据运行时配置创建具体 LLM 客户端。
+type LLMClientFactory func(cfg *LLMRuntimeConfig) LLM
+
 // NewDynamicLLM 创建动态配置 LLM 客户端。
-func NewDynamicLLM(provider LLMConfigProvider, fallback *OpenAIClientConfig) *DynamicLLM {
+func NewDynamicLLM(provider LLMConfigProvider, fallback *LLMRuntimeConfig) *DynamicLLM {
 	if fallback == nil {
-		fallback = &OpenAIClientConfig{}
+		fallback = &LLMRuntimeConfig{
+			Profile: llmcore.ModelProfile{Protocol: llmcore.ProtocolOpenAICompat},
+		}
 	}
-	return &DynamicLLM{provider: provider, fallback: fallback}
+	return &DynamicLLM{
+		provider: provider,
+		factory:  defaultLLMClientFactory,
+		fallback: fallback,
+	}
+}
+
+// NewDynamicLLMWithFactory 创建可注入工厂的动态配置客户端，便于测试和扩展。
+func NewDynamicLLMWithFactory(provider LLMConfigProvider, fallback *LLMRuntimeConfig, factory LLMClientFactory) *DynamicLLM {
+	if fallback == nil {
+		fallback = &LLMRuntimeConfig{
+			Profile: llmcore.ModelProfile{Protocol: llmcore.ProtocolOpenAICompat},
+		}
+	}
+	if factory == nil {
+		factory = defaultLLMClientFactory
+	}
+	return &DynamicLLM{
+		provider: provider,
+		factory:  factory,
+		fallback: fallback,
+	}
 }
 
 // Invoke 调用 LLM，调用前先加载最新配置。
@@ -99,7 +128,10 @@ func (d *DynamicLLM) Invoke(ctx context.Context, req *LLMRequest) (*LLMResponse,
 			cfg = c
 		}
 	}
-	return NewOpenAIClient(cfg).Invoke(ctx, req)
+	if d.factory != nil {
+		return d.factory(cfg).Invoke(ctx, req)
+	}
+	return NewOpenAIClient(runtimeConfigToOpenAIClientConfig(cfg)).Invoke(ctx, req)
 }
 
 // ModelName 返回模型名称（fallback）。
@@ -110,3 +142,24 @@ func (d *DynamicLLM) Temperature() float64 { return d.fallback.Temperature }
 
 // MaxTokens 返回最大 token 数（fallback）。
 func (d *DynamicLLM) MaxTokens() int { return d.fallback.MaxTokens }
+
+func defaultLLMClientFactory(cfg *LLMRuntimeConfig) LLM {
+	if cfg == nil {
+		cfg = &LLMRuntimeConfig{
+			Profile: llmcore.ModelProfile{Protocol: llmcore.ProtocolOpenAICompat},
+		}
+	}
+	switch cfg.Profile.Protocol {
+	case llmcore.ProtocolAnthropic:
+		return NewAnthropicClient(&AnthropicClientConfig{
+			BaseURL:     cfg.BaseURL,
+			APIKey:      cfg.APIKey,
+			ModelName:   cfg.ModelName,
+			Temperature: cfg.Temperature,
+			MaxTokens:   cfg.MaxTokens,
+			Version:     cfg.AnthropicVersion,
+		})
+	default:
+		return NewOpenAIClient(runtimeConfigToOpenAIClientConfig(cfg))
+	}
+}

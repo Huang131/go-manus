@@ -19,6 +19,7 @@ type LLMModelService interface {
 	GetByID(ctx context.Context, id string) (*model.LLMModel, error)
 	Create(ctx context.Context, m *model.LLMModel) (*model.LLMModel, error)
 	Update(ctx context.Context, m *model.LLMModel) (*model.LLMModel, error)
+	UpdateRuntimeHealth(ctx context.Context, id string, health model.RuntimeHealth) error
 	Delete(ctx context.Context, id string) error
 	SetDefault(ctx context.Context, id string) error
 	// GetDefaultForAgent 启动读取：default 优先，否则第一个 enabled
@@ -61,11 +62,7 @@ func validateRequired(m *model.LLMModel) error {
 	if m.Tags == nil {
 		m.Tags = []string{}
 	}
-	// 阶段 0：能力画像兜底
-	// 全新模型（Capabilities 全 0 字段）→ 给一个合理的保守默认
-	if m.Capabilities.MaxContextTokens == 0 {
-		m.Capabilities = model.DefaultCapabilities()
-	}
+	m.Capabilities = model.MergeDefaultCapabilities(m.Capabilities)
 	return nil
 }
 
@@ -109,7 +106,7 @@ func (s *DefaultLLMModelService) Create(ctx context.Context, m *model.LLMModel) 
 		}
 		if autoSetDefault {
 			// 当前表里没有 default 才自动设置
-			cur, _ := s.repo.GetDefault(ctx)
+			cur, _ := r.GetDefault(ctx)
 			if cur == nil {
 				if err := r.ClearDefault(ctx, nil); err != nil {
 					return err
@@ -170,6 +167,19 @@ func (s *DefaultLLMModelService) Update(ctx context.Context, m *model.LLMModel) 
 		return nil, err
 	}
 	return m, nil
+}
+
+// UpdateRuntimeHealth 仅更新运行时健康快照。
+func (s *DefaultLLMModelService) UpdateRuntimeHealth(ctx context.Context, id string, health model.RuntimeHealth) error {
+	m, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return err
+	}
+	if m == nil {
+		return ErrModelNotFound
+	}
+	m.RuntimeHealth = health
+	return s.repo.UpdateRuntimeHealth(ctx, id, health)
 }
 
 // Delete 删除

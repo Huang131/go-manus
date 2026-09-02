@@ -26,6 +26,11 @@ func (t *MessageTool) Description() string {
 	return "用于生成消息。可以向用户发送消息或询问。"
 }
 
+// ReadOnly message 工具会向用户发消息或提问，保守视为有副作用。
+func (t *MessageTool) ReadOnly() bool {
+	return false
+}
+
 // GetTools 返回工具列表
 func (t *MessageTool) GetTools() []map[string]interface{} {
 	return []map[string]interface{}{

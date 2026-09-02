@@ -43,6 +43,13 @@ func (m *MockLLMModelRepository) Update(ctx context.Context, mm *model.LLMModel)
 	return nil
 }
 
+func (m *MockLLMModelRepository) UpdateRuntimeHealth(ctx context.Context, id string, health model.RuntimeHealth) error {
+	if mm, ok := m.models[id]; ok {
+		mm.RuntimeHealth = health
+	}
+	return nil
+}
+
 func (m *MockLLMModelRepository) Delete(ctx context.Context, id string) error {
 	delete(m.models, id)
 	if m.defaultID == id {
@@ -129,6 +136,29 @@ func TestLLMModelService_Create(t *testing.T) {
 	}
 }
 
+func TestLLMModelService_Create_PreservesPartialCapabilities(t *testing.T) {
+	svc := NewLLMModelService(NewMockLLMModelRepository())
+	m, err := svc.Create(context.Background(), &model.LLMModel{
+		Name:      "test",
+		Provider:  "openai",
+		BaseURL:   "https://x",
+		ModelName: "gpt-4",
+		IsEnabled: true,
+		Capabilities: model.ModelCapabilities{
+			SupportsVision: true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.Capabilities.SupportsVision {
+		t.Error("SupportsVision should be preserved")
+	}
+	if m.Capabilities.MaxContextTokens == 0 {
+		t.Error("MaxContextTokens should be filled from default")
+	}
+}
+
 func TestLLMModelService_Create_Validation(t *testing.T) {
 	svc := NewLLMModelService(NewMockLLMModelRepository())
 	_, err := svc.Create(context.Background(), &model.LLMModel{Name: "", Provider: "x", BaseURL: "y", ModelName: "z"})
@@ -197,6 +227,27 @@ func TestLLMModelService_GetDefaultForAgent_DefaultEnabled(t *testing.T) {
 	m := svc.GetDefaultForAgent(context.Background())
 	if m.Name != "d" {
 		t.Errorf("got %s", m.Name)
+	}
+}
+
+func TestLLMModelService_UpdateRuntimeHealth(t *testing.T) {
+	repo := NewMockLLMModelRepository()
+	svc := NewLLMModelService(repo)
+	m, _ := svc.Create(context.Background(), &model.LLMModel{
+		Name: "m", Provider: "p", BaseURL: "u", ModelName: "mn", IsEnabled: true,
+	})
+
+	err := svc.UpdateRuntimeHealth(context.Background(), m.ID, model.RuntimeHealth{
+		Status:           "degraded",
+		RecentFailures:   2,
+		AverageLatencyMS: 321,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cur, _ := repo.GetByID(context.Background(), m.ID)
+	if cur == nil || cur.RuntimeHealth.Status != "degraded" {
+		t.Fatalf("runtime health = %+v", cur.RuntimeHealth)
 	}
 }
 

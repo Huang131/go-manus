@@ -90,6 +90,11 @@ func (t *FileTool) Parameters() map[string]interface{} {
 	}
 }
 
+// ReadOnly file 支持写入/删除/替换，保守视为有副作用。
+func (t *FileTool) ReadOnly() bool {
+	return false
+}
+
 // Invoke 调用工具
 func (t *FileTool) Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
 	action, _ := params["action"].(string)

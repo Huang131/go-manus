@@ -18,6 +18,7 @@ import (
 type LLMModelRepository interface {
 	Create(ctx context.Context, m *model.LLMModel) error
 	Update(ctx context.Context, m *model.LLMModel) error
+	UpdateRuntimeHealth(ctx context.Context, id string, health model.RuntimeHealth) error
 	Delete(ctx context.Context, id string) error
 	GetByID(ctx context.Context, id string) (*model.LLMModel, error)
 	GetDefault(ctx context.Context) (*model.LLMModel, error)
@@ -58,18 +59,18 @@ func (r *PostgresLLMModelRepository) queryer() llmModelQueryer {
 	return r.db.Pool
 }
 
-// 阶段 0 新增：capabilities/request_policy/cost_policy 三个 JSONB 列
+// 阶段 0 新增：capabilities/request_policy/cost_policy/runtime_health 四个 JSONB 列
 const llmModelColumns = `id, name, provider, base_url, api_key, model_name,
 	temperature, max_tokens, tags, is_default, is_enabled, sort_order,
-	capabilities, request_policy, cost_policy,
+	capabilities, request_policy, cost_policy, runtime_health,
 	created_at, updated_at`
 
 func scanLLMModel(row pgx.Row, m *model.LLMModel) error {
-	var tagsJSON, capJSON, reqJSON, costJSON []byte
+	var tagsJSON, capJSON, reqJSON, costJSON, healthJSON []byte
 	if err := row.Scan(
 		&m.ID, &m.Name, &m.Provider, &m.BaseURL, &m.APIKey, &m.ModelName,
 		&m.Temperature, &m.MaxTokens, &tagsJSON, &m.IsDefault, &m.IsEnabled,
-		&m.SortOrder, &capJSON, &reqJSON, &costJSON,
+		&m.SortOrder, &capJSON, &reqJSON, &costJSON, &healthJSON,
 		&m.CreatedAt, &m.UpdatedAt,
 	); err != nil {
 		return err
@@ -89,10 +90,13 @@ func scanLLMModel(row pgx.Row, m *model.LLMModel) error {
 	if len(costJSON) > 0 {
 		_ = json.Unmarshal(costJSON, &m.CostPolicy)
 	}
+	if len(healthJSON) > 0 {
+		_ = json.Unmarshal(healthJSON, &m.RuntimeHealth)
+	}
 	return nil
 }
 
-// capabilitiesToJSON / requestPolicyToJSON / costPolicyToJSON
+// capabilitiesToJSON / requestPolicyToJSON / costPolicyToJSON / runtimeHealthToJSON
 // 用法：写入 DB 前调用，返回 []byte 给 pgx
 func capabilitiesToJSON(c model.ModelCapabilities) []byte {
 	b, _ := json.Marshal(c)
@@ -118,6 +122,14 @@ func costPolicyToJSON(c model.CostPolicy) []byte {
 	return b
 }
 
+func runtimeHealthToJSON(h model.RuntimeHealth) []byte {
+	b, _ := json.Marshal(h)
+	if len(b) == 0 {
+		return []byte("{}")
+	}
+	return b
+}
+
 // Create 新增
 func (r *PostgresLLMModelRepository) Create(ctx context.Context, m *model.LLMModel) error {
 	tagsJSON, _ := json.Marshal(m.Tags)
@@ -131,7 +143,7 @@ func (r *PostgresLLMModelRepository) Create(ctx context.Context, m *model.LLMMod
 	m.UpdatedAt = now
 	_, err := r.queryer().Exec(ctx, `
 		INSERT INTO llm_models (`+llmModelColumns+`)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
 	`,
 		m.ID, m.Name, m.Provider, m.BaseURL, m.APIKey, m.ModelName,
 		m.Temperature, m.MaxTokens, tagsJSON, m.IsDefault, m.IsEnabled,
@@ -139,6 +151,7 @@ func (r *PostgresLLMModelRepository) Create(ctx context.Context, m *model.LLMMod
 		capabilitiesToJSON(m.Capabilities),
 		requestPolicyToJSON(m.RequestPolicy),
 		costPolicyToJSON(m.CostPolicy),
+		runtimeHealthToJSON(m.RuntimeHealth),
 		m.CreatedAt, m.UpdatedAt,
 	)
 	return err
@@ -156,9 +169,9 @@ func (r *PostgresLLMModelRepository) Update(ctx context.Context, m *model.LLMMod
 			name = $2, provider = $3, base_url = $4, api_key = $5, model_name = $6,
 			temperature = $7, max_tokens = $8, tags = $9, is_default = $10,
 			is_enabled = $11, sort_order = $12,
-			capabilities = $13, request_policy = $14, cost_policy = $15,
-			updated_at = $16
-		WHERE id = $1
+			capabilities = $13, request_policy = $14, cost_policy = $15, runtime_health = $16,
+			updated_at = $17
+	WHERE id = $1
 	`,
 		m.ID, m.Name, m.Provider, m.BaseURL, m.APIKey, m.ModelName,
 		m.Temperature, m.MaxTokens, tagsJSON, m.IsDefault, m.IsEnabled,
@@ -166,8 +179,19 @@ func (r *PostgresLLMModelRepository) Update(ctx context.Context, m *model.LLMMod
 		capabilitiesToJSON(m.Capabilities),
 		requestPolicyToJSON(m.RequestPolicy),
 		costPolicyToJSON(m.CostPolicy),
+		runtimeHealthToJSON(m.RuntimeHealth),
 		m.UpdatedAt,
 	)
+	return err
+}
+
+// UpdateRuntimeHealth 只更新运行时健康快照，避免健康打点覆盖模型配置。
+func (r *PostgresLLMModelRepository) UpdateRuntimeHealth(ctx context.Context, id string, health model.RuntimeHealth) error {
+	_, err := r.queryer().Exec(ctx, `
+		UPDATE llm_models
+		SET runtime_health = $2, updated_at = $3
+		WHERE id = $1
+	`, id, runtimeHealthToJSON(health), time.Now())
 	return err
 }
 

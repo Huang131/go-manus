@@ -11,6 +11,7 @@ import (
 type mockTool struct {
 	nameVal        string
 	descriptionVal string
+	readOnlyVal    bool
 }
 
 func (m *mockTool) Name() string {
@@ -30,6 +31,10 @@ func (m *mockTool) Parameters() map[string]interface{} {
 			},
 		},
 	}
+}
+
+func (m *mockTool) ReadOnly() bool {
+	return m.readOnlyVal
 }
 
 func (m *mockTool) Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
@@ -98,6 +103,24 @@ func TestToolRegistry_GetToolsForLLM(t *testing.T) {
 
 	if tools[0].Type != "function" {
 		t.Error("GetToolsForLLM() should return function type")
+	}
+}
+
+func TestToolRegistry_GetToolsForLLM_ReadOnlyFlag(t *testing.T) {
+	registry := NewToolRegistry()
+
+	registry.Register(&mockTool{
+		nameVal:        "readonly_tool",
+		descriptionVal: "readonly",
+		readOnlyVal:    true,
+	})
+
+	tools := registry.GetToolsForLLM()
+	if len(tools) != 1 {
+		t.Fatalf("GetToolsForLLM() got %d tools, want 1", len(tools))
+	}
+	if !tools[0].ReadOnly {
+		t.Error("GetToolsForLLM() should keep ReadOnly flag")
 	}
 }
 

@@ -70,6 +70,11 @@ func (t *ShellTool) Parameters() map[string]interface{} {
 	}
 }
 
+// ReadOnly shell 可执行任意命令，保守视为有副作用。
+func (t *ShellTool) ReadOnly() bool {
+	return false
+}
+
 // Invoke 调用工具
 func (t *ShellTool) Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
 	action, _ := params["action"].(string)

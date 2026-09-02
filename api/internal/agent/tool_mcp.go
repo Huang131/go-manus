@@ -59,6 +59,11 @@ func (t *MCPTool) Parameters() map[string]interface{} {
 	}
 }
 
+// ReadOnly MCP 工具可能映射到任意远端动作，保守视为有副作用。
+func (t *MCPTool) ReadOnly() bool {
+	return false
+}
+
 // Invoke 调用工具
 func (t *MCPTool) Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
 	serverName, _ := params["server"].(string)

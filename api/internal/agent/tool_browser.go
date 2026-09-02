@@ -86,6 +86,11 @@ func (t *BrowserTool) Parameters() map[string]interface{} {
 	}
 }
 
+// ReadOnly 浏览器工具可能触发导航/点击/输入，默认视为有副作用。
+func (t *BrowserTool) ReadOnly() bool {
+	return false
+}
+
 // Invoke 调用工具
 func (t *BrowserTool) Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
 	action, _ := params["action"].(string)

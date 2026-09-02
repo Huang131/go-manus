@@ -45,6 +45,11 @@ func (t *SearchTool) Parameters() map[string]interface{} {
 	}
 }
 
+// ReadOnly 搜索只读取外部信息，不修改本地或远端状态。
+func (t *SearchTool) ReadOnly() bool {
+	return true
+}
+
 // Invoke 调用工具
 func (t *SearchTool) Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
 	query := ""

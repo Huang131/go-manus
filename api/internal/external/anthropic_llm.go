@@ -17,23 +17,27 @@ import (
 
 // AnthropicClient Anthropic API 客户端
 type AnthropicClient struct {
-	baseURL     string
-	apiKey      string
-	modelName   string
-	temperature float64
-	maxTokens   int
-	httpClient  *http.Client
-	version     string // API 版本
+	baseURL       string
+	apiKey        string
+	modelName     string
+	temperature   float64
+	maxTokens     int
+	requestPolicy llmcore.RequestPolicy
+	costPolicy    llmcore.CostPolicy
+	httpClient    *http.Client
+	version       string // API 版本
 }
 
 // AnthropicClientConfig Anthropic 客户端配置
 type AnthropicClientConfig struct {
-	BaseURL     string  `mapstructure:"base_url"`
-	APIKey      string  `mapstructure:"api_key"`
-	ModelName   string  `mapstructure:"model_name"`
-	Temperature float64 `mapstructure:"temperature"`
-	MaxTokens   int     `mapstructure:"max_tokens"`
-	Version     string  `mapstructure:"version"` // API 版本，默认 "2023-06-01"
+	BaseURL       string                `mapstructure:"base_url"`
+	APIKey        string                `mapstructure:"api_key"`
+	ModelName     string                `mapstructure:"model_name"`
+	Temperature   float64               `mapstructure:"temperature"`
+	MaxTokens     int                   `mapstructure:"max_tokens"`
+	RequestPolicy llmcore.RequestPolicy `mapstructure:"request_policy"`
+	CostPolicy    llmcore.CostPolicy    `mapstructure:"cost_policy"`
+	Version       string                `mapstructure:"version"` // API 版本，默认 "2023-06-01"
 }
 
 // AnthropicRequest Anthropic API 请求（wire format）
@@ -44,6 +48,7 @@ type AnthropicRequest struct {
 	Tools       []map[string]interface{} `json:"tools,omitempty"` // wire 仍是 map，Adapter 负责 llmcore→wire
 	MaxTokens   int                      `json:"max_tokens"`
 	Temperature float64                  `json:"temperature,omitempty"`
+	Thinking    map[string]interface{}   `json:"thinking,omitempty"`
 }
 
 // AnthropicMessage Anthropic 消息格式（wire）
@@ -91,11 +96,13 @@ func NewAnthropicClient(cfg *AnthropicClientConfig) *AnthropicClient {
 	}
 
 	return &AnthropicClient{
-		baseURL:     baseURL,
-		apiKey:      cfg.APIKey,
-		modelName:   cfg.ModelName,
-		temperature: cfg.Temperature,
-		maxTokens:   cfg.MaxTokens,
+		baseURL:       baseURL,
+		apiKey:        cfg.APIKey,
+		modelName:     cfg.ModelName,
+		temperature:   cfg.Temperature,
+		maxTokens:     cfg.MaxTokens,
+		requestPolicy: cfg.RequestPolicy,
+		costPolicy:    cfg.CostPolicy,
 		httpClient: &http.Client{
 			Timeout: 120 * time.Second,
 		},
@@ -192,8 +199,9 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMResp
 		Messages:    messages,
 		System:      systemMessage,
 		Tools:       tools,
-		MaxTokens:   c.maxTokens,
-		Temperature: c.temperature,
+		MaxTokens:   c.effectiveMaxTokens(),
+		Temperature: c.effectiveTemperature(),
+		Thinking:    c.effectiveThinking(),
 	}
 
 	// 序列化请求
@@ -263,9 +271,41 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMResp
 		}
 	}
 
+	result.Usage = llmcore.Usage{
+		PromptTokens:     anthropicResp.Usage.InputTokens,
+		CompletionTokens: anthropicResp.Usage.OutputTokens,
+		TotalTokens:      anthropicResp.Usage.InputTokens + anthropicResp.Usage.OutputTokens,
+	}
+	result.CostUSD = estimateCostUSD(c.costPolicy, result.Usage)
+
 	// 阶段 1d：不再调用 NormalizeLLMResponse —— 协议层严格分离 Content / ReasoningContent
 	// 业务兜底（如有）由调用方读 ReasoningContent 自行决定
 	return result, nil
+}
+
+func (c *AnthropicClient) effectiveTemperature() float64 {
+	if c.requestPolicy.DefaultTemperature != nil {
+		return *c.requestPolicy.DefaultTemperature
+	}
+	return c.temperature
+}
+
+func (c *AnthropicClient) effectiveMaxTokens() int {
+	if c.requestPolicy.DefaultMaxTokens != nil {
+		return *c.requestPolicy.DefaultMaxTokens
+	}
+	return c.maxTokens
+}
+
+func (c *AnthropicClient) effectiveThinking() map[string]interface{} {
+	switch c.requestPolicy.ReasoningMode {
+	case llmcore.ReasoningOff:
+		return map[string]interface{}{"type": "disabled"}
+	case llmcore.ReasoningLow, llmcore.ReasoningAuto, llmcore.ReasoningHigh:
+		return map[string]interface{}{"type": "enabled"}
+	default:
+		return nil
+	}
 }
 
 // ModelName 返回模型名称

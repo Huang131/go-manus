@@ -18,6 +18,7 @@ import (
 	"github.com/mooc-manus/go-manus/api/internal/external"
 	"github.com/mooc-manus/go-manus/api/internal/handler"
 	"github.com/mooc-manus/go-manus/api/internal/infrastructure"
+	"github.com/mooc-manus/go-manus/api/internal/llmcore"
 	"github.com/mooc-manus/go-manus/api/internal/repository"
 	"github.com/mooc-manus/go-manus/api/internal/router"
 	"github.com/mooc-manus/go-manus/api/internal/service"
@@ -108,7 +109,10 @@ func main() {
 	llmModelRepo := repository.NewLLMModelRepository(db)
 
 	var llm external.LLM
-	fallbackLLMCfg := &external.OpenAIClientConfig{
+	fallbackLLMCfg := &external.LLMRuntimeConfig{
+		Profile: llmcore.ModelProfile{
+			Protocol: llmcore.ProtocolOpenAICompat,
+		},
 		BaseURL:         cfg.LLM.BaseURL,
 		APIKey:          cfg.LLM.APIKey,
 		ModelName:       cfg.LLM.ModelName,
@@ -117,52 +121,35 @@ func main() {
 		ToolCallTimeout: cfg.LLM.ToolCallTimeout,
 	}
 	if cfg.LLM.BaseURL != "" {
-		llm = external.NewDynamicLLM(
-			func(ctx context.Context) (*external.OpenAIClientConfig, error) {
+		llm = external.NewRoutedLLMFromSingleProvider(
+			func(ctx context.Context) (*external.LLMRuntimeConfig, error) {
 				// 0. 优先：ctx 中显式指定的 modelId（前端 chat 时选的"本次模型"）
 				if mid := external.ModelIDFromContext(ctx); mid != "" {
 					chosen, err := llmModelRepo.GetByID(ctx, mid)
 					if err == nil && chosen != nil && chosen.IsEnabled {
-						return &external.OpenAIClientConfig{
-							BaseURL:         chosen.BaseURL,
-							APIKey:          chosen.APIKey,
-							ModelName:       chosen.ModelName,
-							Temperature:     chosen.Temperature,
-							MaxTokens:       chosen.MaxTokens,
-							ToolCallTimeout: cfg.LLM.ToolCallTimeout,
-						}, nil
+						return external.BuildRuntimeConfigFromModel(chosen, cfg.LLM.ToolCallTimeout), nil
 					}
 					// 指定 ID 不存在/已停用，落到下面的 default 逻辑
 				}
 				// 1. llm_models 表 default 模型
 				def, err := llmModelRepo.GetDefault(ctx)
 				if err == nil && def != nil && def.IsEnabled {
-					return &external.OpenAIClientConfig{
-						BaseURL:         def.BaseURL,
-						APIKey:          def.APIKey,
-						ModelName:       def.ModelName,
-						Temperature:     def.Temperature,
-						MaxTokens:       def.MaxTokens,
-						ToolCallTimeout: cfg.LLM.ToolCallTimeout,
-					}, nil
+					return external.BuildRuntimeConfigFromModel(def, cfg.LLM.ToolCallTimeout), nil
 				}
 				// 2. 兜底：llm_models 第一个 enabled
 				first, err := llmModelRepo.GetFirstEnabled(ctx)
 				if err == nil && first != nil {
-					return &external.OpenAIClientConfig{
-						BaseURL:         first.BaseURL,
-						APIKey:          first.APIKey,
-						ModelName:       first.ModelName,
-						Temperature:     first.Temperature,
-						MaxTokens:       first.MaxTokens,
-						ToolCallTimeout: cfg.LLM.ToolCallTimeout,
-					}, nil
+					return external.BuildRuntimeConfigFromModel(first, cfg.LLM.ToolCallTimeout), nil
 				}
 				// 3. 兜底 2：env
 				return nil, nil
 			},
 			fallbackLLMCfg,
+			nil,
 		)
+		if routed, ok := llm.(*external.RoutedLLM); ok {
+			routed.SetHealthStore(llmModelRepo)
+		}
 		logger.Info("LLM client initialized (dynamic, llm_models table)",
 			zap.String("base_url", cfg.LLM.BaseURL),
 			zap.String("model", cfg.LLM.ModelName),
