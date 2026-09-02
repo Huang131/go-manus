@@ -10,9 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"go.uber.org/zap"
-
-	"github.com/mooc-manus/go-manus/api/pkg/logger"
+	"github.com/mooc-manus/go-manus/api/internal/llmcore"
 )
 
 // OpenAIClient OpenAI 兼容 API 客户端
@@ -58,49 +56,85 @@ func NewOpenAIClient(cfg *OpenAIClientConfig) *OpenAIClient {
 	}
 }
 
-// chatRequest OpenAI Chat API 请求
-type chatRequest struct {
-	Model          string                   `json:"model"`
-	Messages       []map[string]interface{} `json:"messages"`
-	Tools          []map[string]interface{} `json:"tools,omitempty"`
-	ToolChoice     string                   `json:"tool_choice,omitempty"`
-	Temperature    float64                  `json:"temperature"`
-	MaxTokens      int                      `json:"max_tokens"`
-	ResponseFormat map[string]interface{}   `json:"response_format,omitempty"` // 例如 {"type": "json_object"}
+// openAIChatRequest OpenAI Chat API 请求 wire format
+type openAIChatRequest struct {
+	Model       string                   `json:"model"`
+	Messages    []map[string]interface{} `json:"messages"`
+	Tools       []map[string]interface{} `json:"tools,omitempty"`
+	ToolChoice  interface{}              `json:"tool_choice,omitempty"`
+	Temperature *float64                 `json:"temperature,omitempty"`
+	MaxTokens   *int                     `json:"max_tokens,omitempty"`
+	Stream      bool                     `json:"stream,omitempty"`
+	// ResponseFormat 例如 {"type": "json_object"} 或 json_schema
+	ResponseFormat map[string]interface{} `json:"response_format,omitempty"`
 }
 
-// chatResponse OpenAI Chat API 响应
-type chatResponse struct {
+// openAIChatResponse OpenAI Chat API 响应 wire format
+// 注意：上游 reason 模型字段可能是 reasoning_content（DeepSeek / GMI / MiniMax）
+// 或 reasoning（Anthropic 风格），两者都解析到 llmcore.Message.Reasoning
+type openAIChatResponse struct {
 	ID      string `json:"id"`
+	Model   string `json:"model"`
 	Choices []struct {
-		Message struct {
-			Content   string `json:"content"`
-			Reasoning string `json:"reasoning_content"`
-			ToolCalls []struct {
-				ID       string                 `json:"id"`
-				Type     string                 `json:"type"`
-				Function map[string]interface{} `json:"function"`
+		Index        int    `json:"index"`
+		FinishReason string `json:"finish_reason"`
+		Message      struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+			// 兼容 reasoning_content（DeepSeek / GMI / sensenova） 和 reasoning（部分 provider）两种命名
+			ReasoningContent string `json:"reasoning_content"`
+			Reasoning        string `json:"reasoning"`
+			Refusal          string `json:"refusal"`
+			ToolCalls        []struct {
+				ID       string `json:"id"`
+				Type     string `json:"type"`
+				Function struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				} `json:"function"`
 			} `json:"tool_calls"`
 		} `json:"message"`
 	} `json:"choices"`
 	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
+		PromptTokens      int `json:"prompt_tokens"`
+		CompletionTokens  int `json:"completion_tokens"`
+		TotalTokens       int `json:"total_tokens"`
+		ReasoningTokens   int `json:"reasoning_tokens,omitempty"`
+		CompletionDetails struct {
+			ReasoningTokens int `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details"`
 	} `json:"usage"`
+	Error *struct {
+		Message    string `json:"message"`
+		Type       string `json:"type"`
+		Code       string `json:"code"`
+		RetryAfter int    `json:"retry_after"`
+	} `json:"error,omitempty"`
 }
 
 // Invoke 调用 OpenAI Chat API
+//
+// 阶段 1c 改造点：
+//  1. 内部按 llmcore 协议解析上游响应（Content / ReasoningContent / ToolCalls 严格分离）
+//  2. 去掉"content 为空时把 reasoning 当 content 兜底"的违规逻辑
+//     —— Reasoning 不再覆盖 Content；调用方读 ReasoningContent 字段
+//  3. 上游错误按 401/403/429/5xx/timeout 分类为 llmcore.ProviderError，
+//     为阶段 3 fallback 矩阵提供 ErrorKind 钩子
+//  4. 对外仍返回 external.LLMResponse，保持业务侧不破坏
 func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMResponse, error) {
-	// 构建请求
-	chatReq := chatRequest{
+	// 构建 wire format 请求（业务层仍按 map 传 message/tool，阶段 1d 再切）
+	temp := c.temperature
+	maxTok := c.maxTokens
+	chatReq := openAIChatRequest{
 		Model:          c.modelName,
 		Messages:       req.Messages,
 		Tools:          req.Tools,
-		ToolChoice:     req.ToolChoice,
-		Temperature:    c.temperature,
-		MaxTokens:      c.maxTokens,
+		Temperature:    &temp,
+		MaxTokens:      &maxTok,
 		ResponseFormat: req.ResponseFormat,
+	}
+	if req.ToolChoice != "" {
+		chatReq.ToolChoice = req.ToolChoice
 	}
 
 	// 序列化请求
@@ -124,8 +158,6 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMRespons
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-
-	// 设置请求头
 	httpReq.Header.Set("Content-Type", "application/json")
 	if c.apiKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
@@ -134,68 +166,205 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMRespons
 	// 发送请求
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		// context 超时（tool calling）转为友好错误，不暴露底层细节
+		// tool calling 超时特殊处理
 		if len(req.Tools) > 0 && errors.Is(err, context.DeadlineExceeded) {
-			return nil, fmt.Errorf("tool calling 请求超时（%v），模型 %q 可能不支持 tool calling", c.toolCallTimeout, c.modelName)
+			pe := llmcore.NewProviderError(llmcore.KindTimeout, "openai_compat", c.modelName,
+				fmt.Sprintf("tool calling 请求超时（%v），模型 %q 可能不支持 tool calling", c.toolCallTimeout, c.modelName))
+			pe.StatusCode = http.StatusGatewayTimeout
+			pe.Cause = err
+			return nil, pe
 		}
-		return nil, fmt.Errorf("send request: %w", err)
+		if errors.Is(err, context.DeadlineExceeded) {
+			pe := llmcore.NewProviderError(llmcore.KindTimeout, "openai_compat", c.modelName, "request timeout")
+			pe.StatusCode = http.StatusGatewayTimeout
+			pe.Cause = err
+			return nil, pe
+		}
+		pe := llmcore.NewProviderError(llmcore.KindNetwork, "openai_compat", c.modelName, "network error")
+		pe.Cause = err
+		return nil, pe
 	}
 	defer resp.Body.Close()
 
-	// 读取响应
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
+		pe := llmcore.NewProviderError(llmcore.KindNetwork, "openai_compat", c.modelName, "read response body")
+		pe.StatusCode = resp.StatusCode
+		pe.Cause = fmt.Errorf("read response: %w", err)
+		return nil, pe
 	}
 
+	// 非 2xx：分类为 ProviderError，让阶段 3 fallback 决策有 ErrorKind
 	if resp.StatusCode != http.StatusOK {
-		logger.Error("OpenAI API error",
-			zap.Int("status", resp.StatusCode),
-			zap.String("body", string(respBody)),
-		)
-		return nil, fmt.Errorf("OpenAI API error: status=%d, body=%s", resp.StatusCode, string(respBody))
+		return nil, c.classifyHTTPError(resp.StatusCode, respBody)
 	}
 
 	// 解析响应
-	var chatResp chatResponse
+	var chatResp openAIChatResponse
 	if err := json.Unmarshal(respBody, &chatResp); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
+		// 协议错误：熔断该模型（不重试不 fallback）
+		pe := llmcore.NewProviderError(llmcore.KindUnknown, "openai_compat", c.modelName,
+			fmt.Sprintf("unmarshal response: %v", err))
+		pe.StatusCode = resp.StatusCode
+		pe.Cause = err
+		pe.Retryable = false
+		pe.Fallbackable = false
+		return nil, pe
 	}
 
 	if len(chatResp.Choices) == 0 {
-		return nil, fmt.Errorf("no choices in response")
+		pe := llmcore.NewProviderError(llmcore.KindUnknown, "openai_compat", c.modelName, "no choices in response")
+		pe.StatusCode = resp.StatusCode
+		pe.Retryable = false
+		pe.Fallbackable = false
+		return nil, pe
 	}
 
-	// 转换响应
-	content := chatResp.Choices[0].Message.Content
-	reasoning := chatResp.Choices[0].Message.Reasoning
-	// 推理模型（如 MiniMax-M2.7）可能把输出放在 reasoning_content，content 为空。
-	// 此时用 reasoning_content 兜底，否则下游 planner JSON 解析会拿到空串报错。
-	if content == "" && chatResp.Choices[0].Message.Reasoning != "" {
-		logger.Info("OpenAI API content 为空，使用 reasoning_content 兜底",
-			zap.Int("reasoning_len", len(chatResp.Choices[0].Message.Reasoning)))
-		content = chatResp.Choices[0].Message.Reasoning
-	}
-	result := &LLMResponse{
-		ID:               chatResp.ID,
-		Content:          content,
-		ReasoningContent: reasoning,
-		RawContent:       chatResp.Choices[0].Message.Content,
+	// === llmcore 协议层归一化 ===
+	choice := chatResp.Choices[0]
+
+	// 推理字段归一化：reasoning_content（OpenAI 标准/DeepSeek） 和 reasoning（部分厂商） 任一非空都进 Reasoning
+	reasoning := choice.Message.ReasoningContent
+	if reasoning == "" {
+		reasoning = choice.Message.Reasoning
 	}
 
-	// 转换工具调用
-	if len(chatResp.Choices[0].Message.ToolCalls) > 0 {
-		result.ToolUse = make([]map[string]interface{}, len(chatResp.Choices[0].Message.ToolCalls))
-		for i, tc := range chatResp.Choices[0].Message.ToolCalls {
-			result.ToolUse[i] = map[string]interface{}{
-				"id":       tc.ID,
-				"type":     tc.Type,
-				"function": tc.Function,
+	// 工具调用归一化
+	var toolCalls []llmcore.ToolCall
+	if len(choice.Message.ToolCalls) > 0 {
+		toolCalls = make([]llmcore.ToolCall, len(choice.Message.ToolCalls))
+		for i, tc := range choice.Message.ToolCalls {
+			toolCalls[i] = llmcore.ToolCall{
+				ID:        tc.ID,
+				Type:      tc.Type,
+				Name:      tc.Function.Name,
+				Arguments: tc.Function.Arguments,
 			}
 		}
 	}
 
-	return NormalizeLLMResponse(result), nil
+	usage := llmcore.Usage{
+		PromptTokens:     chatResp.Usage.PromptTokens,
+		CompletionTokens: chatResp.Usage.CompletionTokens,
+		TotalTokens:      chatResp.Usage.TotalTokens,
+		ReasoningTokens:  pickReasoningTokens(chatResp.Usage.ReasoningTokens, chatResp.Usage.CompletionDetails.ReasoningTokens),
+	}
+
+	coreResp := &llmcore.LLMResponse{
+		ID:    chatResp.ID,
+		Model: pickModel(chatResp.Model, c.modelName),
+		Message: llmcore.Message{
+			Role:        llmcore.RoleAssistant,
+			ContentText: choice.Message.Content, // 严格：content 即 content，不被 reasoning 覆盖
+			Reasoning:   reasoning,
+			ToolCalls:   toolCalls,
+		},
+		FinishReason: choice.FinishReason,
+		Usage:        usage,
+	}
+
+	// === 转回 external.LLMResponse（业务侧契约不变，阶段 1d 才切到 llmcore）===
+	return toExternalResponse(coreResp), nil
+}
+
+// classifyHTTPError 把 HTTP 状态码分类为 llmcore.ErrorKind
+// 参考 MULTI_LLM_ADAPTER_DESIGN.md "错误分类"：
+//   - 401/403 → auth         不重试不 fallback
+//   - 429     → rate_limit   读 Retry-After 退避，必要时 fallback
+//   - 5xx     → server       有限重试，失败后 fallback
+//   - 4xx     → bad_request  不重试
+//   - 其他    → unknown
+func (c *OpenAIClient) classifyHTTPError(status int, body []byte) error {
+	kind := llmcore.KindUnknown
+	switch {
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		kind = llmcore.KindAuth
+	case status == http.StatusTooManyRequests:
+		kind = llmcore.KindRateLimit
+	case status == http.StatusRequestTimeout:
+		kind = llmcore.KindTimeout
+	case status == http.StatusNotFound:
+		kind = llmcore.KindNotFound
+	case status >= 500:
+		kind = llmcore.KindServer
+	case status >= 400:
+		kind = llmcore.KindBadRequest
+	}
+
+	// 尝试从 body 提取上游 error.message
+	var probe struct {
+		Error *struct {
+			Message string `json:"message"`
+			Code    string `json:"code"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(body, &probe)
+	upstreamMsg := ""
+	if probe.Error != nil {
+		upstreamMsg = probe.Error.Message
+	}
+	if upstreamMsg == "" {
+		upstreamMsg = truncateBody(body)
+	}
+
+	pe := llmcore.NewProviderError(kind, "openai_compat", c.modelName,
+		fmt.Sprintf("status=%d: %s", status, upstreamMsg))
+	pe.StatusCode = status
+	// classifyHTTPError 的 kind 已经被 isRetryable/isFallbackable 决定
+	// 这里用 NewProviderError 默认规则即可
+	return pe
+}
+
+// toExternalResponse 把 llmcore.LLMResponse 转回 external.LLMResponse
+//
+// 阶段 1c 改造点：协议层转回业务契约时不做 reasoning→content 兜底。
+// 兜底是 agent 消费方的事（react_agent 依赖），由 DynamicLLM.Invoke 末尾
+// 显式调用 NormalizeLLMResponse 完成。本函数输出"原始"业务契约。
+func toExternalResponse(c *llmcore.LLMResponse) *LLMResponse {
+	out := &LLMResponse{
+		ID:               c.ID,
+		Content:          c.Message.ContentText,
+		ReasoningContent: c.Message.Reasoning,
+		RawContent:       c.Message.ContentText,
+	}
+	if len(c.Message.ToolCalls) > 0 {
+		out.ToolUse = make([]map[string]interface{}, len(c.Message.ToolCalls))
+		for i, tc := range c.Message.ToolCalls {
+			out.ToolUse[i] = map[string]interface{}{
+				"id":   tc.ID,
+				"type": tc.Type,
+				"function": map[string]interface{}{
+					"name":      tc.Name,
+					"arguments": tc.Arguments,
+				},
+			}
+		}
+	}
+	return out
+}
+
+// pickReasoningTokens 部分 provider 把 reasoning tokens 放在 completion_tokens_details 里
+func pickReasoningTokens(a, b int) int {
+	if a > 0 {
+		return a
+	}
+	return b
+}
+
+// pickModel 优先用上游回传的 model 名（处理 alias/路由）
+func pickModel(serverModel, fallback string) string {
+	if serverModel != "" {
+		return serverModel
+	}
+	return fallback
+}
+
+func truncateBody(b []byte) string {
+	const max = 512
+	if len(b) > max {
+		return string(b[:max]) + "..."
+	}
+	return string(b)
 }
 
 // ModelName 返回模型名称
