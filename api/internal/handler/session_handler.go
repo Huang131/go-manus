@@ -249,7 +249,13 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 	for {
 		select {
 		case <-clientGone:
-			logger.Info("HTTP client disconnected, continuing with independent context")
+			// 客户端已断开（页面刷新 / 关闭 / 网络断开）：立刻结束 SSE 流，
+			// 不再轮询 Redis 也不再写 Flush，避免在 writer 关闭后疯狂刷写日志。
+			// 后端 Agent task 会通过独立 context 继续运行，事件保留在 Redis，
+			// 下次前端连上来时通过 lastEventId 续读即可。
+			logger.Info("HTTP client disconnected, stopping SSE stream", zap.String("task_id", taskID))
+			eventCancel()
+			return
 		case <-eventCtx.Done():
 			logger.Info("SSE stream ended", zap.String("task_id", taskID))
 			return
@@ -271,13 +277,14 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 				c.SSEvent(string(event.Type), string(payload))
 				c.Writer.Flush()
 
-				if event.Type == model.EventTypeDone {
+				// done / error 都视为终态：结束 SSE 流，避免前端 0/N 计数永远卡在等待态。
+				// 后端 task 已结束，下一次连入会通过 lastEventId 续读到 done/error。
+				if event.Type == model.EventTypeDone || event.Type == model.EventTypeError {
 					streamTimeout.Stop()
 					eventCancel()
 					return
 				}
 			}
-
 			time.Sleep(100 * time.Millisecond)
 		}
 	}

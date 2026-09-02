@@ -288,13 +288,17 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
       case "done":
         break;
       case "error": {
-        // 处理错误事件
-        const errorData = ev.data as { error?: string; created_at?: number; event_id?: string; [key: string]: unknown };
-        if (errorData.error) {
+        // 处理错误事件。
+        // 后端 model.ErrorEvent 的 JSON 字段是 "message"（见 api/internal/model/event.go:156-159），
+        // 经过 mergeEventMetadata 平铺后仍是 message，不是 error。前置版本读 errorData.error 永远 undefined，
+        // 导致 error event 被静默丢弃、前端 0/N 永远卡在等待态。
+        const errorData = ev.data as { message?: string; error?: string; created_at?: number; event_id?: string; [key: string]: unknown };
+        const errorMsg = errorData.message || errorData.error;
+        if (errorMsg) {
           list.push({
             kind: "error",
             id: stableId("error", errorIndex++, String(list.length)),
-            error: errorData.error,
+            error: errorMsg,
             timestamp: errorData.created_at,
           });
         }
