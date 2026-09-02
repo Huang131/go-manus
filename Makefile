@@ -1,7 +1,7 @@
 # ============================================================
 # go-manus 一站式运维脚本
 # ============================================================
-# 标准部署: docker-compose.yml (nginx 网关模式)
+# 标准部署: docker compose (nginx 网关模式)
 # 包含: nginx 网关 + UI (Next.js) + API (Go) + 沙箱 (Python) + postgres + redis + minio
 # ============================================================
 
@@ -18,22 +18,32 @@ help:
 	@echo ""
 	@echo "=== 服务状态 ==="
 	@echo "  make health        - 检查 API 健康状态 + 容器状态"
+	@echo "  make ps            - 查看容器运行状态"
 	@echo ""
 	@echo "=== 构建 ==="
 	@echo "  make build         - 构建所有 Docker 镜像"
+	@echo "  make build-no-cache - 重建所有镜像 (不带缓存)"
 	@echo "  make rebuild-api   - 重建并启动 API (同 rebuild-ui / rebuild-sandbox)"
+	@echo "  make restart       - 重启所有服务"
 	@echo "  make restart-api   - 重启指定服务 (同 restart-ui / restart-sandbox)"
 	@echo ""
 	@echo "=== 日志查看 ==="
-	@echo "  make logs          - 所有服务日志"
+	@echo "  make logs          - 所有服务日志 (Ctrl+C 退出)"
 	@echo "  make logs-api      - API 日志"
+	@echo "  make logs-ui       - UI 日志"
+	@echo "  make logs-sandbox  - 沙箱日志"
 	@echo "  make logs-nginx    - nginx 日志 (排查 502 必备)"
-	@echo "  make logs-ui       - UI 日志 (同 logs-sandbox / logs-postgres / logs-redis)"
+	@echo "  make logs-postgres - PostgreSQL 日志"
+	@echo "  make logs-redis    - Redis 日志"
+	@echo "  make logs-minio    - MinIO 日志"
 	@echo ""
 	@echo "=== 进入容器 ==="
 	@echo "  make shell-api     - 进入 API 容器"
-	@echo "  make shell-postgres - 进入 PostgreSQL 命令行"
+	@echo "  make shell-ui      - 进入 UI 容器"
 	@echo "  make shell-sandbox - 进入沙箱容器"
+	@echo "  make shell-postgres - 进入 PostgreSQL 命令行"
+	@echo "  make shell-redis   - 进入 Redis 命令行"
+	@echo "  make shell-minio   - 进入 MinIO 容器"
 	@echo ""
 	@echo "=== 开发命令 (在 api/ 目录) ==="
 	@echo "  cd api && make build    - 编译 Go 程序"
@@ -42,8 +52,7 @@ help:
 	@echo ""
 	@echo "=== 清理 ==="
 	@echo "  make clean         - 清理未使用的 Docker 资源"
-	@echo "  make down-v        - 停止并删除数据卷（慎用）"
-	@echo ""
+	@echo "  make clean-all     - 完整清理 (删除所有 go-manus 镜像)"
 
 # ============================================================
 # 标准部署 (含 nginx 网关)
@@ -52,7 +61,7 @@ help:
 # 启动所有服务 (nginx 网关模式)
 up:
 	@echo "启动所有服务 (nginx 网关模式)..."
-	docker-compose up -d
+	docker compose up -d
 	@echo ""
 	@echo "服务已启动!"
 	@echo "  - 网关:    http://localhost (端口 80) ← 统一入口"
@@ -67,13 +76,12 @@ up:
 
 # 停止所有服务
 down:
-	@echo "停止所有服务..."
-	docker-compose down
+	docker compose down
 
 # 停止并删除数据卷 (完全清理)
 down-v:
 	@echo "停止所有服务并删除数据..."
-	docker-compose down -v
+	docker compose down -v
 
 # ============================================================
 # 构建命令
@@ -82,20 +90,20 @@ down-v:
 # 构建所有 Docker 镜像
 build:
 	@echo "构建所有 Docker 镜像..."
-	docker-compose build
+	docker compose build
 
 # 重新构建所有镜像 (不带缓存)
 build-no-cache:
 	@echo "重新构建所有 Docker 镜像 (不带缓存)..."
-	docker-compose build --no-cache
+	docker compose build --no-cache
 
 # ============================================================
 # 服务状态
 # ============================================================
 
-# 查看服务状态 (建议使用 make health 获取更详细的状态)
+# 查看服务状态
 ps:
-	docker-compose ps
+	docker compose ps
 
 # 查看服务健康状态
 health:
@@ -108,34 +116,37 @@ health:
 	@curl -s http://localhost:8080/api/status 2>/dev/null | jq '.' || echo "API 服务未启动"
 	@echo ""
 	@echo "=== Docker 服务状态 ==="
-	docker-compose ps
+	docker compose ps
 
 # ============================================================
 # 日志查看
 # ============================================================
 
-# 查看所有服务日志
+# 查看所有服务日志 (-f 实时跟踪，Ctrl+C 退出)
 logs:
-	docker-compose logs -f
+	docker compose logs -f
 
 # 查看特定服务日志
 logs-api:
-	docker-compose logs -f api
+	docker compose logs -f api
 
 logs-ui:
-	docker-compose logs -f ui
+	docker compose logs -f ui
 
 logs-sandbox:
-	docker-compose logs -f sandbox
+	docker compose logs -f sandbox
 
 logs-postgres:
-	docker-compose logs -f postgres
+	docker compose logs -f postgres
 
 logs-redis:
-	docker-compose logs -f redis
+	docker compose logs -f redis
+
+logs-minio:
+	docker compose logs -f minio
 
 logs-nginx:
-	docker-compose logs -f nginx
+	docker compose logs -f nginx
 
 # ============================================================
 # 重启服务
@@ -144,17 +155,29 @@ logs-nginx:
 # 重启所有服务
 restart:
 	@echo "重启所有服务..."
-	docker-compose restart
+	docker compose restart
 
 # 重启特定服务
 restart-api:
-	docker-compose restart api
+	docker compose restart api
 
 restart-ui:
-	docker-compose restart ui
+	docker compose restart ui
 
 restart-sandbox:
-	docker-compose restart sandbox
+	docker compose restart sandbox
+
+restart-nginx:
+	docker compose restart nginx
+
+restart-postgres:
+	docker compose restart postgres
+
+restart-redis:
+	docker compose restart redis
+
+restart-minio:
+	docker compose restart minio
 
 # ============================================================
 # 进入容器
@@ -164,13 +187,25 @@ restart-sandbox:
 shell-api:
 	docker exec -it go-manus-api /bin/sh
 
+# 进入 UI 容器
+shell-ui:
+	docker exec -it go-manus-ui /bin/sh
+
 # 进入沙箱容器
 shell-sandbox:
 	docker exec -it go-manus-sandbox /bin/sh
 
-# 进入数据库
+# 进入 PostgreSQL
 shell-postgres:
 	docker exec -it go-manus-postgres psql -U postgres -d manus
+
+# 进入 Redis
+shell-redis:
+	docker exec -it go-manus-redis redis-cli
+
+# 进入 MinIO
+shell-minio:
+	docker exec -it go-manus-minio /bin/sh
 
 # ============================================================
 # 清理
@@ -185,7 +220,7 @@ clean:
 # 完整清理 (包括镜像)
 clean-all:
 	@echo "完整清理 Docker 资源 (删除 go-manus 所有镜像)..."
-	docker-compose down --rmi local
+	docker compose down --rmi local
 	docker system prune -f
 	@echo "清理完成!"
 
@@ -196,12 +231,12 @@ clean-all:
 # 重建并启动特定服务
 rebuild-api:
 	@echo "重建 API 服务..."
-	docker-compose up -d --build api
+	docker compose up -d --build api
 
 rebuild-ui:
 	@echo "重建 UI 服务..."
-	docker-compose up -d --build ui
+	docker compose up -d --build ui
 
 rebuild-sandbox:
 	@echo "重建沙箱服务..."
-	docker-compose up -d --build sandbox
+	docker compose up -d --build sandbox
