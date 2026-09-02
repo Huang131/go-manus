@@ -58,16 +58,19 @@ func (r *PostgresLLMModelRepository) queryer() llmModelQueryer {
 	return r.db.Pool
 }
 
+// 阶段 0 新增：capabilities/request_policy/cost_policy 三个 JSONB 列
 const llmModelColumns = `id, name, provider, base_url, api_key, model_name,
 	temperature, max_tokens, tags, is_default, is_enabled, sort_order,
+	capabilities, request_policy, cost_policy,
 	created_at, updated_at`
 
 func scanLLMModel(row pgx.Row, m *model.LLMModel) error {
-	var tagsJSON []byte
+	var tagsJSON, capJSON, reqJSON, costJSON []byte
 	if err := row.Scan(
 		&m.ID, &m.Name, &m.Provider, &m.BaseURL, &m.APIKey, &m.ModelName,
 		&m.Temperature, &m.MaxTokens, &tagsJSON, &m.IsDefault, &m.IsEnabled,
-		&m.SortOrder, &m.CreatedAt, &m.UpdatedAt,
+		&m.SortOrder, &capJSON, &reqJSON, &costJSON,
+		&m.CreatedAt, &m.UpdatedAt,
 	); err != nil {
 		return err
 	}
@@ -77,7 +80,42 @@ func scanLLMModel(row pgx.Row, m *model.LLMModel) error {
 	if m.Tags == nil {
 		m.Tags = []string{}
 	}
+	if len(capJSON) > 0 {
+		_ = json.Unmarshal(capJSON, &m.Capabilities)
+	}
+	if len(reqJSON) > 0 {
+		_ = json.Unmarshal(reqJSON, &m.RequestPolicy)
+	}
+	if len(costJSON) > 0 {
+		_ = json.Unmarshal(costJSON, &m.CostPolicy)
+	}
 	return nil
+}
+
+// capabilitiesToJSON / requestPolicyToJSON / costPolicyToJSON
+// 用法：写入 DB 前调用，返回 []byte 给 pgx
+func capabilitiesToJSON(c model.ModelCapabilities) []byte {
+	b, _ := json.Marshal(c)
+	if len(b) == 0 {
+		return []byte("{}")
+	}
+	return b
+}
+
+func requestPolicyToJSON(p model.RequestPolicy) []byte {
+	b, _ := json.Marshal(p)
+	if len(b) == 0 {
+		return []byte("{}")
+	}
+	return b
+}
+
+func costPolicyToJSON(c model.CostPolicy) []byte {
+	b, _ := json.Marshal(c)
+	if len(b) == 0 {
+		return []byte("{}")
+	}
+	return b
 }
 
 // Create 新增
@@ -93,11 +131,15 @@ func (r *PostgresLLMModelRepository) Create(ctx context.Context, m *model.LLMMod
 	m.UpdatedAt = now
 	_, err := r.queryer().Exec(ctx, `
 		INSERT INTO llm_models (`+llmModelColumns+`)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
 	`,
 		m.ID, m.Name, m.Provider, m.BaseURL, m.APIKey, m.ModelName,
 		m.Temperature, m.MaxTokens, tagsJSON, m.IsDefault, m.IsEnabled,
-		m.SortOrder, m.CreatedAt, m.UpdatedAt,
+		m.SortOrder,
+		capabilitiesToJSON(m.Capabilities),
+		requestPolicyToJSON(m.RequestPolicy),
+		costPolicyToJSON(m.CostPolicy),
+		m.CreatedAt, m.UpdatedAt,
 	)
 	return err
 }
@@ -113,12 +155,18 @@ func (r *PostgresLLMModelRepository) Update(ctx context.Context, m *model.LLMMod
 		UPDATE llm_models SET
 			name = $2, provider = $3, base_url = $4, api_key = $5, model_name = $6,
 			temperature = $7, max_tokens = $8, tags = $9, is_default = $10,
-			is_enabled = $11, sort_order = $12, updated_at = $13
+			is_enabled = $11, sort_order = $12,
+			capabilities = $13, request_policy = $14, cost_policy = $15,
+			updated_at = $16
 		WHERE id = $1
 	`,
 		m.ID, m.Name, m.Provider, m.BaseURL, m.APIKey, m.ModelName,
 		m.Temperature, m.MaxTokens, tagsJSON, m.IsDefault, m.IsEnabled,
-		m.SortOrder, m.UpdatedAt,
+		m.SortOrder,
+		capabilitiesToJSON(m.Capabilities),
+		requestPolicyToJSON(m.RequestPolicy),
+		costPolicyToJSON(m.CostPolicy),
+		m.UpdatedAt,
 	)
 	return err
 }

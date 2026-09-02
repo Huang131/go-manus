@@ -61,6 +61,11 @@ func validateRequired(m *model.LLMModel) error {
 	if m.Tags == nil {
 		m.Tags = []string{}
 	}
+	// 阶段 0：能力画像兜底
+	// 全新模型（Capabilities 全 0 字段）→ 给一个合理的保守默认
+	if m.Capabilities.MaxContextTokens == 0 {
+		m.Capabilities = model.DefaultCapabilities()
+	}
 	return nil
 }
 
