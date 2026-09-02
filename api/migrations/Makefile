@@ -7,7 +7,7 @@
 #   make migrate-status      - 查看迁移状态
 
 DATABASE_URL ?= postgres://postgres:postgres@localhost:5432/manus?sslmode=disable
-MIGRATIONS_DIR := $(shell pwd)/migrations
+MIGRATIONS_DIR := $(shell pwd)
 
 # 执行所有迁移 (按顺序执行 001, 002, 003...)
 migrate-up:
