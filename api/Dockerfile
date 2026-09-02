@@ -1,7 +1,7 @@
 # ============================================================
 # Stage 1: Builder - 编译 Go 代码
 # ============================================================
-FROM golang:1.23-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # 安装构建工具
 RUN apk add --no-cache git make

@@ -1,0 +1,47 @@
+# Git
+.git
+.gitignore
+
+# Documentation
+*.md
+LICENSE
+docs/
+
+# Development files
+.env
+.env.*
+*.local
+Makefile
+*.log
+
+# Test files
+*_test.go
+_test.go
+tests/
+*mocks/
+testdata/
+
+# Build artifacts
+bin/
+coverage.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# External directories (rebuilt in their own containers)
+ui/
+sandbox/
+vendor/
+
+# Database migrations (already in docker-entrypoint-initdb.d)
+*.sql
+
+# Extra files
+*.bak
+*.tmp

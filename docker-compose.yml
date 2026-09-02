@@ -129,6 +129,7 @@ services:
     volumes:
       # 挂载 config.docker.yaml 用于覆盖配置（Docker 环境专用）
       - ./api/config.docker.yaml:/app/config.yaml:ro
+    command: ["./go-manus", "-config", "/app/config.yaml"]
     ports:
       - "${API_PORT:-8080}:8080"
     networks:
