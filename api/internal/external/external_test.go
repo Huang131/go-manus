@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/mooc-manus/go-manus/api/internal/llmcore"
 	"github.com/mooc-manus/go-manus/api/internal/model"
 )
 
@@ -48,8 +49,8 @@ func TestLLM_Invoke(t *testing.T) {
 	}
 
 	req := &LLMRequest{
-		Messages: []map[string]interface{}{
-			{"role": "user", "content": "Hello, how are you?"},
+		Messages: []llmcore.Message{
+			{Role: llmcore.RoleUser, ContentText: "Hello, how are you?"},
 		},
 	}
 
@@ -74,8 +75,8 @@ func TestLLM_Invoke_WithError(t *testing.T) {
 	}
 
 	req := &LLMRequest{
-		Messages: []map[string]interface{}{
-			{"role": "user", "content": "Hello"},
+		Messages: []llmcore.Message{
+			{Role: llmcore.RoleUser, ContentText: "Hello"},
 		},
 	}
 

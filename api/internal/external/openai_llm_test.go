@@ -51,7 +51,7 @@ func TestOpenAIClient_ContentOnly(t *testing.T) {
 			"model": "test-model",
 			"choices": []map[string]interface{}{
 				{
-					"index":        0,
+					"index":         0,
 					"finish_reason": "stop",
 					"message": map[string]interface{}{
 						"role":    "assistant",
@@ -70,8 +70,8 @@ func TestOpenAIClient_ContentOnly(t *testing.T) {
 
 	c := newTestClient(t, srv.URL)
 	resp, err := c.Invoke(context.Background(), &LLMRequest{
-		Messages: []map[string]interface{}{
-			{"role": "user", "content": "hi"},
+		Messages: []llmcore.Message{
+			{Role: llmcore.RoleUser, ContentText: "hi"},
 		},
 	})
 	if err != nil {
@@ -90,9 +90,9 @@ func TestOpenAIClient_ContentOnly(t *testing.T) {
 
 // === 2. reasoning-only：验证协议层不做 reasoning→content 兜底 ===
 //
-// 阶段 1c 关键断言：OpenAIClient.Invoke 是协议层出口，不该做"业务兜底"。
-// 业务兜底仍在 NormalizeLLMResponse 里，由 DynamicLLM.Invoke 显式调用，
-// 那是 react_agent 真实依赖的兼容逻辑（阶段 1d 才迁移到 agent 消费侧）。
+// 阶段 1d 关键断言：OpenAIClient.Invoke 是协议层出口，不该做"业务兜底"。
+// Reasoning→Content 兜底已下沉到 agent 消费侧（react_agent / planner_agent），
+// 协议层只保证"上游给什么字段就如实返回什么字段"。
 // 本测试只断言 OpenAIClient.Invoke 自身的"协议层不混淆"契约。
 
 func TestOpenAIClient_ReasoningOnly_NoContentLeak(t *testing.T) {
@@ -103,11 +103,11 @@ func TestOpenAIClient_ReasoningOnly_NoContentLeak(t *testing.T) {
 			"model": "glm-5.2",
 			"choices": []map[string]interface{}{
 				{
-					"index":        0,
+					"index":         0,
 					"finish_reason": "stop",
 					"message": map[string]interface{}{
-						"role":             "assistant",
-						"content":          "",
+						"role":              "assistant",
+						"content":           "",
 						"reasoning_content": "分析任务...拆解步骤...",
 					},
 				},
@@ -123,8 +123,8 @@ func TestOpenAIClient_ReasoningOnly_NoContentLeak(t *testing.T) {
 
 	c := newTestClient(t, srv.URL)
 	resp, err := c.Invoke(context.Background(), &LLMRequest{
-		Messages: []map[string]interface{}{
-			{"role": "user", "content": "hi"},
+		Messages: []llmcore.Message{
+			{Role: llmcore.RoleUser, ContentText: "hi"},
 		},
 	})
 	if err != nil {
@@ -153,11 +153,11 @@ func TestOpenAIClient_ContentAndReasoning_Separated(t *testing.T) {
 			"model": "deepseek-v4-flash",
 			"choices": []map[string]interface{}{
 				{
-					"index":        0,
+					"index":         0,
 					"finish_reason": "stop",
 					"message": map[string]interface{}{
-						"role":             "assistant",
-						"content":          "最终回答。",
+						"role":              "assistant",
+						"content":           "最终回答。",
 						"reasoning_content": "思考中...先分析用户问题。",
 					},
 				},
@@ -169,8 +169,8 @@ func TestOpenAIClient_ContentAndReasoning_Separated(t *testing.T) {
 
 	c := newTestClient(t, srv.URL)
 	resp, err := c.Invoke(context.Background(), &LLMRequest{
-		Messages: []map[string]interface{}{
-			{"role": "user", "content": "hi"},
+		Messages: []llmcore.Message{
+			{Role: llmcore.RoleUser, ContentText: "hi"},
 		},
 	})
 	if err != nil {
@@ -197,7 +197,7 @@ func TestOpenAIClient_ReasoningAltField(t *testing.T) {
 			"model": "some-vendor",
 			"choices": []map[string]interface{}{
 				{
-					"index":        0,
+					"index":         0,
 					"finish_reason": "stop",
 					"message": map[string]interface{}{
 						"role":      "assistant",
@@ -213,7 +213,9 @@ func TestOpenAIClient_ReasoningAltField(t *testing.T) {
 
 	c := newTestClient(t, srv.URL)
 	resp, err := c.Invoke(context.Background(), &LLMRequest{
-		Messages: []map[string]interface{}{{"role": "user", "content": "hi"}},
+		Messages: []llmcore.Message{
+			{Role: llmcore.RoleUser, ContentText: "hi"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
@@ -235,7 +237,7 @@ func TestOpenAIClient_ToolCall(t *testing.T) {
 			"model": "test-model",
 			"choices": []map[string]interface{}{
 				{
-					"index":        0,
+					"index":         0,
 					"finish_reason": "tool_calls",
 					"message": map[string]interface{}{
 						"role": "assistant",
@@ -263,14 +265,16 @@ func TestOpenAIClient_ToolCall(t *testing.T) {
 
 	c := newTestClient(t, srv.URL)
 	resp, err := c.Invoke(context.Background(), &LLMRequest{
-		Messages: []map[string]interface{}{{"role": "user", "content": "上海天气"}},
-		Tools: []map[string]interface{}{
+		Messages: []llmcore.Message{
+			{Role: llmcore.RoleUser, ContentText: "上海天气"},
+		},
+		Tools: []llmcore.ToolSpec{
 			{
-				"type": "function",
-				"function": map[string]interface{}{
-					"name":        "get_weather",
-					"description": "get weather",
-					"parameters":  map[string]interface{}{"type": "object"},
+				Type: "function",
+				Function: llmcore.ToolSpecFunction{
+					Name:        "get_weather",
+					Description: "get weather",
+					Parameters:  map[string]interface{}{"type": "object"},
 				},
 			},
 		},
@@ -282,15 +286,14 @@ func TestOpenAIClient_ToolCall(t *testing.T) {
 		t.Fatalf("ToolUse len = %d, want 1", len(resp.ToolUse))
 	}
 	tc := resp.ToolUse[0]
-	if tc["id"] != "call_abc" {
-		t.Errorf("tool.id = %v, want call_abc", tc["id"])
+	if tc.ID != "call_abc" {
+		t.Errorf("tool.id = %v, want call_abc", tc.ID)
 	}
-	fn, _ := tc["function"].(map[string]interface{})
-	if fn["name"] != "get_weather" {
-		t.Errorf("tool.function.name = %v, want get_weather", fn["name"])
+	if tc.Name != "get_weather" {
+		t.Errorf("tool.name = %v, want get_weather", tc.Name)
 	}
-	if fn["arguments"] != `{"city":"上海"}` {
-		t.Errorf("tool.function.arguments = %v", fn["arguments"])
+	if tc.Arguments != `{"city":"上海"}` {
+		t.Errorf("tool.arguments = %v", tc.Arguments)
 	}
 }
 
@@ -311,7 +314,9 @@ func TestOpenAIClient_401_Auth(t *testing.T) {
 
 	c := newTestClient(t, srv.URL)
 	_, err := c.Invoke(context.Background(), &LLMRequest{
-		Messages: []map[string]interface{}{{"role": "user", "content": "hi"}},
+		Messages: []llmcore.Message{
+			{Role: llmcore.RoleUser, ContentText: "hi"},
+		},
 	})
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -347,7 +352,9 @@ func TestOpenAIClient_429_RateLimit(t *testing.T) {
 
 	c := newTestClient(t, srv.URL)
 	_, err := c.Invoke(context.Background(), &LLMRequest{
-		Messages: []map[string]interface{}{{"role": "user", "content": "hi"}},
+		Messages: []llmcore.Message{
+			{Role: llmcore.RoleUser, ContentText: "hi"},
+		},
 	})
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -377,7 +384,9 @@ func TestOpenAIClient_5xx_Server(t *testing.T) {
 
 	c := newTestClient(t, srv.URL)
 	_, err := c.Invoke(context.Background(), &LLMRequest{
-		Messages: []map[string]interface{}{{"role": "user", "content": "hi"}},
+		Messages: []llmcore.Message{
+			{Role: llmcore.RoleUser, ContentText: "hi"},
+		},
 	})
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -403,7 +412,9 @@ func TestOpenAIClient_ProtocolError_NotFallbackable(t *testing.T) {
 
 	c := newTestClient(t, srv.URL)
 	_, err := c.Invoke(context.Background(), &LLMRequest{
-		Messages: []map[string]interface{}{{"role": "user", "content": "hi"}},
+		Messages: []llmcore.Message{
+			{Role: llmcore.RoleUser, ContentText: "hi"},
+		},
 	})
 	if err == nil {
 		t.Fatal("expected error, got nil")

@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/mooc-manus/go-manus/api/internal/external"
+	"github.com/mooc-manus/go-manus/api/internal/llmcore"
 	"github.com/mooc-manus/go-manus/api/internal/model"
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
 )
@@ -50,18 +51,18 @@ func (a *PlannerAgent) CreatePlan(ctx context.Context, message *model.Message) (
 	// 添加系统提示词
 	systemPrompt := SystemPrompt + "\n" + PlannerSystemPrompt
 
-	// 构建消息历史
-	messages := []map[string]interface{}{
-		{"role": "system", "content": systemPrompt},
-		{"role": "user", "content": prompt},
+	// 构建消息历史（阶段 1d：改 llmcore.Message 强类型）
+	messages := []llmcore.Message{
+		{Role: llmcore.RoleSystem, ContentText: systemPrompt},
+		{Role: llmcore.RoleUser, ContentText: prompt},
 	}
 
 	// 调用 LLM（与原项目对齐：planner 阶段强制 JSON 输出，抑制 CoT 泄露）
 	resp, _, err := a.invokeWithEmptyRetry(ctx, &external.LLMRequest{
 		Messages: messages,
 		Tools:    a.GetToolsForLLM(),
-		ResponseFormat: map[string]interface{}{
-			"type": "json_object",
+		ResponseFormat: &llmcore.ResponseFormat{
+			Type: "json_object",
 		},
 	}, a.config.MaxRetries)
 	if err != nil {
@@ -87,6 +88,7 @@ func (a *PlannerAgent) CreatePlan(ctx context.Context, message *model.Message) (
 			zap.String("session_id", a.sessionID),
 			zap.Int("content_len", len(resp.Content)),
 			zap.Error(err))
+		// 阶段 1d：兜底内容由调用方基于 ReasoningContent 自行决定（不再由协议层注入 Content）
 		reply := strings.TrimSpace(resp.Content)
 		if reply == "" {
 			reply = strings.TrimSpace(resp.ReasoningContent)
@@ -142,18 +144,18 @@ func (a *PlannerAgent) UpdatePlan(ctx context.Context, plan *model.Plan, complet
 	// 添加系统提示词
 	systemPrompt := SystemPrompt + "\n" + PlannerSystemPrompt
 
-	// 构建消息历史
-	messages := []map[string]interface{}{
-		{"role": "system", "content": systemPrompt},
-		{"role": "user", "content": prompt},
+	// 构建消息历史（阶段 1d：改 llmcore.Message 强类型）
+	messages := []llmcore.Message{
+		{Role: llmcore.RoleSystem, ContentText: systemPrompt},
+		{Role: llmcore.RoleUser, ContentText: prompt},
 	}
 
 	// 调用 LLM（planner 阶段强制 JSON 输出，与原项目对齐）
 	resp, _, err := a.invokeWithEmptyRetry(ctx, &external.LLMRequest{
 		Messages: messages,
 		Tools:    a.GetToolsForLLM(),
-		ResponseFormat: map[string]interface{}{
-			"type": "json_object",
+		ResponseFormat: &llmcore.ResponseFormat{
+			Type: "json_object",
 		},
 	}, a.config.MaxRetries)
 	if err != nil {

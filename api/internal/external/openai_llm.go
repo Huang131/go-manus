@@ -57,16 +57,16 @@ func NewOpenAIClient(cfg *OpenAIClientConfig) *OpenAIClient {
 }
 
 // openAIChatRequest OpenAI Chat API 请求 wire format
+// 阶段 1d：Messages / Tools / ResponseFormat 改用 llmcore 强类型 → 直接 marshal
 type openAIChatRequest struct {
-	Model       string                   `json:"model"`
-	Messages    []map[string]interface{} `json:"messages"`
-	Tools       []map[string]interface{} `json:"tools,omitempty"`
-	ToolChoice  interface{}              `json:"tool_choice,omitempty"`
-	Temperature *float64                 `json:"temperature,omitempty"`
-	MaxTokens   *int                     `json:"max_tokens,omitempty"`
-	Stream      bool                     `json:"stream,omitempty"`
-	// ResponseFormat 例如 {"type": "json_object"} 或 json_schema
-	ResponseFormat map[string]interface{} `json:"response_format,omitempty"`
+	Model          string                  `json:"model"`
+	Messages       []llmcore.Message       `json:"messages"`
+	Tools          []llmcore.ToolSpec      `json:"tools,omitempty"`
+	ToolChoice     interface{}             `json:"tool_choice,omitempty"`
+	Temperature    *float64                `json:"temperature,omitempty"`
+	MaxTokens      *int                    `json:"max_tokens,omitempty"`
+	Stream         bool                    `json:"stream,omitempty"`
+	ResponseFormat *llmcore.ResponseFormat `json:"response_format,omitempty"`
 }
 
 // openAIChatResponse OpenAI Chat API 响应 wire format
@@ -114,15 +114,17 @@ type openAIChatResponse struct {
 
 // Invoke 调用 OpenAI Chat API
 //
-// 阶段 1c 改造点：
-//  1. 内部按 llmcore 协议解析上游响应（Content / ReasoningContent / ToolCalls 严格分离）
-//  2. 去掉"content 为空时把 reasoning 当 content 兜底"的违规逻辑
+// 阶段 1d 改造点：
+//  1. 入参 Messages / Tools / ResponseFormat 用 llmcore 强类型，直接 marshal
+//  2. 内部按 llmcore 协议解析上游响应（Content / ReasoningContent / ToolCalls 严格分离）
+//  3. 去掉"content 为空时把 reasoning 当 content 兜底"的违规逻辑
 //     —— Reasoning 不再覆盖 Content；调用方读 ReasoningContent 字段
-//  3. 上游错误按 401/403/429/5xx/timeout 分类为 llmcore.ProviderError，
+//  4. 上游错误按 401/403/429/5xx/timeout 分类为 llmcore.ProviderError，
 //     为阶段 3 fallback 矩阵提供 ErrorKind 钩子
-//  4. 对外仍返回 external.LLMResponse，保持业务侧不破坏
+//  5. 对外仍返回 external.LLMResponse（业务侧契约字段不变），
+//     但 ToolUse 改 []llmcore.ToolCall；Message 结构由调用方按需构造
 func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMResponse, error) {
-	// 构建 wire format 请求（业务层仍按 map 传 message/tool，阶段 1d 再切）
+	// 构建 wire format 请求
 	temp := c.temperature
 	maxTok := c.maxTokens
 	chatReq := openAIChatRequest{
@@ -243,28 +245,16 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMRespons
 		}
 	}
 
-	usage := llmcore.Usage{
-		PromptTokens:     chatResp.Usage.PromptTokens,
-		CompletionTokens: chatResp.Usage.CompletionTokens,
-		TotalTokens:      chatResp.Usage.TotalTokens,
-		ReasoningTokens:  pickReasoningTokens(chatResp.Usage.ReasoningTokens, chatResp.Usage.CompletionDetails.ReasoningTokens),
+	// === 转回 external.LLMResponse ===
+	// 阶段 1d：ToolUse 改 []llmcore.ToolCall，不再有 map 转换
+	out := &LLMResponse{
+		ID:               chatResp.ID,
+		Content:          choice.Message.Content, // 严格：content 即 content，不被 reasoning 覆盖
+		ReasoningContent: reasoning,
+		RawContent:       choice.Message.Content,
+		ToolUse:          toolCalls,
 	}
-
-	coreResp := &llmcore.LLMResponse{
-		ID:    chatResp.ID,
-		Model: pickModel(chatResp.Model, c.modelName),
-		Message: llmcore.Message{
-			Role:        llmcore.RoleAssistant,
-			ContentText: choice.Message.Content, // 严格：content 即 content，不被 reasoning 覆盖
-			Reasoning:   reasoning,
-			ToolCalls:   toolCalls,
-		},
-		FinishReason: choice.FinishReason,
-		Usage:        usage,
-	}
-
-	// === 转回 external.LLMResponse（业务侧契约不变，阶段 1d 才切到 llmcore）===
-	return toExternalResponse(coreResp), nil
+	return out, nil
 }
 
 // classifyHTTPError 把 HTTP 状态码分类为 llmcore.ErrorKind
@@ -313,50 +303,6 @@ func (c *OpenAIClient) classifyHTTPError(status int, body []byte) error {
 	// classifyHTTPError 的 kind 已经被 isRetryable/isFallbackable 决定
 	// 这里用 NewProviderError 默认规则即可
 	return pe
-}
-
-// toExternalResponse 把 llmcore.LLMResponse 转回 external.LLMResponse
-//
-// 阶段 1c 改造点：协议层转回业务契约时不做 reasoning→content 兜底。
-// 兜底是 agent 消费方的事（react_agent 依赖），由 DynamicLLM.Invoke 末尾
-// 显式调用 NormalizeLLMResponse 完成。本函数输出"原始"业务契约。
-func toExternalResponse(c *llmcore.LLMResponse) *LLMResponse {
-	out := &LLMResponse{
-		ID:               c.ID,
-		Content:          c.Message.ContentText,
-		ReasoningContent: c.Message.Reasoning,
-		RawContent:       c.Message.ContentText,
-	}
-	if len(c.Message.ToolCalls) > 0 {
-		out.ToolUse = make([]map[string]interface{}, len(c.Message.ToolCalls))
-		for i, tc := range c.Message.ToolCalls {
-			out.ToolUse[i] = map[string]interface{}{
-				"id":   tc.ID,
-				"type": tc.Type,
-				"function": map[string]interface{}{
-					"name":      tc.Name,
-					"arguments": tc.Arguments,
-				},
-			}
-		}
-	}
-	return out
-}
-
-// pickReasoningTokens 部分 provider 把 reasoning tokens 放在 completion_tokens_details 里
-func pickReasoningTokens(a, b int) int {
-	if a > 0 {
-		return a
-	}
-	return b
-}
-
-// pickModel 优先用上游回传的 model 名（处理 alias/路由）
-func pickModel(serverModel, fallback string) string {
-	if serverModel != "" {
-		return serverModel
-	}
-	return fallback
 }
 
 func truncateBody(b []byte) string {

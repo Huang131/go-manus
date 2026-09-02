@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 
+	"github.com/mooc-manus/go-manus/api/internal/llmcore"
 	"github.com/mooc-manus/go-manus/api/internal/model"
 )
 
@@ -20,6 +21,11 @@ type Tool interface {
 
 // MultiFunctionTool 一个工具包可以向 LLM 暴露多个函数。
 // MessageTool 使用该接口同时提供通知用户和询问用户两个函数。
+//
+// 阶段 1d 决策：保留 GetTools() []map 契约不变。
+// 原因：MessageTool / tool_message 内部把每个 function 写死成 map[string]interface{}，
+// 改 llmcore.ToolSpec 会引入"双 schema 表达"成本（map → ToolSpec → map 反向）。
+// 阶段 2 可以整体重构成 []llmcore.ToolSpec。
 type MultiFunctionTool interface {
 	Tool
 	GetTools() []map[string]interface{}
@@ -74,17 +80,21 @@ func (r *ToolRegistry) List() []Tool {
 	return result
 }
 
-// GetToolsForLLM 返回适合 LLM 调用的工具格式
-func (r *ToolRegistry) GetToolsForLLM() []map[string]interface{} {
-	result := make([]map[string]interface{}, 0, len(r.tools))
+// GetToolsForLLM 返回适合 LLM 调用的工具格式（llmcore 强类型）
+//
+// 阶段 1d 改造点：返回 []llmcore.ToolSpec 而非 []map。
+// 业务侧 / LLM adapter 只看到协议级类型，不再拼接 map。
+func (r *ToolRegistry) GetToolsForLLM() []llmcore.ToolSpec {
+	result := make([]llmcore.ToolSpec, 0, len(r.tools))
 	for name, schema := range r.schemas {
 		parameters, _ := schema["parameters"].(map[string]interface{})
-		result = append(result, map[string]interface{}{
-			"type": "function",
-			"function": map[string]interface{}{
-				"name":        name,
-				"description": schema["description"],
-				"parameters":  parameters,
+		description, _ := schema["description"].(string)
+		result = append(result, llmcore.ToolSpec{
+			Type: "function",
+			Function: llmcore.ToolSpecFunction{
+				Name:        name,
+				Description: description,
+				Parameters:  parameters,
 			},
 		})
 	}
@@ -93,12 +103,12 @@ func (r *ToolRegistry) GetToolsForLLM() []map[string]interface{} {
 		if _, ok := tool.(MultiFunctionTool); ok {
 			continue
 		}
-		result = append(result, map[string]interface{}{
-			"type": "function",
-			"function": map[string]interface{}{
-				"name":        name,
-				"description": tool.Description(),
-				"parameters":  tool.Parameters(),
+		result = append(result, llmcore.ToolSpec{
+			Type: "function",
+			Function: llmcore.ToolSpecFunction{
+				Name:        name,
+				Description: tool.Description(),
+				Parameters:  tool.Parameters(),
 			},
 		})
 	}

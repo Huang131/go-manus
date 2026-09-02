@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mooc-manus/go-manus/api/internal/external"
+	"github.com/mooc-manus/go-manus/api/internal/llmcore"
 	"github.com/mooc-manus/go-manus/api/internal/model"
 	"github.com/mooc-manus/go-manus/api/internal/repository"
 	"go.uber.org/zap"
@@ -205,8 +206,8 @@ func (a *BaseAgent) MemorySize() int {
 	return a.memory.Size()
 }
 
-// GetToolsForLLM 获取 LLM 可用的工具
-func (a *BaseAgent) GetToolsForLLM() []map[string]interface{} {
+// GetToolsForLLM 获取 LLM 可用的工具（阶段 1d：返回 llmcore.ToolSpec 强类型）
+func (a *BaseAgent) GetToolsForLLM() []llmcore.ToolSpec {
 	return a.toolRegistry.GetToolsForLLM()
 }
 
@@ -303,20 +304,17 @@ type InvokeResult struct {
 // 返回最终响应与实际调用次数（成功即停止，不超过 maxRetries 次）。
 //
 // 参数 maxRetries 表示最多尝试次数（含首次）。例如 maxRetries=3 表示最多重试 2 次。
+//
+// 阶段 1d 改造点：messages 类型从 []map 改 []llmcore.Message。
+// llmcore.Message 是值类型，深拷贝 = 元素拷贝即可（不再 map-by-map）。
 func (a *BaseAgent) invokeWithEmptyRetry(ctx context.Context, req *external.LLMRequest, maxRetries int) (*external.LLMResponse, int, error) {
 	if maxRetries < 1 {
 		maxRetries = 1
 	}
 
 	// 深拷贝 messages，避免污染调用方的 slice
-	messages := make([]map[string]interface{}, 0, len(req.Messages)+2)
-	for _, m := range req.Messages {
-		cp := make(map[string]interface{}, len(m))
-		for k, v := range m {
-			cp[k] = v
-		}
-		messages = append(messages, cp)
-	}
+	messages := make([]llmcore.Message, len(req.Messages))
+	copy(messages, req.Messages)
 
 	current := *req
 	current.Messages = messages
@@ -328,8 +326,8 @@ func (a *BaseAgent) invokeWithEmptyRetry(ctx context.Context, req *external.LLMR
 			lastErr = err
 			// LLM 错误：注入空 assistant + 重试提示，然后继续
 			current.Messages = append(current.Messages,
-				map[string]interface{}{"role": "assistant", "content": ""},
-				map[string]interface{}{"role": "user", "content": "AI 无响应内容，请继续。"},
+				llmcore.Message{Role: llmcore.RoleAssistant, ContentText: ""},
+				llmcore.Message{Role: llmcore.RoleUser, ContentText: "AI 无响应内容，请继续。"},
 			)
 			continue
 		}
@@ -342,8 +340,8 @@ func (a *BaseAgent) invokeWithEmptyRetry(ctx context.Context, req *external.LLMR
 			zap.String("agent", a.name),
 			zap.Int("attempt", attempt))
 		current.Messages = append(current.Messages,
-			map[string]interface{}{"role": "assistant", "content": ""},
-			map[string]interface{}{"role": "user", "content": "AI 无响应内容，请继续。"},
+			llmcore.Message{Role: llmcore.RoleAssistant, ContentText: ""},
+			llmcore.Message{Role: llmcore.RoleUser, ContentText: "AI 无响应内容，请继续。"},
 		)
 	}
 
@@ -377,10 +375,13 @@ const retryInterval = 1.0
 
 // Invoke 执行 ReAct 循环，调用 LLM 并处理工具调用
 // 返回最终的消息内容，如果没有有效回复则返回错误
+//
+// 阶段 1d 改造点：messages 改 []llmcore.Message，handleToolCall 改 llmcore.ToolCall。
+// assistantMsg / tool 消息改成 Message 结构体，不再用 map 拼字符串键。
 func (a *BaseAgent) Invoke(ctx context.Context, query string) (*InvokeResult, error) {
 	// 1. 构建初始消息
-	messages := []map[string]interface{}{
-		{"role": "user", "content": query},
+	messages := []llmcore.Message{
+		{Role: llmcore.RoleUser, ContentText: query},
 	}
 
 	// 2. 循环调用 LLM 直到达到最大迭代次数或 LLM 不再调用工具
@@ -398,14 +399,10 @@ func (a *BaseAgent) Invoke(ctx context.Context, query string) (*InvokeResult, er
 					zap.Error(err))
 
 				// 添加空回复到历史
-				messages = append(messages, map[string]interface{}{
-					"role":    "assistant",
-					"content": "",
-				})
-				messages = append(messages, map[string]interface{}{
-					"role":    "user",
-					"content": "AI 无响应内容，请继续。",
-				})
+				messages = append(messages,
+					llmcore.Message{Role: llmcore.RoleAssistant, ContentText: ""},
+					llmcore.Message{Role: llmcore.RoleUser, ContentText: "AI 无响应内容，请继续。"},
+				)
 
 				resp, err = a.llm.Invoke(ctx, &external.LLMRequest{
 					Messages: messages,
@@ -421,15 +418,15 @@ func (a *BaseAgent) Invoke(ctx context.Context, query string) (*InvokeResult, er
 			}
 		}
 
-		// 4. 构建助手消息
-		assistantMsg := map[string]interface{}{
-			"role":    "assistant",
-			"content": resp.Content,
-		}
-
-		// 5. 处理工具调用
+		// 4. 处理工具调用
 		if len(resp.ToolUse) > 0 {
-			assistantMsg["tool_calls"] = resp.ToolUse
+			// 4a. 把 assistant + tool_calls 写回历史
+			assistantMsg := llmcore.Message{
+				Role:      llmcore.RoleAssistant,
+				ContentText: resp.Content,
+				ToolCalls: resp.ToolUse,
+				Reasoning: resp.ReasoningContent,
+			}
 			messages = append(messages, assistantMsg)
 
 			// 限制只处理第一个工具调用（避免并发问题）
@@ -444,20 +441,15 @@ func (a *BaseAgent) Invoke(ctx context.Context, query string) (*InvokeResult, er
 			for _, tc := range toolCalls {
 				result, err := a.handleToolCall(ctx, tc, messages)
 				if err != nil {
-					// handleToolCall 失败时 result 可能为 nil，先取安全字段再解引用
-					functionName, toolCallID := "", ""
-					if fn, ok := tc["function"].(map[string]interface{}); ok {
-						functionName, _ = fn["name"].(string)
-					}
-					toolCallID, _ = tc["id"].(string)
 					logger.Error("工具调用失败",
-						zap.String("function", functionName),
+						zap.String("function", tc.Name),
+						zap.String("tool_call_id", tc.ID),
 						zap.Error(err))
 					// 添加错误结果到历史，继续循环
-					messages = append(messages, map[string]interface{}{
-						"role":         "tool",
-						"tool_call_id": toolCallID,
-						"content":      fmt.Sprintf(`{"success": false, "message": "%s"}`, err.Error()),
+					messages = append(messages, llmcore.Message{
+						Role:       llmcore.RoleTool,
+						ToolCallID: tc.ID,
+						ContentText: fmt.Sprintf(`{"success": false, "message": "%s"}`, err.Error()),
 					})
 					continue
 				}
@@ -465,10 +457,10 @@ func (a *BaseAgent) Invoke(ctx context.Context, query string) (*InvokeResult, er
 				// 检测是否需要等待用户输入
 				if result.WaitForUser {
 					// 将工具结果添加到历史
-					messages = append(messages, map[string]interface{}{
-						"role":         "tool",
-						"tool_call_id": result.ToolCallID,
-						"content":      result.Result.JSON(),
+					messages = append(messages, llmcore.Message{
+						Role:       llmcore.RoleTool,
+						ToolCallID: result.ToolCallID,
+						ContentText: result.Result.JSON(),
 					})
 
 					// 获取用户问题
@@ -487,10 +479,10 @@ func (a *BaseAgent) Invoke(ctx context.Context, query string) (*InvokeResult, er
 				}
 
 				// 将工具结果添加到历史
-				messages = append(messages, map[string]interface{}{
-					"role":         "tool",
-					"tool_call_id": result.ToolCallID,
-					"content":      result.Result.JSON(),
+				messages = append(messages, llmcore.Message{
+					Role:       llmcore.RoleTool,
+					ToolCallID: result.ToolCallID,
+					ContentText: result.Result.JSON(),
 				})
 			}
 
@@ -498,24 +490,24 @@ func (a *BaseAgent) Invoke(ctx context.Context, query string) (*InvokeResult, er
 			continue
 		}
 
-		// 6. 如果没有工具调用，检查是否有有效内容
+		// 5. 如果没有工具调用，检查是否有有效内容
 		if resp.Content == "" {
 			logger.Warn("LLM 返回空内容，执行重试")
 
 			// 添加空回复到历史
-			messages = append(messages, map[string]interface{}{
-				"role":    "assistant",
-				"content": "",
-			})
-			messages = append(messages, map[string]interface{}{
-				"role":    "user",
-				"content": "AI 无响应内容，请继续。",
-			})
+			messages = append(messages,
+				llmcore.Message{Role: llmcore.RoleAssistant, ContentText: ""},
+				llmcore.Message{Role: llmcore.RoleUser, ContentText: "AI 无响应内容，请继续。"},
+			)
 			continue
 		}
 
-		// 7. 有有效内容，添加到最后并返回
-		messages = append(messages, assistantMsg)
+		// 6. 有有效内容，添加到最后并返回
+		messages = append(messages, llmcore.Message{
+			Role:        llmcore.RoleAssistant,
+			ContentText: resp.Content,
+			Reasoning:   resp.ReasoningContent,
+		})
 		return &InvokeResult{
 			Content:  resp.Content,
 			ToolCall: false,
@@ -530,27 +522,20 @@ func (a *BaseAgent) Invoke(ctx context.Context, query string) (*InvokeResult, er
 }
 
 // handleToolCall 处理单个工具调用
-func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall map[string]interface{}, messages []map[string]interface{}) (*ToolCallResult, error) {
-	// 解析工具调用信息
-	function, ok := toolCall["function"].(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("invalid tool call format")
-	}
+//
+// 阶段 1d 改造点：toolCall 从 map 改 llmcore.ToolCall；messages 同步改 []llmcore.Message。
+// toolCall.Arguments 已经是 JSON 字符串，直接 json.Unmarshal / Parse 即可，不再 cast map。
+func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCall, messages []llmcore.Message) (*ToolCallResult, error) {
+	functionName := toolCall.Name
+	toolCallID := toolCall.ID
 
-	functionName, _ := function["name"].(string)
-	argumentsJSON, _ := function["arguments"]
-	toolCallID, _ := toolCall["id"].(string)
-
-	// 解析参数
+	// 解析参数（Arguments 是 JSON 字符串）
 	var arguments map[string]interface{}
-	if argumentsJSON != nil {
-		argumentsStr, ok := argumentsJSON.(string)
-		if ok {
-			if err := a.jsonParser.Parse(argumentsStr, &arguments); err != nil {
-				// 尝试直接解析
-				if err := json.Unmarshal([]byte(argumentsStr), &arguments); err != nil {
-					arguments = make(map[string]interface{})
-				}
+	if toolCall.Arguments != "" {
+		if err := a.jsonParser.Parse(toolCall.Arguments, &arguments); err != nil {
+			// 尝试直接解析
+			if err := json.Unmarshal([]byte(toolCall.Arguments), &arguments); err != nil {
+				arguments = make(map[string]interface{})
 			}
 		}
 	}
@@ -623,6 +608,9 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall map[string]inte
 }
 
 // InvokeWithEvents 执行 ReAct 循环，返回事件流
+//
+// 阶段 1d 改造点：messages 改 []llmcore.Message，handleToolCall 改 llmcore.ToolCall。
+// 取参数的方式从 tc["function"]["name"] 改 tc.Name，argumentsJSON cast 改 tc.Arguments。
 func (a *BaseAgent) InvokeWithEvents(ctx context.Context, query string) <-chan model.BaseEvent {
 	ch := make(chan model.BaseEvent, 100)
 
@@ -630,8 +618,8 @@ func (a *BaseAgent) InvokeWithEvents(ctx context.Context, query string) <-chan m
 		defer close(ch)
 
 		// 1. 构建初始消息
-		messages := []map[string]interface{}{
-			{"role": "user", "content": query},
+		messages := []llmcore.Message{
+			{Role: llmcore.RoleUser, ContentText: query},
 		}
 
 		// 2. 循环调用 LLM
@@ -652,10 +640,11 @@ func (a *BaseAgent) InvokeWithEvents(ctx context.Context, query string) <-chan m
 			// 处理工具调用
 			if len(resp.ToolUse) > 0 {
 				// 构建助手消息
-				assistantMsg := map[string]interface{}{
-					"role":       "assistant",
-					"content":    resp.Content,
-					"tool_calls": resp.ToolUse,
+				assistantMsg := llmcore.Message{
+					Role:        llmcore.RoleAssistant,
+					ContentText: resp.Content,
+					ToolCalls:   resp.ToolUse,
+					Reasoning:   resp.ReasoningContent,
 				}
 				messages = append(messages, assistantMsg)
 
@@ -669,17 +658,13 @@ func (a *BaseAgent) InvokeWithEvents(ctx context.Context, query string) <-chan m
 
 				for _, tc := range toolCalls {
 					// 解析工具调用信息
-					function, _ := tc["function"].(map[string]interface{})
-					functionName, _ := function["name"].(string)
-					argumentsJSON, _ := function["arguments"]
-					toolCallID, _ := tc["id"].(string)
+					functionName := tc.Name
+					toolCallID := tc.ID
 
 					// 解析参数
 					var arguments map[string]interface{}
-					if argumentsJSON != nil {
-						if argumentsStr, ok := argumentsJSON.(string); ok {
-							_ = a.jsonParser.Parse(argumentsStr, &arguments)
-						}
+					if tc.Arguments != "" {
+						_ = a.jsonParser.Parse(tc.Arguments, &arguments)
 					}
 
 					// 发送工具调用中事件
@@ -694,10 +679,10 @@ func (a *BaseAgent) InvokeWithEvents(ctx context.Context, query string) <-chan m
 					}
 
 					// 添加工具结果到历史
-					messages = append(messages, map[string]interface{}{
-						"role":         "tool",
-						"tool_call_id": toolCallID,
-						"content":      result.Result.JSON(),
+					messages = append(messages, llmcore.Message{
+						Role:        llmcore.RoleTool,
+						ToolCallID:  toolCallID,
+						ContentText: result.Result.JSON(),
 					})
 				}
 				continue
@@ -705,23 +690,20 @@ func (a *BaseAgent) InvokeWithEvents(ctx context.Context, query string) <-chan m
 
 			// 没有工具调用，检查内容
 			if resp.Content != "" {
-				messages = append(messages, map[string]interface{}{
-					"role":    "assistant",
-					"content": resp.Content,
+				messages = append(messages, llmcore.Message{
+					Role:        llmcore.RoleAssistant,
+					ContentText: resp.Content,
+					Reasoning:   resp.ReasoningContent,
 				})
 				ch <- model.NewMessageEvent("assistant", resp.Content)
 				return
 			}
 
 			// 空内容，继续循环
-			messages = append(messages, map[string]interface{}{
-				"role":    "assistant",
-				"content": "",
-			})
-			messages = append(messages, map[string]interface{}{
-				"role":    "user",
-				"content": "AI 无响应内容，请继续。",
-			})
+			messages = append(messages,
+				llmcore.Message{Role: llmcore.RoleAssistant, ContentText: ""},
+				llmcore.Message{Role: llmcore.RoleUser, ContentText: "AI 无响应内容，请继续。"},
+			)
 		}
 
 		ch <- model.NewErrorEvent(fmt.Sprintf("Agent 迭代超过最大次数: %d", a.config.MaxIterations))

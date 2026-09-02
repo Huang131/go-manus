@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/mooc-manus/go-manus/api/internal/external"
+	"github.com/mooc-manus/go-manus/api/internal/llmcore"
 	"github.com/mooc-manus/go-manus/api/internal/model"
 	"go.uber.org/zap"
 
@@ -134,22 +135,22 @@ func (a *ReActAgent) Summarize(ctx context.Context) (string, []string, error) {
 	// 添加记忆上下文
 	memoryContext := a.GetMemoryContext()
 
-	// 构建消息历史
-	messages := []map[string]interface{}{
-		{"role": "system", "content": systemPrompt},
+	// 构建消息历史（阶段 1d：改 llmcore.Message 强类型）
+	messages := []llmcore.Message{
+		{Role: llmcore.RoleSystem, ContentText: systemPrompt},
 	}
 
 	// 添加记忆上下文
 	if memoryContext != "" {
-		messages = append(messages, map[string]interface{}{
-			"role":    "system",
-			"content": "任务执行上下文:\n" + memoryContext,
+		messages = append(messages, llmcore.Message{
+			Role:        llmcore.RoleSystem,
+			ContentText: "任务执行上下文:\n" + memoryContext,
 		})
 	}
 
-	messages = append(messages, map[string]interface{}{
-		"role":    "user",
-		"content": prompt,
+	messages = append(messages, llmcore.Message{
+		Role:        llmcore.RoleUser,
+		ContentText: prompt,
 	})
 
 	// 调用 LLM

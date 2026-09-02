@@ -2,6 +2,8 @@ package external
 
 import (
 	"context"
+
+	"github.com/mooc-manus/go-manus/api/internal/llmcore"
 )
 
 // llmModelIDKey ctx 中携带"本次请求要用的模型 ID"的 key。
@@ -25,21 +27,23 @@ func ModelIDFromContext(ctx context.Context) string {
 	return ""
 }
 
-// LLMRequest LLM 请求参数
+// LLMRequest LLM 请求参数（阶段 1d：Messages / Tools / ResponseFormat 改用 llmcore 强类型）
+//
+// 业务侧只看到 llmcore 类型，看不到任何厂商协议；Adapter 负责把 llmcore 转 wire format。
 type LLMRequest struct {
-	Messages       []map[string]interface{} `json:"messages"`
-	Tools          []map[string]interface{} `json:"tools,omitempty"`
-	ResponseFormat map[string]interface{}   `json:"response_format,omitempty"`
-	ToolChoice     string                   `json:"tool_choice,omitempty"`
+	Messages       []llmcore.Message    `json:"messages"`
+	Tools          []llmcore.ToolSpec   `json:"tools,omitempty"`
+	ResponseFormat *llmcore.ResponseFormat `json:"response_format,omitempty"`
+	ToolChoice     string               `json:"tool_choice,omitempty"`
 }
 
-// LLMResponse LLM 响应
+// LLMResponse LLM 响应（阶段 1d：ToolUse 改 []llmcore.ToolCall）
 type LLMResponse struct {
-	ID               string                   `json:"id"`
-	Content          string                   `json:"content"`
-	ReasoningContent string                   `json:"reasoning_content,omitempty"`
-	RawContent       string                   `json:"raw_content,omitempty"`
-	ToolUse          []map[string]interface{} `json:"tool_calls,omitempty"`
+	ID               string            `json:"id"`
+	Content          string            `json:"content"`
+	ReasoningContent string            `json:"reasoning_content,omitempty"`
+	RawContent       string            `json:"raw_content,omitempty"`
+	ToolUse          []llmcore.ToolCall `json:"tool_calls,omitempty"`
 }
 
 // LLM LLM 接口
@@ -83,6 +87,11 @@ func NewDynamicLLM(provider LLMConfigProvider, fallback *OpenAIClientConfig) *Dy
 }
 
 // Invoke 调用 LLM，调用前先加载最新配置。
+//
+// 阶段 1d 改造点：去掉 NormalizeLLMResponse 调用。
+// Reasoning→Content 兜底是 agent 消费方（react_agent / planner_agent）的责任，
+// 由调用方基于 LLMResponse.ReasoningContent 字段自行决定是否兜底。
+// 协议层只保证"上游给什么字段就如实返回什么字段"。
 func (d *DynamicLLM) Invoke(ctx context.Context, req *LLMRequest) (*LLMResponse, error) {
 	cfg := d.fallback
 	if d.provider != nil {
@@ -90,11 +99,7 @@ func (d *DynamicLLM) Invoke(ctx context.Context, req *LLMRequest) (*LLMResponse,
 			cfg = c
 		}
 	}
-	resp, err := NewOpenAIClient(cfg).Invoke(ctx, req)
-	if err != nil {
-		return nil, err
-	}
-	return NormalizeLLMResponse(resp), nil
+	return NewOpenAIClient(cfg).Invoke(ctx, req)
 }
 
 // ModelName 返回模型名称（fallback）。

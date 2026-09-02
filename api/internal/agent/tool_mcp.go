@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/mooc-manus/go-manus/api/internal/external"
+	"github.com/mooc-manus/go-manus/api/internal/llmcore"
 	"github.com/mooc-manus/go-manus/api/internal/model"
 	"go.uber.org/zap"
 
@@ -182,11 +183,13 @@ func (t *MCPTool) Initialize(cfg *MCPConfig) error {
 }
 
 // GetToolsForLLM 获取所有 MCP 工具的 schema 列表
-func (t *MCPTool) GetToolsForLLM() []map[string]interface{} {
+//
+// 阶段 1d 改造点：返回 []llmcore.ToolSpec 而非 []map，与 ToolRegistry.GetToolsForLLM 协议统一。
+func (t *MCPTool) GetToolsForLLM() []llmcore.ToolSpec {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	var result []map[string]interface{}
+	result := make([]llmcore.ToolSpec, 0)
 
 	for serverName, tools := range t.tools {
 		for _, tool := range tools {
@@ -208,12 +211,12 @@ func (t *MCPTool) GetToolsForLLM() []map[string]interface{} {
 				}
 			}
 
-			result = append(result, map[string]interface{}{
-				"type": "function",
-				"function": map[string]interface{}{
-					"name":        toolName,
-					"description": description,
-					"parameters":  inputSchema,
+			result = append(result, llmcore.ToolSpec{
+				Type: "function",
+				Function: llmcore.ToolSpecFunction{
+					Name:        toolName,
+					Description: description,
+					Parameters:  inputSchema,
 				},
 			})
 		}

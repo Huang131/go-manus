@@ -96,7 +96,7 @@ func TestToolRegistry_GetToolsForLLM(t *testing.T) {
 		t.Errorf("GetToolsForLLM() got %d tools, want 1", len(tools))
 	}
 
-	if tools[0]["type"] != "function" {
+	if tools[0].Type != "function" {
 		t.Error("GetToolsForLLM() should return function type")
 	}
 }
