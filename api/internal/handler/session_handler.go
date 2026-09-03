@@ -2,7 +2,7 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
+	"github.com/bytedance/sonic"
 	"strconv"
 	"strings"
 	"time"
@@ -117,7 +117,7 @@ func (h *SessionHandler) Stream(c *gin.Context) {
 			if err != nil {
 				continue
 			}
-			data, _ := json.Marshal(sessions)
+			data, _ := sonic.Marshal(sessions)
 			c.SSEvent("sessions", string(data))
 			c.Writer.Flush()
 		}
@@ -149,7 +149,7 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 		ModelID string `json:"model_id"`
 	}
 	if len(rawBody) > 0 {
-		if err := json.Unmarshal(rawBody, &req); err != nil {
+		if err := sonic.Unmarshal(rawBody, &req); err != nil {
 			response.Error(c, err.Error())
 			return
 		}
@@ -199,7 +199,7 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 		}
 
 		// 先推送用户消息事件（让前端能立即展示用户发送的内容）
-		userPayload, _ := json.Marshal(map[string]interface{}{
+		userPayload, _ := sonic.Marshal(map[string]interface{}{
 			"event_id":   "",
 			"created_at": time.Now().Unix(),
 			"role":       msg.Role,
@@ -209,7 +209,7 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 		c.Writer.Flush()
 
 		// 再推送 task_id 事件（单独业务类型，前端可识别）
-		taskIDData, _ := json.Marshal(map[string]interface{}{"task_id": taskID})
+		taskIDData, _ := sonic.Marshal(map[string]interface{}{"task_id": taskID})
 		c.SSEvent("task_id", string(taskIDData))
 		c.Writer.Flush()
 	} else {
@@ -381,7 +381,7 @@ func mergeEventMetadata(event *model.Event) []byte {
 	}
 
 	if len(event.Data) == 0 {
-		out, _ := json.Marshal(map[string]interface{}{
+		out, _ := sonic.Marshal(map[string]interface{}{
 			"event_id":   event.ID,
 			"created_at": createdAt.Unix(),
 		})
@@ -389,13 +389,13 @@ func mergeEventMetadata(event *model.Event) []byte {
 	}
 
 	var payload map[string]interface{}
-	if err := json.Unmarshal(event.Data, &payload); err != nil {
+	if err := sonic.Unmarshal(event.Data, &payload); err != nil {
 		// 业务 payload 不是对象，无法平铺。直接返回原始 Data，由前端按 type 自行解析。
 		return event.Data
 	}
 	payload["event_id"] = event.ID
 	payload["created_at"] = createdAt.Unix()
-	out, err := json.Marshal(payload)
+	out, err := sonic.Marshal(payload)
 	if err != nil {
 		return event.Data
 	}

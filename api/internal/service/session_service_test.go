@@ -2,8 +2,8 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"github.com/bytedance/sonic"
 	"testing"
 	"time"
 
@@ -401,7 +401,7 @@ func TestSessionService_AppendEvent(t *testing.T) {
 
 	// 添加事件
 	msgEvent := &model.MessageEvent{Type: model.EventTypeMessage, Role: "user", Message: "Hello"}
-	eventData, _ := json.Marshal(msgEvent)
+	eventData, _ := sonic.Marshal(msgEvent)
 	event := &model.Event{
 		ID:        "event-1",
 		Type:      model.EventTypeMessage,

@@ -37,8 +37,8 @@ var PlanSchema = map[string]interface{}{
 			"description": "计划标题，给用户看的",
 		},
 		"language": map[string]interface{}{
-			"type": "string",
-			"enum": []string{"zh-CN", "en-US", "ja-JP"},
+			"type":        "string",
+			"enum":        []string{"zh-CN", "en-US", "ja-JP"},
 			"description": "输出语言",
 		},
 		"steps": map[string]interface{}{
@@ -73,7 +73,7 @@ var PlanSchema = map[string]interface{}{
 	},
 }
 
-// PlanSchemaJSON 把 PlanSchema 转成 json.RawMessage 方便发往 OpenAI response_format
+// PlanSchemaJSON 把 PlanSchema 转成 []byte 方便发往 OpenAI response_format
 // 内部用，调用方无需关心
 func PlanSchemaJSON() []byte {
 	b, _ := jsonMarshal(PlanSchema)

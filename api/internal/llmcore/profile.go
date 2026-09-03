@@ -1,7 +1,5 @@
 package llmcore
 
-import "encoding/json"
-
 // ProviderProtocol 上游 provider 协议分类
 // Adapter 选择就是基于这个字段
 type ProviderProtocol string
@@ -71,8 +69,8 @@ const (
 
 // RequestPolicy 请求侧策略
 type RequestPolicy struct {
-	DefaultTemperature *float64     `json:"default_temperature,omitempty"`
-	DefaultMaxTokens   *int         `json:"default_max_tokens,omitempty"`
+	DefaultTemperature *float64      `json:"default_temperature,omitempty"`
+	DefaultMaxTokens   *int          `json:"default_max_tokens,omitempty"`
 	ReasoningMode      ReasoningMode `json:"reasoning_mode"`
 	// Extra provider 白名单参数
 	// Adapter 必须按自身 allowlist 解析，**不允许原样透传**
@@ -80,12 +78,12 @@ type RequestPolicy struct {
 }
 
 // ExtraParam provider 额外参数
-// 用 json.RawMessage 包一层，避免在协议层就把所有 provider 参数预先定义
+// 用 []byte 包一层，避免在协议层就把所有 provider 参数预先定义
 type ExtraParam struct {
 	// Kind "string" / "number" / "bool" / "json"
 	// Adapter 收到 Extra 时按 Kind 反序列化
-	Kind string          `json:"kind"`
-	Raw  json.RawMessage `json:"raw"`
+	Kind string `json:"kind"`
+	Raw  []byte `json:"raw"`
 }
 
 // CostPolicy 成本策略

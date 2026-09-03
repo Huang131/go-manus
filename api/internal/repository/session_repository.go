@@ -3,8 +3,8 @@ package repository
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"time"
 
 	"github.com/google/uuid"
@@ -110,8 +110,8 @@ func (r *PostgresSessionRepository) Create(ctx context.Context, session *model.S
 			latest_message_at, events, memories, status, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	`
-	events, _ := json.Marshal(session.Events)
-	memories, _ := json.Marshal(session.Memories)
+	events, _ := sonic.Marshal(session.Events)
+	memories, _ := sonic.Marshal(session.Memories)
 	_, err := q.Exec(ctx, query,
 		session.ID, session.SandboxID, session.TaskID, session.Title,
 		session.UnreadMessageCount, session.LatestMessage, session.LatestMessageAt,
@@ -138,10 +138,10 @@ func (r *PostgresSessionRepository) GetByID(ctx context.Context, id string) (*mo
 	if err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal(eventsJSON, &s.Events); err != nil {
+	if err := sonic.Unmarshal(eventsJSON, &s.Events); err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal(memoriesJSON, &s.Memories); err != nil {
+	if err := sonic.Unmarshal(memoriesJSON, &s.Memories); err != nil {
 		return nil, err
 	}
 	return &s, nil
@@ -172,8 +172,8 @@ func (r *PostgresSessionRepository) GetAll(ctx context.Context) ([]*model.Sessio
 		); err != nil {
 			return nil, err
 		}
-		json.Unmarshal(eventsJSON, &s.Events)
-		json.Unmarshal(memoriesJSON, &s.Memories)
+		sonic.Unmarshal(eventsJSON, &s.Events)
+		sonic.Unmarshal(memoriesJSON, &s.Memories)
 		sessions = append(sessions, &s)
 	}
 	return sessions, nil
@@ -210,8 +210,8 @@ func (r *PostgresSessionRepository) List(ctx context.Context, limit, offset int)
 		); err != nil {
 			return nil, 0, err
 		}
-		json.Unmarshal(eventsJSON, &s.Events)
-		json.Unmarshal(memoriesJSON, &s.Memories)
+		sonic.Unmarshal(eventsJSON, &s.Events)
+		sonic.Unmarshal(memoriesJSON, &s.Memories)
 		sessions = append(sessions, &s)
 	}
 	return sessions, total, nil
@@ -227,8 +227,8 @@ func (r *PostgresSessionRepository) Update(ctx context.Context, session *model.S
 			memories = $9, status = $10, updated_at = $11
 		WHERE id = $1
 	`
-	events, _ := json.Marshal(session.Events)
-	memories, _ := json.Marshal(session.Memories)
+	events, _ := sonic.Marshal(session.Events)
+	memories, _ := sonic.Marshal(session.Memories)
 	_, err := q.Exec(ctx, query,
 		session.ID, session.SandboxID, session.TaskID, session.Title,
 		session.UnreadMessageCount, session.LatestMessage, session.LatestMessageAt,
@@ -264,7 +264,7 @@ func (r *PostgresSessionRepository) AppendEvent(ctx context.Context, id string, 
 	isAssistantReply := false
 	if event.Type == model.EventTypeMessage {
 		var msgEvent model.MessageEvent
-		if err := json.Unmarshal(event.Data, &msgEvent); err == nil {
+		if err := sonic.Unmarshal(event.Data, &msgEvent); err == nil {
 			message = msgEvent.Message
 			isAssistantReply = msgEvent.Role == "assistant"
 		}
@@ -304,7 +304,7 @@ func (r *PostgresSessionRepository) GetMemory(ctx context.Context, id string, ag
 		return nil, err
 	}
 	var m model.Memory
-	if err := json.Unmarshal(memoryJSON, &m); err != nil {
+	if err := sonic.Unmarshal(memoryJSON, &m); err != nil {
 		return nil, err
 	}
 	return &m, nil
@@ -313,7 +313,7 @@ func (r *PostgresSessionRepository) GetMemory(ctx context.Context, id string, ag
 // SaveMemory 保存指定 Agent 的记忆
 func (r *PostgresSessionRepository) SaveMemory(ctx context.Context, id string, agentName string, memory *model.Memory) error {
 	q := r.queryer(ctx)
-	memoryJSON, err := json.Marshal(memory)
+	memoryJSON, err := sonic.Marshal(memory)
 	if err != nil {
 		return err
 	}

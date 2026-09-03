@@ -2,8 +2,8 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"github.com/bytedance/sonic"
 	"time"
 
 	"github.com/google/uuid"
@@ -45,7 +45,7 @@ func unmarshalConfigValue(data interface{}, v interface{}) error {
 	default:
 		return errors.New("unsupported config value type")
 	}
-	return json.Unmarshal(jsonData, v)
+	return sonic.Unmarshal(jsonData, v)
 }
 
 // GetLLMConfig 获取 LLM 配置

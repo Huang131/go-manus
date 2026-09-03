@@ -3,7 +3,7 @@ package agent
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"github.com/bytedance/sonic"
 	"io"
 	"testing"
 
@@ -51,7 +51,7 @@ func TestSafeMarshal(t *testing.T) {
 			if !tt.wantErr {
 				// 验证结果可以反序列化
 				var decoded interface{}
-				if err := json.Unmarshal(result, &decoded); err != nil {
+				if err := sonic.Unmarshal(result, &decoded); err != nil {
 					t.Errorf("safeMarshal() result = %s, is not valid JSON", string(result))
 				}
 			}

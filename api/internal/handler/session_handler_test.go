@@ -3,7 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	"github.com/bytedance/sonic"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -134,7 +134,7 @@ func TestSessionHandler_Create(t *testing.T) {
 	}
 
 	var resp response.Response
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+	if err := sonic.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("Failed to unmarshal response: %v", err)
 	}
 
@@ -172,7 +172,7 @@ func TestSessionHandler_Get(t *testing.T) {
 	}
 
 	var resp response.Response
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+	if err := sonic.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("Failed to unmarshal response: %v", err)
 	}
 
@@ -198,7 +198,7 @@ func TestSessionHandler_Get_NotFound(t *testing.T) {
 	}
 
 	var resp response.Response
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+	if err := sonic.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("Failed to unmarshal response: %v", err)
 	}
 
@@ -331,7 +331,7 @@ func TestSessionHandler_Chat(t *testing.T) {
 	router.POST("/sessions/:id/chat", handler.Chat)
 
 	body := map[string]string{"message": "Hello"}
-	bodyBytes, _ := json.Marshal(body)
+	bodyBytes, _ := sonic.Marshal(body)
 	req := httptest.NewRequest(http.MethodPost, "/sessions/test-session-id/chat", bytes.NewReader(bodyBytes))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

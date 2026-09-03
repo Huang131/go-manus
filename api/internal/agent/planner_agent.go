@@ -2,8 +2,8 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"strings"
 
 	"go.uber.org/zap"
@@ -127,11 +127,11 @@ func (a *PlannerAgent) CreatePlan(ctx context.Context, message *model.Message) (
 // UpdatePlan 根据执行结果更新计划
 func (a *PlannerAgent) UpdatePlan(ctx context.Context, plan *model.Plan, completedStep *model.PlanStep) (*model.Plan, error) {
 	// 序列化计划和步骤
-	planJSON, err := json.Marshal(plan)
+	planJSON, err := sonic.Marshal(plan)
 	if err != nil {
 		return nil, fmt.Errorf("序列化计划失败: %w", err)
 	}
-	stepJSON, err := json.Marshal(completedStep)
+	stepJSON, err := sonic.Marshal(completedStep)
 	if err != nil {
 		return nil, fmt.Errorf("序列化步骤失败: %w", err)
 	}

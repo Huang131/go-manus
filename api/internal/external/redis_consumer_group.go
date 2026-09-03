@@ -2,8 +2,8 @@ package external
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"strconv"
 	"strings"
 	"sync"
@@ -363,7 +363,7 @@ func (m *RedisConsumerGroupManager) GetGroup(groupName string, streamName string
 
 // MessageToJSON 将消息转换为 JSON
 func MessageToJSON(msg *Message) (string, error) {
-	data, err := json.Marshal(msg.Data)
+	data, err := sonic.Marshal(msg.Data)
 	if err != nil {
 		return "", err
 	}
@@ -373,6 +373,6 @@ func MessageToJSON(msg *Message) (string, error) {
 // JSONToMessage 从 JSON 恢复消息
 func JSONToMessage(jsonStr string) (interface{}, error) {
 	var data interface{}
-	err := json.Unmarshal([]byte(jsonStr), &data)
+	err := sonic.Unmarshal([]byte(jsonStr), &data)
 	return data, err
 }

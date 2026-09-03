@@ -2,7 +2,7 @@ package external
 
 import (
 	"context"
-	"encoding/json"
+	"github.com/bytedance/sonic"
 	"io"
 	"net/http"
 	"strings"
@@ -32,7 +32,8 @@ func newTestClient(t *testing.T, baseURL string) *OpenAIClient {
 func rawOK(w http.ResponseWriter, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(payload)
+	data, _ := sonic.Marshal(payload)
+	w.Write(data)
 }
 
 type roundTripperFunc func(*http.Request) (*http.Response, error)
@@ -58,7 +59,7 @@ func newTransportClient(t *testing.T, handler func(*http.Request) (*http.Respons
 }
 
 func responseJSON(status int, payload interface{}) (*http.Response, error) {
-	body, err := json.Marshal(payload)
+	body, err := sonic.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
@@ -76,7 +77,7 @@ func TestOpenAIClient_ContentOnly(t *testing.T) {
 		// 校验基本请求
 		body, _ := io.ReadAll(r.Body)
 		var got map[string]interface{}
-		_ = json.Unmarshal(body, &got)
+		_ = sonic.Unmarshal(body, &got)
 		if got["model"] != "test-model" {
 			t.Errorf("request.model = %v, want test-model", got["model"])
 		}
@@ -125,7 +126,7 @@ func TestOpenAIClient_RequestWireFormat(t *testing.T) {
 	c := newTransportClient(t, func(r *http.Request) (*http.Response, error) {
 		body, _ := io.ReadAll(r.Body)
 		var got map[string]interface{}
-		_ = json.Unmarshal(body, &got)
+		_ = sonic.Unmarshal(body, &got)
 
 		msgs, ok := got["messages"].([]interface{})
 		if !ok || len(msgs) != 1 {
@@ -391,7 +392,7 @@ func TestOpenAIClient_RequestPolicyAndCost(t *testing.T) {
 	maxTokens := 4096
 	c := newTransportClient(t, func(r *http.Request) (*http.Response, error) {
 		body, _ := io.ReadAll(r.Body)
-		_ = json.Unmarshal(body, &got)
+		_ = sonic.Unmarshal(body, &got)
 		return responseJSON(http.StatusOK, map[string]interface{}{
 			"id":    "chatcmpl-policy",
 			"model": "test-model",
@@ -417,8 +418,8 @@ func TestOpenAIClient_RequestPolicyAndCost(t *testing.T) {
 		DefaultMaxTokens:   &maxTokens,
 		ReasoningMode:      llmcore.ReasoningOff,
 		Extra: map[string]llmcore.ExtraParam{
-			"reasoning_effort": {Kind: "json", Raw: json.RawMessage(`"high"`)},
-			"bad_param":        {Kind: "json", Raw: json.RawMessage(`"leak"`)},
+			"reasoning_effort": {Kind: "json", Raw: []byte(`"high"`)},
+			"bad_param":        {Kind: "json", Raw: []byte(`"leak"`)},
 		},
 	}
 	c.costPolicy = llmcore.CostPolicy{

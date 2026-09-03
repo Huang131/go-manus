@@ -2,8 +2,8 @@ package external
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"io"
 	"net/http"
 	"net/url"
@@ -81,7 +81,7 @@ func (c *BingSearchClient) Invoke(ctx context.Context, query string, dateRange *
 
 	// 解析响应
 	var bingResp bingSearchResponse
-	if err := json.Unmarshal(body, &bingResp); err != nil {
+	if err := sonic.Unmarshal(body, &bingResp); err != nil {
 		return model.NewToolError(err.Error()), err
 	}
 
@@ -226,7 +226,7 @@ func (c *GoogleSearchClient) Invoke(ctx context.Context, query string, dateRange
 
 	// 解析响应
 	var googleResp googleSearchResponse
-	if err := json.Unmarshal(body, &googleResp); err != nil {
+	if err := sonic.Unmarshal(body, &googleResp); err != nil {
 		return model.NewToolError(err.Error()), err
 	}
 

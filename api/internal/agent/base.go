@@ -2,8 +2,8 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"strings"
 
 	"github.com/mooc-manus/go-manus/api/internal/external"
@@ -248,7 +248,7 @@ func (a *BaseAgent) RollBack(ctx context.Context, msg *model.Message) error {
 	if functionName == "message_ask_user" {
 		// 6. 特殊处理：添加用户回复作为工具响应
 		userMsg := msg.Message
-		content, _ := json.Marshal(userMsg)
+		content, _ := sonic.Marshal(userMsg)
 
 		// 创建工具消息
 		toolMsg := &model.Message{
@@ -422,10 +422,10 @@ func (a *BaseAgent) Invoke(ctx context.Context, query string) (*InvokeResult, er
 		if len(resp.ToolUse) > 0 {
 			// 4a. 把 assistant + tool_calls 写回历史
 			assistantMsg := llmcore.Message{
-				Role:      llmcore.RoleAssistant,
+				Role:        llmcore.RoleAssistant,
 				ContentText: resp.Content,
-				ToolCalls: resp.ToolUse,
-				Reasoning: resp.ReasoningContent,
+				ToolCalls:   resp.ToolUse,
+				Reasoning:   resp.ReasoningContent,
 			}
 			messages = append(messages, assistantMsg)
 
@@ -447,8 +447,8 @@ func (a *BaseAgent) Invoke(ctx context.Context, query string) (*InvokeResult, er
 						zap.Error(err))
 					// 添加错误结果到历史，继续循环
 					messages = append(messages, llmcore.Message{
-						Role:       llmcore.RoleTool,
-						ToolCallID: tc.ID,
+						Role:        llmcore.RoleTool,
+						ToolCallID:  tc.ID,
 						ContentText: fmt.Sprintf(`{"success": false, "message": "%s"}`, err.Error()),
 					})
 					continue
@@ -458,8 +458,8 @@ func (a *BaseAgent) Invoke(ctx context.Context, query string) (*InvokeResult, er
 				if result.WaitForUser {
 					// 将工具结果添加到历史
 					messages = append(messages, llmcore.Message{
-						Role:       llmcore.RoleTool,
-						ToolCallID: result.ToolCallID,
+						Role:        llmcore.RoleTool,
+						ToolCallID:  result.ToolCallID,
 						ContentText: result.Result.JSON(),
 					})
 
@@ -480,8 +480,8 @@ func (a *BaseAgent) Invoke(ctx context.Context, query string) (*InvokeResult, er
 
 				// 将工具结果添加到历史
 				messages = append(messages, llmcore.Message{
-					Role:       llmcore.RoleTool,
-					ToolCallID: result.ToolCallID,
+					Role:        llmcore.RoleTool,
+					ToolCallID:  result.ToolCallID,
 					ContentText: result.Result.JSON(),
 				})
 			}
@@ -524,7 +524,7 @@ func (a *BaseAgent) Invoke(ctx context.Context, query string) (*InvokeResult, er
 // handleToolCall 处理单个工具调用
 //
 // 阶段 1d 改造点：toolCall 从 map 改 llmcore.ToolCall；messages 同步改 []llmcore.Message。
-// toolCall.Arguments 已经是 JSON 字符串，直接 json.Unmarshal / Parse 即可，不再 cast map。
+// toolCall.Arguments 已经是 JSON 字符串，直接 sonic.Unmarshal / Parse 即可，不再 cast map。
 func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCall, messages []llmcore.Message) (*ToolCallResult, error) {
 	functionName := toolCall.Name
 	toolCallID := toolCall.ID
@@ -534,7 +534,7 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 	if toolCall.Arguments != "" {
 		if err := a.jsonParser.Parse(toolCall.Arguments, &arguments); err != nil {
 			// 尝试直接解析
-			if err := json.Unmarshal([]byte(toolCall.Arguments), &arguments); err != nil {
+			if err := sonic.Unmarshal([]byte(toolCall.Arguments), &arguments); err != nil {
 				arguments = make(map[string]interface{})
 			}
 		}

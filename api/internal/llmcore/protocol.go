@@ -15,7 +15,7 @@ package llmcore
 // 为简化，V1 让 messages 元素用统一 Message.ContentText / ContentParts 两种字段
 // 由 Adapter 在转厂商格式时选择合适的形状
 type ContentPart struct {
-	Type     string      `json:"type"`     // "text" / "image_url" / "audio_url" / ...
+	Type     string      `json:"type"` // "text" / "image_url" / "audio_url" / ...
 	Text     string      `json:"text,omitempty"`
 	ImageURL *ImageURL   `json:"image_url,omitempty"`
 	AudioURL *AudioURL   `json:"audio_url,omitempty"`
@@ -44,9 +44,9 @@ const (
 // Message 统一消息结构
 // Assistant 的 ToolCalls / Reasoning 字段允许为空
 type Message struct {
-	Role        MessageRole `json:"role"`
+	Role MessageRole `json:"role"`
 	// ContentText 纯文本消息用这个字段（最常见）
-	ContentText string       `json:"content_text,omitempty"`
+	ContentText string `json:"content_text,omitempty"`
 	// ContentParts 多模态消息用这个字段
 	ContentParts []ContentPart `json:"content_parts,omitempty"`
 
@@ -76,9 +76,9 @@ type ToolCall struct {
 //   - ToolSpec 是不依赖具体 Go 函数签名的"协议级"描述
 //   - 同一个本地 tool 可以映射成多个 ToolSpec（多 provider 多字段）
 type ToolSpec struct {
-	Type     string             `json:"type"` // "function"
-	Function ToolSpecFunction   `json:"function"`
-	ReadOnly bool               `json:"read_only,omitempty"` // 标注是否只读（影响 fallback 规则）
+	Type     string           `json:"type"` // "function"
+	Function ToolSpecFunction `json:"function"`
+	ReadOnly bool             `json:"read_only,omitempty"` // 标注是否只读（影响 fallback 规则）
 }
 
 type ToolSpecFunction struct {
@@ -92,8 +92,8 @@ type ToolSpecFunction struct {
 // V1 只放"当前业务用得到的字段"，其他用 map[string]any 兜底
 // 阶段 3 起，按"每加一种 provider 就多一个字段"的节奏补
 type LLMRequest struct {
-	Model    string    `json:"model"`           // 模型名
-	Messages []Message `json:"messages"`        // 对话历史
+	Model    string     `json:"model"`           // 模型名
+	Messages []Message  `json:"messages"`        // 对话历史
 	Tools    []ToolSpec `json:"tools,omitempty"` // 工具定义
 
 	// ===== 生成控制 =====
@@ -169,10 +169,10 @@ type LLMDelta struct {
 }
 
 type ToolCallDelta struct {
-	Index    int    `json:"index"`
-	ID       string `json:"id,omitempty"`
-	Type     string `json:"type,omitempty"`
-	Name     string `json:"name,omitempty"`
+	Index int    `json:"index"`
+	ID    string `json:"id,omitempty"`
+	Type  string `json:"type,omitempty"`
+	Name  string `json:"name,omitempty"`
 	// ArgumentsDelta 增量 JSON 片段（OpenAI 风格）
 	ArgumentsDelta string `json:"arguments_delta,omitempty"`
 }

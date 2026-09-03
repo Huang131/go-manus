@@ -1,7 +1,7 @@
 package model
 
 import (
-	"encoding/json"
+	"github.com/bytedance/sonic"
 	"time"
 )
 
@@ -34,7 +34,7 @@ type Session struct {
 // MarshalJSON 自定义 JSON 序列化
 func (s *Session) MarshalJSON() ([]byte, error) {
 	type Alias Session
-	return json.Marshal(&struct {
+	return sonic.Marshal(&struct {
 		*Alias
 		UpdatedAt int64 `json:"updated_at"`
 		CreatedAt int64 `json:"created_at"`

@@ -3,8 +3,8 @@ package external
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"io"
 	"os"
 	"os/exec"
@@ -348,7 +348,7 @@ func (c *StdioMCPClient) Close() error {
 
 // sendRequest 发送请求
 func (c *StdioMCPClient) sendRequest(req MCPRequest) error {
-	data, err := json.Marshal(req)
+	data, err := sonic.Marshal(req)
 	if err != nil {
 		return fmt.Errorf("failed to marshal request: %w", err)
 	}
@@ -369,7 +369,7 @@ func (c *StdioMCPClient) readResponse() (*MCPResponse, error) {
 	}
 
 	var resp MCPResponse
-	if err := json.Unmarshal(line, &resp); err != nil {
+	if err := sonic.Unmarshal(line, &resp); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 

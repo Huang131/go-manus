@@ -2,8 +2,8 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"github.com/bytedance/sonic"
 	"net/url"
 	"strconv"
 	"strings"
@@ -165,7 +165,7 @@ func (s *DefaultSessionService) Chat(ctx context.Context, sessionID string, mess
 		Role:    "user",
 		Message: message,
 	}
-	data, _ := json.Marshal(msgEvent)
+	data, _ := sonic.Marshal(msgEvent)
 
 	event := &model.Event{
 		ID:        uuid.New().String(),

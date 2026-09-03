@@ -4,8 +4,8 @@ package integration
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -53,7 +53,7 @@ func TestLLMModelAPI_CRUD(t *testing.T) {
 			"currency":                  "USD",
 		},
 	}
-	bodyJSON, _ := json.Marshal(createBody)
+	bodyJSON, _ := sonic.Marshal(createBody)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/llm-models", bytes.NewReader(bodyJSON))
@@ -62,7 +62,7 @@ func TestLLMModelAPI_CRUD(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code, "create 应返回 200")
 	var createResp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &createResp)
+	sonic.Unmarshal(w.Body.Bytes(), &createResp)
 	assertResponseCode(t, createResp, 0)
 
 	created := createResp["data"].(map[string]interface{})
@@ -78,7 +78,7 @@ func TestLLMModelAPI_CRUD(t *testing.T) {
 	testServer.ServeHTTP(getW, getReq)
 	assert.Equal(t, http.StatusOK, getW.Code)
 	var getResp map[string]interface{}
-	json.Unmarshal(getW.Body.Bytes(), &getResp)
+	sonic.Unmarshal(getW.Body.Bytes(), &getResp)
 	gotModel := getResp["data"].(map[string]interface{})
 	assert.Equal(t, "integration-test-claude", gotModel["name"])
 	assert.Equal(t, "anthropic", gotModel["provider"])
@@ -89,7 +89,7 @@ func TestLLMModelAPI_CRUD(t *testing.T) {
 	testServer.ServeHTTP(listW, listReq)
 	assert.Equal(t, http.StatusOK, listW.Code)
 	var listResp map[string]interface{}
-	json.Unmarshal(listW.Body.Bytes(), &listResp)
+	sonic.Unmarshal(listW.Body.Bytes(), &listResp)
 	assertResponseCode(t, listResp, 0)
 	listData := listResp["data"].(map[string]interface{})
 	models := listData["models"].([]interface{})
@@ -115,7 +115,7 @@ func TestLLMModelAPI_CRUD(t *testing.T) {
 			"currency":                  "USD",
 		},
 	}
-	updateJSON, _ := json.Marshal(updateBody)
+	updateJSON, _ := sonic.Marshal(updateBody)
 	updW := httptest.NewRecorder()
 	updReq, _ := http.NewRequest("PUT", "/api/llm-models/"+modelID, bytes.NewReader(updateJSON))
 	updReq.Header.Set("Content-Type", "application/json")
@@ -127,7 +127,7 @@ func TestLLMModelAPI_CRUD(t *testing.T) {
 	regetReq, _ := http.NewRequest("GET", "/api/llm-models/"+modelID, nil)
 	testServer.ServeHTTP(regetW, regetReq)
 	var regetResp map[string]interface{}
-	json.Unmarshal(regetW.Body.Bytes(), &regetResp)
+	sonic.Unmarshal(regetW.Body.Bytes(), &regetResp)
 	regetModel := regetResp["data"].(map[string]interface{})
 	assert.Equal(t, "integration-test-claude-updated", regetModel["name"])
 	assert.Equal(t, float64(8192), regetModel["max_tokens"], "max_tokens 应被更新")
@@ -144,7 +144,7 @@ func TestLLMModelAPI_CRUD(t *testing.T) {
 	testServer.ServeHTTP(getDefW, getDefReq)
 	assert.Equal(t, http.StatusOK, getDefW.Code)
 	var getDefResp map[string]interface{}
-	json.Unmarshal(getDefW.Body.Bytes(), &getDefResp)
+	sonic.Unmarshal(getDefW.Body.Bytes(), &getDefResp)
 	defaultModel := getDefResp["data"].(map[string]interface{})
 	assert.Equal(t, modelID, defaultModel["id"], "default 模型应为刚设置的模型")
 	assert.Equal(t, true, defaultModel["is_default"])
@@ -171,14 +171,14 @@ func TestLLMModelAPI_CRUD(t *testing.T) {
 		"sort_order":   2,
 		"capabilities": map[string]interface{}{},
 	}
-	bodyJSON2, _ := json.Marshal(createBody2)
+	bodyJSON2, _ := sonic.Marshal(createBody2)
 	createW2 := httptest.NewRecorder()
 	createReq2, _ := http.NewRequest("POST", "/api/llm-models", bytes.NewReader(bodyJSON2))
 	createReq2.Header.Set("Content-Type", "application/json")
 	testServer.ServeHTTP(createW2, createReq2)
 	assert.Equal(t, http.StatusOK, createW2.Code)
 	var createResp2 map[string]interface{}
-	json.Unmarshal(createW2.Body.Bytes(), &createResp2)
+	sonic.Unmarshal(createW2.Body.Bytes(), &createResp2)
 	modelID2 := createResp2["data"].(map[string]interface{})["id"].(string)
 	defer CleanupLLMModel(t, modelID2)
 
@@ -196,7 +196,7 @@ func TestLLMModelAPI_CRUD(t *testing.T) {
 	testServer.ServeHTTP(getDefW2, getDefReq2)
 	assert.Equal(t, http.StatusOK, getDefW2.Code)
 	var getDefResp2 map[string]interface{}
-	json.Unmarshal(getDefW2.Body.Bytes(), &getDefResp2)
+	sonic.Unmarshal(getDefW2.Body.Bytes(), &getDefResp2)
 	fallback := getDefResp2["data"].(map[string]interface{})
 	assert.Equal(t, false, fallback["is_default"], "UnsetDefault 后不应存在显式 default（降级返回的模型 is_default=false）")
 
@@ -254,7 +254,7 @@ func TestFileAPI_FileTableConsistency(t *testing.T) {
 	sessionReq, _ := http.NewRequest("POST", "/api/sessions", nil)
 	testServer.ServeHTTP(sessionW, sessionReq)
 	var sessionResp map[string]interface{}
-	json.Unmarshal(sessionW.Body.Bytes(), &sessionResp)
+	sonic.Unmarshal(sessionW.Body.Bytes(), &sessionResp)
 	sessionID := sessionResp["data"].(map[string]interface{})["id"].(string)
 	defer CleanupSession(t, sessionID)
 
@@ -268,7 +268,7 @@ func TestFileAPI_FileTableConsistency(t *testing.T) {
 	testServer.ServeHTTP(uploadW, uploadReq)
 	assert.Equal(t, http.StatusOK, uploadW.Code)
 	var uploadResp map[string]interface{}
-	json.Unmarshal(uploadW.Body.Bytes(), &uploadResp)
+	sonic.Unmarshal(uploadW.Body.Bytes(), &uploadResp)
 	fileID := uploadResp["data"].(map[string]interface{})["id"].(string)
 	defer CleanupFile(t, fileID)
 
@@ -303,14 +303,14 @@ func createLLMModelForTest(t *testing.T, name string) string {
 		"sort_order":   100,
 		"capabilities": map[string]interface{}{},
 	}
-	bodyJSON, _ := json.Marshal(createBody)
+	bodyJSON, _ := sonic.Marshal(createBody)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/llm-models", bytes.NewReader(bodyJSON))
 	req.Header.Set("Content-Type", "application/json")
 	testServer.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code, "create "+name+" 应返回 200")
 	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	sonic.Unmarshal(w.Body.Bytes(), &resp)
 	return resp["data"].(map[string]interface{})["id"].(string)
 }
 
@@ -332,7 +332,7 @@ func TestLLMModelAPI_UpdateRuntimeHealth(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	sonic.Unmarshal(w.Body.Bytes(), &resp)
 	got := resp["data"].(map[string]interface{})["runtime_health"].(map[string]interface{})
 	assert.Equal(t, "degraded", got["status"])
 	assert.Equal(t, float64(3), got["recent_failures"])
@@ -358,7 +358,7 @@ func TestLLMModelAPI_SetDefault_Migration(t *testing.T) {
 	getAReq, _ := http.NewRequest("GET", "/api/llm-models/"+idA, nil)
 	testServer.ServeHTTP(getAW, getAReq)
 	var getAResp map[string]interface{}
-	json.Unmarshal(getAW.Body.Bytes(), &getAResp)
+	sonic.Unmarshal(getAW.Body.Bytes(), &getAResp)
 	assert.Equal(t, true, getAResp["data"].(map[string]interface{})["is_default"], "A 应为 default")
 
 	// set B 为 default（切换）
@@ -372,7 +372,7 @@ func TestLLMModelAPI_SetDefault_Migration(t *testing.T) {
 	getBReq, _ := http.NewRequest("GET", "/api/llm-models/"+idB, nil)
 	testServer.ServeHTTP(getBW, getBReq)
 	var getBResp map[string]interface{}
-	json.Unmarshal(getBW.Body.Bytes(), &getBResp)
+	sonic.Unmarshal(getBW.Body.Bytes(), &getBResp)
 	assert.Equal(t, true, getBResp["data"].(map[string]interface{})["is_default"], "B 应为 default")
 
 	// get A 验证 is_default 已自动清空
@@ -380,7 +380,7 @@ func TestLLMModelAPI_SetDefault_Migration(t *testing.T) {
 	getA2Req, _ := http.NewRequest("GET", "/api/llm-models/"+idA, nil)
 	testServer.ServeHTTP(getA2W, getA2Req)
 	var getA2Resp map[string]interface{}
-	json.Unmarshal(getA2W.Body.Bytes(), &getA2Resp)
+	sonic.Unmarshal(getA2W.Body.Bytes(), &getA2Resp)
 	assert.Equal(t, false, getA2Resp["data"].(map[string]interface{})["is_default"], "切到 B 后 A 应不再是 default")
 }
 

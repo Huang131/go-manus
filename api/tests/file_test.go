@@ -5,8 +5,8 @@ package integration
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -46,7 +46,7 @@ func TestFileAPI_Upload_Success(t *testing.T) {
 	assert.Equal(t, http.StatusOK, sessionW.Code)
 
 	var sessionResp map[string]interface{}
-	json.Unmarshal(sessionW.Body.Bytes(), &sessionResp)
+	sonic.Unmarshal(sessionW.Body.Bytes(), &sessionResp)
 	sessionID := sessionResp["data"].(map[string]interface{})["id"].(string)
 	defer CleanupSession(t, sessionID)
 
@@ -62,7 +62,7 @@ func TestFileAPI_Upload_Success(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code, "上传文件应该成功")
 
 	var uploadResp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &uploadResp)
+	sonic.Unmarshal(w.Body.Bytes(), &uploadResp)
 	fileData := uploadResp["data"].(map[string]interface{})
 
 	fileID := fileData["id"].(string)
@@ -82,7 +82,7 @@ func TestFileAPI_Upload_MissingSession(t *testing.T) {
 	testServer.ServeHTTP(sessionW, sessionReq)
 
 	var sessionResp map[string]interface{}
-	json.Unmarshal(sessionW.Body.Bytes(), &sessionResp)
+	sonic.Unmarshal(sessionW.Body.Bytes(), &sessionResp)
 	sessionID := sessionResp["data"].(map[string]interface{})["id"].(string)
 	defer CleanupSession(t, sessionID)
 
@@ -99,7 +99,7 @@ func TestFileAPI_Upload_MissingSession(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
 	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	sonic.Unmarshal(w.Body.Bytes(), &resp)
 	assert.NotEqual(t, 0, resp["code"])
 }
 
@@ -111,7 +111,7 @@ func TestFileAPI_Upload_MissingFile(t *testing.T) {
 	testServer.ServeHTTP(sessionW, sessionReq)
 
 	var sessionResp map[string]interface{}
-	json.Unmarshal(sessionW.Body.Bytes(), &sessionResp)
+	sonic.Unmarshal(sessionW.Body.Bytes(), &sessionResp)
 	sessionID := sessionResp["data"].(map[string]interface{})["id"].(string)
 	defer CleanupSession(t, sessionID)
 
@@ -135,7 +135,7 @@ func TestFileAPI_Upload_LargeFile(t *testing.T) {
 	testServer.ServeHTTP(sessionW, sessionReq)
 
 	var sessionResp map[string]interface{}
-	json.Unmarshal(sessionW.Body.Bytes(), &sessionResp)
+	sonic.Unmarshal(sessionW.Body.Bytes(), &sessionResp)
 	sessionID := sessionResp["data"].(map[string]interface{})["id"].(string)
 	defer CleanupSession(t, sessionID)
 
@@ -152,7 +152,7 @@ func TestFileAPI_Upload_LargeFile(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code, "大文件上传应该成功")
 
 	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	sonic.Unmarshal(w.Body.Bytes(), &resp)
 	fileData := resp["data"].(map[string]interface{})
 	fileID := fileData["id"].(string)
 	defer CleanupFile(t, fileID)
@@ -166,7 +166,7 @@ func TestFileAPI_GetInfo(t *testing.T) {
 	testServer.ServeHTTP(sessionW, sessionReq)
 
 	var sessionResp map[string]interface{}
-	json.Unmarshal(sessionW.Body.Bytes(), &sessionResp)
+	sonic.Unmarshal(sessionW.Body.Bytes(), &sessionResp)
 	sessionID := sessionResp["data"].(map[string]interface{})["id"].(string)
 	defer CleanupSession(t, sessionID)
 
@@ -180,7 +180,7 @@ func TestFileAPI_GetInfo(t *testing.T) {
 	testServer.ServeHTTP(uploadW, uploadReq)
 
 	var uploadResp map[string]interface{}
-	json.Unmarshal(uploadW.Body.Bytes(), &uploadResp)
+	sonic.Unmarshal(uploadW.Body.Bytes(), &uploadResp)
 	fileID := uploadResp["data"].(map[string]interface{})["id"].(string)
 	defer CleanupFile(t, fileID)
 
@@ -192,7 +192,7 @@ func TestFileAPI_GetInfo(t *testing.T) {
 	assert.Equal(t, http.StatusOK, infoW.Code)
 
 	var infoResp map[string]interface{}
-	json.Unmarshal(infoW.Body.Bytes(), &infoResp)
+	sonic.Unmarshal(infoW.Body.Bytes(), &infoResp)
 	infoData := infoResp["data"].(map[string]interface{})
 
 	assert.Equal(t, fileID, infoData["id"])
@@ -207,7 +207,7 @@ func TestFileAPI_Download(t *testing.T) {
 	testServer.ServeHTTP(sessionW, sessionReq)
 
 	var sessionResp map[string]interface{}
-	json.Unmarshal(sessionW.Body.Bytes(), &sessionResp)
+	sonic.Unmarshal(sessionW.Body.Bytes(), &sessionResp)
 	sessionID := sessionResp["data"].(map[string]interface{})["id"].(string)
 	defer CleanupSession(t, sessionID)
 
@@ -221,7 +221,7 @@ func TestFileAPI_Download(t *testing.T) {
 	testServer.ServeHTTP(uploadW, uploadReq)
 
 	var uploadResp map[string]interface{}
-	json.Unmarshal(uploadW.Body.Bytes(), &uploadResp)
+	sonic.Unmarshal(uploadW.Body.Bytes(), &uploadResp)
 	fileID := uploadResp["data"].(map[string]interface{})["id"].(string)
 	defer CleanupFile(t, fileID)
 
@@ -261,7 +261,7 @@ func TestFileAPI_GetSessionFiles(t *testing.T) {
 	testServer.ServeHTTP(sessionW, sessionReq)
 
 	var sessionResp map[string]interface{}
-	json.Unmarshal(sessionW.Body.Bytes(), &sessionResp)
+	sonic.Unmarshal(sessionW.Body.Bytes(), &sessionResp)
 	sessionID := sessionResp["data"].(map[string]interface{})["id"].(string)
 	defer CleanupSession(t, sessionID)
 
@@ -278,7 +278,7 @@ func TestFileAPI_GetSessionFiles(t *testing.T) {
 		assert.Equal(t, http.StatusOK, uploadW.Code)
 
 		var uploadResp map[string]interface{}
-		json.Unmarshal(uploadW.Body.Bytes(), &uploadResp)
+		sonic.Unmarshal(uploadW.Body.Bytes(), &uploadResp)
 		fileIDs[i] = uploadResp["data"].(map[string]interface{})["id"].(string)
 		defer CleanupFile(t, fileIDs[i])
 	}
@@ -291,7 +291,7 @@ func TestFileAPI_GetSessionFiles(t *testing.T) {
 	assert.Equal(t, http.StatusOK, filesW.Code)
 
 	var filesResp map[string]interface{}
-	json.Unmarshal(filesW.Body.Bytes(), &filesResp)
+	sonic.Unmarshal(filesW.Body.Bytes(), &filesResp)
 	filesData, ok := filesResp["data"].([]interface{})
 	assert.True(t, ok, "data should be an array of files")
 
@@ -308,7 +308,7 @@ func TestFileAPI_Upload_MultipleFormats(t *testing.T) {
 	testServer.ServeHTTP(sessionW, sessionReq)
 
 	var sessionResp map[string]interface{}
-	json.Unmarshal(sessionW.Body.Bytes(), &sessionResp)
+	sonic.Unmarshal(sessionW.Body.Bytes(), &sessionResp)
 	sessionID := sessionResp["data"].(map[string]interface{})["id"].(string)
 	defer CleanupSession(t, sessionID)
 
@@ -333,7 +333,7 @@ func TestFileAPI_Upload_MultipleFormats(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code, tc.filename+" 上传应该成功")
 
 		var resp map[string]interface{}
-		json.Unmarshal(w.Body.Bytes(), &resp)
+		sonic.Unmarshal(w.Body.Bytes(), &resp)
 		fileID := resp["data"].(map[string]interface{})["id"].(string)
 		defer CleanupFile(t, fileID)
 	}
@@ -346,7 +346,7 @@ func TestFileAPI_Upload_Concurrent(t *testing.T) {
 	sessionReq, _ := http.NewRequest("POST", "/api/sessions", nil)
 	testServer.ServeHTTP(sessionW, sessionReq)
 	var sessionResp map[string]interface{}
-	json.Unmarshal(sessionW.Body.Bytes(), &sessionResp)
+	sonic.Unmarshal(sessionW.Body.Bytes(), &sessionResp)
 	sessionID := sessionResp["data"].(map[string]interface{})["id"].(string)
 	defer CleanupSession(t, sessionID)
 
@@ -370,7 +370,7 @@ func TestFileAPI_Upload_Concurrent(t *testing.T) {
 				return
 			}
 			var resp map[string]interface{}
-			json.Unmarshal(w.Body.Bytes(), &resp)
+			sonic.Unmarshal(w.Body.Bytes(), &resp)
 			fileIDs[i] = resp["data"].(map[string]interface{})["id"].(string)
 		}(i)
 	}

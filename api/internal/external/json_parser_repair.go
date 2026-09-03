@@ -1,8 +1,8 @@
 package external
 
 import (
-	"encoding/json"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"regexp"
 	"strings"
 
@@ -28,7 +28,7 @@ func (p *RepairJSONParser) Parse(text string, v interface{}) error {
 	cleaned := removeMarkdownCodeBlocks(text)
 
 	// 2. 尝试直接解析
-	if err := json.Unmarshal([]byte(cleaned), v); err == nil {
+	if err := sonic.Unmarshal([]byte(cleaned), v); err == nil {
 		return nil
 	}
 
@@ -44,7 +44,7 @@ func (p *RepairJSONParser) Parse(text string, v interface{}) error {
 	}
 
 	// 4. 再次尝试解析
-	if err := json.Unmarshal([]byte(fixed), v); err == nil {
+	if err := sonic.Unmarshal([]byte(fixed), v); err == nil {
 		return nil
 	}
 
@@ -52,7 +52,7 @@ func (p *RepairJSONParser) Parse(text string, v interface{}) error {
 	extracted := extractJSON(cleaned)
 	if extracted != cleaned {
 		fixedExtracted, _ := jsonrepair.RepairJSON(extracted)
-		if err := json.Unmarshal([]byte(fixedExtracted), v); err == nil {
+		if err := sonic.Unmarshal([]byte(fixedExtracted), v); err == nil {
 			return nil
 		}
 	}

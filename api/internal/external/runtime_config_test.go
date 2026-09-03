@@ -1,7 +1,6 @@
 package external
 
 import (
-	"encoding/json"
 	"testing"
 
 	"github.com/mooc-manus/go-manus/api/internal/model"
@@ -32,7 +31,7 @@ func TestProtocolFromProvider(t *testing.T) {
 }
 
 func TestBuildRuntimeConfigFromModel(t *testing.T) {
-	reqExtra := json.RawMessage(`{"reasoning_effort":"none"}`)
+	reqExtra := []byte(`{"reasoning_effort":"none"}`)
 	m := &model.LLMModel{
 		ID:          "1",
 		Provider:    "anthropic",
@@ -44,7 +43,7 @@ func TestBuildRuntimeConfigFromModel(t *testing.T) {
 			DefaultTemperature: func() *float64 { v := 0.1; return &v }(),
 			DefaultMaxTokens:   func() *int { v := 2048; return &v }(),
 			ReasoningMode:      model.ReasoningOff,
-			Extra: map[string]json.RawMessage{
+			Extra: map[string][]byte{
 				"reasoning_effort": reqExtra,
 			},
 		},

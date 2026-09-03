@@ -2,8 +2,8 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -224,7 +224,7 @@ func (s *TaskStream) Pop(ctx context.Context) (string, string, error) {
 	dataStr, ok := data.(string)
 	if !ok {
 		// 如果是其他类型，序列化为 JSON
-		bytes, _ := json.Marshal(data)
+		bytes, _ := sonic.Marshal(data)
 		dataStr = string(bytes)
 	}
 	return id, dataStr, nil
@@ -418,7 +418,7 @@ func (t *RedisStreamTask) Cancel() bool {
 
 // PutInput 往输入流放入消息
 func (t *RedisStreamTask) PutInput(ctx context.Context, event interface{}) (string, error) {
-	data, err := json.Marshal(event)
+	data, err := sonic.Marshal(event)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal event: %w", err)
 	}
@@ -449,7 +449,7 @@ func (t *RedisStreamTask) GetOutput(ctx context.Context, startID string, blockTi
 
 	// 解析事件
 	var event model.Event
-	if err := json.Unmarshal([]byte(data.(string)), &event); err != nil {
+	if err := sonic.Unmarshal([]byte(data.(string)), &event); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal event: %w", err)
 	}
 	event.ID = id
@@ -500,7 +500,7 @@ func (t *RedisStreamTask) SubscribeOutput(ctx context.Context, bufferSize int) (
 				// 解析事件
 				var event model.Event
 				dataStr, _ := data.(string)
-				if err := json.Unmarshal([]byte(dataStr), &event); err != nil {
+				if err := sonic.Unmarshal([]byte(dataStr), &event); err != nil {
 					logger.Warn("解析事件失败",
 						zap.String("task_id", t.id),
 						zap.Error(err))

@@ -3,10 +3,10 @@ package llmcore
 // CanFallbackTo 判断 candidate profile 是否可作为 fallback 替换 current profile
 //
 // 严格规则（对应 MULTI_LLM_ADAPTER_DESIGN.md 阶段 2 修订意见）：
-//   1. 协议必须完全一致（OpenAI <-> Anthropic 不能 fallback，message 格式不同）
-//   2. 能力必须完全等价（"满足"不等于"等价"）
-//   3. 上下文能装下（带 20% 安全余量）
-//   4. 工具集必须等价（不能新增/缺失）
+//  1. 协议必须完全一致（OpenAI <-> Anthropic 不能 fallback，message 格式不同）
+//  2. 能力必须完全等价（"满足"不等于"等价"）
+//  3. 上下文能装下（带 20% 安全余量）
+//  4. 工具集必须等价（不能新增/缺失）
 //
 // 返回 true 时，Orchestrator 可在不丢上下文的前提下切换
 func CanFallbackTo(candidate, current ModelProfile) bool {

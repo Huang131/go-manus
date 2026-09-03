@@ -1,7 +1,7 @@
 package model
 
 import (
-	"encoding/json"
+	"github.com/bytedance/sonic"
 	"testing"
 )
 
@@ -159,7 +159,7 @@ func TestEvent_ToJSON(t *testing.T) {
 	jsonStr := event.ToJSON()
 
 	var parsed map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
+	if err := sonic.Unmarshal([]byte(jsonStr), &parsed); err != nil {
 		t.Errorf("ToJSON() is not valid JSON: %v", err)
 	}
 

@@ -4,7 +4,7 @@ package integration
 
 import (
 	"context"
-	"encoding/json"
+	"github.com/bytedance/sonic"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -23,7 +23,7 @@ func TestSessionAPI_Create(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp map[string]interface{}
-	err := json.Unmarshal(w.Body.Bytes(), &resp)
+	err := sonic.Unmarshal(w.Body.Bytes(), &resp)
 	assert.NoError(t, err)
 	assertResponseCode(t, resp, 0)
 
@@ -47,7 +47,7 @@ func TestSessionAPI_CreateAndGet(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var createResp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &createResp)
+	sonic.Unmarshal(w.Body.Bytes(), &createResp)
 	sessionID := createResp["data"].(map[string]interface{})["id"].(string)
 	defer CleanupSession(t, sessionID)
 
@@ -59,7 +59,7 @@ func TestSessionAPI_CreateAndGet(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var getResp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &getResp)
+	sonic.Unmarshal(w.Body.Bytes(), &getResp)
 	data := getResp["data"].(map[string]interface{})
 
 	assert.Equal(t, sessionID, data["id"])
@@ -77,7 +77,7 @@ func TestSessionAPI_CreateAndList(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		var resp map[string]interface{}
-		json.Unmarshal(w.Body.Bytes(), &resp)
+		sonic.Unmarshal(w.Body.Bytes(), &resp)
 		sessionIDs[i] = resp["data"].(map[string]interface{})["id"].(string)
 		defer CleanupSession(t, sessionIDs[i])
 	}
@@ -90,7 +90,7 @@ func TestSessionAPI_CreateAndList(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var listResp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &listResp)
+	sonic.Unmarshal(w.Body.Bytes(), &listResp)
 	// List 接口使用 SuccessWithTotal，data 直接是会话数组
 	sessions, ok := listResp["data"].([]interface{})
 	assert.True(t, ok, "data should be an array of sessions")
@@ -110,7 +110,7 @@ func TestSessionAPI_CreateAndDelete(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var createResp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &createResp)
+	sonic.Unmarshal(w.Body.Bytes(), &createResp)
 	sessionID := createResp["data"].(map[string]interface{})["id"].(string)
 
 	// 2. 删除会话
@@ -136,7 +136,7 @@ func TestSessionAPI_GetNotFound(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 
 	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	sonic.Unmarshal(w.Body.Bytes(), &resp)
 	assertResponseCode(t, resp, 400)
 }
 
@@ -150,7 +150,7 @@ func TestSessionAPI_ListPagination(t *testing.T) {
 		testServer.ServeHTTP(w, req)
 
 		var resp map[string]interface{}
-		json.Unmarshal(w.Body.Bytes(), &resp)
+		sonic.Unmarshal(w.Body.Bytes(), &resp)
 		sessionIDs[i] = resp["data"].(map[string]interface{})["id"].(string)
 		defer CleanupSession(t, sessionIDs[i])
 	}
@@ -161,7 +161,7 @@ func TestSessionAPI_ListPagination(t *testing.T) {
 	testServer.ServeHTTP(w, req)
 
 	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	sonic.Unmarshal(w.Body.Bytes(), &resp)
 	// List 接口使用 SuccessWithTotal，data 直接是会话数组
 	sessions, ok := resp["data"].([]interface{})
 	assert.True(t, ok, "data should be an array of sessions")
@@ -179,7 +179,7 @@ func TestSessionAPI_ClearUnreadCount(t *testing.T) {
 	testServer.ServeHTTP(w, req)
 
 	var createResp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &createResp)
+	sonic.Unmarshal(w.Body.Bytes(), &createResp)
 	sessionID := createResp["data"].(map[string]interface{})["id"].(string)
 	defer CleanupSession(t, sessionID)
 
@@ -196,7 +196,7 @@ func TestSessionAPI_ClearUnreadCount(t *testing.T) {
 	testServer.ServeHTTP(w, req)
 
 	var getResp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &getResp)
+	sonic.Unmarshal(w.Body.Bytes(), &getResp)
 	data := getResp["data"].(map[string]interface{})
 
 	assert.Equal(t, float64(0), data["unread_message_count"])
@@ -210,7 +210,7 @@ func TestSessionAPI_GetAllSessions(t *testing.T) {
 	testServer.ServeHTTP(w, req)
 
 	var createResp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &createResp)
+	sonic.Unmarshal(w.Body.Bytes(), &createResp)
 	sessionID := createResp["data"].(map[string]interface{})["id"].(string)
 	defer CleanupSession(t, sessionID)
 

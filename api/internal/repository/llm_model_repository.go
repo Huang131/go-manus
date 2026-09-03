@@ -2,8 +2,8 @@ package repository
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"github.com/bytedance/sonic"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -76,22 +76,22 @@ func scanLLMModel(row pgx.Row, m *model.LLMModel) error {
 		return err
 	}
 	if len(tagsJSON) > 0 {
-		_ = json.Unmarshal(tagsJSON, &m.Tags)
+		_ = sonic.Unmarshal(tagsJSON, &m.Tags)
 	}
 	if m.Tags == nil {
 		m.Tags = []string{}
 	}
 	if len(capJSON) > 0 {
-		_ = json.Unmarshal(capJSON, &m.Capabilities)
+		_ = sonic.Unmarshal(capJSON, &m.Capabilities)
 	}
 	if len(reqJSON) > 0 {
-		_ = json.Unmarshal(reqJSON, &m.RequestPolicy)
+		_ = sonic.Unmarshal(reqJSON, &m.RequestPolicy)
 	}
 	if len(costJSON) > 0 {
-		_ = json.Unmarshal(costJSON, &m.CostPolicy)
+		_ = sonic.Unmarshal(costJSON, &m.CostPolicy)
 	}
 	if len(healthJSON) > 0 {
-		_ = json.Unmarshal(healthJSON, &m.RuntimeHealth)
+		_ = sonic.Unmarshal(healthJSON, &m.RuntimeHealth)
 	}
 	return nil
 }
@@ -99,7 +99,7 @@ func scanLLMModel(row pgx.Row, m *model.LLMModel) error {
 // capabilitiesToJSON / requestPolicyToJSON / costPolicyToJSON / runtimeHealthToJSON
 // 用法：写入 DB 前调用，返回 []byte 给 pgx
 func capabilitiesToJSON(c model.ModelCapabilities) []byte {
-	b, _ := json.Marshal(c)
+	b, _ := sonic.Marshal(c)
 	if len(b) == 0 {
 		return []byte("{}")
 	}
@@ -107,7 +107,7 @@ func capabilitiesToJSON(c model.ModelCapabilities) []byte {
 }
 
 func requestPolicyToJSON(p model.RequestPolicy) []byte {
-	b, _ := json.Marshal(p)
+	b, _ := sonic.Marshal(p)
 	if len(b) == 0 {
 		return []byte("{}")
 	}
@@ -115,7 +115,7 @@ func requestPolicyToJSON(p model.RequestPolicy) []byte {
 }
 
 func costPolicyToJSON(c model.CostPolicy) []byte {
-	b, _ := json.Marshal(c)
+	b, _ := sonic.Marshal(c)
 	if len(b) == 0 {
 		return []byte("{}")
 	}
@@ -123,7 +123,7 @@ func costPolicyToJSON(c model.CostPolicy) []byte {
 }
 
 func runtimeHealthToJSON(h model.RuntimeHealth) []byte {
-	b, _ := json.Marshal(h)
+	b, _ := sonic.Marshal(h)
 	if len(b) == 0 {
 		return []byte("{}")
 	}
@@ -132,7 +132,7 @@ func runtimeHealthToJSON(h model.RuntimeHealth) []byte {
 
 // Create 新增
 func (r *PostgresLLMModelRepository) Create(ctx context.Context, m *model.LLMModel) error {
-	tagsJSON, _ := json.Marshal(m.Tags)
+	tagsJSON, _ := sonic.Marshal(m.Tags)
 	if tagsJSON == nil {
 		tagsJSON = []byte("[]")
 	}
@@ -159,7 +159,7 @@ func (r *PostgresLLMModelRepository) Create(ctx context.Context, m *model.LLMMod
 
 // Update 更新
 func (r *PostgresLLMModelRepository) Update(ctx context.Context, m *model.LLMModel) error {
-	tagsJSON, _ := json.Marshal(m.Tags)
+	tagsJSON, _ := sonic.Marshal(m.Tags)
 	if tagsJSON == nil {
 		tagsJSON = []byte("[]")
 	}

@@ -2,7 +2,7 @@ package repository
 
 import (
 	"context"
-	"encoding/json"
+	"github.com/bytedance/sonic"
 	"testing"
 	"time"
 
@@ -56,7 +56,7 @@ func TestSessionRepository_AppendEvent(t *testing.T) {
 		ID:        "event-1",
 		Type:      model.EventTypeMessage,
 		CreatedAt: time.Now(),
-		Data:      json.RawMessage(`{"content":"hello"}`),
+		Data:      []byte(`{"content":"hello"}`),
 	}
 
 	session.Events = append(session.Events, *event)
@@ -124,7 +124,7 @@ func TestSessionRepository_Memory(t *testing.T) {
 	}
 
 	// 序列化记忆
-	memoryJSON, _ := json.Marshal(memory)
+	memoryJSON, _ := sonic.Marshal(memory)
 	session.Memories["summary"] = string(memoryJSON)
 
 	if len(session.Memories) != 1 {
@@ -133,7 +133,7 @@ func TestSessionRepository_Memory(t *testing.T) {
 
 	// 反序列化验证
 	var restored model.Memory
-	json.Unmarshal([]byte(session.Memories["summary"].(string)), &restored)
+	sonic.Unmarshal([]byte(session.Memories["summary"].(string)), &restored)
 	if len(restored.Messages) != 1 {
 		t.Error("记忆内容不匹配")
 	}
@@ -232,14 +232,14 @@ func TestSessionRepository_JSONSerialization(t *testing.T) {
 	}
 
 	// 测试 JSON 序列化（使用自定义 MarshalJSON 将时间转为 Unix 时间戳）
-	data, err := json.Marshal(session)
+	data, err := sonic.Marshal(session)
 	if err != nil {
 		t.Errorf("JSON Marshal 失败: %v", err)
 	}
 
 	// 解析 JSON 验证基本字段
 	var jsonData map[string]interface{}
-	err = json.Unmarshal(data, &jsonData)
+	err = sonic.Unmarshal(data, &jsonData)
 	if err != nil {
 		t.Errorf("JSON Unmarshal 到 map 失败: %v", err)
 	}

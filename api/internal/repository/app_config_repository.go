@@ -3,8 +3,8 @@ package repository
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
+	"github.com/bytedance/sonic"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -114,12 +114,12 @@ func (r *PostgresAppConfigRepository) GetConfig(ctx context.Context, configType,
 //   - 存 base64 编码的 JSON 字符串："eyJi..." => 解码后返回 JSON 字节
 func normalizeConfigValue(raw []byte) []byte {
 	var v interface{}
-	if err := json.Unmarshal(raw, &v); err != nil {
+	if err := sonic.Unmarshal(raw, &v); err != nil {
 		return raw // 非 JSON，原样返回
 	}
 
 	if str, ok := v.(string); ok {
-		if decoded, err := base64.StdEncoding.DecodeString(str); err == nil && json.Valid(decoded) {
+		if decoded, err := base64.StdEncoding.DecodeString(str); err == nil && sonic.Valid(decoded) {
 			return decoded
 		}
 		return []byte(str)
@@ -131,7 +131,7 @@ func normalizeConfigValue(raw []byte) []byte {
 // SaveConfig 保存配置
 func (r *PostgresAppConfigRepository) SaveConfig(ctx context.Context, config *model.AppConfig) error {
 	q := r.queryer()
-	configValueJSON, err := json.Marshal(config.ConfigValue)
+	configValueJSON, err := sonic.Marshal(config.ConfigValue)
 	if err != nil {
 		return err
 	}
@@ -177,7 +177,7 @@ func (r *PostgresAppConfigRepository) ListConfigs(ctx context.Context, configTyp
 		if err := rows.Scan(&c.ID, &c.ConfigType, &c.ConfigKey, &configValueJSON, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
-		if err := json.Unmarshal(configValueJSON, &c.ConfigValue); err != nil {
+		if err := sonic.Unmarshal(configValueJSON, &c.ConfigValue); err != nil {
 			return nil, err
 		}
 		configs = append(configs, &c)
@@ -205,7 +205,7 @@ func (r *PostgresAppConfigRepository) ListAllConfigs(ctx context.Context) ([]*mo
 		if err := rows.Scan(&c.ID, &c.ConfigType, &c.ConfigKey, &configValueJSON, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
-		if err := json.Unmarshal(configValueJSON, &c.ConfigValue); err != nil {
+		if err := sonic.Unmarshal(configValueJSON, &c.ConfigValue); err != nil {
 			return nil, err
 		}
 		configs = append(configs, &c)

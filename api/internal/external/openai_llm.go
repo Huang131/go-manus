@@ -3,9 +3,9 @@ package external
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"io"
 	"net/http"
 	"time"
@@ -178,7 +178,7 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMRespons
 	}
 
 	// 序列化请求
-	reqBody, err := json.Marshal(chatReq)
+	reqBody, err := sonic.Marshal(chatReq)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
@@ -241,7 +241,7 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMRespons
 
 	// 解析响应
 	var chatResp openAIChatResponse
-	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+	if err := sonic.Unmarshal(respBody, &chatResp); err != nil {
 		// 协议错误：熔断该模型（不重试不 fallback）
 		pe := llmcore.NewProviderError(llmcore.KindUnknown, "openai_compat", c.modelName,
 			fmt.Sprintf("unmarshal response: %v", err))
@@ -331,7 +331,7 @@ func (c *OpenAIClient) effectiveReasoningEffort() *string {
 
 	if extra, ok := c.requestPolicy.Extra["reasoning_effort"]; ok {
 		var v string
-		if err := json.Unmarshal(extra.Raw, &v); err == nil && v != "" {
+		if err := sonic.Unmarshal(extra.Raw, &v); err == nil && v != "" {
 			return &v
 		}
 	}
@@ -432,7 +432,7 @@ func (c *OpenAIClient) classifyHTTPError(status int, body []byte) error {
 			Code    string `json:"code"`
 		} `json:"error"`
 	}
-	_ = json.Unmarshal(body, &probe)
+	_ = sonic.Unmarshal(body, &probe)
 	upstreamMsg := ""
 	if probe.Error != nil {
 		upstreamMsg = probe.Error.Message

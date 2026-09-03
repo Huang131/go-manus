@@ -1,7 +1,7 @@
 package agent
 
 import (
-	"encoding/json"
+	"github.com/bytedance/sonic"
 	"strings"
 	"sync"
 	"time"
@@ -137,7 +137,7 @@ func (m *SimpleMemory) Size() int {
 
 	total := 0
 	for _, msg := range m.messages {
-		data, _ := json.Marshal(msg)
+		data, _ := sonic.Marshal(msg)
 		total += len(data)
 	}
 	// 简单估算: 1 token ≈ 4 字符
@@ -165,7 +165,7 @@ func (m *SimpleMemory) Compact(keepCount int) error {
 
 // EstimateTokens 估算消息的 token 数
 func (m *SimpleMemory) EstimateTokens(msg *model.Message) int {
-	data, _ := json.Marshal(msg)
+	data, _ := sonic.Marshal(msg)
 	// 简单估算: 1 token ≈ 4 字符
 	return len(data) / 4
 }

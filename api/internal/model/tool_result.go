@@ -1,6 +1,6 @@
 package model
 
-import "encoding/json"
+import "github.com/bytedance/sonic"
 
 // ToolResult 工具执行结果
 // Generic 类型用于承载不同工具的返回数据
@@ -47,7 +47,7 @@ func (r *ToolResult) FromSandbox(code int, msg string, data interface{}) *ToolRe
 
 // JSON 将工具结果转换为 JSON 字符串
 func (r *ToolResult) JSON() string {
-	data, err := json.Marshal(r)
+	data, err := sonic.Marshal(r)
 	if err != nil {
 		return `{"success": false, "message": "failed to marshal result"}`
 	}

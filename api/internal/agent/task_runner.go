@@ -2,8 +2,8 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"io"
 	"path/filepath"
 	"sync"
@@ -177,7 +177,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 
 		// 解析事件
 		var inputEvent model.MessageEvent
-		if err := json.Unmarshal([]byte(data), &inputEvent); err != nil {
+		if err := sonic.Unmarshal([]byte(data), &inputEvent); err != nil {
 			logger.Warn("解析输入事件失败",
 				zap.String("data", data),
 				zap.Error(err))
@@ -217,7 +217,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 		// 处理 Flow 输出事件
 		for event := range eventChan {
 			// 业务事件先序列化为 payload
-			eventJSON, err := json.Marshal(event)
+			eventJSON, err := sonic.Marshal(event)
 			if err != nil {
 				logger.Error("序列化事件失败",
 					zap.String("task_id", task.ID()),
@@ -232,7 +232,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 				Type: event.GetType(),
 				Data: eventJSON,
 			}
-			wrappedJSON, err := json.Marshal(baseEvent)
+			wrappedJSON, err := sonic.Marshal(baseEvent)
 			if err != nil {
 				logger.Error("序列化 model.Event 失败",
 					zap.String("task_id", task.ID()),
@@ -328,7 +328,7 @@ func (r *AgentTaskRunner) Run(ctx context.Context, message *model.Message) error
 	// 处理事件
 	for event := range eventChan {
 		// 添加事件到会话
-		eventJSON, err := json.Marshal(event)
+		eventJSON, err := sonic.Marshal(event)
 		if err != nil {
 			logger.Error("序列化事件失败",
 				zap.String("session_id", r.sessionID),
@@ -529,14 +529,14 @@ func (r *readerWrapper) Read(p []byte) (n int, err error) {
 
 // mustMarshal JSON 序列化（保留向后兼容，但不推荐使用）
 // Deprecated: 请使用 safeMarshal 代替
-func mustMarshal(v interface{}) json.RawMessage {
-	data, _ := json.Marshal(v)
+func mustMarshal(v interface{}) []byte {
+	data, _ := sonic.Marshal(v)
 	return data
 }
 
 // safeMarshal JSON 序列化（推荐使用）
-func safeMarshal(v interface{}) (json.RawMessage, error) {
-	data, err := json.Marshal(v)
+func safeMarshal(v interface{}) ([]byte, error) {
+	data, err := sonic.Marshal(v)
 	if err != nil {
 		return nil, fmt.Errorf("JSON marshal failed: %w", err)
 	}

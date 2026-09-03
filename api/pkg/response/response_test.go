@@ -1,7 +1,7 @@
 package response
 
 import (
-	"encoding/json"
+	"github.com/bytedance/sonic"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -20,13 +20,13 @@ func TestResponse_Structure(t *testing.T) {
 		Data: map[string]string{"key": "value"},
 	}
 
-	data, err := json.Marshal(resp)
+	data, err := sonic.Marshal(resp)
 	if err != nil {
 		t.Errorf("Response marshal error: %v", err)
 	}
 
 	var parsed Response
-	if err := json.Unmarshal(data, &parsed); err != nil {
+	if err := sonic.Unmarshal(data, &parsed); err != nil {
 		t.Errorf("Response unmarshal error: %v", err)
 	}
 
@@ -46,13 +46,13 @@ func TestTotalResponse_Structure(t *testing.T) {
 		Total: 2,
 	}
 
-	data, err := json.Marshal(resp)
+	data, err := sonic.Marshal(resp)
 	if err != nil {
 		t.Errorf("TotalResponse marshal error: %v", err)
 	}
 
 	var parsed TotalResponse
-	if err := json.Unmarshal(data, &parsed); err != nil {
+	if err := sonic.Unmarshal(data, &parsed); err != nil {
 		t.Errorf("TotalResponse unmarshal error: %v", err)
 	}
 
@@ -74,7 +74,7 @@ func TestSuccess_HttpResponse(t *testing.T) {
 	}
 
 	var resp Response
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+	if err := sonic.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Errorf("Success() response is not valid JSON: %v", err)
 	}
 
@@ -95,7 +95,7 @@ func TestError_HttpResponse(t *testing.T) {
 	}
 
 	var resp Response
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+	if err := sonic.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Errorf("Error() response is not valid JSON: %v", err)
 	}
 

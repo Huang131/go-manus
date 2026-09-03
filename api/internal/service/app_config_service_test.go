@@ -2,8 +2,8 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
+	"github.com/bytedance/sonic"
 	"testing"
 
 	"github.com/mooc-manus/go-manus/api/internal/model"
@@ -41,7 +41,7 @@ func (m *MockAppConfigRepository) SaveConfig(ctx context.Context, config *model.
 	if m.createErr != nil {
 		return m.createErr
 	}
-	// 如果传入的 ConfigValue 已经是 []byte（测试用例中预先 json.Marshal 的结果），
+	// 如果传入的 ConfigValue 已经是 []byte（测试用例中预先 sonic.Marshal 的结果），
 	// 直接存储；否则将其 Marshal 为 []byte，模拟生产 repo 的持久化行为。
 	var storedValue []byte
 	switch v := config.ConfigValue.(type) {
@@ -50,7 +50,7 @@ func (m *MockAppConfigRepository) SaveConfig(ctx context.Context, config *model.
 	case nil:
 		storedValue = nil
 	default:
-		b, err := json.Marshal(v)
+		b, err := sonic.Marshal(v)
 		if err != nil {
 			return err
 		}
@@ -117,7 +117,7 @@ func TestAppConfigService_GetLLMConfig(t *testing.T) {
 		Temperature: 0.7,
 		MaxTokens:   4096,
 	}
-	configValue, _ := json.Marshal(llmConfig)
+	configValue, _ := sonic.Marshal(llmConfig)
 	config := &model.AppConfig{
 		ConfigType:  "llm",
 		ConfigKey:   "default",
@@ -168,7 +168,7 @@ func TestAppConfigService_UpdateLLMConfig(t *testing.T) {
 		Temperature: 0.7,
 		MaxTokens:   4096,
 	}
-	configValue, _ := json.Marshal(llmConfig)
+	configValue, _ := sonic.Marshal(llmConfig)
 	config := &model.AppConfig{
 		ConfigType:  "llm",
 		ConfigKey:   "default",
@@ -216,7 +216,7 @@ func TestAppConfigService_UpdateLLMConfig_WithNewApiKey(t *testing.T) {
 		ModelName: "gpt-4",
 		APIKey:    "old-key",
 	}
-	configValue, _ := json.Marshal(llmConfig)
+	configValue, _ := sonic.Marshal(llmConfig)
 	config := &model.AppConfig{
 		ConfigType:  "llm",
 		ConfigKey:   "default",
@@ -252,7 +252,7 @@ func TestAppConfigService_GetAgentConfig(t *testing.T) {
 		MaxRetries:       3,
 		MaxSearchResults: 5,
 	}
-	configValue, _ := json.Marshal(agentConfig)
+	configValue, _ := sonic.Marshal(agentConfig)
 	config := &model.AppConfig{
 		ConfigType:  "agent",
 		ConfigKey:   "default",
@@ -290,7 +290,7 @@ func TestAppConfigService_GetMCPConfig(t *testing.T) {
 			},
 		},
 	}
-	configValue, _ := json.Marshal(mcpConfig)
+	configValue, _ := sonic.Marshal(mcpConfig)
 	config := &model.AppConfig{
 		ConfigType:  "mcp",
 		ConfigKey:   "default",
@@ -331,7 +331,7 @@ func TestAppConfigService_GetA2AConfig(t *testing.T) {
 			},
 		},
 	}
-	configValue, _ := json.Marshal(a2aConfig)
+	configValue, _ := sonic.Marshal(a2aConfig)
 	config := &model.AppConfig{
 		ConfigType:  "a2a",
 		ConfigKey:   "default",
@@ -365,7 +365,7 @@ func TestAppConfigService_UpdateMCPConfig(t *testing.T) {
 			{ServerName: "server-1", Enabled: true, Transport: "stdio"},
 		},
 	}
-	configValue, _ := json.Marshal(mcpConfig)
+	configValue, _ := sonic.Marshal(mcpConfig)
 	config := &model.AppConfig{
 		ConfigType:  "mcp",
 		ConfigKey:   "default",
@@ -403,7 +403,7 @@ func TestAppConfigService_DeleteMCPServer(t *testing.T) {
 			{ServerName: "server-2", Enabled: true, Transport: "http"},
 		},
 	}
-	configValue, _ := json.Marshal(mcpConfig)
+	configValue, _ := sonic.Marshal(mcpConfig)
 	config := &model.AppConfig{
 		ConfigType:  "mcp",
 		ConfigKey:   "default",

@@ -1,7 +1,7 @@
 package model
 
 import (
-	"encoding/json"
+	"github.com/bytedance/sonic"
 	"time"
 )
 
@@ -63,15 +63,15 @@ const (
 
 // Event 事件模型
 type Event struct {
-	ID        string          `json:"id"`
-	Type      EventType       `json:"type"`
-	CreatedAt time.Time       `json:"created_at"`
-	Data      json.RawMessage `json:"data"`
+	ID        string    `json:"id"`
+	Type      EventType `json:"type"`
+	CreatedAt time.Time `json:"created_at"`
+	Data      []byte    `json:"data"`
 }
 
 // ToJSON 将事件转换为 JSON 字符串
 func (e *Event) ToJSON() string {
-	data, _ := json.Marshal(e)
+	data, _ := sonic.Marshal(e)
 	return string(data)
 }
 
@@ -91,7 +91,7 @@ func (e *MessageEvent) GetType() EventType {
 
 // ToJSON 将事件转换为 JSON 字符串
 func (e *MessageEvent) ToJSON() string {
-	data, _ := json.Marshal(e)
+	data, _ := sonic.Marshal(e)
 	return string(data)
 }
 
@@ -165,7 +165,7 @@ func (e *ErrorEvent) GetType() EventType {
 
 // ToJSON 将事件转换为 JSON 字符串
 func (e *ErrorEvent) ToJSON() string {
-	data, _ := json.Marshal(e)
+	data, _ := sonic.Marshal(e)
 	return string(data)
 }
 
@@ -181,7 +181,7 @@ func (e *DoneEvent) GetType() EventType {
 
 // ToJSON 将事件转换为 JSON 字符串
 func (e *DoneEvent) ToJSON() string {
-	data, _ := json.Marshal(e)
+	data, _ := sonic.Marshal(e)
 	return string(data)
 }
 
@@ -234,7 +234,7 @@ func (e *TitleEvent) GetType() EventType {
 
 // ToJSON 将事件转换为 JSON 字符串
 func (e *TitleEvent) ToJSON() string {
-	data, _ := json.Marshal(e)
+	data, _ := sonic.Marshal(e)
 	return string(data)
 }
 
@@ -250,7 +250,7 @@ func (e *WaitEvent) GetType() EventType {
 
 // ToJSON 将事件转换为 JSON 字符串
 func (e *WaitEvent) ToJSON() string {
-	data, _ := json.Marshal(e)
+	data, _ := sonic.Marshal(e)
 	return string(data)
 }
 
@@ -267,7 +267,7 @@ func (e *FullPlanEvent) GetType() EventType {
 
 // ToJSON 将事件转换为 JSON 字符串
 func (e *FullPlanEvent) ToJSON() string {
-	data, _ := json.Marshal(e)
+	data, _ := sonic.Marshal(e)
 	return string(data)
 }
 
@@ -284,7 +284,7 @@ func (e *FullStepEvent) GetType() EventType {
 
 // ToJSON 将事件转换为 JSON 字符串
 func (e *FullStepEvent) ToJSON() string {
-	data, _ := json.Marshal(e)
+	data, _ := sonic.Marshal(e)
 	return string(data)
 }
 
@@ -347,7 +347,7 @@ func (e *ToolCallingEvent) GetType() EventType {
 
 // ToJSON 将事件转换为 JSON 字符串
 func (e *ToolCallingEvent) ToJSON() string {
-	data, _ := json.Marshal(e)
+	data, _ := sonic.Marshal(e)
 	return string(data)
 }
 
@@ -366,7 +366,7 @@ func (e *ToolCalledEvent) GetType() EventType {
 
 // ToJSON 将事件转换为 JSON 字符串
 func (e *ToolCalledEvent) ToJSON() string {
-	data, _ := json.Marshal(e)
+	data, _ := sonic.Marshal(e)
 	return string(data)
 }
 

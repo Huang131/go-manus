@@ -3,8 +3,8 @@ package external
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -141,7 +141,7 @@ func (c *SandboxClient) doRequest(ctx context.Context, method, action string, re
 
 	var body io.Reader
 	if req != nil {
-		data, err := json.Marshal(req)
+		data, err := sonic.Marshal(req)
 		if err != nil {
 			return nil, fmt.Errorf("marshal request: %w", err)
 		}
@@ -171,7 +171,7 @@ func (c *SandboxClient) doRequest(ctx context.Context, method, action string, re
 	}
 
 	var sandboxResp sandboxResponse
-	if err := json.Unmarshal(respBody, &sandboxResp); err != nil {
+	if err := sonic.Unmarshal(respBody, &sandboxResp); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
 
@@ -400,7 +400,7 @@ func (c *SandboxClient) UploadFile(ctx context.Context, fileData []byte, filepat
 	}
 
 	var sandboxResp sandboxResponse
-	if err := json.Unmarshal(respBody, &sandboxResp); err != nil {
+	if err := sonic.Unmarshal(respBody, &sandboxResp); err != nil {
 		return model.NewToolError(err.Error()), err
 	}
 

@@ -2,8 +2,8 @@ package external
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"sync"
 	"time"
 
@@ -42,7 +42,7 @@ func NewRedisStreamMessageQueue(client *redis.Client) *RedisStreamMessageQueue {
 // Put 往消息队列中添加一条消息
 func (q *RedisStreamMessageQueue) Put(ctx context.Context, streamName string, message interface{}) (string, error) {
 	// 序列化消息
-	data, err := json.Marshal(message)
+	data, err := sonic.Marshal(message)
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal message: %w", err)
 	}
@@ -112,7 +112,7 @@ func (q *RedisStreamMessageQueue) Get(ctx context.Context, streamName string, st
 
 	// 反序列化消息
 	var data interface{}
-	if err := json.Unmarshal([]byte(dataStr), &data); err != nil {
+	if err := sonic.Unmarshal([]byte(dataStr), &data); err != nil {
 		// 如果反序列化失败，返回原始字符串
 		data = dataStr
 	}
@@ -173,7 +173,7 @@ func (q *RedisStreamMessageQueue) GetBlocking(ctx context.Context, streamName st
 			}
 
 			var data interface{}
-			if err := json.Unmarshal([]byte(dataStr), &data); err != nil {
+			if err := sonic.Unmarshal([]byte(dataStr), &data); err != nil {
 				data = dataStr
 			}
 
@@ -230,7 +230,7 @@ func (q *RedisStreamMessageQueue) Pop(ctx context.Context, streamName string) (s
 	}
 
 	var data interface{}
-	if err := json.Unmarshal([]byte(dataStr), &data); err != nil {
+	if err := sonic.Unmarshal([]byte(dataStr), &data); err != nil {
 		data = dataStr
 	}
 
@@ -426,7 +426,7 @@ func (q *RedisStreamMessageQueue) GetRange(ctx context.Context, streamName strin
 		}
 
 		var data interface{}
-		if err := json.Unmarshal([]byte(dataStr), &data); err != nil {
+		if err := sonic.Unmarshal([]byte(dataStr), &data); err != nil {
 			data = dataStr
 		}
 

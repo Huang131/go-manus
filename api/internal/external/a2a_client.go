@@ -3,8 +3,8 @@ package external
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"io"
 	"net/http"
 	"sync"
@@ -152,7 +152,7 @@ func (m *A2AClientManager) fetchAgentCard(ctx context.Context, baseURL string) (
 	}
 
 	var card A2AAgentCard
-	if err := json.Unmarshal(body, &card); err != nil {
+	if err := sonic.Unmarshal(body, &card); err != nil {
 		return nil, fmt.Errorf("解析 AgentCard 失败: %w", err)
 	}
 
@@ -209,7 +209,7 @@ func (m *A2AClientManager) Invoke(ctx context.Context, agentID string, query str
 	}
 
 	// 序列化请求
-	reqBody, err := json.Marshal(request)
+	reqBody, err := sonic.Marshal(request)
 	if err != nil {
 		return nil, fmt.Errorf("序列化请求失败: %w", err)
 	}
@@ -247,7 +247,7 @@ func (m *A2AClientManager) Invoke(ctx context.Context, agentID string, query str
 
 	// 6. 解析响应
 	var rpcResp A2AJSONRPCResponse
-	if err := json.Unmarshal(respBody, &rpcResp); err != nil {
+	if err := sonic.Unmarshal(respBody, &rpcResp); err != nil {
 		return nil, fmt.Errorf("解析响应失败: %w", err)
 	}
 

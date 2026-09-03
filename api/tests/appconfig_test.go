@@ -4,7 +4,7 @@ package integration
 
 import (
 	"bytes"
-	"encoding/json"
+	"github.com/bytedance/sonic"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -32,7 +32,7 @@ func TestAppConfigAPI_UpdateAndGetLLMConfig(t *testing.T) {
 		"temperature": 0.9,
 		"max_tokens":  2048,
 	}
-	updateJSON, _ := json.Marshal(updateData)
+	updateJSON, _ := sonic.Marshal(updateData)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/app-config/llm", bytes.NewReader(updateJSON))
@@ -47,7 +47,7 @@ func TestAppConfigAPI_UpdateAndGetLLMConfig(t *testing.T) {
 	testServer.ServeHTTP(getW, getReq)
 
 	var getResp map[string]interface{}
-	json.Unmarshal(getW.Body.Bytes(), &getResp)
+	sonic.Unmarshal(getW.Body.Bytes(), &getResp)
 	assertResponseCode(t, getResp, 0)
 
 	data, ok := getResp["data"].(map[string]interface{})
@@ -67,7 +67,7 @@ func TestAppConfigAPI_UpdateAndGetAgentConfig(t *testing.T) {
 		"max_retries":        5,
 		"max_search_results": 10,
 	}
-	updateJSON, _ := json.Marshal(updateData)
+	updateJSON, _ := sonic.Marshal(updateData)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/app-config/agent", bytes.NewReader(updateJSON))
@@ -82,7 +82,7 @@ func TestAppConfigAPI_UpdateAndGetAgentConfig(t *testing.T) {
 	testServer.ServeHTTP(getW, getReq)
 
 	var getResp map[string]interface{}
-	json.Unmarshal(getW.Body.Bytes(), &getResp)
+	sonic.Unmarshal(getW.Body.Bytes(), &getResp)
 	assertResponseCode(t, getResp, 0)
 
 	data, ok := getResp["data"].(map[string]interface{})
@@ -101,7 +101,7 @@ func TestAppConfigAPI_GetEmptyMCPConfig(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	sonic.Unmarshal(w.Body.Bytes(), &resp)
 	assertResponseCode(t, resp, 0)
 
 	// data 可能是 nil 或空对象
@@ -125,7 +125,7 @@ func TestAppConfigAPI_UpdateAndGetMCPConfig(t *testing.T) {
 			},
 		},
 	}
-	updateJSON, _ := json.Marshal(mcpConfig)
+	updateJSON, _ := sonic.Marshal(mcpConfig)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/app-config/mcp-servers", bytes.NewReader(updateJSON))
@@ -140,7 +140,7 @@ func TestAppConfigAPI_UpdateAndGetMCPConfig(t *testing.T) {
 	testServer.ServeHTTP(getW, getReq)
 
 	var getResp map[string]interface{}
-	json.Unmarshal(getW.Body.Bytes(), &getResp)
+	sonic.Unmarshal(getW.Body.Bytes(), &getResp)
 	assertResponseCode(t, getResp, 0)
 
 	data, ok := getResp["data"].(map[string]interface{})
@@ -175,7 +175,7 @@ func TestAppConfigAPI_DeleteMCPServer(t *testing.T) {
 			},
 		},
 	}
-	updateJSON, _ := json.Marshal(mcpConfig)
+	updateJSON, _ := sonic.Marshal(mcpConfig)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/app-config/mcp-servers", bytes.NewReader(updateJSON))
@@ -200,7 +200,7 @@ func TestAppConfigAPI_DeleteMCPServer(t *testing.T) {
 	testServer.ServeHTTP(getW, getReq)
 
 	var getResp map[string]interface{}
-	json.Unmarshal(getW.Body.Bytes(), &getResp)
+	sonic.Unmarshal(getW.Body.Bytes(), &getResp)
 	if data, ok := getResp["data"].(map[string]interface{}); ok {
 		if servers, ok := data["servers"].([]interface{}); ok {
 			for _, s := range servers {
@@ -221,7 +221,7 @@ func TestAppConfigAPI_GetEmptyA2AConfig(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var resp map[string]interface{}
-	json.Unmarshal(w.Body.Bytes(), &resp)
+	sonic.Unmarshal(w.Body.Bytes(), &resp)
 	assertResponseCode(t, resp, 0)
 }
 
@@ -242,7 +242,7 @@ func TestAppConfigAPI_UpdateAndGetA2AConfig(t *testing.T) {
 			},
 		},
 	}
-	updateJSON, _ := json.Marshal(a2aConfig)
+	updateJSON, _ := sonic.Marshal(a2aConfig)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/app-config/a2a-servers", bytes.NewReader(updateJSON))
@@ -257,7 +257,7 @@ func TestAppConfigAPI_UpdateAndGetA2AConfig(t *testing.T) {
 	testServer.ServeHTTP(getW, getReq)
 
 	var getResp map[string]interface{}
-	json.Unmarshal(getW.Body.Bytes(), &getResp)
+	sonic.Unmarshal(getW.Body.Bytes(), &getResp)
 	assertResponseCode(t, getResp, 0)
 
 	data, ok := getResp["data"].(map[string]interface{})

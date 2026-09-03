@@ -36,7 +36,7 @@ const (
 // Adapter 把所有厂商错误归一化到这种结构
 // Orchestrator 据此做路由决策
 type ProviderError struct {
-	Kind     ErrorKind
+	Kind ErrorKind
 	// StatusCode HTTP 状态码（如果非 HTTP 错误，置 0）
 	StatusCode int
 	// Message 错误描述（已脱敏，不含 api_key）

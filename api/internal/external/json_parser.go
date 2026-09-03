@@ -1,6 +1,6 @@
 package external
 
-import "encoding/json"
+import "github.com/bytedance/sonic"
 
 // JSONParser JSON 解析器接口
 // 用于解析 LLM 返回的 JSON 字符串，并修复可能存在的格式错误
@@ -22,5 +22,5 @@ func NewDefaultJSONParser() *DefaultJSONParser {
 
 // Parse 解析 JSON 字符串
 func (p *DefaultJSONParser) Parse(text string, v interface{}) error {
-	return json.Unmarshal([]byte(text), v)
+	return sonic.Unmarshal([]byte(text), v)
 }

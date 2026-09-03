@@ -3,8 +3,8 @@ package external
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"io"
 	"net/http"
 	"time"
@@ -205,7 +205,7 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMResp
 	}
 
 	// 序列化请求
-	reqBody, err := json.Marshal(anthropicReq)
+	reqBody, err := sonic.Marshal(anthropicReq)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
@@ -245,7 +245,7 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMResp
 
 	// 解析响应
 	var anthropicResp AnthropicResponse
-	if err := json.Unmarshal(respBody, &anthropicResp); err != nil {
+	if err := sonic.Unmarshal(respBody, &anthropicResp); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
 
@@ -261,7 +261,7 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMResp
 		case "tool_use":
 			// 阶段 1d：转 llmcore.ToolCall（ID + Name + Arguments JSON 字符串）
 			// Arguments 把 input map 重新 marshal 成 JSON 字符串，保持和 openai 协议形状一致
-			argsBytes, _ := json.Marshal(content.InputJSON)
+			argsBytes, _ := sonic.Marshal(content.InputJSON)
 			result.ToolUse = append(result.ToolUse, llmcore.ToolCall{
 				ID:        content.ID,
 				Type:      "function",

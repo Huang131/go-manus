@@ -2,8 +2,8 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"github.com/bytedance/sonic"
 	"sync"
 
 	"go.uber.org/zap"
@@ -216,12 +216,12 @@ func (t *A2ATool) extractResponseText(data interface{}) string {
 		}
 
 		// 尝试直接返回 JSON
-		jsonBytes, _ := json.Marshal(data)
+		jsonBytes, _ := sonic.Marshal(data)
 		return string(jsonBytes)
 	}
 
 	// 其他类型尝试 JSON 序列化
-	jsonBytes, _ := json.Marshal(data)
+	jsonBytes, _ := sonic.Marshal(data)
 	return string(jsonBytes)
 }
 

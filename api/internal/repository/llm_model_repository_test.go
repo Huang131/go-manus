@@ -1,7 +1,7 @@
 package repository
 
 import (
-	"encoding/json"
+	"github.com/bytedance/sonic"
 	"testing"
 
 	"github.com/mooc-manus/go-manus/api/internal/model"
@@ -20,7 +20,7 @@ func TestRuntimeHealthJSONRoundTrip(t *testing.T) {
 	}
 
 	var got model.RuntimeHealth
-	if err := json.Unmarshal(b, &got); err != nil {
+	if err := sonic.Unmarshal(b, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if got.Status != src.Status || got.RecentFailures != src.RecentFailures || got.AverageLatencyMS != src.AverageLatencyMS {
