@@ -28,14 +28,16 @@ import {ModelConfigManager} from '@/components/model-config-manager'
 // ==================== 通用配置 ====================
 
 type CommonSettingProps = {
-  config: AgentConfig
+  config: AgentConfig | null
   onChange: (config: AgentConfig) => void
 }
 
 function CommonSetting({config, onChange}: CommonSettingProps) {
+  // 后端在 app_configs 表为空时返回 null，避免访问 null 字段崩溃
+  const safeConfig = config ?? {}
   const handleChange = (field: keyof AgentConfig, value: string) => {
     const numValue = value === '' ? undefined : Number(value)
-    onChange({...config, [field]: numValue})
+    onChange({...safeConfig, [field]: numValue})
   }
 
   return (
@@ -50,7 +52,7 @@ function CommonSetting({config, onChange}: CommonSettingProps) {
                 id="max_iterations"
                 type="number"
                 placeholder="Agent最大迭代次数"
-                value={config.max_iterations ?? 100}
+                value={safeConfig.max_iterations ?? 100}
                 onChange={(e) => handleChange('max_iterations', e.target.value)}
                 min={0}
                 max={200}
@@ -65,7 +67,7 @@ function CommonSetting({config, onChange}: CommonSettingProps) {
                 id="max_retries"
                 type="number"
                 placeholder="LLM/Tool最大重试次数"
-                value={config.max_retries ?? 3}
+                value={safeConfig.max_retries ?? 3}
                 onChange={(e) => handleChange('max_retries', e.target.value)}
                 min={0}
                 max={10}
@@ -80,7 +82,7 @@ function CommonSetting({config, onChange}: CommonSettingProps) {
                 id="max_search_results"
                 type="number"
                 placeholder="搜索工具返回的最大结果数"
-                value={config.max_search_results ?? 10}
+                value={safeConfig.max_search_results ?? 10}
                 onChange={(e) => handleChange('max_search_results', e.target.value)}
                 min={0}
                 max={30}

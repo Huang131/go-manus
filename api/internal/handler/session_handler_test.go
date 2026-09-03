@@ -30,7 +30,6 @@ func (m *MockSessionServiceForHandler) CreateSession(ctx context.Context) (*mode
 		Title:              "新对话",
 		UnreadMessageCount: 0,
 		Events:             []model.Event{},
-		Files:              []model.File{},
 		Status:             model.SessionStatusPending,
 	}
 	m.sessions[session.ID] = session
@@ -47,7 +46,6 @@ func (m *MockSessionServiceForHandler) GetSession(ctx context.Context, id string
 	// 返回拷贝避免 handler 直接修改 mock 内部状态
 	clone := *session
 	clone.Events = append([]model.Event(nil), session.Events...)
-	clone.Files = append([]model.File(nil), session.Files...)
 	return &clone, nil
 }
 
@@ -93,8 +91,8 @@ func (m *MockSessionServiceForHandler) DecrementUnreadCount(ctx context.Context,
 	return nil
 }
 
-func (m *MockSessionServiceForHandler) GetSessionFiles(ctx context.Context, id string) ([]model.File, error) {
-	return []model.File{}, nil
+func (m *MockSessionServiceForHandler) GetSessionFiles(ctx context.Context, id string) ([]*model.File, error) {
+	return []*model.File{}, nil
 }
 
 func (m *MockSessionServiceForHandler) AppendEvent(ctx context.Context, sessionID string, event *model.Event) error {

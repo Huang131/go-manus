@@ -8,10 +8,11 @@ import (
 	"github.com/mooc-manus/go-manus/api/internal/model"
 )
 
+// VNC 测试不调用 GetSessionFiles，传 nil 即可
 // TestSessionService_GetVNCURL_Success 验证：会话存在时，从 sandbox address 派生 VNC URL (ws://host:5901)
 func TestSessionService_GetVNCURL_Success(t *testing.T) {
 	repo := NewMockSessionRepository()
-	svc := NewSessionServiceWithSandbox(repo, "http://sandbox.local:8080")
+	svc := NewSessionServiceWithSandbox(repo, nil, "http://sandbox.local:8080")
 
 	created, err := svc.CreateSession(context.Background())
 	if err != nil {
@@ -32,7 +33,7 @@ func TestSessionService_GetVNCURL_Success(t *testing.T) {
 // TestSessionService_GetVNCURL_HTTPS 验证：https:// 派生为 wss://
 func TestSessionService_GetVNCURL_HTTPS(t *testing.T) {
 	repo := NewMockSessionRepository()
-	svc := NewSessionServiceWithSandbox(repo, "https://sandbox.example.com")
+	svc := NewSessionServiceWithSandbox(repo, nil, "https://sandbox.example.com")
 
 	created, _ := svc.CreateSession(context.Background())
 	vncURL, err := svc.GetVNCURL(context.Background(), created.ID)
@@ -51,7 +52,7 @@ func TestSessionService_GetVNCURL_HTTPS(t *testing.T) {
 // TestSessionService_GetVNCURL_NotFound 验证：会话不存在时返回错误
 func TestSessionService_GetVNCURL_NotFound(t *testing.T) {
 	repo := NewMockSessionRepository()
-	svc := NewSessionServiceWithSandbox(repo, "http://sandbox.local:8080")
+	svc := NewSessionServiceWithSandbox(repo, nil, "http://sandbox.local:8080")
 
 	_, err := svc.GetVNCURL(context.Background(), "nonexistent-id")
 	if err == nil {
@@ -62,7 +63,7 @@ func TestSessionService_GetVNCURL_NotFound(t *testing.T) {
 // TestSessionService_GetVNCURL_EmptyAddress 验证：sandbox address 为空时返回错误
 func TestSessionService_GetVNCURL_EmptyAddress(t *testing.T) {
 	repo := NewMockSessionRepository()
-	svc := NewSessionServiceWithSandbox(repo, "")
+	svc := NewSessionServiceWithSandbox(repo, nil, "")
 
 	created, _ := svc.CreateSession(context.Background())
 	_, err := svc.GetVNCURL(context.Background(), created.ID)

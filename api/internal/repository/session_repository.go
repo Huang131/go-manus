@@ -27,11 +27,6 @@ type SessionRepository interface {
 	// 事件操作
 	AppendEvent(ctx context.Context, id string, event *model.Event) error
 
-	// 文件操作 (原子 JSONB 操作)
-	AddFile(ctx context.Context, id string, file *model.File) error
-	RemoveFile(ctx context.Context, id string, fileID string) error
-	GetFileByPath(ctx context.Context, id string, filepath string) (*model.File, error)
-
 	// 内存操作
 	GetMemory(ctx context.Context, id string, agentName string) (*model.Memory, error)
 	SaveMemory(ctx context.Context, id string, agentName string, memory *model.Memory) error
@@ -112,16 +107,15 @@ func (r *PostgresSessionRepository) Create(ctx context.Context, session *model.S
 	q := r.queryer(ctx)
 	query := `
 		INSERT INTO sessions (id, sandbox_id, task_id, title, unread_message_count, latest_message,
-			latest_message_at, events, files, memories, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			latest_message_at, events, memories, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	`
 	events, _ := json.Marshal(session.Events)
-	files, _ := json.Marshal(session.Files)
 	memories, _ := json.Marshal(session.Memories)
 	_, err := q.Exec(ctx, query,
 		session.ID, session.SandboxID, session.TaskID, session.Title,
 		session.UnreadMessageCount, session.LatestMessage, session.LatestMessageAt,
-		events, files, memories, session.Status, session.CreatedAt, session.UpdatedAt,
+		events, memories, session.Status, session.CreatedAt, session.UpdatedAt,
 	)
 	return err
 }
@@ -131,23 +125,20 @@ func (r *PostgresSessionRepository) GetByID(ctx context.Context, id string) (*mo
 	q := r.queryer(ctx)
 	query := `
 		SELECT id, sandbox_id, task_id, title, unread_message_count, latest_message,
-			latest_message_at, events, files, memories, status, created_at, updated_at
+			latest_message_at, events, memories, status, created_at, updated_at
 		FROM sessions WHERE id = $1
 	`
 	var s model.Session
-	var eventsJSON, filesJSON, memoriesJSON []byte
+	var eventsJSON, memoriesJSON []byte
 	err := q.QueryRow(ctx, query, id).Scan(
 		&s.ID, &s.SandboxID, &s.TaskID, &s.Title, &s.UnreadMessageCount,
-		&s.LatestMessage, &s.LatestMessageAt, &eventsJSON, &filesJSON, &memoriesJSON,
+		&s.LatestMessage, &s.LatestMessageAt, &eventsJSON, &memoriesJSON,
 		&s.Status, &s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(eventsJSON, &s.Events); err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal(filesJSON, &s.Files); err != nil {
 		return nil, err
 	}
 	if err := json.Unmarshal(memoriesJSON, &s.Memories); err != nil {
@@ -161,7 +152,7 @@ func (r *PostgresSessionRepository) GetAll(ctx context.Context) ([]*model.Sessio
 	q := r.queryer(ctx)
 	query := `
 		SELECT id, sandbox_id, task_id, title, unread_message_count, latest_message,
-			latest_message_at, events, files, memories, status, created_at, updated_at
+			latest_message_at, events, memories, status, created_at, updated_at
 		FROM sessions ORDER BY latest_message_at DESC NULLS LAST
 	`
 	rows, err := q.Query(ctx, query)
@@ -173,16 +164,15 @@ func (r *PostgresSessionRepository) GetAll(ctx context.Context) ([]*model.Sessio
 	var sessions []*model.Session
 	for rows.Next() {
 		var s model.Session
-		var eventsJSON, filesJSON, memoriesJSON []byte
+		var eventsJSON, memoriesJSON []byte
 		if err := rows.Scan(
 			&s.ID, &s.SandboxID, &s.TaskID, &s.Title, &s.UnreadMessageCount,
-			&s.LatestMessage, &s.LatestMessageAt, &eventsJSON, &filesJSON, &memoriesJSON,
+			&s.LatestMessage, &s.LatestMessageAt, &eventsJSON, &memoriesJSON,
 			&s.Status, &s.CreatedAt, &s.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
 		json.Unmarshal(eventsJSON, &s.Events)
-		json.Unmarshal(filesJSON, &s.Files)
 		json.Unmarshal(memoriesJSON, &s.Memories)
 		sessions = append(sessions, &s)
 	}
@@ -200,7 +190,7 @@ func (r *PostgresSessionRepository) List(ctx context.Context, limit, offset int)
 
 	query := `
 		SELECT id, sandbox_id, task_id, title, unread_message_count, latest_message,
-			latest_message_at, events, files, memories, status, created_at, updated_at
+			latest_message_at, events, memories, status, created_at, updated_at
 		FROM sessions ORDER BY latest_message_at DESC NULLS LAST LIMIT $1 OFFSET $2
 	`
 	rows, err := q.Query(ctx, query, limit, offset)
@@ -212,16 +202,15 @@ func (r *PostgresSessionRepository) List(ctx context.Context, limit, offset int)
 	var sessions []*model.Session
 	for rows.Next() {
 		var s model.Session
-		var eventsJSON, filesJSON, memoriesJSON []byte
+		var eventsJSON, memoriesJSON []byte
 		if err := rows.Scan(
 			&s.ID, &s.SandboxID, &s.TaskID, &s.Title, &s.UnreadMessageCount,
-			&s.LatestMessage, &s.LatestMessageAt, &eventsJSON, &filesJSON, &memoriesJSON,
+			&s.LatestMessage, &s.LatestMessageAt, &eventsJSON, &memoriesJSON,
 			&s.Status, &s.CreatedAt, &s.UpdatedAt,
 		); err != nil {
 			return nil, 0, err
 		}
 		json.Unmarshal(eventsJSON, &s.Events)
-		json.Unmarshal(filesJSON, &s.Files)
 		json.Unmarshal(memoriesJSON, &s.Memories)
 		sessions = append(sessions, &s)
 	}
@@ -234,17 +223,16 @@ func (r *PostgresSessionRepository) Update(ctx context.Context, session *model.S
 	query := `
 		UPDATE sessions SET
 			sandbox_id = $2, task_id = $3, title = $4, unread_message_count = $5,
-			latest_message = $6, latest_message_at = $7, events = $8, files = $9,
-			memories = $10, status = $11, updated_at = $12
+			latest_message = $6, latest_message_at = $7, events = $8,
+			memories = $9, status = $10, updated_at = $11
 		WHERE id = $1
 	`
 	events, _ := json.Marshal(session.Events)
-	files, _ := json.Marshal(session.Files)
 	memories, _ := json.Marshal(session.Memories)
 	_, err := q.Exec(ctx, query,
 		session.ID, session.SandboxID, session.TaskID, session.Title,
 		session.UnreadMessageCount, session.LatestMessage, session.LatestMessageAt,
-		events, files, memories, session.Status, session.UpdatedAt,
+		events, memories, session.Status, session.UpdatedAt,
 	)
 	return err
 }
@@ -301,58 +289,6 @@ func (r *PostgresSessionRepository) AppendEvent(ctx context.Context, id string, 
 	`
 	_, err := q.Exec(ctx, query, id, event.ToJSON(), message, timestamp, unreadDelta)
 	return err
-}
-
-// AddFile 往会话的 JSONB files 数组追加文件
-func (r *PostgresSessionRepository) AddFile(ctx context.Context, id string, file *model.File) error {
-	q := r.queryer(ctx)
-	fileData, _ := json.Marshal(file)
-	query := `
-		UPDATE sessions SET
-			files = COALESCE(files, '[]'::jsonb) || $2::jsonb,
-			updated_at = NOW()
-		WHERE id = $1
-	`
-	_, err := q.Exec(ctx, query, id, string(fileData))
-	return err
-}
-
-// RemoveFile 从会话的 JSONB files 数组移除指定文件
-func (r *PostgresSessionRepository) RemoveFile(ctx context.Context, id string, fileID string) error {
-	q := r.queryer(ctx)
-	query := `
-		UPDATE sessions SET
-			files = (
-				SELECT jsonb_agg(item) FROM (
-					SELECT item FROM jsonb_array_elements(files) AS item
-					WHERE item->>'id' != $2
-				) AS filtered
-			),
-			updated_at = NOW()
-		WHERE id = $1 AND files IS NOT NULL
-	`
-	_, err := q.Exec(ctx, query, id, fileID)
-	return err
-}
-
-// GetFileByPath 根据文件路径从会话的 JSONB files 中查找文件
-func (r *PostgresSessionRepository) GetFileByPath(ctx context.Context, id string, filepath string) (*model.File, error) {
-	q := r.queryer(ctx)
-	query := `
-		SELECT item::text FROM sessions, jsonb_array_elements(files) AS item
-		WHERE id = $1 AND item->>'filepath' = $2
-		LIMIT 1
-	`
-	var fileJSON string
-	err := q.QueryRow(ctx, query, id, filepath).Scan(&fileJSON)
-	if err != nil {
-		return nil, err
-	}
-	var f model.File
-	if err := json.Unmarshal([]byte(fileJSON), &f); err != nil {
-		return nil, err
-	}
-	return &f, nil
 }
 
 // GetMemory 获取指定 Agent 的记忆

@@ -24,7 +24,7 @@ type SessionService interface {
 	IncrementUnreadCount(ctx context.Context, id string) error
 	DecrementUnreadCount(ctx context.Context, id string) error
 	ClearUnreadCount(ctx context.Context, id string) error
-	GetSessionFiles(ctx context.Context, id string) ([]model.File, error)
+	GetSessionFiles(ctx context.Context, id string) ([]*model.File, error)
 	AppendEvent(ctx context.Context, sessionID string, event *model.Event) error
 	StreamSession(ctx context.Context, id string) (*model.Session, error)
 	Chat(ctx context.Context, sessionID string, message string) error
@@ -39,11 +39,12 @@ type SessionService interface {
 // DefaultSessionService 会话服务默认实现
 type DefaultSessionService struct {
 	repo           repository.SessionRepository
+	fileRepo       repository.FileRepository
 	sandboxAddress string
 	vncPort        int
 }
 
-// NewSessionService 创建会话服务
+// NewSessionService 创建会话服务（不含 fileRepo，GetSessionFiles 会报错）
 func NewSessionService(repo repository.SessionRepository) SessionService {
 	return &DefaultSessionService{
 		repo:    repo,
@@ -52,9 +53,11 @@ func NewSessionService(repo repository.SessionRepository) SessionService {
 }
 
 // NewSessionServiceWithSandbox 创建带 sandbox 配置的会话服务
-func NewSessionServiceWithSandbox(repo repository.SessionRepository, sandboxAddress string) SessionService {
+// 注意：fileRepo 为可选，GetSessionFiles 依赖它。如果未注入且被调用，方法内会返回错误。
+func NewSessionServiceWithSandbox(repo repository.SessionRepository, fileRepo repository.FileRepository, sandboxAddress string) SessionService {
 	return &DefaultSessionService{
 		repo:           repo,
+		fileRepo:       fileRepo,
 		sandboxAddress: sandboxAddress,
 		vncPort:        5901,
 	}
@@ -70,7 +73,6 @@ func (s *DefaultSessionService) CreateSession(ctx context.Context) (*model.Sessi
 		LatestMessage:      "",
 		LatestMessageAt:    nil,
 		Events:             []model.Event{},
-		Files:              []model.File{},
 		Memories:           make(map[string]interface{}),
 		Status:             model.SessionStatusPending,
 		CreatedAt:          now,
@@ -129,15 +131,21 @@ func (s *DefaultSessionService) DecrementUnreadCount(ctx context.Context, id str
 }
 
 // GetSessionFiles 获取会话的文件列表
-func (s *DefaultSessionService) GetSessionFiles(ctx context.Context, id string) ([]model.File, error) {
-	session, err := s.repo.GetByID(ctx, id)
+// 统一走 files 表（替代旧 sessions.files JSONB），单一数据源，永不不一致
+func (s *DefaultSessionService) GetSessionFiles(ctx context.Context, id string) ([]*model.File, error) {
+	// 先确认 session 存在
+	_, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	if session == nil {
-		return nil, errors.New("会话不存在")
+	if s.fileRepo == nil {
+		return nil, errors.New("file repository 未注入，GetSessionFiles 不可用")
 	}
-	return session.Files, nil
+	files, err := s.fileRepo.ListBySessionID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return files, nil
 }
 
 // AppendEvent 追加事件

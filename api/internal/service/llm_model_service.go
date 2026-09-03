@@ -22,6 +22,8 @@ type LLMModelService interface {
 	UpdateRuntimeHealth(ctx context.Context, id string, health model.RuntimeHealth) error
 	Delete(ctx context.Context, id string) error
 	SetDefault(ctx context.Context, id string) error
+	// UnsetDefault 取消默认模型（允许系统处于"无默认"状态，agent 启动时降级到第一个 enabled）
+	UnsetDefault(ctx context.Context) error
 	// GetDefaultForAgent 启动读取：default 优先，否则第一个 enabled
 	// 找不到则 panic (与原"必须配 LLM" 行为一致)
 	GetDefaultForAgent(ctx context.Context) *model.LLMModel
@@ -39,10 +41,9 @@ func NewLLMModelService(repo repository.LLMModelRepository) LLMModelService {
 
 // 业务错误
 var (
-	ErrModelNotFound      = errors.New("模型不存在")
-	ErrModelNameRequired  = errors.New("name/provider/base_url/model_name 不能为空")
-	ErrDeleteDefaultModel = errors.New("不能删除默认模型，请先把其他模型设为默认")
-	ErrModelConflict      = errors.New("同名同 provider+url+model 已存在")
+	ErrModelNotFound     = errors.New("模型不存在")
+	ErrModelNameRequired = errors.New("name/provider/base_url/model_name 不能为空")
+	ErrModelConflict     = errors.New("同名同 provider+url+model 已存在")
 )
 
 // validateRequired 校验必填字段
@@ -182,7 +183,7 @@ func (s *DefaultLLMModelService) UpdateRuntimeHealth(ctx context.Context, id str
 	return s.repo.UpdateRuntimeHealth(ctx, id, health)
 }
 
-// Delete 删除
+// Delete 删除（允许删除默认模型；agent 启动时会降级到第一个 enabled）
 func (s *DefaultLLMModelService) Delete(ctx context.Context, id string) error {
 	m, err := s.repo.GetByID(ctx, id)
 	if err != nil {
@@ -191,10 +192,15 @@ func (s *DefaultLLMModelService) Delete(ctx context.Context, id string) error {
 	if m == nil {
 		return ErrModelNotFound
 	}
-	if m.IsDefault {
-		return ErrDeleteDefaultModel
-	}
-	return s.repo.Delete(ctx, id)
+	return s.repo.WithTx(ctx, func(r repository.LLMModelRepository) error {
+		// 如果是 default，先清掉 default 标记（事务内原子）
+		if m.IsDefault {
+			if err := r.ClearDefault(ctx, nil); err != nil {
+				return err
+			}
+		}
+		return r.Delete(ctx, id)
+	})
 }
 
 // SetDefault 切换默认（事务内原子操作）
@@ -223,6 +229,11 @@ func (s *DefaultLLMModelService) SetDefault(ctx context.Context, id string) erro
 		// 触发部分 unique 索引兜底
 		return nil
 	})
+}
+
+// UnsetDefault 取消默认模型（清空 default 标记，agent 启动时会降级到第一个 enabled）
+func (s *DefaultLLMModelService) UnsetDefault(ctx context.Context) error {
+	return s.repo.ClearDefault(ctx, nil)
 }
 
 // GetDefaultForAgent agent 启动读默认模型

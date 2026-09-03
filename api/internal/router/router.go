@@ -73,6 +73,7 @@ func SetupRoutes(engine *gin.Engine, h *Handlers) {
 		{
 			llmModels.GET("", h.LLMModel.List)
 			llmModels.GET("/default", h.LLMModel.GetDefault)
+			llmModels.DELETE("/default", h.LLMModel.UnsetDefault)
 			llmModels.POST("", h.LLMModel.Create)
 			llmModels.GET("/:id", h.LLMModel.Get)
 			llmModels.PUT("/:id", h.LLMModel.Update)

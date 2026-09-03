@@ -500,10 +500,11 @@ func (r *AgentTaskRunner) syncUserAttachmentsToSandbox(ctx context.Context, atta
 		sandboxFile.Filepath = sandboxPath
 		result = append(result, sandboxFile.Filepath)
 
-		if r.sessionRep != nil {
-			existing, findErr := r.sessionRep.GetFileByPath(ctx, r.sessionID, sandboxFile.Filepath)
+		// 写入 files 表（替代旧 sessions.files JSONB），按 filepath 去重
+		if r.fileRep != nil {
+			existing, findErr := r.fileRep.GetBySessionAndFilepath(ctx, r.sessionID, sandboxFile.Filepath)
 			if findErr != nil || existing == nil {
-				_ = r.sessionRep.AddFile(ctx, r.sessionID, &sandboxFile)
+				_ = r.fileRep.Create(ctx, &sandboxFile)
 			}
 		}
 	}

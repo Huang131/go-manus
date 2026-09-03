@@ -205,7 +205,7 @@ func main() {
 	logger.Info("Repository layer initialized")
 
 	// 9. 初始化 Service 层
-	sessionService := service.NewSessionServiceWithSandbox(sessionRepo, cfg.Sandbox.Address)
+	sessionService := service.NewSessionServiceWithSandbox(sessionRepo, fileRepo, cfg.Sandbox.Address)
 	fileService := service.NewFileService(fileRepo, cos)
 	statusService := service.NewStatusService(db, redis, cos)
 	appConfigService := service.NewAppConfigService(configRepo)
@@ -284,7 +284,7 @@ func main() {
 
 	// 10. 初始化 Handler 层
 	sessionHandler := handler.NewSessionHandler(sessionService, agentService, sandbox)
-	fileHandler := handler.NewFileHandler(fileService)
+	fileHandler := handler.NewFileHandler(fileService, sessionService)
 	statusHandler := handler.NewStatusHandler(statusService)
 	appConfigHandler := handler.NewAppConfigHandler(appConfigService)
 	llmModelHandler := handler.NewLLMModelHandler(llmModelService)

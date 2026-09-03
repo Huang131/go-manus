@@ -13,7 +13,6 @@ CREATE TABLE IF NOT EXISTS sessions (
     latest_message          TEXT NOT NULL DEFAULT '',
     latest_message_at       TIMESTAMP,
     events                  JSONB NOT NULL DEFAULT '[]',
-    files                   JSONB NOT NULL DEFAULT '[]',
     memories                JSONB NOT NULL DEFAULT '{}',
     status                  VARCHAR(255) NOT NULL DEFAULT '',
     updated_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
@@ -37,7 +36,6 @@ COMMENT ON COLUMN sessions.unread_message_count IS '未读消息数量，UI 显�
 COMMENT ON COLUMN sessions.latest_message IS '最新一条消息的摘要，用于会话列表展示';
 COMMENT ON COLUMN sessions.latest_message_at IS '最新消息的时间戳，用于会话列表按时间排序';
 COMMENT ON COLUMN sessions.events IS '会话事件历史 JSON 数组，存储完整对话记录';
-COMMENT ON COLUMN sessions.files IS '会话关联的文件列表 JSON 数组';
 COMMENT ON COLUMN sessions.memories IS 'AI 记忆数据 JSON 对象，存储会话中学到的关键信息';
 COMMENT ON COLUMN sessions.status IS '会话状态：空字符串=初始, active=活跃, completed=完成, failed=失败, cancelled=取消';
 COMMENT ON COLUMN sessions.updated_at IS '最后更新时间，任何字段修改都会更新';

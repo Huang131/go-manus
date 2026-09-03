@@ -70,36 +70,8 @@ func TestSessionRepository_AppendEvent(t *testing.T) {
 	}
 }
 
-// TestSessionRepository_AppendFile 测试追加文件
-func TestSessionRepository_AppendFile(t *testing.T) {
-	session := &model.Session{
-		ID:        "test-session-4",
-		Title:     "Test Session 4",
-		Status:    model.SessionStatusPending,
-		Files:     []model.File{},
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
-
-	// 模拟文件追加
-	file := &model.File{
-		ID:        "file-1",
-		Filename:  "test.txt",
-		Extension: "txt",
-		SessionID: session.ID,
-		CreatedAt: time.Now(),
-	}
-
-	session.Files = append(session.Files, *file)
-
-	if len(session.Files) != 1 {
-		t.Errorf("Files 数量应为 1，实际: %d", len(session.Files))
-	}
-
-	if session.Files[0].Filename != "test.txt" {
-		t.Errorf("File 文件名应为 test.txt，实际: %s", session.Files[0].Filename)
-	}
-}
+// TestSessionRepository_AppendFile 已废弃：Issue #1 后文件不再通过 sessions.files JSONB 存储，
+// 文件已统一到 files 表，对应测试见 TestFileRepository_*。
 
 // TestSessionRepository_UpdateLatestMessage 测试更新最新消息
 func TestSessionRepository_UpdateLatestMessage(t *testing.T) {
@@ -254,7 +226,6 @@ func TestSessionRepository_JSONSerialization(t *testing.T) {
 		UnreadMessageCount: 1,
 		LatestMessage:      "Hello",
 		Events:             []model.Event{},
-		Files:              []model.File{},
 		Memories:           map[string]interface{}{},
 		CreatedAt:          time.Now(),
 		UpdatedAt:          time.Now(),

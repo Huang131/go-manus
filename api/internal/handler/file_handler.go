@@ -10,12 +10,14 @@ import (
 
 // FileHandler 文件处理器
 type FileHandler struct {
-	service service.FileService
+	service    service.FileService
+	sessionSvc service.SessionService
 }
 
 // NewFileHandler 创建文件处理器
-func NewFileHandler(svc service.FileService) *FileHandler {
-	return &FileHandler{service: svc}
+// sessionSvc 用于校验上传时携带的 session_id 是否存在；传 nil 则跳过校验（保留兼容）。
+func NewFileHandler(svc service.FileService, sessionSvc service.SessionService) *FileHandler {
+	return &FileHandler{service: svc, sessionSvc: sessionSvc}
 }
 
 // Upload 上传文件
@@ -24,6 +26,14 @@ func (h *FileHandler) Upload(c *gin.Context) {
 	if sessionID == "" {
 		response.Error(c, "session_id is required")
 		return
+	}
+
+	// Issue #5：先校验 session 存在性，避免上传到不存在的 session
+	if h.sessionSvc != nil {
+		if _, err := h.sessionSvc.GetSession(c.Request.Context(), sessionID); err != nil {
+			response.Error(c, "session not found: "+sessionID)
+			return
+		}
 	}
 
 	file, err := c.FormFile("file")

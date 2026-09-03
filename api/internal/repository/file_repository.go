@@ -15,6 +15,8 @@ import (
 type FileRepository interface {
 	Create(ctx context.Context, file *model.File) error
 	GetByID(ctx context.Context, id string) (*model.File, error)
+	// GetBySessionAndFilepath 根据 session_id + filepath 查重（替代旧 sessions.files JSONB 的路径去重逻辑）
+	GetBySessionAndFilepath(ctx context.Context, sessionID, filepath string) (*model.File, error)
 	Update(ctx context.Context, file *model.File) error
 	Delete(ctx context.Context, id string) error
 	DeleteBySessionID(ctx context.Context, sessionID string) error
@@ -95,6 +97,24 @@ func (r *PostgresFileRepository) Create(ctx context.Context, file *model.File) e
 		file.Key, file.Extension, file.MimeType, file.Size, file.CreatedAt,
 	)
 	return err
+}
+
+// GetBySessionAndFilepath 根据 session_id + filepath 查重（替代旧 sessions.files JSONB 的 GetFileByPath）
+func (r *PostgresFileRepository) GetBySessionAndFilepath(ctx context.Context, sessionID, filepath string) (*model.File, error) {
+	q := r.queryer()
+	query := `
+		SELECT id, session_id, filename, filepath, key, extension, mime_type, size, created_at
+		FROM files WHERE session_id = $1 AND filepath = $2 LIMIT 1
+	`
+	var file model.File
+	err := q.QueryRow(ctx, query, sessionID, filepath).Scan(
+		&file.ID, &file.SessionID, &file.Filename, &file.Filepath,
+		&file.Key, &file.Extension, &file.MimeType, &file.Size, &file.CreatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &file, nil
 }
 
 // GetByID 根据ID获取文件

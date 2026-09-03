@@ -173,9 +173,9 @@ func TestLLMModelService_Delete_Default(t *testing.T) {
 	m, _ := svc.Create(context.Background(), &model.LLMModel{
 		Name: "a", Provider: "p", BaseURL: "u", ModelName: "mn",
 	})
-	err := svc.Delete(context.Background(), m.ID)
-	if !errors.Is(err, ErrDeleteDefaultModel) {
-		t.Errorf("want ErrDeleteDefaultModel, got %v", err)
+	// 当前业务规则已开放：允许删除 default 模型（agent 启动会降级到第一个 enabled）
+	if err := svc.Delete(context.Background(), m.ID); err != nil {
+		t.Errorf("Delete(default model) should succeed, got %v", err)
 	}
 }
 

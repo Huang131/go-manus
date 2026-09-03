@@ -52,13 +52,12 @@ func Logger() gin.HandlerFunc {
 			zap.String("method", c.Request.Method),
 			zap.String("path", c.Request.URL.Path),
 			zap.Int("status", c.Writer.Status()),
-			zap.Int64("latency_ms", int64(time.Since(start).Milliseconds())),
+			zap.Int64("latency_ms", time.Since(start).Milliseconds()),
 		)
 	}
 }
 
 // CORS CORS 中间件
-// 与原项目 mooc-manus 对齐：allow_origins=["*"]，对外提供最宽松的跨域支持。
 // 鉴权由后端在路由内部完成（不依赖浏览器 Cookie），因此 AllowAllOrigins 安全。
 // 同时显式放行 SSE 所需的 Last-Event-ID 头与常见 Content-Type。
 func CORS() gin.HandlerFunc {

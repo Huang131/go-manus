@@ -24,6 +24,9 @@ func (h *AppConfigHandler) GetLLMConfig(c *gin.Context) {
 		response.Error(c, err.Error())
 		return
 	}
+	if cfg == nil {
+		cfg = &model.LLMConfig{}
+	}
 	response.Success(c, cfg)
 }
 
@@ -48,6 +51,9 @@ func (h *AppConfigHandler) GetAgentConfig(c *gin.Context) {
 		response.Error(c, err.Error())
 		return
 	}
+	if cfg == nil {
+		cfg = &model.AgentConfig{}
+	}
 	response.Success(c, cfg)
 }
 
@@ -71,6 +77,9 @@ func (h *AppConfigHandler) GetMCPConfig(c *gin.Context) {
 	if err != nil {
 		response.Error(c, err.Error())
 		return
+	}
+	if cfg == nil {
+		cfg = &model.MCPConfig{}
 	}
 	response.Success(c, cfg)
 }
@@ -105,6 +114,9 @@ func (h *AppConfigHandler) GetA2AConfig(c *gin.Context) {
 	if err != nil {
 		response.Error(c, err.Error())
 		return
+	}
+	if cfg == nil {
+		cfg = &model.A2AConfig{}
 	}
 	response.Success(c, cfg)
 }

@@ -105,18 +105,6 @@ func (m *MockSessionRepository) AppendEvent(ctx context.Context, id string, even
 	return nil
 }
 
-func (m *MockSessionRepository) AddFile(ctx context.Context, id string, file *model.File) error {
-	return nil
-}
-
-func (m *MockSessionRepository) RemoveFile(ctx context.Context, id string, fileID string) error {
-	return nil
-}
-
-func (m *MockSessionRepository) GetFileByPath(ctx context.Context, id string, filepath string) (*model.File, error) {
-	return nil, nil
-}
-
 func (m *MockSessionRepository) GetMemory(ctx context.Context, id string, agentName string) (*model.Memory, error) {
 	return nil, nil
 }
@@ -198,9 +186,6 @@ func TestSessionService_CreateSession(t *testing.T) {
 	}
 	if len(session.Events) != 0 {
 		t.Errorf("Session Events length = %d, want 0", len(session.Events))
-	}
-	if len(session.Files) != 0 {
-		t.Errorf("Session Files length = %d, want 0", len(session.Files))
 	}
 	if session.Memories == nil {
 		t.Error("Session Memories should not be nil")
@@ -354,7 +339,8 @@ func TestSessionService_ClearUnreadCount(t *testing.T) {
 
 func TestSessionService_GetSessionFiles(t *testing.T) {
 	repo := NewMockSessionRepository()
-	svc := NewSessionService(repo)
+	fileRepo := newMockFileRepo()
+	svc := NewSessionServiceWithSandbox(repo, fileRepo, "")
 
 	// 创建会话
 	session, _ := svc.CreateSession(context.Background())
@@ -367,6 +353,43 @@ func TestSessionService_GetSessionFiles(t *testing.T) {
 	if len(files) != 0 {
 		t.Errorf("GetSessionFiles() returned %d files, want 0", len(files))
 	}
+}
+
+// newMockFileRepo 为 GetSessionFiles 测试提供最小化的 FileRepository mock
+func newMockFileRepo() *mockFileRepo {
+	return &mockFileRepo{files: map[string][]*model.File{}}
+}
+
+type mockFileRepo struct {
+	files map[string][]*model.File
+}
+
+func (m *mockFileRepo) ListBySessionID(ctx context.Context, sessionID string) ([]*model.File, error) {
+	return m.files[sessionID], nil
+}
+
+// 实现 FileRepository 其他接口以满足编译（测试用不到）
+func (m *mockFileRepo) Create(ctx context.Context, f *model.File) error             { return nil }
+func (m *mockFileRepo) GetByID(ctx context.Context, id string) (*model.File, error) { return nil, nil }
+func (m *mockFileRepo) GetBySessionAndFilepath(ctx context.Context, s, f string) (*model.File, error) {
+	return nil, nil
+}
+func (m *mockFileRepo) Update(ctx context.Context, f *model.File) error { return nil }
+func (m *mockFileRepo) Delete(ctx context.Context, id string) error     { return nil }
+func (m *mockFileRepo) DeleteBySessionID(ctx context.Context, s string) error {
+	delete(m.files, s)
+	return nil
+}
+func (m *mockFileRepo) GetExpiredFiles(ctx context.Context, d string, l int64) ([]*model.File, error) {
+	return nil, nil
+}
+func (m *mockFileRepo) CountExpiredFiles(ctx context.Context, d string) (int64, error) { return 0, nil }
+func (m *mockFileRepo) DeleteByIDs(ctx context.Context, ids []string) (int64, error)   { return 0, nil }
+func (m *mockFileRepo) GetFilesBySessionIDs(ctx context.Context, s []string) ([]*model.File, error) {
+	return nil, nil
+}
+func (m *mockFileRepo) WithTx(ctx context.Context, fn func(repository.FileRepository) error) error {
+	return fn(m)
 }
 
 func TestSessionService_AppendEvent(t *testing.T) {

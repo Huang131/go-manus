@@ -25,7 +25,6 @@ type Session struct {
 	LatestMessage      string                 `json:"latest_message"`
 	LatestMessageAt    *time.Time             `json:"latest_message_at,omitempty"`
 	Events             []Event                `json:"events"`
-	Files              []File                 `json:"files"`
 	Memories           map[string]interface{} `json:"memories"`
 	Status             SessionStatus          `json:"status"`
 	UpdatedAt          time.Time              `json:"updated_at"`

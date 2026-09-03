@@ -120,3 +120,12 @@ func (h *LLMModelHandler) SetDefault(c *gin.Context) {
 	}
 	response.Success(c, nil)
 }
+
+// UnsetDefault 取消默认（agent 启动时会降级到第一个 enabled）
+func (h *LLMModelHandler) UnsetDefault(c *gin.Context) {
+	if err := h.svc.UnsetDefault(c.Request.Context()); err != nil {
+		response.Error(c, err.Error())
+		return
+	}
+	response.Success(c, nil)
+}
