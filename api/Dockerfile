@@ -43,7 +43,6 @@ WORKDIR /app
 # 从 builder 阶段复制二进制文件
 COPY --from=builder /build/go-manus .
 COPY --from=builder /build/config.yaml .
-COPY --from=builder /build/.env.example .env
 
 # 复制数据库迁移脚本
 COPY --from=builder /build/migrations ./migrations

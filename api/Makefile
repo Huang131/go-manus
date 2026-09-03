@@ -2,7 +2,7 @@
 # go-manus API Makefile - Go 代码开发和测试
 # ============================================================
 
-.PHONY: help build test test-cover lint clean run fmt deps deps-view tidy health docker-build
+.PHONY: help build test test-cover test-integration test-up test-down lint clean run fmt deps deps-view tidy health docker-build
 
 # 默认目标
 help:
@@ -15,6 +15,9 @@ help:
 	@echo "=== 测试 ==="
 	@echo "  make test          - 运行所有测试"
 	@echo "  make test-cover    - 运行测试 (生成覆盖率报告)"
+	@echo "  make test-up       - 初始化集成测试环境 (创建 manus_test DB 等)"
+	@echo "  make test-integration - 一键运行集成测试 (自动初始化环境)"
+	@echo "  make test-down     - 清理集成测试数据"
 	@echo ""
 	@echo "=== 代码质量 ==="
 	@echo "  make lint          - 代码检查 (go vet + golangci-lint)"
@@ -58,6 +61,25 @@ test-cover:
 	go test -coverprofile=coverage.out ./...
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "覆盖率报告已生成: coverage.html"
+
+# ============================================================
+# 集成测试命令
+# ============================================================
+
+# 初始化集成测试环境 (在项目根目录执行)
+test-up:
+	@echo "初始化集成测试环境..."
+	cd .. && ./scripts/test-env-up.sh
+
+# 一键运行集成测试 (自动初始化环境后运行测试)
+test-integration: test-up
+	@echo "运行集成测试..."
+	go test -tags=integration -v ./tests/...
+
+# 清理集成测试数据 (在项目根目录执行)
+test-down:
+	@echo "清理集成测试数据..."
+	cd .. && ./scripts/test-env-down.sh
 
 # ============================================================
 # 代码质量

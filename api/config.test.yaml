@@ -1,0 +1,72 @@
+# ============================================================
+# go-manus 测试环境配置
+# ============================================================
+# 用途：集成测试时使用，连接共享开发 Docker 的隔离资源
+# 数据隔离：
+#   - PostgreSQL: manus_test 数据库（由 scripts/test-env-up.sh 创建）
+#   - Redis: db 1（与开发 db 0 隔离）
+#   - MinIO: go-manus-test-files bucket（与开发 go-manus-files 隔离）
+# ============================================================
+
+env: test
+log_level: debug
+app_config_filepath: config.test.yaml
+
+database:
+  host: localhost
+  port: 5432              # 复用开发 PostgreSQL 端口
+  user: postgres
+  password: postgres
+  database: manus_test    # 与开发数据库 manus 隔离
+  max_open_conns: 5
+  max_idle_conns: 2
+
+redis:
+  host: localhost
+  port: 6379              # 复用开发 Redis 端口
+  db: 1                   # 与开发 db 0 隔离
+  password: ""
+
+cos:
+  endpoint: "http://localhost:9000"   # 复用开发 MinIO
+  secret_id: "minioadmin"
+  secret_key: "minioadmin"
+  region: us-east-1
+  scheme: http
+  bucket: "go-manus-test-files"       # 与开发 bucket 隔离
+
+sandbox:
+  address: ""
+  image: ""
+  name_prefix: manus-test
+  ttl_minutes: 5
+  network: ""
+  chrome_args: ""
+  https_proxy: ""
+  http_proxy: ""
+  no_proxy: ""
+
+llm:
+  base_url: "https://api.openai.com/v1"
+  api_key: ""
+  model_name: "gpt-4o"
+  temperature: 0.7
+  max_tokens: 4096
+
+search:
+  provider: "bing"
+  bing_api_key: ""
+  google_api_key: ""
+  search_engine_id: ""
+
+mcp:
+  timeout: 60
+  servers: []
+
+a2a:
+  timeout: 30
+  agents: []
+
+server:
+  host: 0.0.0.0
+  port: 8080
