@@ -1,6 +1,7 @@
 package external
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/mooc-manus/go-manus/api/internal/model"
@@ -43,7 +44,7 @@ func TestBuildRuntimeConfigFromModel(t *testing.T) {
 			DefaultTemperature: func() *float64 { v := 0.1; return &v }(),
 			DefaultMaxTokens:   func() *int { v := 2048; return &v }(),
 			ReasoningMode:      model.ReasoningOff,
-			Extra: map[string][]byte{
+			Extra: map[string]json.RawMessage{
 				"reasoning_effort": reqExtra,
 			},
 		},

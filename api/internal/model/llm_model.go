@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -67,7 +68,7 @@ type RequestPolicy struct {
 	// Extra provider 白名单参数
 	// 例：sensenova deepseek-v4-flash → {"reasoning_effort": "none"}
 	// 只能由 Adapter 按白名单解析，不允许原样透传
-	Extra map[string][]byte `json:"extra,omitempty"`
+	Extra map[string]json.RawMessage `json:"extra,omitempty"`
 }
 
 // CostPolicy 成本策略（美元 / 百万 token）

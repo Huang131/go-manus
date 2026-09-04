@@ -1,6 +1,7 @@
 package external
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/mooc-manus/go-manus/api/internal/llmcore"
@@ -118,7 +119,7 @@ func BuildRuntimeConfigFromModel(m *model.LLMModel, toolCallTimeout int) *LLMRun
 	}
 }
 
-func convertRequestPolicyExtra(in map[string][]byte) map[string]llmcore.ExtraParam {
+func convertRequestPolicyExtra(in map[string]json.RawMessage) map[string]llmcore.ExtraParam {
 	if len(in) == 0 {
 		return nil
 	}

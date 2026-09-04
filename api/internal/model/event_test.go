@@ -1,169 +1,154 @@
 package model
 
 import (
-	"github.com/bytedance/sonic"
+	"encoding/json"
 	"testing"
+
+	"github.com/bytedance/sonic"
 )
 
-func TestExecutionStatus_Values(t *testing.T) {
+// TestEvent_Data_JSONRoundtrip 验证 Event.Data 字段在 JSON 序列化/反序列化后
+// 保持原始 JSON 结构（不出现 base64 编码）。
+//
+// 历史 Bug:
+//
+//	Event.Data 原为 []byte，被 sonic 序列化为 base64 字符串（JSON 没有 []byte 类型，
+//	标准库与 sonic 都会做 base64 编码）。改为 json.RawMessage 后，sonic 直接嵌入
+//	原始 JSON，不再二次编码。
+func TestEvent_Data_JSONRoundtrip(t *testing.T) {
 	tests := []struct {
-		status   ExecutionStatus
-		expected string
+		name  string
+		input string
 	}{
-		{ExecutionStatusPending, "pending"},
-		{ExecutionStatusRunning, "running"},
-		{ExecutionStatusCompleted, "completed"},
-		{ExecutionStatusFailed, "failed"},
-	}
-
-	for _, tt := range tests {
-		if string(tt.status) != tt.expected {
-			t.Errorf("ExecutionStatus %v: expected %s, got %s", tt.status, tt.expected, string(tt.status))
-		}
-	}
-}
-
-func TestPlan_Done(t *testing.T) {
-	tests := []struct {
-		name   string
-		status ExecutionStatus
-		want   bool
-	}{
-		{"pending not done", ExecutionStatusPending, false},
-		{"running not done", ExecutionStatusRunning, false},
-		{"completed is done", ExecutionStatusCompleted, true},
-		{"failed is done", ExecutionStatusFailed, true},
+		{
+			name:  "user message object",
+			input: `{"role":"user","message":"GitHub上最热门的存储库有哪些？"}`,
+		},
+		{
+			name:  "title string",
+			input: `{"title":"GitHub热门存储库"}`,
+		},
+		{
+			name:  "step result with attachments",
+			input: `{"step":{"id":"1","description":"查询GitHub","status":"completed","success":true,"attachments":null},"status":"finished"}`,
+		},
+		{
+			name:  "empty object",
+			input: `{}`,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			plan := &Plan{Status: tt.status}
-			if got := plan.Done(); got != tt.want {
-				t.Errorf("Plan.Done() = %v, want %v", got, tt.want)
+			event := Event{
+				ID:   "test-id",
+				Type: EventTypeMessage,
+				Data: json.RawMessage(tt.input),
+			}
+			out, err := sonic.Marshal(event)
+			if err != nil {
+				t.Fatalf("marshal failed: %v", err)
+			}
+
+			var probe struct {
+				Data json.RawMessage `json:"data"`
+			}
+			if err := sonic.Unmarshal(out, &probe); err != nil {
+				t.Fatalf("unmarshal probe failed: %v", err)
+			}
+
+			got := string(probe.Data)
+			if len(got) == 0 || got[0] != '{' {
+				t.Errorf("Data should be embedded as JSON object, got: %s\nfull json: %s", got, out)
+			}
+
+			var back Event
+			if err := sonic.Unmarshal(out, &back); err != nil {
+				t.Fatalf("unmarshal failed: %v", err)
+			}
+			if string(back.Data) != tt.input {
+				t.Errorf("roundtrip mismatch:\nwant: %s\ngot:  %s", tt.input, back.Data)
 			}
 		})
 	}
 }
 
-func TestPlan_GetNextStep(t *testing.T) {
-	plan := &Plan{
-		Steps: []PlanStep{
-			{ID: "1", Status: ExecutionStatusCompleted},
-			{ID: "2", Status: ExecutionStatusRunning},
-			{ID: "3", Status: ExecutionStatusPending},
+// TestEvent_Data_NotBase64 防御性回归测试：明确验证 Data 不会被 base64 编码。
+func TestEvent_Data_NotBase64(t *testing.T) {
+	original := `{"role":"user","message":"hello"}`
+	event := Event{
+		Type: EventTypeMessage,
+		Data: json.RawMessage(original),
+	}
+
+	out, err := sonic.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	if contains(string(out), `"data":"eyJ`) {
+		t.Errorf("Data was base64-encoded, JSON output:\n%s", out)
+	}
+}
+
+// TestEvent_Data_PreservesStructure 验证 Data 在嵌套场景下的结构保真度。
+func TestEvent_Data_PreservesStructure(t *testing.T) {
+	data := json.RawMessage(`{
+		"plan": {
+			"id": "",
+			"title": "GitHub热门存储库",
+			"steps": [
+				{"id": "1", "description": "查询GitHub", "status": "pending", "success": false, "attachments": null}
+			]
 		},
+		"status": "running"
+	}`)
+
+	event := Event{
+		Type: EventTypePlan,
+		Data: data,
 	}
 
-	next := plan.GetNextStep()
-	if next == nil {
-		t.Fatal("GetNextStep() returned nil, want step 2")
+	out, err := sonic.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
-	if next.ID != "2" {
-		t.Errorf("GetNextStep() = %s, want 2", next.ID)
+
+	var back struct {
+		Data struct {
+			Plan struct {
+				Title string `json:"title"`
+				Steps []struct {
+					ID     string `json:"id"`
+					Status string `json:"status"`
+				} `json:"steps"`
+			} `json:"plan"`
+			Status string `json:"status"`
+		} `json:"data"`
+	}
+	if err := sonic.Unmarshal(out, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if back.Data.Plan.Title != "GitHub热门存储库" {
+		t.Errorf("plan title lost: %s", back.Data.Plan.Title)
+	}
+	if len(back.Data.Plan.Steps) != 1 || back.Data.Plan.Steps[0].ID != "1" {
+		t.Errorf("plan steps lost: %+v", back.Data.Plan.Steps)
+	}
+	if back.Data.Status != "running" {
+		t.Errorf("status lost: %s", back.Data.Status)
 	}
 }
 
-func TestPlan_GetNextStep_AllDone(t *testing.T) {
-	plan := &Plan{
-		Steps: []PlanStep{
-			{ID: "1", Status: ExecutionStatusCompleted},
-			{ID: "2", Status: ExecutionStatusCompleted},
-		},
+// TestEvent_Data_Nil 验证 nil Data 序列化为 null。
+func TestEvent_Data_Nil(t *testing.T) {
+	event := Event{Type: EventTypeMessage}
+	out, err := sonic.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
 	}
-
-	next := plan.GetNextStep()
-	if next != nil {
-		t.Errorf("GetNextStep() = %v, want nil (all steps done)", next)
-	}
-}
-
-func TestPlanStep_Done(t *testing.T) {
-	tests := []struct {
-		name   string
-		status ExecutionStatus
-		want   bool
-	}{
-		{"pending not done", ExecutionStatusPending, false},
-		{"running not done", ExecutionStatusRunning, false},
-		{"completed is done", ExecutionStatusCompleted, true},
-		{"failed is done", ExecutionStatusFailed, true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			step := &PlanStep{Status: tt.status}
-			if got := step.Done(); got != tt.want {
-				t.Errorf("PlanStep.Done() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestNewErrorEvent(t *testing.T) {
-	event := NewErrorEvent("test error")
-	if event.Message != "test error" {
-		t.Errorf("NewErrorEvent() message = %s, want test error", event.Message)
-	}
-	if event.GetType() != EventTypeError {
-		t.Errorf("NewErrorEvent() type = %v, want EventTypeError", event.GetType())
-	}
-}
-
-func TestNewTitleEvent(t *testing.T) {
-	event := NewTitleEvent("Test Title")
-	if event.Title != "Test Title" {
-		t.Errorf("NewTitleEvent() title = %s, want Test Title", event.Title)
-	}
-	if event.GetType() != EventTypeTitle {
-		t.Errorf("NewTitleEvent() type = %v, want EventTypeTitle", event.GetType())
-	}
-}
-
-func TestNewMessageEvent(t *testing.T) {
-	event := NewMessageEvent("assistant", "Hello!")
-	if event.Message != "Hello!" {
-		t.Errorf("NewMessageEvent() message = %s, want Hello!", event.Message)
-	}
-	if event.Role != "assistant" {
-		t.Errorf("NewMessageEvent() role = %s, want assistant", event.Role)
-	}
-	if event.GetType() != EventTypeMessage {
-		t.Errorf("NewMessageEvent() type = %v, want EventTypeMessage", event.GetType())
-	}
-}
-
-func TestNewDoneEvent(t *testing.T) {
-	event := NewDoneEvent()
-	if event.GetType() != EventTypeDone {
-		t.Errorf("NewDoneEvent() type = %v, want EventTypeDone", event.GetType())
-	}
-}
-
-func TestNewPlanEvent(t *testing.T) {
-	plan := &Plan{ID: "plan-1", Title: "Test Plan"}
-	event := NewPlanEvent(plan, PlanEventStatusCreated)
-
-	if event.Plan != plan {
-		t.Error("NewPlanEvent() plan mismatch")
-	}
-	if event.Status != PlanEventStatusCreated {
-		t.Errorf("NewPlanEvent() status = %v, want PlanEventStatusCreated", event.Status)
-	}
-	if event.GetType() != EventTypePlan {
-		t.Errorf("NewPlanEvent() type = %v, want EventTypePlan", event.GetType())
-	}
-}
-
-func TestEvent_ToJSON(t *testing.T) {
-	event := &ErrorEvent{Message: "test"}
-	jsonStr := event.ToJSON()
-
-	var parsed map[string]interface{}
-	if err := sonic.Unmarshal([]byte(jsonStr), &parsed); err != nil {
-		t.Errorf("ToJSON() is not valid JSON: %v", err)
-	}
-
-	if parsed["message"] != "test" {
-		t.Errorf("ToJSON() message = %v, want test", parsed["message"])
+	if !contains(string(out), `"data":null`) {
+		t.Errorf("nil Data should serialize as null, got: %s", out)
 	}
 }

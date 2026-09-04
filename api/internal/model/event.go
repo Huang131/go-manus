@@ -1,8 +1,10 @@
 package model
 
 import (
-	"github.com/bytedance/sonic"
+	"encoding/json"
 	"time"
+
+	"github.com/bytedance/sonic"
 )
 
 // BaseEvent 事件接口
@@ -63,10 +65,10 @@ const (
 
 // Event 事件模型
 type Event struct {
-	ID        string    `json:"id"`
-	Type      EventType `json:"type"`
-	CreatedAt time.Time `json:"created_at"`
-	Data      []byte    `json:"data"`
+	ID        string          `json:"id"`
+	Type      EventType       `json:"type"`
+	CreatedAt time.Time       `json:"created_at"`
+	Data      json.RawMessage `json:"data"`
 }
 
 // ToJSON 将事件转换为 JSON 字符串
