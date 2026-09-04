@@ -8,7 +8,6 @@ import (
 
 	"github.com/mooc-manus/go-manus/api/internal/model"
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
-	"github.com/mooc-manus/go-manus/api/pkg/unsafe"
 	"go.uber.org/zap"
 )
 
@@ -181,32 +180,20 @@ func (m *SimpleMemory) SmartCompact() error {
 	for _, msg := range m.messages {
 		// 1. 如果是 tool 角色的消息，检查是否是长输出工具
 		if msg.Role == "tool" && len(msg.ToolCalls) > 0 {
-			toolCall := msg.ToolCalls[0]
-			if function, ok := toolCall["function"].(map[string]interface{}); ok {
-				if functionName, ok := function["name"].(string); ok {
-					if compressibleTools[functionName] {
-						// 替换内容为 "(removed)"
-						originalLen := len(msg.Message)
-						msg.Message = "(removed)"
-						removedCount++
-						logger.Debug("从记忆中移除对应工具的结果",
-							zap.String("function_name", functionName),
-							zap.Int("original_length", originalLen))
-					}
-				}
+			tc := msg.ToolCalls[0]
+			if compressibleTools[tc.Function.Name] {
+				// 替换内容为 "(removed)"
+				originalLen := len(msg.Message)
+				msg.Message = "(removed)"
+				removedCount++
+				logger.Debug("从记忆中移除对应工具的结果",
+					zap.String("function_name", tc.Function.Name),
+					zap.Int("original_length", originalLen))
 			}
 		}
 
-		// 2. 移除 reasoning_content（如果有）
-		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
-			for i := range msg.ToolCalls {
-				if _, ok := msg.ToolCalls[i]["reasoning_content"]; ok {
-					delete(msg.ToolCalls[i], "reasoning_content")
-					removedCount++
-					logger.Debug("从记忆中移除工具思考结果")
-				}
-			}
-		}
+		// 2. reasoning_content 已在 LLMResponse.ReasoningContent 字段归一化，
+		//    不会写入 ToolCall 结构；此处无需再清理。
 	}
 
 	if removedCount > 0 {
@@ -281,12 +268,11 @@ func (m *SimpleMemory) AssessMessageImportance(msg *model.Message) float64 {
 		importance = 0.8 // 默认权重
 	}
 
-	// 使用安全工具获取字符串值
+	// 拼装内容：tool 消息还会带上 arguments（用于重要性判定）
 	content := msg.Message
 	if msg.Role == "tool" && len(msg.ToolCalls) > 0 {
 		for _, tc := range msg.ToolCalls {
-			// 使用 unsafe.GetNestedString 安全获取 arguments
-			if args := unsafe.GetNestedString(tc, "arguments"); args != "" {
+			if args := tc.Function.Arguments; args != "" {
 				content += args
 			}
 		}

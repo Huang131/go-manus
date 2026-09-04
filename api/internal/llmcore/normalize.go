@@ -64,7 +64,7 @@ func MergeDeltas(model string, deltas []LLMDelta) *LLMResponse {
 				currentCalls[tcd.Index].Type = tcd.Type
 			}
 			if tcd.Name != "" {
-				currentCalls[tcd.Index].Name = tcd.Name
+				currentCalls[tcd.Index].Function.Name = tcd.Name
 			}
 			if tcd.ArgumentsDelta != "" {
 				argsBuf[tcd.Index] += tcd.ArgumentsDelta
@@ -81,7 +81,7 @@ func MergeDeltas(model string, deltas []LLMDelta) *LLMResponse {
 	// 收尾：把 argsBuf 注入 currentCalls
 	for i := range currentCalls {
 		if args, ok := argsBuf[i]; ok {
-			currentCalls[i].Arguments = args
+			currentCalls[i].Function.Arguments = args
 		}
 	}
 	resp.Message.ToolCalls = currentCalls

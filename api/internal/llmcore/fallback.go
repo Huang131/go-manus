@@ -93,7 +93,7 @@ func EstimateContextTokens(messages []Message) int {
 			total += len(part.Text)
 		}
 		for _, tc := range m.ToolCalls {
-			total += len(tc.Arguments) + len(tc.Name)
+			total += len(tc.Function.Arguments) + len(tc.Function.Name)
 		}
 	}
 	// 1 token ≈ 4 chars

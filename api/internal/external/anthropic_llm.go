@@ -259,14 +259,16 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMResp
 		case "text":
 			result.Content += content.Text
 		case "tool_use":
-			// 阶段 1d：转 llmcore.ToolCall（ID + Name + Arguments JSON 字符串）
+			// 阶段 1d：转 llmcore.ToolCall（ID + Function{Name, Arguments} JSON 字符串）
 			// Arguments 把 input map 重新 marshal 成 JSON 字符串，保持和 openai 协议形状一致
 			argsBytes, _ := sonic.Marshal(content.InputJSON)
 			result.ToolUse = append(result.ToolUse, llmcore.ToolCall{
-				ID:        content.ID,
-				Type:      "function",
-				Name:      content.Name,
-				Arguments: string(argsBytes),
+				ID:   content.ID,
+				Type: "function",
+				Function: llmcore.ToolCallFunction{
+					Name:      content.Name,
+					Arguments: string(argsBytes),
+				},
 			})
 		}
 	}

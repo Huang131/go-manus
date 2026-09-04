@@ -237,12 +237,8 @@ func (a *BaseAgent) RollBack(ctx context.Context, msg *model.Message) error {
 
 	// 4. 如果是工具调用，获取工具信息
 	toolCall := lastMessage.ToolCalls[0]
-	toolCallID, _ := toolCall["id"].(string)
-
-	var functionName string
-	if function, ok := toolCall["function"].(map[string]interface{}); ok {
-		functionName, _ = function["name"].(string)
-	}
+	toolCallID := toolCall.ID
+	functionName := toolCall.Function.Name
 
 	// 5. 判断是否是 message_ask_user 工具
 	if functionName == "message_ask_user" {
@@ -254,11 +250,12 @@ func (a *BaseAgent) RollBack(ctx context.Context, msg *model.Message) error {
 		toolMsg := &model.Message{
 			Role:    "tool",
 			Message: string(content),
-			ToolCalls: []map[string]interface{}{
+			ToolCalls: []llmcore.ToolCall{
 				{
-					"id": toolCallID,
-					"function": map[string]interface{}{
-						"name": functionName,
+					ID:   toolCallID,
+					Type: "function",
+					Function: llmcore.ToolCallFunction{
+						Name: functionName,
 					},
 				},
 			},
@@ -442,7 +439,7 @@ func (a *BaseAgent) Invoke(ctx context.Context, query string) (*InvokeResult, er
 				result, err := a.handleToolCall(ctx, tc, messages)
 				if err != nil {
 					logger.Error("工具调用失败",
-						zap.String("function", tc.Name),
+						zap.String("function", tc.Function.Name),
 						zap.String("tool_call_id", tc.ID),
 						zap.Error(err))
 					// 添加错误结果到历史，继续循环
@@ -526,15 +523,15 @@ func (a *BaseAgent) Invoke(ctx context.Context, query string) (*InvokeResult, er
 // 阶段 1d 改造点：toolCall 从 map 改 llmcore.ToolCall；messages 同步改 []llmcore.Message。
 // toolCall.Arguments 已经是 JSON 字符串，直接 sonic.Unmarshal / Parse 即可，不再 cast map。
 func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCall, messages []llmcore.Message) (*ToolCallResult, error) {
-	functionName := toolCall.Name
+	functionName := toolCall.Function.Name
 	toolCallID := toolCall.ID
 
 	// 解析参数（Arguments 是 JSON 字符串）
 	var arguments map[string]interface{}
-	if toolCall.Arguments != "" {
-		if err := a.jsonParser.Parse(toolCall.Arguments, &arguments); err != nil {
+	if toolCall.Function.Arguments != "" {
+		if err := a.jsonParser.Parse(toolCall.Function.Arguments, &arguments); err != nil {
 			// 尝试直接解析
-			if err := sonic.Unmarshal([]byte(toolCall.Arguments), &arguments); err != nil {
+			if err := sonic.Unmarshal([]byte(toolCall.Function.Arguments), &arguments); err != nil {
 				arguments = make(map[string]interface{})
 			}
 		}
@@ -658,13 +655,13 @@ func (a *BaseAgent) InvokeWithEvents(ctx context.Context, query string) <-chan m
 
 				for _, tc := range toolCalls {
 					// 解析工具调用信息
-					functionName := tc.Name
+					functionName := tc.Function.Name
 					toolCallID := tc.ID
 
 					// 解析参数
 					var arguments map[string]interface{}
-					if tc.Arguments != "" {
-						_ = a.jsonParser.Parse(tc.Arguments, &arguments)
+					if tc.Function.Arguments != "" {
+						_ = a.jsonParser.Parse(tc.Function.Arguments, &arguments)
 					}
 
 					// 发送工具调用中事件

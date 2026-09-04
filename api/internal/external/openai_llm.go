@@ -275,10 +275,12 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMRespons
 		toolCalls = make([]llmcore.ToolCall, len(choice.Message.ToolCalls))
 		for i, tc := range choice.Message.ToolCalls {
 			toolCalls[i] = llmcore.ToolCall{
-				ID:        tc.ID,
-				Type:      tc.Type,
-				Name:      tc.Function.Name,
-				Arguments: tc.Function.Arguments,
+				ID:   tc.ID,
+				Type: tc.Type,
+				Function: llmcore.ToolCallFunction{
+					Name:      tc.Function.Name,
+					Arguments: tc.Function.Arguments,
+				},
 			}
 		}
 	}
@@ -374,8 +376,8 @@ func toOpenAIMessages(messages []llmcore.Message) []openAIMessage {
 					ID:   tc.ID,
 					Type: tc.Type,
 					Function: openAIFunctionCall{
-						Name:      tc.Name,
-						Arguments: tc.Arguments,
+						Name:      tc.Function.Name,
+						Arguments: tc.Function.Arguments,
 					},
 				})
 			}

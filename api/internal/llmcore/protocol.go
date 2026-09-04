@@ -63,12 +63,17 @@ type Message struct {
 	ToolCallID string `json:"tool_call_id,omitempty"`
 }
 
-// ToolCall 模型返回的工具调用请求
-type ToolCall struct {
-	ID        string `json:"id"`
-	Type      string `json:"type"` // 通常 "function"
+// ToolCallFunction 工具调用的函数信息（对应 OpenAI 的 function_call 结构）
+type ToolCallFunction struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"` // JSON 字符串
+}
+
+// ToolCall 模型返回的工具调用请求
+type ToolCall struct {
+	ID       string           `json:"id"`
+	Type     string           `json:"type"` // 通常 "function"
+	Function ToolCallFunction `json:"function"`
 }
 
 // ToolSpec 工具规格（发给模型的）

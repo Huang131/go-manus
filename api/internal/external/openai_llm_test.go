@@ -377,11 +377,11 @@ func TestOpenAIClient_ToolCall(t *testing.T) {
 	if tc.ID != "call_abc" {
 		t.Errorf("tool.id = %v, want call_abc", tc.ID)
 	}
-	if tc.Name != "get_weather" {
-		t.Errorf("tool.name = %v, want get_weather", tc.Name)
+	if tc.Function.Name != "get_weather" {
+		t.Errorf("tool.name = %v, want get_weather", tc.Function.Name)
 	}
-	if tc.Arguments != `{"city":"上海"}` {
-		t.Errorf("tool.arguments = %v", tc.Arguments)
+	if tc.Function.Arguments != `{"city":"上海"}` {
+		t.Errorf("tool.arguments = %v", tc.Function.Arguments)
 	}
 }
 

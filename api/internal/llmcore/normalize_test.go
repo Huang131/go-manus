@@ -100,11 +100,11 @@ func TestMergeDeltas_ToolCall(t *testing.T) {
 	if tc.ID != "call_abc" {
 		t.Errorf("expected id=call_abc, got %q", tc.ID)
 	}
-	if tc.Name != "get_weather" {
-		t.Errorf("expected name=get_weather, got %q", tc.Name)
+	if tc.Function.Name != "get_weather" {
+		t.Errorf("expected name=get_weather, got %q", tc.Function.Name)
 	}
-	if tc.Arguments != `{"city":"上海"}` {
-		t.Errorf("expected arguments={\"city\":\"上海\"}, got %q", tc.Arguments)
+	if tc.Function.Arguments != `{"city":"上海"}` {
+		t.Errorf("expected arguments={\"city\":\"上海\"}, got %q", tc.Function.Arguments)
 	}
 	if resp.FinishReason != "tool_calls" {
 		t.Errorf("expected finish_reason=tool_calls, got %q", resp.FinishReason)
@@ -130,14 +130,14 @@ func TestMergeDeltas_MultipleToolCalls(t *testing.T) {
 	if len(resp.Message.ToolCalls) != 2 {
 		t.Fatalf("expected 2 tool calls, got %d", len(resp.Message.ToolCalls))
 	}
-	if resp.Message.ToolCalls[0].Name != "search_1" {
-		t.Errorf("expected calls[0].name=search_1, got %q", resp.Message.ToolCalls[0].Name)
+	if resp.Message.ToolCalls[0].Function.Name != "search_1" {
+		t.Errorf("expected calls[0].name=search_1, got %q", resp.Message.ToolCalls[0].Function.Name)
 	}
-	if resp.Message.ToolCalls[1].Name != "search_2" {
-		t.Errorf("expected calls[1].name=search_2, got %q", resp.Message.ToolCalls[1].Name)
+	if resp.Message.ToolCalls[1].Function.Name != "search_2" {
+		t.Errorf("expected calls[1].name=search_2, got %q", resp.Message.ToolCalls[1].Function.Name)
 	}
-	if resp.Message.ToolCalls[1].Arguments != `{"q":"bar"}` {
-		t.Errorf("calls[1] args wrong: %q", resp.Message.ToolCalls[1].Arguments)
+	if resp.Message.ToolCalls[1].Function.Arguments != `{"q":"bar"}` {
+		t.Errorf("calls[1] args wrong: %q", resp.Message.ToolCalls[1].Function.Arguments)
 	}
 }
 

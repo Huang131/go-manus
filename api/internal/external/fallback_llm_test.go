@@ -303,7 +303,7 @@ func TestRoutedLLM_AllowFallbackBeforeToolExecution(t *testing.T) {
 		Messages: []llmcore.Message{
 			{
 				Role:      llmcore.RoleAssistant,
-				ToolCalls: []llmcore.ToolCall{{ID: "tool-1", Type: "function", Name: "shell", Arguments: "{}"}},
+				ToolCalls: []llmcore.ToolCall{{ID: "tool-1", Type: "function", Function: llmcore.ToolCallFunction{Name: "shell", Arguments: "{}"}}},
 			},
 		},
 		Tools: []llmcore.ToolSpec{{
