@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -9,7 +10,14 @@ import (
 )
 
 // mockTaskRunner 用于测试的 Mock TaskRunner
+//
+// 并发模型：
+//   - 所有字段共享读写，用 sync.RWMutex 保护
+//   - Invoke 在 RedisStreamTask.execute goroutine 中调用（生产者）
+//   - 测试主线程读取字段做断言（消费者）
+//   - 必须用 -race 验证，否则会偶发 data race 误判
 type mockTaskRunner struct {
+	mu            sync.RWMutex
 	invokeCalled  bool
 	invokeCtx     context.Context
 	invokeTask    *RedisStreamTask
@@ -19,22 +27,48 @@ type mockTaskRunner struct {
 }
 
 func (m *mockTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) error {
+	m.mu.Lock()
 	m.invokeCalled = true
 	m.invokeCtx = ctx
 	m.invokeTask = task
+	m.mu.Unlock()
+
 	// 模拟执行，阻塞一段时间后返回
 	time.Sleep(100 * time.Millisecond)
 	return nil
 }
 
 func (m *mockTaskRunner) Destroy() error {
+	m.mu.Lock()
 	m.destroyCalled = true
+	m.mu.Unlock()
 	return nil
 }
 
 func (m *mockTaskRunner) OnDone(task *RedisStreamTask) {
+	m.mu.Lock()
 	m.onDoneCalled = true
 	m.onDoneTask = task
+	m.mu.Unlock()
+}
+
+// 断言辅助方法（用 RLock 减少竞争）
+func (m *mockTaskRunner) wasInvokeCalled() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.invokeCalled
+}
+
+func (m *mockTaskRunner) getInvokeCtx() context.Context {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.invokeCtx
+}
+
+func (m *mockTaskRunner) getInvokeTask() *RedisStreamTask {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.invokeTask
 }
 
 // TestTaskRegistry_Register 测试任务注册
@@ -312,17 +346,17 @@ func TestRedisStreamTask_Invoke(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// 验证 TaskRunner.Invoke 被调用
-	if !runner.invokeCalled {
+	if !runner.wasInvokeCalled() {
 		t.Error("TaskRunner.Invoke() was not called")
 	}
 
 	// 验证上下文被正确传递
-	if runner.invokeCtx == nil {
+	if runner.getInvokeCtx() == nil {
 		t.Error("TaskRunner.Invoke() was called with nil context")
 	}
 
 	// 验证任务被正确传递
-	if runner.invokeTask != task {
+	if runner.getInvokeTask() != task {
 		t.Error("TaskRunner.Invoke() was called with wrong task")
 	}
 
