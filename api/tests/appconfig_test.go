@@ -4,27 +4,30 @@ package integration
 
 import (
 	"bytes"
-	"github.com/bytedance/sonic"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/bytedance/sonic"
+	"github.com/mooc-manus/go-manus/api/pkg/response"
 	"github.com/stretchr/testify/assert"
 )
 
-// assertResponseCode 辅助函数，处理 JSON 中 code 是 float64 的情况
-func assertResponseCode(t *testing.T, resp map[string]interface{}, expectedCode int) {
-	code := resp["code"]
-	if f, ok := code.(float64); ok {
-		assert.Equal(t, float64(expectedCode), f)
-	} else {
-		assert.Equal(t, expectedCode, code)
-	}
-}
+// TestAppConfigAPI_LLMConfig_Lifecycle 测试 LLM 配置完整生命周期
+func TestAppConfigAPI_LLMConfig_Lifecycle(t *testing.T) {
+	defer CleanupAppConfig(t, "llm", "default")
 
-// TestAppConfigAPI_UpdateAndGetLLMConfig 测试更新后获取 LLM 配置
-func TestAppConfigAPI_UpdateAndGetLLMConfig(t *testing.T) {
-	// 1. 更新配置（创建配置）
+	// 1. Get 初始状态
+	getW := httptest.NewRecorder()
+	getReq, _ := http.NewRequest("GET", "/api/app-config/llm", nil)
+	testServer.ServeHTTP(getW, getReq)
+	assert.Equal(t, http.StatusOK, getW.Code)
+
+	var getResp response.Response
+	sonic.Unmarshal(getW.Body.Bytes(), &getResp)
+	assert.Equal(t, 0, getResp.Code)
+
+	// 2. Update 创建配置
 	updateData := map[string]interface{}{
 		"base_url":    "https://api.test.com/v1",
 		"model_name":  "test-model",
@@ -33,88 +36,88 @@ func TestAppConfigAPI_UpdateAndGetLLMConfig(t *testing.T) {
 		"max_tokens":  2048,
 	}
 	updateJSON, _ := sonic.Marshal(updateData)
+	updW := httptest.NewRecorder()
+	updReq, _ := http.NewRequest("POST", "/api/app-config/llm", bytes.NewReader(updateJSON))
+	updReq.Header.Set("Content-Type", "application/json")
+	testServer.ServeHTTP(updW, updReq)
+	assert.Equal(t, http.StatusOK, updW.Code)
 
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/app-config/llm", bytes.NewReader(updateJSON))
-	req.Header.Set("Content-Type", "application/json")
-	testServer.ServeHTTP(w, req)
+	// 3. Get 验证更新
+	getW2 := httptest.NewRecorder()
+	getReq2, _ := http.NewRequest("GET", "/api/app-config/llm", nil)
+	testServer.ServeHTTP(getW2, getReq2)
+	assert.Equal(t, http.StatusOK, getW2.Code)
 
-	assert.Equal(t, http.StatusOK, w.Code)
+	var getResp2 response.Response
+	sonic.Unmarshal(getW2.Body.Bytes(), &getResp2)
+	assert.Equal(t, 0, getResp2.Code)
 
-	// 2. 获取配置验证更新
-	getW := httptest.NewRecorder()
-	getReq, _ := http.NewRequest("GET", "/api/app-config/llm", nil)
-	testServer.ServeHTTP(getW, getReq)
-
-	var getResp map[string]interface{}
-	sonic.Unmarshal(getW.Body.Bytes(), &getResp)
-	assertResponseCode(t, getResp, 0)
-
-	data, ok := getResp["data"].(map[string]interface{})
+	data, ok := getResp2.Data.(map[string]interface{})
 	assert.True(t, ok, "data should be a map")
-	assert.NotNil(t, data)
-
 	assert.Equal(t, "https://api.test.com/v1", data["base_url"])
 	assert.Equal(t, "test-model", data["model_name"])
 	assert.Equal(t, float64(0.9), data["temperature"])
 }
 
-// TestAppConfigAPI_UpdateAndGetAgentConfig 测试更新后获取 Agent 配置
-func TestAppConfigAPI_UpdateAndGetAgentConfig(t *testing.T) {
-	// 1. 更新配置
+// TestAppConfigAPI_AgentConfig_Lifecycle 测试 Agent 配置完整生命周期
+func TestAppConfigAPI_AgentConfig_Lifecycle(t *testing.T) {
+	defer CleanupAppConfig(t, "agent", "default")
+
+	// 1. Get 初始状态
+	getW := httptest.NewRecorder()
+	getReq, _ := http.NewRequest("GET", "/api/app-config/agent", nil)
+	testServer.ServeHTTP(getW, getReq)
+	assert.Equal(t, http.StatusOK, getW.Code)
+
+	var getResp response.Response
+	sonic.Unmarshal(getW.Body.Bytes(), &getResp)
+	assert.Equal(t, 0, getResp.Code)
+
+	// 2. Update 创建配置
 	updateData := map[string]interface{}{
 		"max_iterations":     20,
 		"max_retries":        5,
 		"max_search_results": 10,
 	}
 	updateJSON, _ := sonic.Marshal(updateData)
+	updW := httptest.NewRecorder()
+	updReq, _ := http.NewRequest("POST", "/api/app-config/agent", bytes.NewReader(updateJSON))
+	updReq.Header.Set("Content-Type", "application/json")
+	testServer.ServeHTTP(updW, updReq)
+	assert.Equal(t, http.StatusOK, updW.Code)
 
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/app-config/agent", bytes.NewReader(updateJSON))
-	req.Header.Set("Content-Type", "application/json")
-	testServer.ServeHTTP(w, req)
+	// 3. Get 验证更新
+	getW2 := httptest.NewRecorder()
+	getReq2, _ := http.NewRequest("GET", "/api/app-config/agent", nil)
+	testServer.ServeHTTP(getW2, getReq2)
+	assert.Equal(t, http.StatusOK, getW2.Code)
 
-	assert.Equal(t, http.StatusOK, w.Code)
+	var getResp2 response.Response
+	sonic.Unmarshal(getW2.Body.Bytes(), &getResp2)
+	assert.Equal(t, 0, getResp2.Code)
 
-	// 2. 获取配置验证
-	getW := httptest.NewRecorder()
-	getReq, _ := http.NewRequest("GET", "/api/app-config/agent", nil)
-	testServer.ServeHTTP(getW, getReq)
-
-	var getResp map[string]interface{}
-	sonic.Unmarshal(getW.Body.Bytes(), &getResp)
-	assertResponseCode(t, getResp, 0)
-
-	data, ok := getResp["data"].(map[string]interface{})
+	data, ok := getResp2.Data.(map[string]interface{})
 	assert.True(t, ok, "data should be a map")
-
 	assert.Equal(t, float64(20), data["max_iterations"])
 	assert.Equal(t, float64(5), data["max_retries"])
+	assert.Equal(t, float64(10), data["max_search_results"])
 }
 
-// TestAppConfigAPI_GetEmptyMCPConfig 测试获取空的 MCP 配置
-func TestAppConfigAPI_GetEmptyMCPConfig(t *testing.T) {
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/app-config/mcp-servers", nil)
-	testServer.ServeHTTP(w, req)
+// TestAppConfigAPI_MCPConfig_Lifecycle 测试 MCP 配置完整生命周期
+func TestAppConfigAPI_MCPConfig_Lifecycle(t *testing.T) {
+	defer CleanupAppConfig(t, "mcp", "default")
 
-	assert.Equal(t, http.StatusOK, w.Code)
+	// 1. Get 初始状态
+	getW := httptest.NewRecorder()
+	getReq, _ := http.NewRequest("GET", "/api/app-config/mcp-servers", nil)
+	testServer.ServeHTTP(getW, getReq)
+	assert.Equal(t, http.StatusOK, getW.Code)
 
-	var resp map[string]interface{}
-	sonic.Unmarshal(w.Body.Bytes(), &resp)
-	assertResponseCode(t, resp, 0)
+	var getResp response.Response
+	sonic.Unmarshal(getW.Body.Bytes(), &getResp)
+	assert.Equal(t, 0, getResp.Code)
 
-	// data 可能是 nil 或空对象
-	data := resp["data"]
-	if data != nil {
-		_, ok := data.(map[string]interface{})
-		assert.True(t, ok, "data should be a map or nil")
-	}
-}
-
-// TestAppConfigAPI_UpdateAndGetMCPConfig 测试更新后获取 MCP 配置
-func TestAppConfigAPI_UpdateAndGetMCPConfig(t *testing.T) {
-	// 1. 更新 MCP 配置
+	// 2. Update 创建配置
 	mcpConfig := map[string]interface{}{
 		"servers": []map[string]interface{}{
 			{
@@ -126,24 +129,23 @@ func TestAppConfigAPI_UpdateAndGetMCPConfig(t *testing.T) {
 		},
 	}
 	updateJSON, _ := sonic.Marshal(mcpConfig)
+	updW := httptest.NewRecorder()
+	updReq, _ := http.NewRequest("POST", "/api/app-config/mcp-servers", bytes.NewReader(updateJSON))
+	updReq.Header.Set("Content-Type", "application/json")
+	testServer.ServeHTTP(updW, updReq)
+	assert.Equal(t, http.StatusOK, updW.Code)
 
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/app-config/mcp-servers", bytes.NewReader(updateJSON))
-	req.Header.Set("Content-Type", "application/json")
-	testServer.ServeHTTP(w, req)
+	// 3. Get 验证更新
+	getW2 := httptest.NewRecorder()
+	getReq2, _ := http.NewRequest("GET", "/api/app-config/mcp-servers", nil)
+	testServer.ServeHTTP(getW2, getReq2)
+	assert.Equal(t, http.StatusOK, getW2.Code)
 
-	assert.Equal(t, http.StatusOK, w.Code)
+	var getResp2 response.Response
+	sonic.Unmarshal(getW2.Body.Bytes(), &getResp2)
+	assert.Equal(t, 0, getResp2.Code)
 
-	// 2. 获取配置验证
-	getW := httptest.NewRecorder()
-	getReq, _ := http.NewRequest("GET", "/api/app-config/mcp-servers", nil)
-	testServer.ServeHTTP(getW, getReq)
-
-	var getResp map[string]interface{}
-	sonic.Unmarshal(getW.Body.Bytes(), &getResp)
-	assertResponseCode(t, getResp, 0)
-
-	data, ok := getResp["data"].(map[string]interface{})
+	data, ok := getResp2.Data.(map[string]interface{})
 	assert.True(t, ok, "data should be a map")
 
 	servers, ok := data["servers"].([]interface{})
@@ -162,8 +164,10 @@ func TestAppConfigAPI_UpdateAndGetMCPConfig(t *testing.T) {
 	assert.Equal(t, "stdio", found["transport"])
 }
 
-// TestAppConfigAPI_DeleteMCPServer 测试删除 MCP 服务器
-func TestAppConfigAPI_DeleteMCPServer(t *testing.T) {
+// TestAppConfigAPI_MCPConfig_Delete 测试删除 MCP 服务器
+func TestAppConfigAPI_MCPConfig_Delete(t *testing.T) {
+	defer CleanupAppConfig(t, "mcp", "default")
+
 	// 1. 添加 MCP 服务器
 	mcpConfig := map[string]interface{}{
 		"servers": []map[string]interface{}{
@@ -176,19 +180,16 @@ func TestAppConfigAPI_DeleteMCPServer(t *testing.T) {
 		},
 	}
 	updateJSON, _ := sonic.Marshal(mcpConfig)
+	addW := httptest.NewRecorder()
+	addReq, _ := http.NewRequest("POST", "/api/app-config/mcp-servers", bytes.NewReader(updateJSON))
+	addReq.Header.Set("Content-Type", "application/json")
+	testServer.ServeHTTP(addW, addReq)
+	assert.Equal(t, http.StatusOK, addW.Code)
 
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/app-config/mcp-servers", bytes.NewReader(updateJSON))
-	req.Header.Set("Content-Type", "application/json")
-	testServer.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	// 2. 删除服务器（路由参数名是 :server_name）
+	// 2. 删除服务器
 	deleteW := httptest.NewRecorder()
 	deleteReq, _ := http.NewRequest("POST", "/api/app-config/mcp-servers/temp-server-to-delete/delete", nil)
 	testServer.ServeHTTP(deleteW, deleteReq)
-
-	// 打印响应体便于调试
 	if deleteW.Code != http.StatusOK {
 		t.Logf("delete response body: %s", deleteW.Body.String())
 	}
@@ -199,9 +200,11 @@ func TestAppConfigAPI_DeleteMCPServer(t *testing.T) {
 	getReq, _ := http.NewRequest("GET", "/api/app-config/mcp-servers", nil)
 	testServer.ServeHTTP(getW, getReq)
 
-	var getResp map[string]interface{}
+	var getResp response.Response
 	sonic.Unmarshal(getW.Body.Bytes(), &getResp)
-	if data, ok := getResp["data"].(map[string]interface{}); ok {
+	assert.Equal(t, 0, getResp.Code)
+
+	if data, ok := getResp.Data.(map[string]interface{}); ok {
 		if servers, ok := data["servers"].([]interface{}); ok {
 			for _, s := range servers {
 				if srv, ok := s.(map[string]interface{}); ok && srv["server_name"] == "temp-server-to-delete" {
@@ -212,22 +215,21 @@ func TestAppConfigAPI_DeleteMCPServer(t *testing.T) {
 	}
 }
 
-// TestAppConfigAPI_GetEmptyA2AConfig 测试获取空的 A2A 配置
-func TestAppConfigAPI_GetEmptyA2AConfig(t *testing.T) {
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/app-config/a2a-servers", nil)
-	testServer.ServeHTTP(w, req)
+// TestAppConfigAPI_A2AConfig_Lifecycle 测试 A2A 配置完整生命周期
+func TestAppConfigAPI_A2AConfig_Lifecycle(t *testing.T) {
+	defer CleanupAppConfig(t, "a2a", "default")
 
-	assert.Equal(t, http.StatusOK, w.Code)
+	// 1. Get 初始状态
+	getW := httptest.NewRecorder()
+	getReq, _ := http.NewRequest("GET", "/api/app-config/a2a-servers", nil)
+	testServer.ServeHTTP(getW, getReq)
+	assert.Equal(t, http.StatusOK, getW.Code)
 
-	var resp map[string]interface{}
-	sonic.Unmarshal(w.Body.Bytes(), &resp)
-	assertResponseCode(t, resp, 0)
-}
+	var getResp response.Response
+	sonic.Unmarshal(getW.Body.Bytes(), &getResp)
+	assert.Equal(t, 0, getResp.Code)
 
-// TestAppConfigAPI_UpdateAndGetA2AConfig 测试更新后获取 A2A 配置
-func TestAppConfigAPI_UpdateAndGetA2AConfig(t *testing.T) {
-	// 1. 更新 A2A 配置（A2AConfig 的字段是 servers，合并按 id 合并）
+	// 2. Update 创建配置
 	a2aConfig := map[string]interface{}{
 		"servers": []map[string]interface{}{
 			{
@@ -243,24 +245,23 @@ func TestAppConfigAPI_UpdateAndGetA2AConfig(t *testing.T) {
 		},
 	}
 	updateJSON, _ := sonic.Marshal(a2aConfig)
+	updW := httptest.NewRecorder()
+	updReq, _ := http.NewRequest("POST", "/api/app-config/a2a-servers", bytes.NewReader(updateJSON))
+	updReq.Header.Set("Content-Type", "application/json")
+	testServer.ServeHTTP(updW, updReq)
+	assert.Equal(t, http.StatusOK, updW.Code)
 
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/api/app-config/a2a-servers", bytes.NewReader(updateJSON))
-	req.Header.Set("Content-Type", "application/json")
-	testServer.ServeHTTP(w, req)
+	// 3. Get 验证更新
+	getW2 := httptest.NewRecorder()
+	getReq2, _ := http.NewRequest("GET", "/api/app-config/a2a-servers", nil)
+	testServer.ServeHTTP(getW2, getReq2)
+	assert.Equal(t, http.StatusOK, getW2.Code)
 
-	assert.Equal(t, http.StatusOK, w.Code)
+	var getResp2 response.Response
+	sonic.Unmarshal(getW2.Body.Bytes(), &getResp2)
+	assert.Equal(t, 0, getResp2.Code)
 
-	// 2. 获取配置验证
-	getW := httptest.NewRecorder()
-	getReq, _ := http.NewRequest("GET", "/api/app-config/a2a-servers", nil)
-	testServer.ServeHTTP(getW, getReq)
-
-	var getResp map[string]interface{}
-	sonic.Unmarshal(getW.Body.Bytes(), &getResp)
-	assertResponseCode(t, getResp, 0)
-
-	data, ok := getResp["data"].(map[string]interface{})
+	data, ok := getResp2.Data.(map[string]interface{})
 	assert.True(t, ok, "data should be a map")
 
 	servers, ok := data["servers"].([]interface{})
@@ -287,17 +288,17 @@ func TestAppConfigAPI_InvalidJSON(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	testServer.ServeHTTP(w, req)
 
-	// 应该返回错误
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 // TestAppConfigAPI_EmptyUpdate 测试空更新
 func TestAppConfigAPI_EmptyUpdate(t *testing.T) {
+	defer CleanupAppConfig(t, "agent", "default")
+
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/app-config/agent", bytes.NewReader([]byte("{}")))
 	req.Header.Set("Content-Type", "application/json")
 	testServer.ServeHTTP(w, req)
 
-	// 空更新应该返回成功
 	assert.Equal(t, http.StatusOK, w.Code)
 }
