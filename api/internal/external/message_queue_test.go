@@ -93,30 +93,48 @@ func (m *mockMQ) GetLatestID(ctx context.Context, streamName string) (string, er
 func (m *mockMQ) Subscribe(ctx context.Context, streamName string, bufferSize int) (<-chan *Message, func()) {
 	msgChan := make(chan *Message, bufferSize)
 	stopped := make(chan struct{})
-	once := sync.Once{}
+	var closeOnce sync.Once
 
-	cancel := func() {
-		once.Do(func() {
-			close(stopped)
+	closeChan := func() {
+		closeOnce.Do(func() {
 			close(msgChan)
 		})
 	}
 
-	// 发送一条测试消息后关闭
-	go func() {
+	// 取消订阅：仅发出停止信号，由 goroutine 统一负责关闭 channel，
+	// 避免 "goroutine 发送中" 与 "取消方 close" 之间的 send-on-closed 竞态。
+	cancel := func() {
 		select {
-		case <-ctx.Done():
-			cancel()
-			return
 		case <-stopped:
-			return
-		case msgChan <- &Message{
+			// 已停止
+		default:
+			close(stopped)
+		}
+	}
+
+	// 模拟一条消息的投递，然后阻塞直到订阅被取消
+	go func() {
+		defer closeChan()
+
+		msg := &Message{
 			ID:     "test-id",
 			Data:   "test message",
 			Stream: streamName,
-		}:
-			// 发送成功后关闭
-			cancel()
+		}
+
+		// 发送消息：select 在 stopped/ctx.Done 时优先退出，避免向已关闭 channel 发送
+		select {
+		case <-ctx.Done():
+			return
+		case <-stopped:
+			return
+		case msgChan <- msg:
+		}
+
+		// 发送完成后等待停止信号，再退出（defer 关闭 channel）
+		select {
+		case <-ctx.Done():
+		case <-stopped:
 		}
 	}()
 
@@ -296,10 +314,14 @@ func TestMessageQueue_SubscribeWithCancel(t *testing.T) {
 	// 等待一小段时间确保 goroutine 退出
 	time.Sleep(50 * time.Millisecond)
 
-	// 确认 channel 已关闭
-	_, ok := <-msgChan
-	if ok {
-		t.Error("Channel should be closed after context cancellation")
+	// 先排空 channel 中可能残留的消息，再确认 channel 已关闭。
+	// mock 的语义是：cancel/unsubscribe 不会丢弃已入 buffer 的消息，
+	// 因此 channel 关闭前 buffer 里可能还有一条测试消息。
+	for {
+		_, ok := <-msgChan
+		if !ok {
+			break
+		}
 	}
 }
 

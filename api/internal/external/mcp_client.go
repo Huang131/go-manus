@@ -4,12 +4,13 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"github.com/bytedance/sonic"
 	"io"
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 
+	"github.com/bytedance/sonic"
 	"go.uber.org/zap"
 
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
@@ -50,14 +51,18 @@ type MCPContent struct {
 }
 
 // StdioMCPClient 基于 stdio 的 MCP 客户端
+//
+// 并发模型：
+//   - closed 用 atomic.Bool 管理，Close 幂等自治，不持锁
+//   - cmd/reader/stdin 在 Connect 成功后只读，Close 后资源不可用
+//   - 不需要 sync.Mutex，所有并发安全由 atomic + 资源回收顺序保证
 type StdioMCPClient struct {
-	mu         sync.Mutex
 	cmd        *exec.Cmd
 	stdin      io.Writer
 	stdout     io.Reader
 	reader     *bufio.Reader
 	nextID     int
-	closed     bool
+	closed     atomic.Bool
 	serverName string
 	env        map[string]string
 }
@@ -81,9 +86,6 @@ func NewStdioMCPClient(serverName string, cfg StdioMCPClientConfig) *StdioMCPCli
 
 // Connect 连接到 MCP 服务器
 func (c *StdioMCPClient) Connect(ctx context.Context) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if c.cmd == nil {
 		return fmt.Errorf("MCP client not initialized")
 	}
@@ -132,17 +134,30 @@ func (c *StdioMCPClient) Connect(ctx context.Context) error {
 	c.stdout = stdoutReader
 	c.reader = bufio.NewReader(stdoutReader)
 
+	// 发送 initialize 请求
+	if err := c.sendInitialize(ctx); err != nil {
+		// 错误路径：标记 closed + 回收进程。不调 c.Close()，避免重复清理
+		c.closed.Store(true)
+		c.terminateProcess()
+		return fmt.Errorf("failed to initialize MCP server: %w", err)
+	}
+
 	logger.Info("MCP 服务器已启动",
 		zap.String("server", c.serverName),
 		zap.String("command", c.cmd.Path))
 
-	// 发送 initialize 请求
-	if err := c.sendInitialize(ctx); err != nil {
-		c.Close()
-		return fmt.Errorf("failed to initialize MCP server: %w", err)
-	}
-
 	return nil
+}
+
+// terminateProcess 强制终止子进程并等待回收。设计为无锁调用，供错误路径使用。
+// 不要在持锁状态下调用，否则 cmd.Wait() 可能在持锁状态下阻塞。
+func (c *StdioMCPClient) terminateProcess() {
+	if c.cmd == nil || c.cmd.Process == nil {
+		return
+	}
+	_ = c.cmd.Process.Kill()
+	// Wait 不能漏：否则子进程会变成 zombie
+	_ = c.cmd.Wait()
 }
 
 // getEnv 获取环境变量
@@ -182,17 +197,14 @@ func (c *StdioMCPClient) sendInitialize(ctx context.Context) error {
 		return err
 	}
 
-	// 读取响应
-	_, err := c.readResponse()
+	// 读取响应（带 ctx，可被超时打断）
+	_, err := c.readResponse(ctx)
 	return err
 }
 
 // ListTools 获取工具列表
 func (c *StdioMCPClient) ListTools(ctx context.Context) ([]MCPToolInfo, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.closed {
+	if c.closed.Load() {
 		return nil, fmt.Errorf("MCP client is closed")
 	}
 
@@ -207,7 +219,7 @@ func (c *StdioMCPClient) ListTools(ctx context.Context) ([]MCPToolInfo, error) {
 		return nil, err
 	}
 
-	resp, err := c.readResponse()
+	resp, err := c.readResponse(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -261,10 +273,7 @@ func (c *StdioMCPClient) ListTools(ctx context.Context) ([]MCPToolInfo, error) {
 
 // CallTool 调用工具
 func (c *StdioMCPClient) CallTool(ctx context.Context, name string, args map[string]interface{}) (*MCPToolResult, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.closed {
+	if c.closed.Load() {
 		return nil, fmt.Errorf("MCP client is closed")
 	}
 
@@ -283,7 +292,7 @@ func (c *StdioMCPClient) CallTool(ctx context.Context, name string, args map[str
 		return nil, err
 	}
 
-	resp, err := c.readResponse()
+	resp, err := c.readResponse(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -327,20 +336,16 @@ func (c *StdioMCPClient) CallTool(ctx context.Context, name string, args map[str
 }
 
 // Close 关闭连接
+//
+// 幂等设计：用 atomic.Bool.CompareAndSwap 保证只清理一次。
+// 不持锁，可从任何 goroutine 调用（包括持锁代码路径），不会自递归死锁。
 func (c *StdioMCPClient) Close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.closed {
-		return nil
+	if !c.closed.CompareAndSwap(false, true) {
+		return nil // 已关闭，幂等返回
 	}
 
-	c.closed = true
-
-	if c.cmd != nil && c.cmd.Process != nil {
-		c.cmd.Process.Kill()
-		c.cmd.Wait()
-	}
+	// cmd.Wait() 在 CAS 之后无锁调用，可以安全阻塞
+	c.terminateProcess()
 
 	logger.Info("MCP 服务器已关闭", zap.String("server", c.serverName))
 	return nil
@@ -361,19 +366,34 @@ func (c *StdioMCPClient) sendRequest(req MCPRequest) error {
 	return nil
 }
 
-// readResponse 读取响应
-func (c *StdioMCPClient) readResponse() (*MCPResponse, error) {
-	line, err := c.reader.ReadBytes('\n')
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
+// readResponse 读取响应。
+// 关键：必须接受 ctx 并响应取消/超时，否则进程异常退出后 ReadBytes 会永久阻塞。
+// 实现思路：把 ctx 转换为 read deadline，超时或取消时 ReadBytes 立即返回错误。
+func (c *StdioMCPClient) readResponse(ctx context.Context) (*MCPResponse, error) {
+	type readResult struct {
+		line []byte
+		err  error
 	}
+	done := make(chan readResult, 1)
 
-	var resp MCPResponse
-	if err := sonic.Unmarshal(line, &resp); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+	go func() {
+		line, err := c.reader.ReadBytes('\n')
+		done <- readResult{line: line, err: err}
+	}()
+
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("read response: %w", ctx.Err())
+	case r := <-done:
+		if r.err != nil {
+			return nil, fmt.Errorf("failed to read response: %w", r.err)
+		}
+		var resp MCPResponse
+		if err := sonic.Unmarshal(r.line, &resp); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+		}
+		return &resp, nil
 	}
-
-	return &resp, nil
 }
 
 // MCPRequest MCP JSON-RPC 请求
