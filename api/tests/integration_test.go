@@ -21,12 +21,16 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"log"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/gin-gonic/gin"
 	"github.com/mooc-manus/go-manus/api/config"
 	"github.com/mooc-manus/go-manus/api/internal/handler"
@@ -34,6 +38,8 @@ import (
 	"github.com/mooc-manus/go-manus/api/internal/repository"
 	"github.com/mooc-manus/go-manus/api/internal/router"
 	"github.com/mooc-manus/go-manus/api/internal/service"
+	"github.com/mooc-manus/go-manus/api/pkg/response"
+	"mime/multipart"
 )
 
 var (
@@ -120,6 +126,7 @@ func NewTestContext() (context.Context, context.CancelFunc) {
 
 // CleanupSession 清理测试会话
 func CleanupSession(t *testing.T, sessionID string) {
+	t.Helper()
 	ctx, cancel := NewTestContext()
 	defer cancel()
 
@@ -131,6 +138,7 @@ func CleanupSession(t *testing.T, sessionID string) {
 
 // CleanupFile 清理测试文件记录
 func CleanupFile(t *testing.T, fileID string) {
+	t.Helper()
 	ctx, cancel := NewTestContext()
 	defer cancel()
 
@@ -142,6 +150,7 @@ func CleanupFile(t *testing.T, fileID string) {
 
 // CleanupAppConfig 清理测试配置
 func CleanupAppConfig(t *testing.T, configType, configKey string) {
+	t.Helper()
 	ctx, cancel := NewTestContext()
 	defer cancel()
 
@@ -149,4 +158,128 @@ func CleanupAppConfig(t *testing.T, configType, configKey string) {
 	if err != nil {
 		t.Logf("清理配置 %s/%s 失败: %v", configType, configKey, err)
 	}
+}
+
+// ==================== 通用 HTTP 请求辅助函数 ====================
+
+// doRequest 发送 HTTP 请求并返回响应
+func doRequest(t *testing.T, method, path string, body []byte, contentType string) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	var req *http.Request
+	var err error
+	if body != nil {
+		req, err = http.NewRequest(method, path, bytes.NewReader(body))
+	} else {
+		req, err = http.NewRequest(method, path, nil)
+	}
+	if err != nil {
+		t.Fatalf("创建请求失败: %v", err)
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	testServer.ServeHTTP(w, req)
+	return w
+}
+
+// postJSON 发送 POST JSON 请求
+func postJSON(t *testing.T, path string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	bodyJSON, err := sonic.Marshal(body)
+	if err != nil {
+		t.Fatalf("序列化请求体失败: %v", err)
+	}
+	return doRequest(t, "POST", path, bodyJSON, "application/json")
+}
+
+// getJSON 发送 GET 请求
+func getJSON(t *testing.T, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	return doRequest(t, "GET", path, nil, "")
+}
+
+// putJSON 发送 PUT JSON 请求
+func putJSON(t *testing.T, path string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	bodyJSON, err := sonic.Marshal(body)
+	if err != nil {
+		t.Fatalf("序列化请求体失败: %v", err)
+	}
+	return doRequest(t, "PUT", path, bodyJSON, "application/json")
+}
+
+// deleteRequest 发送 DELETE 请求
+func deleteRequest(t *testing.T, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	return doRequest(t, "DELETE", path, nil, "")
+}
+
+// postFormData 发送 POST multipart/form-data 请求
+func postFormData(t *testing.T, path string, fields map[string]string, fileName string, fileContent []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	body, contentType := makeMultipartFile(fields, fileName, fileContent)
+	return doRequest(t, "POST", path, body.Bytes(), contentType)
+}
+
+// parseResponse 解析 HTTP 响应为 Response 结构
+func parseResponse(t *testing.T, w *httptest.ResponseRecorder) response.Response {
+	t.Helper()
+	var resp response.Response
+	if err := sonic.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	return resp
+}
+
+// parseTotalResponse 解析 HTTP 响应为 TotalResponse 结构
+func parseTotalResponse(t *testing.T, w *httptest.ResponseRecorder) response.TotalResponse {
+	t.Helper()
+	var resp response.TotalResponse
+	if err := sonic.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	return resp
+}
+
+// parseResponseDataAsMap 解析响应 data 字段为 map[string]any
+func parseResponseDataAsMap(t *testing.T, w *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+	resp := parseResponse(t, w)
+	data, ok := resp.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("data 应为 map[string]any，实际为 %T", resp.Data)
+	}
+	return data
+}
+
+// parseResponseDataAsArray 解析响应 data 字段为 []any
+func parseResponseDataAsArray(t *testing.T, w *httptest.ResponseRecorder) []any {
+	t.Helper()
+	resp := parseResponse(t, w)
+	data, ok := resp.Data.([]any)
+	if !ok {
+		t.Fatalf("data 应为 []any，实际为 %T", resp.Data)
+	}
+	return data
+}
+
+// makeMultipartFile 构造 multipart/form-data 请求体
+func makeMultipartFile(fields map[string]string, fileName string, fileContent []byte) (*bytes.Buffer, string) {
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	for key, value := range fields {
+		_ = writer.WriteField(key, value)
+	}
+
+	if fileName != "" && len(fileContent) > 0 {
+		part, err := writer.CreateFormFile("file", fileName)
+		if err == nil {
+			_, _ = part.Write(fileContent)
+		}
+	}
+
+	_ = writer.Close()
+	return body, writer.FormDataContentType()
 }
