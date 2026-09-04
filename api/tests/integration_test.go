@@ -30,23 +30,21 @@ import (
 	"testing"
 	"time"
 
+	"mime/multipart"
+
 	"github.com/bytedance/sonic"
 	"github.com/gin-gonic/gin"
 	"github.com/mooc-manus/go-manus/api/config"
-	"github.com/mooc-manus/go-manus/api/internal/handler"
+	"github.com/mooc-manus/go-manus/api/internal/bootstrap"
 	"github.com/mooc-manus/go-manus/api/internal/infrastructure"
-	"github.com/mooc-manus/go-manus/api/internal/repository"
-	"github.com/mooc-manus/go-manus/api/internal/router"
-	"github.com/mooc-manus/go-manus/api/internal/service"
 	"github.com/mooc-manus/go-manus/api/pkg/response"
-	"mime/multipart"
 )
 
 var (
 	testServer *gin.Engine
 	testCfg    *config.Config
+	testApp    *bootstrap.App
 	testDB     *infrastructure.Postgres
-	testRedis  *infrastructure.Redis
 )
 
 // TestMain 初始化测试环境
@@ -59,62 +57,35 @@ func TestMain(m *testing.M) {
 		log.Fatalf("加载测试配置失败: %v", err)
 	}
 
-	// 连接真实数据库
-	db, err := infrastructure.NewPostgres(&cfg.Database)
+	app, err := bootstrap.Build(cfg, bootstrap.Options{
+		EnablePostgres:    true,
+		EnableRedis:       true,
+		EnableStorage:     true,
+		EnableLLM:         false,
+		EnableSandbox:     false,
+		EnableBrowser:     false,
+		EnableSearch:      false,
+		EnableAgent:       false,
+		EnableRoutes:      true,
+		EnableHealthCheck: true,
+	})
 	if err != nil {
-		log.Fatalf("连接测试数据库失败: %v", err)
+		log.Fatalf("构建测试应用失败: %v", err)
 	}
-
-	// 连接真实 Redis
-	redis, err := infrastructure.NewRedis(&cfg.Redis)
-	if err != nil {
-		log.Fatalf("连接测试 Redis 失败: %v", err)
-	}
-
-	// 连接真实 MinIO (S3)
-	cosClient, err := infrastructure.NewS3Storage(&cfg.COS)
-	if err != nil {
-		log.Fatalf("连接测试 MinIO 失败: %v", err)
-	}
-
-	// 初始化仓储
-	sessionRepo := repository.NewSessionRepository(db)
-	fileRepo := repository.NewFileRepository(db)
-	appConfigRepo := repository.NewAppConfigRepository(db)
-	llmModelRepo := repository.NewLLMModelRepository(db)
-
-	// 初始化服务
-	sessionSvc := service.NewSessionServiceWithSandbox(sessionRepo, fileRepo, "")
-	fileSvc := service.NewFileService(fileRepo, cosClient)
-	appConfigSvc := service.NewAppConfigService(appConfigRepo)
-	llmModelSvc := service.NewLLMModelService(llmModelRepo)
-
-	// 初始化处理器
-	// 注意：agent 和 sandbox 传 nil，因为集成测试不涉及 AI 交互功能
-	// Chat/Stop/ReadFile/ReadShell 接口会返回 "服务未配置" 错误，这是预期行为
-	handlers := &router.Handlers{
-		Session:   handler.NewSessionHandler(sessionSvc, nil, nil),
-		File:      handler.NewFileHandler(fileSvc, sessionSvc),
-		AppConfig: handler.NewAppConfigHandler(appConfigSvc),
-		LLMModel:  handler.NewLLMModelHandler(llmModelSvc),
-	}
-
-	// 创建测试服务器
-	engine := gin.New()
-	router.SetupRoutes(engine, handlers)
 
 	// 保存全局变量
 	testCfg = cfg
-	testDB = db
-	testRedis = redis
-	testServer = engine
+	testApp = app
+	testServer = app.Engine
+	testDB = app.Postgres
 
 	// 运行测试
 	code := m.Run()
 
 	// 清理
-	db.Pool.Close()
-	redis.Close()
+	if testApp != nil {
+		testApp.Close()
+	}
 
 	os.Exit(code)
 }
@@ -130,7 +101,7 @@ func CleanupSession(t *testing.T, sessionID string) {
 	ctx, cancel := NewTestContext()
 	defer cancel()
 
-	_, err := testDB.Pool.Exec(ctx, "DELETE FROM sessions WHERE id = $1", sessionID)
+	_, err := testApp.Postgres.Pool.Exec(ctx, "DELETE FROM sessions WHERE id = $1", sessionID)
 	if err != nil {
 		t.Logf("清理会话 %s 失败: %v", sessionID, err)
 	}
@@ -142,7 +113,7 @@ func CleanupFile(t *testing.T, fileID string) {
 	ctx, cancel := NewTestContext()
 	defer cancel()
 
-	_, err := testDB.Pool.Exec(ctx, "DELETE FROM files WHERE id = $1", fileID)
+	_, err := testApp.Postgres.Pool.Exec(ctx, "DELETE FROM files WHERE id = $1", fileID)
 	if err != nil {
 		t.Logf("清理文件记录 %s 失败: %v", fileID, err)
 	}
@@ -154,7 +125,7 @@ func CleanupAppConfig(t *testing.T, configType, configKey string) {
 	ctx, cancel := NewTestContext()
 	defer cancel()
 
-	_, err := testDB.Pool.Exec(ctx, "DELETE FROM app_configs WHERE config_type = $1 AND config_key = $2", configType, configKey)
+	_, err := testApp.Postgres.Pool.Exec(ctx, "DELETE FROM app_configs WHERE config_type = $1 AND config_key = $2", configType, configKey)
 	if err != nil {
 		t.Logf("清理配置 %s/%s 失败: %v", configType, configKey, err)
 	}
