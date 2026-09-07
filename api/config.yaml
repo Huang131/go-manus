@@ -1,6 +1,15 @@
 env: development
-log_level: info
 app_config_filepath: config.yaml
+
+# 日志配置：filename 为空时只输出到 stdout。
+# 想要文件切割就填 filename 并调整 max_size / max_age。
+log:
+  level: info
+  filename: ""
+  max_size: 100
+  max_backups: 10
+  max_age: 30
+  compress: true
 
 database:
   host: localhost

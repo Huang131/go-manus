@@ -165,10 +165,10 @@ func (a *App) initInfrastructure(cfg *config.Config, opts Options, factories Fac
 			if a.Postgres != nil {
 				a.Postgres.Close()
 			}
-			return fmt.Errorf("initialize postgres: %w", err)
+			return fmt.Errorf("postgres: %w: %w", ErrInitialize, err)
 		}
 		if a.Postgres == nil {
-			return fmt.Errorf("postgres factory returned nil")
+			return fmt.Errorf("postgres: %w: factory returned nil", ErrInitialize)
 		}
 		a.shutdownHooks = append(a.shutdownHooks, func() {
 			a.Postgres.Close()
@@ -181,10 +181,10 @@ func (a *App) initInfrastructure(cfg *config.Config, opts Options, factories Fac
 			if a.Redis != nil {
 				_ = a.Redis.Close()
 			}
-			return fmt.Errorf("initialize redis: %w", err)
+			return fmt.Errorf("redis: %w: %w", ErrInitialize, err)
 		}
 		if a.Redis == nil {
-			return fmt.Errorf("redis factory returned nil")
+			return fmt.Errorf("redis: %w: factory returned nil", ErrInitialize)
 		}
 		a.shutdownHooks = append(a.shutdownHooks, func() {
 			_ = a.Redis.Close()
@@ -201,7 +201,7 @@ func (a *App) initInfrastructure(cfg *config.Config, opts Options, factories Fac
 		} else {
 			a.COS = cos
 			if a.COS == nil {
-				return fmt.Errorf("storage factory returned nil")
+				return fmt.Errorf("storage: %w: factory returned nil", ErrInitialize)
 			}
 			a.shutdownHooks = append(a.shutdownHooks, func() {
 				_ = a.COS.Close()
@@ -380,12 +380,12 @@ func (a *App) healthCheck(opts Options, cfg *config.Config) error {
 	defer cancel()
 	if a.Postgres != nil {
 		if err := a.Postgres.HealthCheck(ctx); err != nil {
-			return fmt.Errorf("postgres health check failed: %w", err)
+			return fmt.Errorf("postgres: %w: %w", ErrHealthCheckFailed, err)
 		}
 	}
 	if a.Redis != nil {
 		if err := a.Redis.HealthCheck(ctx); err != nil {
-			return fmt.Errorf("redis health check failed: %w", err)
+			return fmt.Errorf("redis: %w: %w", ErrHealthCheckFailed, err)
 		}
 	}
 	if a.Sandbox != nil && cfg.Sandbox.Address != "" {

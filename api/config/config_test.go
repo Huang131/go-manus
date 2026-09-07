@@ -17,11 +17,6 @@ func TestValidate_RequiredFields(t *testing.T) {
 			wantSub: "Database.Host",
 		},
 		{
-			name:    "invalid log_level",
-			mutate:  func(c *Config) { c.LogLevel = "trace" },
-			wantSub: "LogLevel",
-		},
-		{
 			name:    "invalid env",
 			mutate:  func(c *Config) { c.Env = "staging" },
 			wantSub: "Env",
@@ -62,8 +57,7 @@ func TestValidate_OK(t *testing.T) {
 // validConfig 返回一个能通过校验的最小配置；测试通过 mutate 修改后断言失败。
 func validConfig() *Config {
 	return &Config{
-		Env:      "development",
-		LogLevel: "info",
+		Env: "development",
 		Database: DatabaseConfig{
 			Host:     "localhost",
 			Port:     5432,

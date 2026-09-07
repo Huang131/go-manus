@@ -9,8 +9,16 @@
 # ============================================================
 
 env: test
-log_level: debug
 app_config_filepath: config.test.yaml
+
+# 测试环境日志：仅 stdout，关闭文件切割便于查看实时输出。
+log:
+  level: debug
+  filename: ""
+  max_size: 100
+  max_backups: 3
+  max_age: 7
+  compress: false
 
 database:
   host: localhost

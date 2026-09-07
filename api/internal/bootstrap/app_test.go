@@ -2,7 +2,7 @@ package bootstrap
 
 import (
 	"context"
-	"strings"
+	"errors"
 	"testing"
 
 	"github.com/mooc-manus/go-manus/api/config"
@@ -123,7 +123,25 @@ func TestBuildRejectsNilInfrastructureFromFactory(t *testing.T) {
 	if err == nil {
 		t.Fatal("Build() error = nil, want nil infrastructure error")
 	}
-	if !strings.Contains(err.Error(), "postgres factory returned nil") {
-		t.Fatalf("Build() error = %q, want postgres factory error", err)
+	if !errors.Is(err, ErrInitialize) {
+		t.Fatalf("Build() error = %v, want errors.Is(_, ErrInitialize)", err)
+	}
+}
+
+func TestBuildInitializeErrorWrapsSentinel(t *testing.T) {
+	cfg := &config.Config{}
+
+	_, err := BuildWithFactories(cfg, Options{
+		EnablePostgres: true,
+	}, Factories{
+		NewPostgres: func(*config.DatabaseConfig) (*infrastructure.Postgres, error) {
+			return nil, errors.New("dial tcp: connection refused")
+		},
+	})
+	if err == nil {
+		t.Fatal("Build() error = nil, want initialization error")
+	}
+	if !errors.Is(err, ErrInitialize) {
+		t.Fatalf("Build() error = %v, want errors.Is(_, ErrInitialize)", err)
 	}
 }

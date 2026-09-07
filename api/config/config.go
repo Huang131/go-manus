@@ -11,8 +11,10 @@ import (
 // Config 应用程序配置
 type Config struct {
 	Env               string `mapstructure:"env"                 validate:"required,oneof=development production"` // 环境: development/production
-	LogLevel          string `mapstructure:"log_level"           validate:"required,oneof=debug info warn error"`  // 日志级别
 	AppConfigFilepath string `mapstructure:"app_config_filepath"`                                                  // 应用配置文件路径
+
+	// 日志配置
+	Log LoggerConfig `mapstructure:"log"`
 
 	// 数据库配置
 	Database DatabaseConfig `mapstructure:"database" validate:"required"`
@@ -40,6 +42,16 @@ type Config struct {
 
 	// HTTP 服务配置
 	Server ServerConfig `mapstructure:"server" validate:"required"`
+}
+
+// LoggerConfig 日志配置
+type LoggerConfig struct {
+	Level      string `mapstructure:"level"       validate:"required,oneof=debug info warn error"`
+	Filename   string `mapstructure:"filename"`                     // 日志文件路径，为空则只输出到 stdout
+	MaxSize    int    `mapstructure:"max_size"    validate:"gte=0"` // 单个日志文件最大大小(MB)
+	MaxBackups int    `mapstructure:"max_backups" validate:"gte=0"` // 保留的旧日志文件数量
+	MaxAge     int    `mapstructure:"max_age"     validate:"gte=0"` // 旧日志文件保留天数
+	Compress   bool   `mapstructure:"compress"`                     // 是否压缩旧日志
 }
 
 // DatabaseConfig 数据库配置

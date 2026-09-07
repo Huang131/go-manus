@@ -1,6 +1,15 @@
 env: development
-log_level: info
 app_config_filepath: config.yaml
+
+# Docker 环境日志：默认只输出到 stdout，由 docker logs 收集。
+# 如需落盘可设置 filename=/var/log/manus/server.log。
+log:
+  level: info
+  filename: ""
+  max_size: 100
+  max_backups: 10
+  max_age: 30
+  compress: true
 
 database:
   host: postgres
