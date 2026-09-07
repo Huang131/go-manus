@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mooc-manus/go-manus/api/internal/model"
-	"github.com/mooc-manus/go-manus/api/internal/repository"
+	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/repository"
 )
 
 // MockSessionRepository 用于测试的 Repository Mock

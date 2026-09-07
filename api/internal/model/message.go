@@ -1,6 +1,6 @@
 package model
 
-import "github.com/mooc-manus/go-manus/api/internal/llmcore"
+import "github.com/Huang131/go-manus/api/internal/llmcore"
 
 // Message 用户消息模型
 // 存储用户发送的消息和附件信息

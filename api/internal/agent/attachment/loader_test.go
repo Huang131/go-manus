@@ -7,7 +7,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/mooc-manus/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 // mockStorage 用于测试的内存 FileStorage

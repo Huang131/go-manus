@@ -6,9 +6,9 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/mooc-manus/go-manus/api/pkg/logger"
+	"github.com/Huang131/go-manus/api/pkg/logger"
 
-	"github.com/mooc-manus/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 // FileStorage 文件存储最小接口（由 agent.COSFileStorage 实现）

@@ -12,8 +12,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 
-	appconfig "github.com/mooc-manus/go-manus/api/config"
-	"github.com/mooc-manus/go-manus/api/pkg/logger"
+	appconfig "github.com/Huang131/go-manus/api/config"
+	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
 // Storage 对象存储接口

@@ -6,11 +6,11 @@ import (
 	"errors"
 	"github.com/bytedance/sonic"
 
+	"github.com/Huang131/go-manus/api/internal/infrastructure"
+	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/mooc-manus/go-manus/api/internal/infrastructure"
-	"github.com/mooc-manus/go-manus/api/internal/model"
 )
 
 // AppConfigRepository 应用配置仓储接口

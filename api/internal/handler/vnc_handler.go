@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Huang131/go-manus/api/internal/service"
+	"github.com/Huang131/go-manus/api/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	"github.com/mooc-manus/go-manus/api/internal/service"
-	"github.com/mooc-manus/go-manus/api/pkg/logger"
 )
 
 // vncUpgrader 接受浏览器 noVNC 客户端的 WebSocket 升级请求。

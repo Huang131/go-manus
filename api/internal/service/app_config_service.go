@@ -6,9 +6,9 @@ import (
 	"github.com/bytedance/sonic"
 	"time"
 
+	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/repository"
 	"github.com/google/uuid"
-	"github.com/mooc-manus/go-manus/api/internal/model"
-	"github.com/mooc-manus/go-manus/api/internal/repository"
 )
 
 // AppConfigService 应用配置服务接口

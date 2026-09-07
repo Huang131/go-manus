@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mooc-manus/go-manus/api/internal/agent/attachment"
-	"github.com/mooc-manus/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/agent/attachment"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 func TestBuildAttachmentContextSection_IncludesContent(t *testing.T) {

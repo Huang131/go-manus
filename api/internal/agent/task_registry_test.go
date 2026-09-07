@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/mooc-manus/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/external"
 )
 
 // TestDefaultTaskRegistry_Register 测试默认注册表的注册功能

@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/mooc-manus/go-manus/api/config"
-	"github.com/mooc-manus/go-manus/api/internal/infrastructure"
+	"github.com/Huang131/go-manus/api/config"
+	"github.com/Huang131/go-manus/api/internal/infrastructure"
 )
 
 func TestAppCloseIsIdempotent(t *testing.T) {

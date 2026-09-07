@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mooc-manus/go-manus/api/internal/agent/attachment"
+	"github.com/Huang131/go-manus/api/internal/agent/attachment"
 )
 
 func TestBuildAttachmentContextSection_Empty(t *testing.T) {

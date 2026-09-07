@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/mooc-manus/go-manus/api/internal/external"
-	"github.com/mooc-manus/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 // TestPlannerReActFlow_StateTransitions 测试状态转换逻辑

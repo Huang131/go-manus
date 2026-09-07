@@ -4,7 +4,7 @@ import (
 	"github.com/bytedance/sonic"
 	"testing"
 
-	"github.com/mooc-manus/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 func TestRuntimeHealthJSONRoundTrip(t *testing.T) {

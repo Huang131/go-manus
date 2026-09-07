@@ -6,8 +6,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/mooc-manus/go-manus/api/config"
-	"github.com/mooc-manus/go-manus/api/pkg/logger"
+	"github.com/Huang131/go-manus/api/config"
+	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
 // Postgres PostgreSQL 客户端

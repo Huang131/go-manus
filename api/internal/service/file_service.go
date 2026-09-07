@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/repository"
 	"github.com/google/uuid"
-	"github.com/mooc-manus/go-manus/api/internal/model"
-	"github.com/mooc-manus/go-manus/api/internal/repository"
 )
 
 // FileService 文件服务接口

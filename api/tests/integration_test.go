@@ -32,12 +32,12 @@ import (
 
 	"mime/multipart"
 
+	"github.com/Huang131/go-manus/api/config"
+	"github.com/Huang131/go-manus/api/internal/bootstrap"
+	"github.com/Huang131/go-manus/api/internal/infrastructure"
+	"github.com/Huang131/go-manus/api/pkg/response"
 	"github.com/bytedance/sonic"
 	"github.com/gin-gonic/gin"
-	"github.com/mooc-manus/go-manus/api/config"
-	"github.com/mooc-manus/go-manus/api/internal/bootstrap"
-	"github.com/mooc-manus/go-manus/api/internal/infrastructure"
-	"github.com/mooc-manus/go-manus/api/pkg/response"
 )
 
 var (

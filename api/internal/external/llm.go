@@ -3,7 +3,7 @@ package external
 import (
 	"context"
 
-	"github.com/mooc-manus/go-manus/api/internal/llmcore"
+	"github.com/Huang131/go-manus/api/internal/llmcore"
 )
 
 // llmModelIDKey ctx 中携带"本次请求要用的模型 ID"的 key。

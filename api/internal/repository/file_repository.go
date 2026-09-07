@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/Huang131/go-manus/api/internal/infrastructure"
+	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/mooc-manus/go-manus/api/internal/infrastructure"
-	"github.com/mooc-manus/go-manus/api/internal/model"
 )
 
 // FileRepository 文件仓储接口

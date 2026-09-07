@@ -1,6 +1,6 @@
 package agent
 
-import "github.com/mooc-manus/go-manus/api/internal/model"
+import "github.com/Huang131/go-manus/api/internal/model"
 
 // FlowStatus 流状态枚举
 type FlowStatus string

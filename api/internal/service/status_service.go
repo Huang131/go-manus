@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 
-	"github.com/mooc-manus/go-manus/api/internal/infrastructure"
-	"github.com/mooc-manus/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/infrastructure"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 // StatusService 状态服务接口

@@ -4,11 +4,11 @@ import (
 	"context"
 	"sync"
 
-	"github.com/mooc-manus/go-manus/api/internal/external"
-	"github.com/mooc-manus/go-manus/api/internal/llmcore"
-	"github.com/mooc-manus/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llmcore"
+	"github.com/Huang131/go-manus/api/internal/model"
 
-	"github.com/mooc-manus/go-manus/api/pkg/logger"
+	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
 // MCPTool MCP 工具 (Model Context Protocol)

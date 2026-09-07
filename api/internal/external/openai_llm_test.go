@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mooc-manus/go-manus/api/internal/llmcore"
+	"github.com/Huang131/go-manus/api/internal/llmcore"
 )
 
 // newTestClient 构造一个 baseURL 指向 test server 的 OpenAIClient

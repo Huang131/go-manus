@@ -6,8 +6,8 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"github.com/mooc-manus/go-manus/api/config"
-	"github.com/mooc-manus/go-manus/api/pkg/logger"
+	"github.com/Huang131/go-manus/api/config"
+	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
 // Redis Redis 客户端

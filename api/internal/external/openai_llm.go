@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/mooc-manus/go-manus/api/internal/llmcore"
+	"github.com/Huang131/go-manus/api/internal/llmcore"
 )
 
 // OpenAIClient OpenAI 兼容 API 客户端

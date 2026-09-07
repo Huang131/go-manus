@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/mooc-manus/go-manus/api/internal/external"
-	"github.com/mooc-manus/go-manus/api/internal/llmcore"
+	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llmcore"
 )
 
 // mockLLM 用于测试的 LLM mock。

@@ -10,8 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/Huang131/go-manus/api/pkg/logger"
 	"github.com/bytedance/sonic"
-	"github.com/mooc-manus/go-manus/api/pkg/logger"
 )
 
 // MCPClient MCP 客户端接口

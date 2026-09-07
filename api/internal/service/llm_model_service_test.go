@@ -8,8 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/mooc-manus/go-manus/api/internal/model"
-	"github.com/mooc-manus/go-manus/api/internal/repository"
+	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/repository"
 )
 
 // MockLLMModelRepository 仓储 mock

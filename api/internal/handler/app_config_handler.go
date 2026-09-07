@@ -1,10 +1,10 @@
 package handler
 
 import (
+	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/service"
+	"github.com/Huang131/go-manus/api/pkg/response"
 	"github.com/gin-gonic/gin"
-	"github.com/mooc-manus/go-manus/api/internal/model"
-	"github.com/mooc-manus/go-manus/api/internal/service"
-	"github.com/mooc-manus/go-manus/api/pkg/response"
 )
 
 // AppConfigHandler 应用配置处理器

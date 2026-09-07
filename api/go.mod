@@ -1,4 +1,4 @@
-module github.com/mooc-manus/go-manus/api
+module github.com/Huang131/go-manus/api
 
 go 1.24.4
 

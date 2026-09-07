@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/mooc-manus/go-manus/api/internal/llmcore"
+	"github.com/Huang131/go-manus/api/internal/llmcore"
 )
 
 type stubLLM struct {

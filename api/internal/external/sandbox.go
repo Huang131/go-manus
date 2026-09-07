@@ -10,9 +10,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/mooc-manus/go-manus/api/config"
-	"github.com/mooc-manus/go-manus/api/internal/model"
-	"github.com/mooc-manus/go-manus/api/pkg/logger"
+	"github.com/Huang131/go-manus/api/config"
+	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
 // sandboxToolResult 创建沙箱响应对应的 ToolResult

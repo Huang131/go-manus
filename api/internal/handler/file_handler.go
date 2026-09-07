@@ -3,9 +3,9 @@ package handler
 import (
 	"net/http"
 
+	"github.com/Huang131/go-manus/api/internal/service"
+	"github.com/Huang131/go-manus/api/pkg/response"
 	"github.com/gin-gonic/gin"
-	"github.com/mooc-manus/go-manus/api/internal/service"
-	"github.com/mooc-manus/go-manus/api/pkg/response"
 )
 
 // FileHandler 文件处理器

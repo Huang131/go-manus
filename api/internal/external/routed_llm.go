@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mooc-manus/go-manus/api/internal/llmcore"
-	"github.com/mooc-manus/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/llmcore"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 // RuntimeHealthStore 持久化运行时健康快照的最小接口。

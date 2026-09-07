@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mooc-manus/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 // VNC 测试不调用 GetSessionFiles，传 nil 即可

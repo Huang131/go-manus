@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mooc-manus/go-manus/api/pkg/logger"
+	"github.com/Huang131/go-manus/api/pkg/logger"
 	"github.com/redis/go-redis/v9"
 )
 

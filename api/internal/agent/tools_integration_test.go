@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/mooc-manus/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 // mockSandbox 模拟 Sandbox 用于测试

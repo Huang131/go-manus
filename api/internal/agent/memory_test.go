@@ -3,7 +3,7 @@ package agent
 import (
 	"testing"
 
-	"github.com/mooc-manus/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 func TestSimpleMemory_Add(t *testing.T) {

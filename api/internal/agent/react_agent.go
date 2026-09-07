@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mooc-manus/go-manus/api/internal/external"
-	"github.com/mooc-manus/go-manus/api/internal/llmcore"
-	"github.com/mooc-manus/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llmcore"
+	"github.com/Huang131/go-manus/api/internal/model"
 
-	"github.com/mooc-manus/go-manus/api/pkg/logger"
+	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
 // ReActAgent 基于 ReAct 架构的执行 Agent

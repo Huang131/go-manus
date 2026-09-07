@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/repository"
+	"github.com/Huang131/go-manus/api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	"github.com/mooc-manus/go-manus/api/internal/model"
-	"github.com/mooc-manus/go-manus/api/internal/repository"
-	"github.com/mooc-manus/go-manus/api/internal/service"
 )
 
 type stubVNCService struct {

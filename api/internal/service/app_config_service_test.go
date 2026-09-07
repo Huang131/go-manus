@@ -6,8 +6,8 @@ import (
 	"github.com/bytedance/sonic"
 	"testing"
 
-	"github.com/mooc-manus/go-manus/api/internal/model"
-	"github.com/mooc-manus/go-manus/api/internal/repository"
+	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/repository"
 )
 
 // MockAppConfigRepository 用于测试的 AppConfig Repository Mock

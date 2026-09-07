@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mooc-manus/go-manus/api/internal/llmcore"
-	"github.com/mooc-manus/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/llmcore"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 type mockRuntimeHealthStore struct {

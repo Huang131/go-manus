@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mooc-manus/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/external"
 )
 
 // mockTaskRunner 用于测试的 Mock TaskRunner

@@ -8,11 +8,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/google/uuid"
-	"github.com/mooc-manus/go-manus/api/internal/external"
-	"github.com/mooc-manus/go-manus/api/internal/model"
 
-	"github.com/mooc-manus/go-manus/api/pkg/logger"
+	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
 // TaskRegistryInterface 任务注册表接口

@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/mooc-manus/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 // SearchEngine 搜索引擎接口

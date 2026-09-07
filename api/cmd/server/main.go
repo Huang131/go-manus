@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mooc-manus/go-manus/api/config"
-	"github.com/mooc-manus/go-manus/api/internal/bootstrap"
-	"github.com/mooc-manus/go-manus/api/pkg/logger"
+	"github.com/Huang131/go-manus/api/config"
+	"github.com/Huang131/go-manus/api/internal/bootstrap"
+	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
 // 退出码定义

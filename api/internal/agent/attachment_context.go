@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mooc-manus/go-manus/api/internal/agent/attachment"
+	"github.com/Huang131/go-manus/api/internal/agent/attachment"
 )
 
 // BuildAttachmentContextSection 将已加载的附件内容拼成可注入 prompt 的字符串。

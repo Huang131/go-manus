@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 
-	"github.com/mooc-manus/go-manus/api/internal/external"
-	"github.com/mooc-manus/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 // SearchTool 搜索工具

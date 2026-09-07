@@ -8,13 +8,13 @@ import (
 
 	"github.com/bytedance/sonic"
 
+	"github.com/Huang131/go-manus/api/internal/agent"
+	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/service"
+	"github.com/Huang131/go-manus/api/pkg/logger"
+	"github.com/Huang131/go-manus/api/pkg/response"
 	"github.com/gin-gonic/gin"
-	"github.com/mooc-manus/go-manus/api/internal/agent"
-	"github.com/mooc-manus/go-manus/api/internal/external"
-	"github.com/mooc-manus/go-manus/api/internal/model"
-	"github.com/mooc-manus/go-manus/api/internal/service"
-	"github.com/mooc-manus/go-manus/api/pkg/logger"
-	"github.com/mooc-manus/go-manus/api/pkg/response"
 )
 
 // SessionHandler 会话处理器

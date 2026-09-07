@@ -4,8 +4,8 @@ import (
 	"context"
 	"strings"
 
-	"github.com/mooc-manus/go-manus/api/internal/llmcore"
-	"github.com/mooc-manus/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/llmcore"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 // Tool 工具接口

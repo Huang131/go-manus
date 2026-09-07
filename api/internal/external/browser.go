@@ -1,7 +1,7 @@
 package external
 
 import (
-	"github.com/mooc-manus/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 // Browser 浏览器接口

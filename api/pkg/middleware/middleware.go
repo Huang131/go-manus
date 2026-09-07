@@ -8,8 +8,8 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
-	"github.com/mooc-manus/go-manus/api/pkg/logger"
-	"github.com/mooc-manus/go-manus/api/pkg/response"
+	"github.com/Huang131/go-manus/api/pkg/logger"
+	"github.com/Huang131/go-manus/api/pkg/response"
 )
 
 // Recovery 错误恢复中间件
