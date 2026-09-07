@@ -1,6 +1,8 @@
 package logger
 
 import (
+	"fmt"
+	"io"
 	"os"
 	"sync"
 	"time"
@@ -65,6 +67,10 @@ func InitWithConfig(cfg Config) error {
 
 	mu.Lock()
 	defer mu.Unlock()
+
+	// 在覆盖前释放旧实例：触发最后一次 Flush，并把旧的 WriteSyncer 关闭（若实现 Closer）。
+	// 这样热重载日志时不会泄露 lumberjack 的 fd 或 stdout buffer。
+	shutdownCurrent()
 
 	// 初始化原子级别（支持动态调整）
 	atomicLevel = zap.NewAtomicLevelAt(zapLevel)
@@ -156,13 +162,40 @@ func GetLevel() string {
 	return "info"
 }
 
-// Sync 刷新日志缓冲区
-func Sync() {
+// Sync 刷新日志缓冲区。
+//
+// 返回值供调用方在退出前显式处理；典型场景是把 error 输出到 stderr，
+// 避免关闭阶段丢失日志（例如 stderr 写文件但文件已轮转等场景）。
+func Sync() error {
 	mu.RLock()
 	defer mu.RUnlock()
+	if log == nil {
+		return nil
+	}
+	if err := log.Sync(); err != nil {
+		fmt.Fprintf(os.Stderr, "logger sync failed: %v\n", err)
+		return err
+	}
+	return nil
+}
+
+// shutdownCurrent 在持有写锁的前提下释放当前 logger 句柄。
+//
+// 职责：1) Flush 旧 logger；2) 关闭底层 WriteSyncer（如 lumberjack）以避免 fd 泄露。
+// 旧对象本身由 GC 回收，无需额外处理。
+func shutdownCurrent() {
 	if log != nil {
 		_ = log.Sync()
+		log = nil
 	}
+	if writeSyncer != nil {
+		if closer, ok := writeSyncer.(io.Closer); ok {
+			_ = closer.Close()
+		}
+		writeSyncer = nil
+	}
+	encoder = nil
+	inited = false
 }
 
 // ==================== 日志方法封装 ====================

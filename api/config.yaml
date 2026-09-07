@@ -70,3 +70,12 @@ a2a:
 server:
   host: 0.0.0.0
   port: 8080
+  # 受信反向代理列表：nginx 在 docker compose 网络里通常是 172.18.0.0/16，
+  # 也可填具体 IP/CIDR。留空时回退到 ["127.0.0.1", "::1"]。
+  trusted_proxies:
+    - 172.18.0.0/16
+    - 127.0.0.1
+    - ::1
+  read_timeout_sec: 30
+  write_timeout_sec: 0   # 流式接口不设置写超时
+  idle_timeout_sec: 60

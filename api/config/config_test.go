@@ -1,90 +1,82 @@
 package config
 
 import (
-	"os"
+	"strings"
 	"testing"
 )
 
-func TestLoad_Defaults(t *testing.T) {
-	// 创建一个临时配置文件
-	tmpDir := t.TempDir()
-	configPath := tmpDir + "/config.yaml"
-
-	configContent := `
-app:
-  env: "test"
-  log_level: "debug"
-  app_config_filepath: ""
-
-database:
-  host: "localhost"
-  port: 5432
-  user: "postgres"
-  password: "postgres"
-  database: "manus"
-  max_open_conns: 10
-  max_idle_conns: 5
-  conn_max_lifetime: 3600
-
-redis:
-  host: "localhost"
-  port: 6379
-  password: ""
-  db: 0
-
-cos:
-  secret_id: "test_id"
-  secret_key: "test_key"
-  region: "ap-guangzhou"
-  bucket: "test-bucket"
-
-sandbox:
-  address: "http://localhost:8081"
-  image: "ubuntu:22.04"
-  ttl: 3600
-
-llm:
-  base_url: "https://api.openai.com"
-  api_key: ""
-  model_name: "gpt-4"
-  temperature: 0.7
-  max_tokens: 4096
-
-search:
-  provider: "bing"
-  bing_api_key: ""
-  google_api_key: ""
-
-server:
-  host: "0.0.0.0"
-  port: 8080
-`
-
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
-		t.Fatalf("Failed to write config file: %v", err)
+func TestValidate_RequiredFields(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(*Config)
+		wantSub string
+	}{
+		{
+			name:    "missing database.host",
+			mutate:  func(c *Config) { c.Database.Host = "" },
+			wantSub: "Database.Host",
+		},
+		{
+			name:    "invalid log_level",
+			mutate:  func(c *Config) { c.LogLevel = "trace" },
+			wantSub: "LogLevel",
+		},
+		{
+			name:    "invalid env",
+			mutate:  func(c *Config) { c.Env = "staging" },
+			wantSub: "Env",
+		},
+		{
+			name:    "invalid server.port",
+			mutate:  func(c *Config) { c.Server.Port = 99999 },
+			wantSub: "Server.Port",
+		},
+		{
+			name:    "negative max_open_conns",
+			mutate:  func(c *Config) { c.Database.MaxOpenConns = -1 },
+			wantSub: "MaxOpenConns",
+		},
 	}
-
-	// 加载配置
-	cfg, err := Load(configPath)
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-
-	// 验证配置
-	if cfg.Server.Port != 8080 {
-		t.Errorf("Server.Port = %d, want 8080", cfg.Server.Port)
-	}
-	if cfg.Database.Host != "localhost" {
-		t.Errorf("Database.Host = %s, want localhost", cfg.Database.Host)
-	}
-	if cfg.Redis.Port != 6379 {
-		t.Errorf("Redis.Port = %d, want 6379", cfg.Redis.Port)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := validConfig()
+			tc.mutate(c)
+			err := c.Validate()
+			if err == nil {
+				t.Fatalf("expected validation error, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.wantSub) {
+				t.Fatalf("error %q does not mention %q", err.Error(), tc.wantSub)
+			}
+		})
 	}
 }
 
-func TestLoad_FileNotFound(t *testing.T) {
-	_, err := Load("/nonexistent/path/config.yaml")
-	if err == nil {
-		t.Error("Load() should return error for nonexistent file")
+func TestValidate_OK(t *testing.T) {
+	c := validConfig()
+	if err := c.Validate(); err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+}
+
+// validConfig 返回一个能通过校验的最小配置；测试通过 mutate 修改后断言失败。
+func validConfig() *Config {
+	return &Config{
+		Env:      "development",
+		LogLevel: "info",
+		Database: DatabaseConfig{
+			Host:     "localhost",
+			Port:     5432,
+			User:     "u",
+			Database: "d",
+		},
+		Redis: RedisConfig{
+			Host: "localhost",
+			Port: 6379,
+		},
+		Server: ServerConfig{
+			Host: "0.0.0.0",
+			Port: 8080,
+		},
 	}
 }

@@ -3,28 +3,22 @@ package config
 import (
 	"fmt"
 	"strings"
-	"sync"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/spf13/viper"
-)
-
-// 全局配置单例
-var (
-	cfg  *Config
-	once sync.Once
 )
 
 // Config 应用程序配置
 type Config struct {
-	Env               string `mapstructure:"env"`                 // 环境: development/production
-	LogLevel          string `mapstructure:"log_level"`           // 日志级别
-	AppConfigFilepath string `mapstructure:"app_config_filepath"` // 应用配置文件路径
+	Env               string `mapstructure:"env"                 validate:"required,oneof=development production"` // 环境: development/production
+	LogLevel          string `mapstructure:"log_level"           validate:"required,oneof=debug info warn error"`  // 日志级别
+	AppConfigFilepath string `mapstructure:"app_config_filepath"`                                                  // 应用配置文件路径
 
 	// 数据库配置
-	Database DatabaseConfig `mapstructure:"database"`
+	Database DatabaseConfig `mapstructure:"database" validate:"required"`
 
 	// Redis 配置
-	Redis RedisConfig `mapstructure:"redis"`
+	Redis RedisConfig `mapstructure:"redis" validate:"required"`
 
 	// COS 配置
 	COS COSConfig `mapstructure:"cos"`
@@ -45,18 +39,18 @@ type Config struct {
 	A2A A2AConfig `mapstructure:"a2a"`
 
 	// HTTP 服务配置
-	Server ServerConfig `mapstructure:"server"`
+	Server ServerConfig `mapstructure:"server" validate:"required"`
 }
 
 // DatabaseConfig 数据库配置
 type DatabaseConfig struct {
-	Host         string `mapstructure:"host"`
-	Port         int    `mapstructure:"port"`
-	User         string `mapstructure:"user"`
+	Host         string `mapstructure:"host"          validate:"required"`
+	Port         int    `mapstructure:"port"          validate:"required,gt=0,lte=65535"`
+	User         string `mapstructure:"user"          validate:"required"`
 	Password     string `mapstructure:"password"`
-	Database     string `mapstructure:"database"`
-	MaxOpenConns int    `mapstructure:"max_open_conns"`
-	MaxIdleConns int    `mapstructure:"max_idle_conns"`
+	Database     string `mapstructure:"database"      validate:"required"`
+	MaxOpenConns int    `mapstructure:"max_open_conns" validate:"gte=0"`
+	MaxIdleConns int    `mapstructure:"max_idle_conns" validate:"gte=0"`
 }
 
 // DSN 返回 PostgreSQL 连接字符串
@@ -102,8 +96,12 @@ type SandboxConfig struct {
 
 // ServerConfig HTTP 服务配置
 type ServerConfig struct {
-	Host string `mapstructure:"host"`
-	Port int    `mapstructure:"port"`
+	Host            string   `mapstructure:"host"             validate:"required"`
+	Port            int      `mapstructure:"port"             validate:"required,gt=0,lte=65535"`
+	TrustedProxies  []string `mapstructure:"trusted_proxies"` // 受信反向代理 CIDR/IP，nginx/网关地址
+	ReadTimeoutSec  int      `mapstructure:"read_timeout_sec"  validate:"gte=0"`
+	WriteTimeoutSec int      `mapstructure:"write_timeout_sec" validate:"gte=0"`
+	IdleTimeoutSec  int      `mapstructure:"idle_timeout_sec"  validate:"gte=0"`
 }
 
 // Addr 返回服务地址
@@ -156,37 +154,89 @@ type A2AAgent struct {
 	Metadata map[string]string `mapstructure:"metadata"`
 }
 
-// Load 加载配置
-func Load(configPath string) (*Config, error) {
-	viper.SetConfigFile(configPath)
-	viper.SetConfigType("yaml")
+// LoadWithValidation 从指定路径加载并验证配置。
+//
+// 每次调用都创建独立的 viper 实例，避免全局状态在并发/重载场景下互相覆盖。
+func LoadWithValidation(configPath string) (*Config, error) {
+	v := viper.New()
+	v.SetConfigFile(configPath)
+	v.SetConfigType("yaml")
 
-	// 环境变量映射
-	viper.AutomaticEnv()
-	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	// 环境变量映射：仅作用于本实例
+	v.AutomaticEnv()
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
-	if err := viper.ReadInConfig(); err != nil {
+	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
 
-	cfg = &Config{}
-	if err := viper.Unmarshal(cfg); err != nil {
+	cfg := &Config{}
+	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 
-// Get 返回全局配置
-func Get() *Config {
-	return cfg
+// 全局 validator 实例（线程安全）
+// tag → 可读描述映射。key 与 validate tag 完全一致，大小写敏感。
+var tagDesc = map[string]string{
+	"required": "cannot be empty",
+	"oneof":    "must be one of [%s]", // Param 填入允许值列表
+	"gt":       "must be greater than %s",
+	"gte":      "must be ≥ %s",
+	"lt":       "must be less than %s",
+	"lte":      "must be ≤ %s",
+	"eq":       "must be equal to %s",
+	"ne":       "must not be equal to %s",
+	"min":      "min length is %s",
+	"max":      "max length is %s",
 }
 
-// Init 初始化配置
-func Init(configPath string) error {
-	var err error
-	once.Do(func() {
-		cfg, err = Load(configPath)
-	})
-	return err
+// formatFieldError 把单个字段校验错误转成运维友好的描述。
+// 输出形如：server.port: must be ≤ 65535
+func formatFieldError(fe validator.FieldError) string {
+	tag := fe.Tag()
+	desc, ok := tagDesc[tag]
+	if !ok {
+		return fmt.Sprintf("%s: invalid tag %q", fe.Namespace(), tag)
+	}
+	var msg string
+	if fe.Param() != "" {
+		// oneof/min/max 等带参数的 tag，填入参数。
+		// 对于 oneof，把空格分隔的参数用 ", " 连接。
+		if tag == "oneof" {
+			msg = fmt.Sprintf(desc, strings.Join(strings.Fields(fe.Param()), ", "))
+		} else {
+			msg = fmt.Sprintf(desc, fe.Param())
+		}
+	} else {
+		// 无参数 tag（如 required）直接用描述。
+		msg = desc
+	}
+	return fmt.Sprintf("%s: %s", fe.Namespace(), msg)
+}
+
+var validate = validator.New(validator.WithRequiredStructEnabled())
+
+// Validate 使用 struct tag 校验配置。
+//
+// 规则集中在各字段的 `validate:"..."` 标签中；新增字段时只需追加 tag 即可，
+// 不必再修改 if 链，便于审计与单元测试。
+func (c *Config) Validate() error {
+	if err := validate.Struct(c); err != nil {
+		// 把 validator.ValidationErrors 转成运维友好描述，便于 CLI 排错。
+		if ve, ok := err.(validator.ValidationErrors); ok {
+			parts := make([]string, 0, len(ve))
+			for _, fe := range ve {
+				parts = append(parts, formatFieldError(fe))
+			}
+			return fmt.Errorf("config validation failed: %s", strings.Join(parts, "; "))
+		}
+		return fmt.Errorf("config validation failed: %w", err)
+	}
+	return nil
 }

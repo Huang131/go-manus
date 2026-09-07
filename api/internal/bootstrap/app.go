@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -122,6 +123,9 @@ func (a *App) Close() {
 }
 
 // Shutdown 先停止 HTTP 服务，再释放应用依赖，统一生产和测试的退出顺序。
+//
+// 返回的错误会通过 context.DeadlineExceeded 区分超时与真正的关闭失败，
+// 方便 main 据此选择不同的退出码或告警级别。
 func (a *App) Shutdown(ctx context.Context) error {
 	if a == nil {
 		return nil
@@ -130,6 +134,10 @@ func (a *App) Shutdown(ctx context.Context) error {
 	var shutdownErr error
 	if a.Server != nil {
 		shutdownErr = a.Server.Shutdown(ctx)
+		if shutdownErr != nil && errors.Is(shutdownErr, context.DeadlineExceeded) {
+			// 超时场景：把上下文错误包一层，方便调用方 errors.Is 判定。
+			shutdownErr = fmt.Errorf("graceful shutdown timed out: %w", shutdownErr)
+		}
 	}
 	a.Close()
 	return shutdownErr
@@ -333,6 +341,14 @@ func (a *App) initRoutes(cfg *config.Config, opts Options) {
 	}
 
 	engine := gin.New()
+	// 把受信反向代理列表注入 Gin，避免使用默认的 0.0.0.0/0（生产环境不安全）。
+	// 没配置时回退到 ["127.0.0.1", "::1"]，只信任本机回环。
+	if err := engine.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+		logger.Warn("invalid trusted_proxies config, falling back to loopback",
+			zap.Strings("configured", cfg.Server.TrustedProxies),
+			zap.Error(err))
+		_ = engine.SetTrustedProxies([]string{"127.0.0.1", "::1"})
+	}
 	engine.Use(middleware.Recovery(), middleware.Logger(), middleware.CORS(), middleware.RequestID())
 	sessionHandler := handler.NewSessionHandler(a.SessionService, a.AgentService, a.Sandbox)
 	fileHandler := handler.NewFileHandler(a.FileService, a.SessionService)
@@ -345,12 +361,13 @@ func (a *App) initRoutes(cfg *config.Config, opts Options) {
 	})
 
 	a.Engine = engine
+	// 超时由配置驱动；缺省时回落到保守的 30s 读 / 60s 空闲，写超时 0 留给流式接口。
 	a.Server = &http.Server{
 		Addr:         cfg.Server.Addr(),
 		Handler:      engine,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 0,
-		IdleTimeout:  60 * time.Second,
+		ReadTimeout:  time.Duration(cfg.Server.ReadTimeoutSec) * time.Second,
+		WriteTimeout: time.Duration(cfg.Server.WriteTimeoutSec) * time.Second,
+		IdleTimeout:  time.Duration(cfg.Server.IdleTimeoutSec) * time.Second,
 	}
 }
 
