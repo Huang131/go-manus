@@ -12,12 +12,20 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-// 日志级别名称到 zapcore.Level 的映射
+// 日志级别常量。对齐 config.LoggerConfig 的 oneof tag，不可直接用于 struct tag。
+const (
+	LevelDebug = "debug"
+	LevelInfo  = "info"
+	LevelWarn  = "warn"
+	LevelError = "error"
+)
+
+// levelMap 把字符串级别映射到 zapcore.Level。
 var levelMap = map[string]zapcore.Level{
-	"debug": zapcore.DebugLevel,
-	"info":  zapcore.InfoLevel,
-	"warn":  zapcore.WarnLevel,
-	"error": zapcore.ErrorLevel,
+	LevelDebug: zapcore.DebugLevel,
+	LevelInfo:  zapcore.InfoLevel,
+	LevelWarn:  zapcore.WarnLevel,
+	LevelError: zapcore.ErrorLevel,
 }
 
 var (

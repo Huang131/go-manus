@@ -58,6 +58,9 @@ func TestValidate_OK(t *testing.T) {
 func validConfig() *Config {
 	return &Config{
 		Env: "development",
+		Log: LoggerConfig{
+			Level: "info",
+		},
 		Database: DatabaseConfig{
 			Host:     "localhost",
 			Port:     5432,
@@ -69,8 +72,9 @@ func validConfig() *Config {
 			Port: 6379,
 		},
 		Server: ServerConfig{
-			Host: "0.0.0.0",
-			Port: 8080,
+			Host:               "0.0.0.0",
+			Port:               8080,
+			ShutdownTimeoutSec: 30,
 		},
 	}
 }

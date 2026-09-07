@@ -108,12 +108,13 @@ type SandboxConfig struct {
 
 // ServerConfig HTTP 服务配置
 type ServerConfig struct {
-	Host            string   `mapstructure:"host"             validate:"required"`
-	Port            int      `mapstructure:"port"             validate:"required,gt=0,lte=65535"`
-	TrustedProxies  []string `mapstructure:"trusted_proxies"` // 受信反向代理 CIDR/IP，nginx/网关地址
-	ReadTimeoutSec  int      `mapstructure:"read_timeout_sec"  validate:"gte=0"`
-	WriteTimeoutSec int      `mapstructure:"write_timeout_sec" validate:"gte=0"`
-	IdleTimeoutSec  int      `mapstructure:"idle_timeout_sec"  validate:"gte=0"`
+	Host               string   `mapstructure:"host"               validate:"required"`
+	Port               int      `mapstructure:"port"               validate:"required,gt=0,lte=65535"`
+	TrustedProxies     []string `mapstructure:"trusted_proxies"` // 受信反向代理 CIDR/IP，nginx/网关地址
+	ReadTimeoutSec     int      `mapstructure:"read_timeout_sec"   validate:"gte=0"`
+	WriteTimeoutSec    int      `mapstructure:"write_timeout_sec"  validate:"gte=0"`
+	IdleTimeoutSec     int      `mapstructure:"idle_timeout_sec"   validate:"gte=0"`
+	ShutdownTimeoutSec int      `mapstructure:"shutdown_timeout_sec" validate:"gte=0"` // 优雅关闭超时秒数，0 兜底 30s
 }
 
 // Addr 返回服务地址

@@ -88,3 +88,4 @@ server:
   read_timeout_sec: 30
   write_timeout_sec: 0   # 流式接口不设置写超时
   idle_timeout_sec: 60
+  shutdown_timeout_sec: 30

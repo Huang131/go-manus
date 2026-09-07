@@ -41,9 +41,9 @@ func main() {
 func run() int {
 	flag.Parse()
 
-	// 1. 先用默认级别初始化日志（确保早期错误可记录）。
+	// 1. 先用info级别初始化日志（确保早期错误可记录）。
 	// 之后再根据配置重建一次，支持文件切割等高级特性。
-	if err := logger.Init("info"); err != nil {
+	if err := logger.Init(logger.LevelInfo); err != nil {
 		fmt.Fprintf(os.Stderr, "init logger failed: %v\n", err)
 		return ExitCodeLoggerError
 	}
@@ -59,7 +59,8 @@ func run() int {
 	}
 
 	// 3. 根据配置重建 logger：可启用文件切割、压缩等高级特性。
-	if err := logger.InitWithConfig(resolveLoggerConfig(cfg)); err != nil {
+	// cfg.Log 与 logger.Config 字段同构，直接类型转换。
+	if err := logger.InitWithConfig(logger.Config(cfg.Log)); err != nil {
 		fmt.Fprintf(os.Stderr, "reinit logger failed: %v\n", err)
 		return ExitCodeLoggerError
 	}
@@ -105,7 +106,12 @@ func run() int {
 		logger.Info("shutdown signal received", logger.String("signal", sig.String()))
 		logger.Info("shutting down server...")
 
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		// ShutdownTimeoutSec 为 0 时兜底 30s。
+		timeout := time.Duration(cfg.Server.ShutdownTimeoutSec)
+		if timeout == 0 {
+			timeout = 30
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 
 		if err := app.Shutdown(ctx); err != nil {
@@ -113,7 +119,7 @@ func run() int {
 				// 超时未能在限定时间内关停所有连接，按 ShutdownErr 处理。
 				// 监控层应把这类错误计入 SLO 告警。
 				logger.Error("graceful shutdown timed out",
-					logger.Dur("timeout", 30*time.Second),
+					logger.Dur("timeout", timeout),
 					logger.Err(err),
 				)
 			} else {
@@ -124,18 +130,6 @@ func run() int {
 
 		logger.Info("server shutdown completed gracefully")
 		return ExitCodeOK
-	}
-}
-
-// resolveLoggerConfig 把 Config 折叠为 logger.Config。
-func resolveLoggerConfig(cfg *config.Config) logger.Config {
-	return logger.Config{
-		Level:      cfg.Log.Level,
-		Filename:   cfg.Log.Filename,
-		MaxSize:    cfg.Log.MaxSize,
-		MaxBackups: cfg.Log.MaxBackups,
-		MaxAge:     cfg.Log.MaxAge,
-		Compress:   cfg.Log.Compress,
 	}
 }
 
