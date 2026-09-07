@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -29,20 +30,16 @@ var levelMap = map[string]zapcore.Level{
 }
 
 var (
-	// encoder 配置（创建后不可变）
-	encoderConfig zapcore.EncoderConfig
 	// encoder 实例
 	encoder zapcore.Encoder
 	// writeSyncer 输出目标
 	writeSyncer zapcore.WriteSyncer
-	// 原子级别，支持动态调整
+	// 原子级别，SetLevel/GetLevel 线程安全，无需全局锁
 	atomicLevel zap.AtomicLevel
-	// 日志实例
-	log *zap.Logger
-	// 互斥锁
-	mu sync.RWMutex
-	// 是否已初始化
-	inited bool
+	// 日志实例（使用原子操作，Get/Sync 无需锁）
+	log atomic.Pointer[zap.Logger]
+	// 原子级别写入保护（在 InitWithConfig 中使用写锁）
+	muLevel sync.Mutex
 )
 
 // Config 日志配置
@@ -66,15 +63,15 @@ func InitWithConfig(cfg Config) error {
 	// 解析日志级别
 	level := cfg.Level
 	if level == "" {
-		level = "info"
+		level = LevelInfo
 	}
 	zapLevel, ok := levelMap[level]
 	if !ok {
 		zapLevel = zapcore.InfoLevel
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
+	muLevel.Lock()
+	defer muLevel.Unlock()
 
 	// 在覆盖前释放旧实例：触发最后一次 Flush，并把旧的 WriteSyncer 关闭（若实现 Closer）。
 	// 这样热重载日志时不会泄露 lumberjack 的 fd 或 stdout buffer。
@@ -83,8 +80,8 @@ func InitWithConfig(cfg Config) error {
 	// 初始化原子级别（支持动态调整）
 	atomicLevel = zap.NewAtomicLevelAt(zapLevel)
 
-	// 初始化编码器配置
-	encoderConfig = zapcore.EncoderConfig{
+	// 初始化编码器
+	encoder = zapcore.NewJSONEncoder(zapcore.EncoderConfig{
 		TimeKey:        "time",
 		LevelKey:       "level",
 		NameKey:        "logger",
@@ -97,8 +94,7 @@ func InitWithConfig(cfg Config) error {
 		EncodeTime:     zapcore.ISO8601TimeEncoder,
 		EncodeDuration: zapcore.SecondsDurationEncoder,
 		EncodeCaller:   zapcore.ShortCallerEncoder,
-	}
-	encoder = zapcore.NewJSONEncoder(encoderConfig)
+	})
 
 	// 确定输出位置
 	if cfg.Filename != "" {
@@ -126,48 +122,42 @@ func InitWithConfig(cfg Config) error {
 	// 1. zap 内部的 write/Check 调用
 	// 2. log.Info() <- zap.Logger 的方法
 	// 这样 caller 会显示业务调用方
-	log = zap.New(core, zap.AddCaller(), zap.AddCallerSkip(2))
-	inited = true
+	log.Store(zap.New(core, zap.AddCaller(), zap.AddCallerSkip(2)))
 
 	return nil
 }
 
 // Get 返回全局日志实例
+// 无需锁：atomic.Pointer.Load() 原子操作线程安全
 func Get() *zap.Logger {
-	mu.RLock()
-	defer mu.RUnlock()
-	if !inited {
-		// 兜底初始化
-		log, _ = zap.NewProduction()
+	if l := log.Load(); l != nil {
+		return l
 	}
-	return log
+	// 兜底：不应发生（InitWithConfig 失败），防御性处理
+	tmp, _ := zap.NewProduction()
+	return tmp
 }
 
 // SetLevel 动态调整日志级别
-// level 支持: debug, info, warn, error
+// 无需锁：atomicLevel.SetLevel() 本身线程安全，levelMap 是只读 map
 func SetLevel(level string) {
 	zapLevel, ok := levelMap[level]
 	if !ok {
 		zapLevel = zapcore.InfoLevel
 	}
-
-	mu.RLock()
 	atomicLevel.SetLevel(zapLevel)
-	mu.RUnlock()
 }
 
 // GetLevel 获取当前日志级别
+// 无需锁：atomicLevel.Level() 本身线程安全
 func GetLevel() string {
-	mu.RLock()
-	defer mu.RUnlock()
-
 	currentLevel := atomicLevel.Level()
 	for name, lvl := range levelMap {
 		if lvl == currentLevel {
 			return name
 		}
 	}
-	return "info"
+	return LevelInfo
 }
 
 // Sync 刷新日志缓冲区。
@@ -175,12 +165,11 @@ func GetLevel() string {
 // 返回值供调用方在退出前显式处理；典型场景是把 error 输出到 stderr，
 // 避免关闭阶段丢失日志（例如 stderr 写文件但文件已轮转等场景）。
 func Sync() error {
-	mu.RLock()
-	defer mu.RUnlock()
-	if log == nil {
+	l := log.Load()
+	if l == nil {
 		return nil
 	}
-	if err := log.Sync(); err != nil {
+	if err := l.Sync(); err != nil {
 		fmt.Fprintf(os.Stderr, "logger sync failed: %v\n", err)
 		return err
 	}
@@ -189,12 +178,11 @@ func Sync() error {
 
 // shutdownCurrent 在持有写锁的前提下释放当前 logger 句柄。
 //
-// 职责：1) Flush 旧 logger；2) 关闭底层 WriteSyncer（如 lumberjack）以避免 fd 泄露。
-// 旧对象本身由 GC 回收，无需额外处理。
+// 职责：1) Swap 旧 logger 并 Flush；2) 关闭底层 WriteSyncer（如 lumberjack）以避免 fd 泄露。
+// 使用 atomic.Pointer.Swap() 原子交换，同时获取旧值并置 nil。
 func shutdownCurrent() {
-	if log != nil {
-		_ = log.Sync()
-		log = nil
+	if oldLog := log.Swap(nil); oldLog != nil {
+		_ = oldLog.Sync()
 	}
 	if writeSyncer != nil {
 		if closer, ok := writeSyncer.(io.Closer); ok {
@@ -203,7 +191,6 @@ func shutdownCurrent() {
 		writeSyncer = nil
 	}
 	encoder = nil
-	inited = false
 }
 
 // ==================== 日志方法封装 ====================
