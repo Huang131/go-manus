@@ -2,10 +2,11 @@ package handler
 
 import (
 	"context"
-	"github.com/bytedance/sonic"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/bytedance/sonic"
 
 	"github.com/gin-gonic/gin"
 	"github.com/mooc-manus/go-manus/api/internal/agent"
@@ -14,7 +15,6 @@ import (
 	"github.com/mooc-manus/go-manus/api/internal/service"
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
 	"github.com/mooc-manus/go-manus/api/pkg/response"
-	"go.uber.org/zap"
 )
 
 // SessionHandler 会话处理器
@@ -221,7 +221,7 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 			// 前端 startEmptyStream 不再因立即关闭而 500ms 死循环重连。
 			// 当新 chat 请求创建 task 后再向该 session 推流（见 createTaskNotify 后续扩展）。
 			logger.Info("空流续读: session 无活跃 task，保持长连接心跳",
-				zap.String("session_id", id))
+				logger.String("session_id", id))
 			heartbeat := time.NewTicker(15 * time.Second)
 			defer heartbeat.Stop()
 			for {
@@ -239,9 +239,9 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 			}
 		}
 		logger.Info("空流续读: 订阅 session 活跃 task 事件流",
-			zap.String("session_id", id),
-			zap.String("task_id", taskID),
-			zap.String("start_event_id", req.EventID))
+			logger.String("session_id", id),
+			logger.String("task_id", taskID),
+			logger.String("start_event_id", req.EventID))
 	}
 
 	startID := req.EventID // 从前端 lastEventIdRef 续读；空字符串表示从头开始
@@ -253,11 +253,11 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 			// 不再轮询 Redis 也不再写 Flush，避免在 writer 关闭后疯狂刷写日志。
 			// 后端 Agent task 会通过独立 context 继续运行，事件保留在 Redis，
 			// 下次前端连上来时通过 lastEventId 续读即可。
-			logger.Info("HTTP client disconnected, stopping SSE stream", zap.String("task_id", taskID))
+			logger.Info("HTTP client disconnected, stopping SSE stream", logger.String("task_id", taskID))
 			eventCancel()
 			return
 		case <-eventCtx.Done():
-			logger.Info("SSE stream ended", zap.String("task_id", taskID))
+			logger.Info("SSE stream ended", logger.String("task_id", taskID))
 			return
 		default:
 			events, err := h.agent.GetTaskEvents(eventCtx, taskID, startID)

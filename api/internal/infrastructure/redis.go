@@ -8,7 +8,6 @@ import (
 
 	"github.com/mooc-manus/go-manus/api/config"
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
-	"go.uber.org/zap"
 )
 
 // Redis Redis 客户端
@@ -32,8 +31,8 @@ func NewRedis(cfg *config.RedisConfig) (*Redis, error) {
 	}
 
 	logger.Info("Redis connection established",
-		zap.String("addr", cfg.Addr()),
-		zap.Int("db", cfg.DB),
+		logger.String("addr", cfg.Addr()),
+		logger.Int("db", cfg.DB),
 	)
 
 	return &Redis{Client: client}, nil

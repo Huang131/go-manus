@@ -10,7 +10,6 @@ import (
 	"github.com/mooc-manus/go-manus/api/internal/llmcore"
 	"github.com/mooc-manus/go-manus/api/internal/model"
 	"github.com/mooc-manus/go-manus/api/internal/repository"
-	"go.uber.org/zap"
 
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
 )
@@ -114,9 +113,9 @@ func (a *BaseAgent) AddMemory(ctx context.Context, msg *model.Message) error {
 		memory := a.getModelMemory()
 		if err := a.sessionRepo.SaveMemory(ctx, a.sessionID, a.name, memory); err != nil {
 			logger.Error("记忆持久化失败",
-				zap.String("session_id", a.sessionID),
-				zap.String("agent_name", a.name),
-				zap.Error(err))
+				logger.String("session_id", a.sessionID),
+				logger.String("agent_name", a.name),
+				logger.Err(err))
 			// 不返回错误，因为内存已成功添加
 		}
 	}
@@ -150,9 +149,9 @@ func (a *BaseAgent) EnsureMemory(ctx context.Context) error {
 	memory, err := a.sessionRepo.GetMemory(ctx, a.sessionID, a.name)
 	if err != nil {
 		logger.Warn("从数据库加载记忆失败，创建新记忆",
-			zap.String("session_id", a.sessionID),
-			zap.String("agent_name", a.name),
-			zap.Error(err))
+			logger.String("session_id", a.sessionID),
+			logger.String("agent_name", a.name),
+			logger.Err(err))
 		return nil
 	}
 
@@ -172,9 +171,9 @@ func (a *BaseAgent) EnsureMemory(ctx context.Context) error {
 	}
 
 	logger.Info("从数据库加载记忆成功",
-		zap.String("session_id", a.sessionID),
-		zap.String("agent_name", a.name),
-		zap.Int("message_count", len(memory.Messages)))
+		logger.String("session_id", a.sessionID),
+		logger.String("agent_name", a.name),
+		logger.Int("message_count", len(memory.Messages)))
 
 	return nil
 }
@@ -273,9 +272,9 @@ func (a *BaseAgent) RollBack(ctx context.Context, msg *model.Message) error {
 		memory := a.getModelMemory()
 		if err := a.sessionRepo.SaveMemory(ctx, a.sessionID, a.name, memory); err != nil {
 			logger.Error("Rollback 后记忆持久化失败",
-				zap.String("session_id", a.sessionID),
-				zap.String("agent_name", a.name),
-				zap.Error(err))
+				logger.String("session_id", a.sessionID),
+				logger.String("agent_name", a.name),
+				logger.Err(err))
 		}
 	}
 
@@ -333,9 +332,9 @@ func (a *BaseAgent) invokeWithEmptyRetry(ctx context.Context, req *external.LLMR
 		}
 		lastErr = nil
 		logger.Warn("LLM 返回空内容，执行重试",
-			zap.String("session_id", a.sessionID),
-			zap.String("agent", a.name),
-			zap.Int("attempt", attempt))
+			logger.String("session_id", a.sessionID),
+			logger.String("agent", a.name),
+			logger.Int("attempt", attempt))
 		current.Messages = append(current.Messages,
 			llmcore.Message{Role: llmcore.RoleAssistant, ContentText: ""},
 			llmcore.Message{Role: llmcore.RoleUser, ContentText: "AI 无响应内容，请继续。"},
@@ -392,8 +391,8 @@ func (a *BaseAgent) Invoke(ctx context.Context, query string) (*InvokeResult, er
 			// LLM 调用失败，尝试重试
 			for retry := 0; retry < a.config.MaxRetries; retry++ {
 				logger.Warn("LLM 调用失败，执行重试",
-					zap.Int("retry", retry+1),
-					zap.Error(err))
+					logger.Int("retry", retry+1),
+					logger.Err(err))
 
 				// 添加空回复到历史
 				messages = append(messages,
@@ -430,7 +429,7 @@ func (a *BaseAgent) Invoke(ctx context.Context, query string) (*InvokeResult, er
 			toolCalls := resp.ToolUse
 			if len(toolCalls) > 1 {
 				logger.Warn("LLM 返回多个工具调用，只处理第一个",
-					zap.Int("total", len(toolCalls)))
+					logger.Int("total", len(toolCalls)))
 				toolCalls = toolCalls[:1]
 			}
 
@@ -439,9 +438,9 @@ func (a *BaseAgent) Invoke(ctx context.Context, query string) (*InvokeResult, er
 				result, err := a.handleToolCall(ctx, tc, messages)
 				if err != nil {
 					logger.Error("工具调用失败",
-						zap.String("function", tc.Function.Name),
-						zap.String("tool_call_id", tc.ID),
-						zap.Error(err))
+						logger.String("function", tc.Function.Name),
+						logger.String("tool_call_id", tc.ID),
+						logger.Err(err))
 					// 添加错误结果到历史，继续循环
 					messages = append(messages, llmcore.Message{
 						Role:        llmcore.RoleTool,
@@ -550,9 +549,9 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 	}
 
 	logger.Info("执行工具调用",
-		zap.String("tool", tool.Name()),
-		zap.String("function", functionName),
-		zap.Any("arguments", arguments))
+		logger.String("tool", tool.Name()),
+		logger.String("function", functionName),
+		logger.Any("arguments", arguments))
 
 	// 特殊处理 message_ask_user 工具
 	if functionName == "message_ask_user" {
@@ -580,9 +579,9 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 			break
 		}
 		logger.Warn("工具调用失败，执行重试",
-			zap.String("function", functionName),
-			zap.Int("retry", retry+1),
-			zap.Error(err))
+			logger.String("function", functionName),
+			logger.Int("retry", retry+1),
+			logger.Err(err))
 	}
 
 	if err != nil {
@@ -649,7 +648,7 @@ func (a *BaseAgent) InvokeWithEvents(ctx context.Context, query string) <-chan m
 				toolCalls := resp.ToolUse
 				if len(toolCalls) > 1 {
 					logger.Warn("LLM 返回多个工具调用，只处理第一个",
-						zap.Int("total", len(toolCalls)))
+						logger.Int("total", len(toolCalls)))
 					toolCalls = toolCalls[:1]
 				}
 

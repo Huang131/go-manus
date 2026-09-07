@@ -13,7 +13,6 @@ import (
 	"github.com/mooc-manus/go-manus/api/internal/external"
 	"github.com/mooc-manus/go-manus/api/internal/model"
 	"github.com/mooc-manus/go-manus/api/internal/repository"
-	"go.uber.org/zap"
 
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
 )
@@ -98,8 +97,8 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 	}
 
 	logger.Info("AgentTaskRunner 开始执行",
-		zap.String("session_id", r.sessionID),
-		zap.String("task_id", task.ID()))
+		logger.String("session_id", r.sessionID),
+		logger.String("task_id", task.ID()))
 
 	// 死循环修复：添加重试延迟和最大错误次数限制
 	var popRetryCount int
@@ -111,11 +110,11 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 		select {
 		case <-ctx.Done():
 			logger.Info("AgentTaskRunner 上下文取消，退出执行",
-				zap.String("task_id", task.ID()))
+				logger.String("task_id", task.ID()))
 			return ctx.Err()
 		case <-task.DoneChan():
 			logger.Info("AgentTaskRunner 任务完成，退出执行",
-				zap.String("task_id", task.ID()))
+				logger.String("task_id", task.ID()))
 			return nil
 		default:
 		}
@@ -126,13 +125,13 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 			// 检查是否是 context 取消
 			if ctx.Err() != nil {
 				logger.Info("AgentTaskRunner 上下文取消，退出执行",
-					zap.String("task_id", task.ID()))
+					logger.String("task_id", task.ID()))
 				return ctx.Err()
 			}
 			// 检查是否是任务完成信号
 			if task.Done() {
 				logger.Info("AgentTaskRunner 任务完成，退出执行",
-					zap.String("task_id", task.ID()))
+					logger.String("task_id", task.ID()))
 				return nil
 			}
 
@@ -140,18 +139,18 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 			popRetryCount++
 			if popRetryCount >= popRetryMaxCount {
 				logger.Error("获取输入消息连续失败次数过多，退出执行",
-					zap.String("task_id", task.ID()),
-					zap.Int("retry_count", popRetryCount),
-					zap.Error(err))
+					logger.String("task_id", task.ID()),
+					logger.Int("retry_count", popRetryCount),
+					logger.Err(err))
 				return fmt.Errorf("pop retry exceeded max count: %d", popRetryMaxCount)
 			}
 
 			// 指数退避延迟
 			logger.Warn("获取输入消息失败，等待重试",
-				zap.String("task_id", task.ID()),
-				zap.Int("retry_count", popRetryCount),
-				zap.Duration("retry_delay", popRetryDelay),
-				zap.Error(err))
+				logger.String("task_id", task.ID()),
+				logger.Int("retry_count", popRetryCount),
+				logger.Dur("retry_delay", popRetryDelay),
+				logger.Err(err))
 
 			select {
 			case <-ctx.Done():
@@ -179,16 +178,16 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 		var inputEvent model.MessageEvent
 		if err := sonic.Unmarshal([]byte(data), &inputEvent); err != nil {
 			logger.Warn("解析输入事件失败",
-				zap.String("data", data),
-				zap.Error(err))
+				logger.String("data", data),
+				logger.Err(err))
 			continue
 		}
 
 		attachments, err := r.syncUserAttachmentsToSandbox(ctx, inputEvent.Attachments)
 		if err != nil {
 			logger.Warn("同步用户附件失败",
-				zap.String("session_id", r.sessionID),
-				zap.Error(err))
+				logger.String("session_id", r.sessionID),
+				logger.Err(err))
 		}
 
 		// 加载附件内容到 LLM 上下文（解决"只列计划"问题）
@@ -198,8 +197,8 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 			attachmentContexts = contexts
 			if len(contexts) > 0 {
 				logger.Info("已加载附件内容到 LLM 上下文",
-					zap.String("session_id", r.sessionID),
-					zap.Int("count", len(contexts)))
+					logger.String("session_id", r.sessionID),
+					logger.Int("count", len(contexts)))
 			}
 		}
 
@@ -220,8 +219,8 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 			eventJSON, err := sonic.Marshal(event)
 			if err != nil {
 				logger.Error("序列化事件失败",
-					zap.String("task_id", task.ID()),
-					zap.Error(err))
+					logger.String("task_id", task.ID()),
+					logger.Err(err))
 				continue
 			}
 
@@ -235,23 +234,23 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 			wrappedJSON, err := sonic.Marshal(baseEvent)
 			if err != nil {
 				logger.Error("序列化 model.Event 失败",
-					zap.String("task_id", task.ID()),
-					zap.Error(err))
+					logger.String("task_id", task.ID()),
+					logger.Err(err))
 				continue
 			}
 
 			outputID, err := task.OutputStream().Put(ctx, string(wrappedJSON))
 			if err != nil {
 				logger.Warn("写入 output_stream 失败",
-					zap.String("task_id", task.ID()),
-					zap.Error(err))
+					logger.String("task_id", task.ID()),
+					logger.Err(err))
 			}
 
 			// 同步到会话数据库
 			if err := r.sessionRep.AppendEvent(ctx, r.sessionID, baseEvent); err != nil {
 				logger.Warn("添加事件到会话失败",
-					zap.String("session_id", r.sessionID),
-					zap.Error(err))
+					logger.String("session_id", r.sessionID),
+					logger.Err(err))
 			}
 
 			// 处理不同类型的事件
@@ -262,7 +261,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 					_ = r.sessionRep.UpdateStatus(ctx, r.sessionID, model.SessionStatusCompleted)
 				}
 			case *model.ErrorEvent:
-				logger.Error("Agent 运行出错", zap.String("error", e.Message))
+				logger.Error("Agent 运行出错", logger.String("error", e.Message))
 			case *model.FullStepEvent:
 				if e.Status == model.StepEventStatusCompleted && e.Step.Success {
 					// 步骤完成，同步附件文件
@@ -273,9 +272,9 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 			}
 
 			logger.Debug("AgentTaskRunner 输出事件",
-				zap.String("task_id", task.ID()),
-				zap.String("event_id", outputID),
-				zap.String("event_type", string(event.GetType())))
+				logger.String("task_id", task.ID()),
+				logger.String("event_id", outputID),
+				logger.String("event_type", string(event.GetType())))
 		}
 	}
 }
@@ -292,7 +291,7 @@ func (r *AgentTaskRunner) Destroy() error {
 	}
 
 	logger.Info("AgentTaskRunner 已销毁",
-		zap.String("session_id", r.sessionID))
+		logger.String("session_id", r.sessionID))
 
 	return nil
 }
@@ -301,8 +300,8 @@ func (r *AgentTaskRunner) Destroy() error {
 // 任务完成时的回调
 func (r *AgentTaskRunner) OnDone(task *RedisStreamTask) {
 	logger.Info("AgentTaskRunner 任务完成回调",
-		zap.String("task_id", task.ID()),
-		zap.String("session_id", r.sessionID))
+		logger.String("task_id", task.ID()),
+		logger.String("session_id", r.sessionID))
 
 	// 可选：更新会话状态为完成
 	// _ = r.sessionRep.UpdateStatus(context.Background(), r.sessionID, model.SessionStatusCompleted)
@@ -331,9 +330,9 @@ func (r *AgentTaskRunner) Run(ctx context.Context, message *model.Message) error
 		eventJSON, err := sonic.Marshal(event)
 		if err != nil {
 			logger.Error("序列化事件失败",
-				zap.String("session_id", r.sessionID),
-				zap.String("event_type", string(event.GetType())),
-				zap.Error(err))
+				logger.String("session_id", r.sessionID),
+				logger.String("event_type", string(event.GetType())),
+				logger.Err(err))
 			continue
 		}
 
@@ -344,8 +343,8 @@ func (r *AgentTaskRunner) Run(ctx context.Context, message *model.Message) error
 
 		if err := r.sessionRep.AppendEvent(ctx, r.sessionID, baseEvent); err != nil {
 			logger.Warn("添加事件到会话失败",
-				zap.String("session_id", r.sessionID),
-				zap.Error(err))
+				logger.String("session_id", r.sessionID),
+				logger.Err(err))
 		}
 
 		// 处理不同类型的事件
@@ -356,7 +355,7 @@ func (r *AgentTaskRunner) Run(ctx context.Context, message *model.Message) error
 				_ = r.sessionRep.UpdateStatus(ctx, r.sessionID, model.SessionStatusCompleted)
 			}
 		case *model.ErrorEvent:
-			logger.Error("Agent 运行出错", zap.String("error", e.Message))
+			logger.Error("Agent 运行出错", logger.String("error", e.Message))
 		case *model.FullStepEvent:
 			if e.Status == model.StepEventStatusCompleted && e.Step.Success {
 				// 步骤完成，同步附件文件
@@ -418,7 +417,7 @@ func (r *AgentTaskRunner) syncFileToStorage(ctx context.Context, filepath string
 	key := "agent/" + r.sessionID + "/" + filepath
 	err = r.fileStorage.Upload(ctx, key, &readerWrapper{data: []byte(content)}, int64(len(content)), "text/plain")
 	if err != nil {
-		logger.Warn("同步文件到存储失败", zap.String("filepath", filepath), zap.Error(err))
+		logger.Warn("同步文件到存储失败", logger.String("filepath", filepath), logger.Err(err))
 		return nil
 	}
 
@@ -429,7 +428,7 @@ func (r *AgentTaskRunner) syncFileToStorage(ctx context.Context, filepath string
 		Key:      key,
 	}
 	if err := r.fileRep.Create(ctx, file); err != nil {
-		logger.Warn("创建文件记录失败", zap.String("filepath", filepath), zap.Error(err))
+		logger.Warn("创建文件记录失败", logger.String("filepath", filepath), logger.Err(err))
 	}
 
 	return nil
@@ -460,9 +459,9 @@ func (r *AgentTaskRunner) syncUserAttachmentsToSandbox(ctx context.Context, atta
 		reader, err := r.fileStorage.Download(ctx, file.Key)
 		if err != nil {
 			logger.Warn("下载用户附件失败",
-				zap.String("session_id", r.sessionID),
-				zap.String("file_id", file.ID),
-				zap.Error(err))
+				logger.String("session_id", r.sessionID),
+				logger.String("file_id", file.ID),
+				logger.Err(err))
 			continue
 		}
 
@@ -470,16 +469,16 @@ func (r *AgentTaskRunner) syncUserAttachmentsToSandbox(ctx context.Context, atta
 		closeErr := reader.Close()
 		if err != nil {
 			logger.Warn("读取用户附件失败",
-				zap.String("session_id", r.sessionID),
-				zap.String("file_id", file.ID),
-				zap.Error(err))
+				logger.String("session_id", r.sessionID),
+				logger.String("file_id", file.ID),
+				logger.Err(err))
 			continue
 		}
 		if closeErr != nil {
 			logger.Warn("关闭用户附件失败",
-				zap.String("session_id", r.sessionID),
-				zap.String("file_id", file.ID),
-				zap.Error(closeErr))
+				logger.String("session_id", r.sessionID),
+				logger.String("file_id", file.ID),
+				logger.Err(closeErr))
 		}
 
 		filename := filepath.Base(file.Filename)
@@ -489,10 +488,10 @@ func (r *AgentTaskRunner) syncUserAttachmentsToSandbox(ctx context.Context, atta
 		sandboxPath := filepath.Join("/home/ubuntu/upload", r.sessionID, filename)
 		if _, err := r.sandbox.UploadFile(ctx, data, sandboxPath, filename); err != nil {
 			logger.Warn("上传用户附件到沙箱失败",
-				zap.String("session_id", r.sessionID),
-				zap.String("file_id", file.ID),
-				zap.String("sandbox_path", sandboxPath),
-				zap.Error(err))
+				logger.String("session_id", r.sessionID),
+				logger.String("file_id", file.ID),
+				logger.String("sandbox_path", sandboxPath),
+				logger.Err(err))
 			continue
 		}
 

@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/mooc-manus/go-manus/api/internal/llmcore"
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
 )
@@ -237,8 +235,8 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMResp
 
 	if resp.StatusCode != http.StatusOK {
 		logger.Error("Anthropic API error",
-			zap.Int("status", resp.StatusCode),
-			zap.String("body", string(respBody)),
+			logger.Int("status", resp.StatusCode),
+			logger.String("body", string(respBody)),
 		)
 		return nil, fmt.Errorf("Anthropic API error: status=%d, body=%s", resp.StatusCode, string(respBody))
 	}

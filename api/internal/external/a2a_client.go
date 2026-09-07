@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"go.uber.org/zap"
 
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
 )
@@ -215,8 +214,8 @@ func (m *A2AClientManager) Invoke(ctx context.Context, agentID string, query str
 	}
 
 	logger.Info("调用远程 Agent",
-		zap.String("agent_id", agentID),
-		zap.String("url", url))
+		logger.String("agent_id", agentID),
+		logger.String("url", url))
 
 	// 4. 发送请求
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
@@ -239,9 +238,9 @@ func (m *A2AClientManager) Invoke(ctx context.Context, agentID string, query str
 
 	if resp.StatusCode != http.StatusOK {
 		logger.Error("调用远程 Agent 失败",
-			zap.String("agent_id", agentID),
-			zap.Int("status", resp.StatusCode),
-			zap.String("body", string(respBody)))
+			logger.String("agent_id", agentID),
+			logger.Int("status", resp.StatusCode),
+			logger.String("body", string(respBody)))
 		return nil, fmt.Errorf("调用远程 Agent [%s:%s] 出错: HTTP %d", agentID, url, resp.StatusCode)
 	}
 

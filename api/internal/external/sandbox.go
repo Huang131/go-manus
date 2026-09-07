@@ -10,8 +10,6 @@ import (
 	"net/http"
 	"time"
 
-	"go.uber.org/zap"
-
 	"github.com/mooc-manus/go-manus/api/config"
 	"github.com/mooc-manus/go-manus/api/internal/model"
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
@@ -476,7 +474,7 @@ func (c *BrowserClient) Restart(sessionID, url string) (*model.ToolResult, error
 	// 先关闭现有浏览器，再启动新的
 	killScript := `pkill -f chromium || true`
 	if _, err := c.sandbox.ExecCommand(context.Background(), sessionID, "", killScript); err != nil {
-		logger.Warn("failed to kill existing browser", zap.Error(err))
+		logger.Warn("failed to kill existing browser", logger.Err(err))
 	}
 	return c.Navigate(sessionID, url)
 }

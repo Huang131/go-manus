@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/mooc-manus/go-manus/api/internal/external"
 	"github.com/mooc-manus/go-manus/api/internal/model"
-	"go.uber.org/zap"
 
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
 )
@@ -54,7 +53,7 @@ func (r *DefaultTaskRegistry) Register(task *RedisStreamTask) {
 	r.tasks[task.id] = task
 	r.doneChans[task.id] = task.doneChan // 保存 doneChan 引用
 	logger.Debug("任务注册到注册表",
-		zap.String("task_id", task.id))
+		logger.String("task_id", task.id))
 }
 
 // Unregister 从注册表移除任务
@@ -67,7 +66,7 @@ func (r *DefaultTaskRegistry) Unregister(taskID string) {
 	// 只从 doneChans 中移除引用，不关闭 channel
 	delete(r.doneChans, taskID)
 	logger.Debug("任务从注册表移除",
-		zap.String("task_id", taskID))
+		logger.String("task_id", taskID))
 }
 
 // CleanupCompleted 清理已完成的任务
@@ -89,7 +88,7 @@ func (r *DefaultTaskRegistry) CleanupCompleted() int {
 		// 只移除引用，不关闭 channel
 		delete(r.doneChans, id)
 		logger.Debug("清理已完成任务",
-			zap.String("task_id", id))
+			logger.String("task_id", id))
 	}
 
 	return len(toRemove)
@@ -133,7 +132,7 @@ func (r *DefaultTaskRegistry) Clear() {
 	// 注意：这里不调用 task.Cancel()，避免死锁
 	// 任务的生命周期管理由调用方负责
 	logger.Info("任务注册表已清空",
-		zap.Int("task_count", len(tasks)))
+		logger.Int("task_count", len(tasks)))
 }
 
 // TaskRunner 任务运行器接口（对齐 Python 版本）
@@ -271,9 +270,9 @@ func NewRedisStreamTask(mq external.MessageQueue, runner TaskRunner, registry ..
 	reg.Register(task)
 
 	logger.Info("创建 RedisStreamTask",
-		zap.String("task_id", taskID),
-		zap.String("input_stream", task.inputStreamName()),
-		zap.String("output_stream", task.outputStreamName()))
+		logger.String("task_id", taskID),
+		logger.String("input_stream", task.inputStreamName()),
+		logger.String("output_stream", task.outputStreamName()))
 
 	return task
 }
@@ -344,7 +343,7 @@ func (t *RedisStreamTask) Invoke(ctx context.Context) error {
 	go t.execute(ctx)
 
 	logger.Info("RedisStreamTask 已启动",
-		zap.String("task_id", t.id))
+		logger.String("task_id", t.id))
 
 	return nil
 }
@@ -357,8 +356,8 @@ func (t *RedisStreamTask) execute(ctx context.Context) {
 	if t.runner != nil {
 		if err := t.runner.Invoke(ctx, t); err != nil {
 			logger.Error("TaskRunner.Invoke 失败",
-				zap.String("task_id", t.id),
-				zap.Error(err))
+				logger.String("task_id", t.id),
+				logger.Err(err))
 		}
 	}
 }
@@ -381,7 +380,7 @@ func (t *RedisStreamTask) onDone() {
 	}
 
 	logger.Info("RedisStreamTask 执行完成",
-		zap.String("task_id", t.id))
+		logger.String("task_id", t.id))
 }
 
 // Cancel 取消任务
@@ -411,7 +410,7 @@ func (t *RedisStreamTask) Cancel() bool {
 		t.registry.Unregister(t.id)
 	}
 	logger.Info("RedisStreamTask 已取消",
-		zap.String("task_id", t.id))
+		logger.String("task_id", t.id))
 
 	return true
 }
@@ -488,8 +487,8 @@ func (t *RedisStreamTask) SubscribeOutput(ctx context.Context, bufferSize int) (
 						return
 					}
 					logger.Warn("获取输出消息失败",
-						zap.String("task_id", t.id),
-						zap.Error(err))
+						logger.String("task_id", t.id),
+						logger.Err(err))
 					time.Sleep(time.Second)
 					continue
 				}
@@ -502,8 +501,8 @@ func (t *RedisStreamTask) SubscribeOutput(ctx context.Context, bufferSize int) (
 				dataStr, _ := data.(string)
 				if err := sonic.Unmarshal([]byte(dataStr), &event); err != nil {
 					logger.Warn("解析事件失败",
-						zap.String("task_id", t.id),
-						zap.Error(err))
+						logger.String("task_id", t.id),
+						logger.Err(err))
 					continue
 				}
 				event.ID = id

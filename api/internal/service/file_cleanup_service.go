@@ -9,7 +9,6 @@ import (
 	"github.com/mooc-manus/go-manus/api/internal/model"
 	"github.com/mooc-manus/go-manus/api/internal/repository"
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
-	"go.uber.org/zap"
 )
 
 // FileCleanupService 文件清理服务接口
@@ -81,7 +80,7 @@ func (s *DefaultFileCleanupService) CleanExpiredFiles(ctx context.Context, expir
 		// 清理这批文件
 		cleaned, size, err := s.cleanFiles(ctx, files)
 		if err != nil {
-			logger.Error("清理文件批次失败", zap.Error(err))
+			logger.Error("清理文件批次失败", logger.Err(err))
 			break
 		}
 
@@ -89,8 +88,8 @@ func (s *DefaultFileCleanupService) CleanExpiredFiles(ctx context.Context, expir
 		totalSize += size
 
 		logger.Info("清理文件批次完成",
-			zap.Int("batch_count", cleaned),
-			zap.Int64("batch_size", size))
+			logger.Int("batch_count", cleaned),
+			logger.Int64("batch_size", size))
 	}
 
 	// 更新统计信息
@@ -101,9 +100,9 @@ func (s *DefaultFileCleanupService) CleanExpiredFiles(ctx context.Context, expir
 	s.stats.LastCleanupDuration = time.Since(startTime).String()
 
 	logger.Info("清理过期文件完成",
-		zap.Int("total_cleaned", totalCleaned),
-		zap.Int64("total_size", totalSize),
-		zap.Duration("duration", time.Since(startTime)))
+		logger.Int("total_cleaned", totalCleaned),
+		logger.Int64("total_size", totalSize),
+		logger.Dur("duration", time.Since(startTime)))
 
 	return totalCleaned, nil
 }
@@ -128,9 +127,9 @@ func (s *DefaultFileCleanupService) cleanFiles(ctx context.Context, files []*mod
 		for _, file := range files {
 			if err := s.storage.Delete(ctx, file.Key); err != nil {
 				logger.Warn("从对象存储删除文件失败",
-					zap.String("file_id", file.ID),
-					zap.String("key", file.Key),
-					zap.Error(err))
+					logger.String("file_id", file.ID),
+					logger.String("key", file.Key),
+					logger.Err(err))
 			}
 		}
 	}
@@ -170,8 +169,8 @@ func (s *DefaultFileCleanupService) CleanSessionFiles(ctx context.Context, sessi
 	s.stats.LastCleanupCount = cleaned
 
 	logger.Info("清理会话文件完成",
-		zap.String("session_id", sessionID),
-		zap.Int("cleaned_count", cleaned))
+		logger.String("session_id", sessionID),
+		logger.Int("cleaned_count", cleaned))
 
 	return cleaned, nil
 }
@@ -221,9 +220,9 @@ func (s *FileCleanupScheduler) Start() {
 	s.wg.Add(1)
 	go s.run()
 	logger.Info("文件清理调度器已启动",
-		zap.String("expire_duration", s.expireDuration),
-		zap.Int("batch_size", s.batchSize),
-		zap.Duration("interval", s.interval))
+		logger.String("expire_duration", s.expireDuration),
+		logger.Int("batch_size", s.batchSize),
+		logger.Dur("interval", s.interval))
 }
 
 // Stop 停止清理调度器
@@ -260,12 +259,12 @@ func (s *FileCleanupScheduler) cleanup() {
 
 	cleaned, err := s.cleanupService.CleanExpiredFiles(ctx, s.expireDuration, s.batchSize)
 	if err != nil {
-		logger.Error("定时清理失败", zap.Error(err))
+		logger.Error("定时清理失败", logger.Err(err))
 		return
 	}
 
 	if cleaned > 0 {
-		logger.Info("定时清理完成", zap.Int("cleaned_count", cleaned))
+		logger.Info("定时清理完成", logger.Int("cleaned_count", cleaned))
 	}
 }
 

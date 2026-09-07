@@ -9,7 +9,6 @@ import (
 	"github.com/mooc-manus/go-manus/api/internal/external"
 	"github.com/mooc-manus/go-manus/api/internal/model"
 	"github.com/mooc-manus/go-manus/api/internal/repository"
-	"go.uber.org/zap"
 
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
 )
@@ -100,7 +99,7 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *mode
 
 	// 更新最新消息
 	if err := s.sessionRep.UpdateLatestMessage(ctx, sessionID, message.Message); err != nil {
-		logger.Warn("更新最新消息失败", zap.String("session_id", sessionID), zap.Error(err))
+		logger.Warn("更新最新消息失败", logger.String("session_id", sessionID), logger.Err(err))
 	}
 
 	// 添加用户消息事件到数据库
@@ -110,8 +109,8 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *mode
 	})
 	if err != nil {
 		logger.Error("序列化用户消息事件失败",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
+			logger.String("session_id", sessionID),
+			logger.Err(err))
 		return "", fmt.Errorf("序列化用户消息事件失败: %w", err)
 	}
 
@@ -120,7 +119,7 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *mode
 		Data: userEventData,
 	}
 	if err := s.sessionRep.AppendEvent(ctx, sessionID, userEvent); err != nil {
-		logger.Warn("添加用户消息事件失败", zap.String("session_id", sessionID), zap.Error(err))
+		logger.Warn("添加用户消息事件失败", logger.String("session_id", sessionID), logger.Err(err))
 	}
 
 	// 创建独立的 task context，不受 HTTP 请求取消影响，但保留请求中的 trace 等 values。
@@ -136,7 +135,7 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *mode
 	// 启动任务执行（后台 goroutine）
 	if err := task.Invoke(taskCtx); err != nil {
 		// 如果任务已经在运行，不是错误，只记录日志
-		logger.Debug("任务已启动或已完成", zap.String("task_id", task.ID()), zap.Error(err))
+		logger.Debug("任务已启动或已完成", logger.String("task_id", task.ID()), logger.Err(err))
 	}
 
 	// 将消息放入 input_stream
@@ -149,13 +148,13 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *mode
 		msgEvent.Attachments = s.resolveMessageAttachments(taskCtx, sessionID, message.Attachments)
 	}
 	if _, err := task.PutInput(taskCtx, msgEvent); err != nil {
-		logger.Error("放入消息失败", zap.String("session_id", sessionID), zap.Error(err))
+		logger.Error("放入消息失败", logger.String("session_id", sessionID), logger.Err(err))
 		return task.ID(), fmt.Errorf("放入消息失败: %w", err)
 	}
 
 	logger.Info("Chat 处理消息",
-		zap.String("session_id", sessionID),
-		zap.String("task_id", task.ID()))
+		logger.String("session_id", sessionID),
+		logger.String("task_id", task.ID()))
 
 	return task.ID(), nil
 }
@@ -177,9 +176,9 @@ func (s *AgentService) resolveMessageAttachments(ctx context.Context, sessionID 
 		file, err := s.fileRep.GetByID(ctx, fileID)
 		if err != nil {
 			logger.Warn("获取聊天附件失败",
-				zap.String("session_id", sessionID),
-				zap.String("file_id", fileID),
-				zap.Error(err))
+				logger.String("session_id", sessionID),
+				logger.String("file_id", fileID),
+				logger.Err(err))
 			continue
 		}
 		if file != nil {
@@ -293,8 +292,8 @@ func (s *AgentService) getTools() []Tool {
 	}
 
 	logger.Info("注册工具列表",
-		zap.Int("count", len(tools)),
-		zap.Any("tools", s.getToolNames(tools)))
+		logger.Int("count", len(tools)),
+		logger.Any("tools", s.getToolNames(tools)))
 
 	return tools
 }
@@ -326,8 +325,8 @@ func (s *AgentService) getOrCreateTask(ctx context.Context, session *model.Sessi
 	s.taskBySession[session.ID] = task
 
 	logger.Info("创建新的 RedisStreamTask",
-		zap.String("session_id", session.ID),
-		zap.String("task_id", task.ID()))
+		logger.String("session_id", session.ID),
+		logger.String("task_id", task.ID()))
 
 	return task, nil
 }
@@ -344,19 +343,19 @@ func (s *AgentService) getOrCreateTask(ctx context.Context, session *model.Sessi
 func (s *AgentService) GetTaskEvents(ctx context.Context, taskID string, startID string) ([]*model.Event, error) {
 	task := defaultTaskRegistry.Get(taskID)
 	if task == nil {
-		logger.Warn("GetTaskEvents: task not found", zap.String("task_id", taskID))
+		logger.Warn("GetTaskEvents: task not found", logger.String("task_id", taskID))
 		return nil, fmt.Errorf("task not found: %s", taskID)
 	}
 
 	logger.Debug("GetTaskEvents 获取事件",
-		zap.String("task_id", taskID),
-		zap.String("start_id", startID))
+		logger.String("task_id", taskID),
+		logger.String("start_id", startID))
 
 	events, err := task.GetOutput(ctx, startID)
 	if err != nil {
 		logger.Error("GetTaskEvents 获取事件失败",
-			zap.String("task_id", taskID),
-			zap.Error(err))
+			logger.String("task_id", taskID),
+			logger.Err(err))
 		return nil, fmt.Errorf("get task events failed: %w", err)
 	}
 
@@ -370,8 +369,8 @@ func (s *AgentService) GetTaskEvents(ctx context.Context, taskID string, startID
 	}
 
 	logger.Debug("GetTaskEvents 返回事件",
-		zap.String("task_id", taskID),
-		zap.Int("event_count", len(result)))
+		logger.String("task_id", taskID),
+		logger.Int("event_count", len(result)))
 
 	return result, nil
 }
@@ -407,7 +406,7 @@ func (s *AgentService) RegisterTool(tool Tool) {
 
 	// 注意: AgentTaskRunner 创建时已固定工具列表
 	// 如需动态添加工具，需要修改设计
-	logger.Info("注册工具", zap.String("name", tool.Name()))
+	logger.Info("注册工具", logger.String("name", tool.Name()))
 }
 
 // GetRunningTasks 获取运行中的任务数

@@ -11,8 +11,6 @@ import (
 	"sync/atomic"
 
 	"github.com/bytedance/sonic"
-	"go.uber.org/zap"
-
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
 )
 
@@ -143,8 +141,8 @@ func (c *StdioMCPClient) Connect(ctx context.Context) error {
 	}
 
 	logger.Info("MCP 服务器已启动",
-		zap.String("server", c.serverName),
-		zap.String("command", c.cmd.Path))
+		logger.String("server", c.serverName),
+		logger.String("command", c.cmd.Path))
 
 	return nil
 }
@@ -265,8 +263,8 @@ func (c *StdioMCPClient) ListTools(ctx context.Context) ([]MCPToolInfo, error) {
 	}
 
 	logger.Info("获取 MCP 工具列表成功",
-		zap.String("server", c.serverName),
-		zap.Int("count", len(tools)))
+		logger.String("server", c.serverName),
+		logger.Int("count", len(tools)))
 
 	return tools, nil
 }
@@ -347,7 +345,7 @@ func (c *StdioMCPClient) Close() error {
 	// cmd.Wait() 在 CAS 之后无锁调用，可以安全阻塞
 	c.terminateProcess()
 
-	logger.Info("MCP 服务器已关闭", zap.String("server", c.serverName))
+	logger.Info("MCP 服务器已关闭", logger.String("server", c.serverName))
 	return nil
 }
 
@@ -465,13 +463,13 @@ func (m *MCPClientManager) Initialize(ctx context.Context) error {
 
 		if err := client.Connect(ctx); err != nil {
 			logger.Warn("连接 MCP 服务器失败，跳过",
-				zap.String("server", server.Name),
-				zap.Error(err))
+				logger.String("server", server.Name),
+				logger.Err(err))
 			continue
 		}
 
 		m.clients[server.Name] = client
-		logger.Info("MCP 服务器连接成功", zap.String("server", server.Name))
+		logger.Info("MCP 服务器连接成功", logger.String("server", server.Name))
 	}
 
 	return nil
@@ -497,8 +495,8 @@ func (m *MCPClientManager) ListAllTools(ctx context.Context) (map[string][]MCPTo
 		tools, err := client.ListTools(ctx)
 		if err != nil {
 			logger.Warn("获取 MCP 工具列表失败",
-				zap.String("server", name),
-				zap.Error(err))
+				logger.String("server", name),
+				logger.Err(err))
 			continue
 		}
 		result[name] = tools
@@ -515,8 +513,8 @@ func (m *MCPClientManager) Close() error {
 	for name, client := range m.clients {
 		if err := client.Close(); err != nil {
 			logger.Warn("关闭 MCP 客户端失败",
-				zap.String("server", name),
-				zap.Error(err))
+				logger.String("server", name),
+				logger.Err(err))
 		}
 	}
 

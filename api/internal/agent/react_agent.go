@@ -8,7 +8,6 @@ import (
 	"github.com/mooc-manus/go-manus/api/internal/external"
 	"github.com/mooc-manus/go-manus/api/internal/llmcore"
 	"github.com/mooc-manus/go-manus/api/internal/model"
-	"go.uber.org/zap"
 
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
 )
@@ -93,8 +92,8 @@ func (a *ReActAgent) ExecuteStep(ctx context.Context, plan *model.Plan, step *mo
 	if err := a.jsonParser.Parse(result.Content, &stepResult); err != nil {
 		// 如果 JSON 解析失败，将整个响应作为结果
 		logger.Warn("JSON 解析失败，尝试直接提取结果",
-			zap.String("content", result.Content),
-			zap.Error(err))
+			logger.String("content", result.Content),
+			logger.Err(err))
 		step.Success = false
 		step.Result = result.Content
 		step.Status = model.ExecutionStatusFailed
@@ -114,9 +113,9 @@ func (a *ReActAgent) ExecuteStep(ctx context.Context, plan *model.Plan, step *mo
 	}
 
 	logger.Info("ReActAgent 执行步骤完成",
-		zap.String("step_id", step.ID),
-		zap.Bool("success", step.Success),
-		zap.String("result", step.Result))
+		logger.String("step_id", step.ID),
+		logger.Bool("success", step.Success),
+		logger.String("result", step.Result))
 
 	// 添加到记忆
 	_ = a.AddMemory(ctx, message)

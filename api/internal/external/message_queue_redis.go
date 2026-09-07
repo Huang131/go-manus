@@ -11,7 +11,6 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
-	"go.uber.org/zap"
 )
 
 // 消息队列相关常量
@@ -56,14 +55,14 @@ func (q *RedisStreamMessageQueue) Put(ctx context.Context, streamName string, me
 
 	if err != nil {
 		logger.Error("添加消息到队列失败",
-			zap.String("stream", streamName),
-			zap.Error(err))
+			logger.String("stream", streamName),
+			logger.Err(err))
 		return "", fmt.Errorf("failed to add message: %w", err)
 	}
 
 	logger.Debug("添加消息到队列成功",
-		zap.String("stream", streamName),
-		zap.String("message_id", result))
+		logger.String("stream", streamName),
+		logger.String("message_id", result))
 
 	return result, nil
 }
@@ -93,8 +92,8 @@ func (q *RedisStreamMessageQueue) Get(ctx context.Context, streamName string, st
 			return "", nil, nil // 超时无消息
 		}
 		logger.Error("从队列获取消息失败",
-			zap.String("stream", streamName),
-			zap.Error(err))
+			logger.String("stream", streamName),
+			logger.Err(err))
 		return "", nil, fmt.Errorf("failed to get message: %w", err)
 	}
 
@@ -202,8 +201,8 @@ func (q *RedisStreamMessageQueue) Pop(ctx context.Context, streamName string) (s
 	messages, err := q.client.XRange(ctx, streamName, "-", "+").Result()
 	if err != nil {
 		logger.Error("获取队列消息失败",
-			zap.String("stream", streamName),
-			zap.Error(err))
+			logger.String("stream", streamName),
+			logger.Err(err))
 		return "", nil, fmt.Errorf("failed to range messages: %w", err)
 	}
 
@@ -217,9 +216,9 @@ func (q *RedisStreamMessageQueue) Pop(ctx context.Context, streamName string) (s
 	// 删除消息
 	if err := q.client.XDel(ctx, streamName, msg.ID).Err(); err != nil {
 		logger.Error("删除队列消息失败",
-			zap.String("stream", streamName),
-			zap.String("message_id", msg.ID),
-			zap.Error(err))
+			logger.String("stream", streamName),
+			logger.String("message_id", msg.ID),
+			logger.Err(err))
 		return "", nil, fmt.Errorf("failed to delete message: %w", err)
 	}
 
@@ -242,8 +241,8 @@ func (q *RedisStreamMessageQueue) Clear(ctx context.Context, streamName string) 
 	// 使用 DEL 命令删除整个流
 	if err := q.client.Del(ctx, streamName).Err(); err != nil {
 		logger.Error("清空队列失败",
-			zap.String("stream", streamName),
-			zap.Error(err))
+			logger.String("stream", streamName),
+			logger.Err(err))
 		return fmt.Errorf("failed to clear stream: %w", err)
 	}
 	return nil
@@ -263,8 +262,8 @@ func (q *RedisStreamMessageQueue) Size(ctx context.Context, streamName string) (
 	size, err := q.client.XLen(ctx, streamName).Result()
 	if err != nil {
 		logger.Error("获取队列长度失败",
-			zap.String("stream", streamName),
-			zap.Error(err))
+			logger.String("stream", streamName),
+			logger.Err(err))
 		return 0, fmt.Errorf("failed to get stream length: %w", err)
 	}
 	return size, nil
@@ -274,9 +273,9 @@ func (q *RedisStreamMessageQueue) Size(ctx context.Context, streamName string) (
 func (q *RedisStreamMessageQueue) DeleteMessage(ctx context.Context, streamName string, messageID string) error {
 	if err := q.client.XDel(ctx, streamName, messageID).Err(); err != nil {
 		logger.Error("删除消息失败",
-			zap.String("stream", streamName),
-			zap.String("message_id", messageID),
-			zap.Error(err))
+			logger.String("stream", streamName),
+			logger.String("message_id", messageID),
+			logger.Err(err))
 		return fmt.Errorf("failed to delete message: %w", err)
 	}
 	return nil
@@ -320,7 +319,7 @@ func (q *RedisStreamMessageQueue) Subscribe(ctx context.Context, streamName stri
 			select {
 			case <-ctx.Done():
 				// context 被取消，正常退出
-				logger.Debug("订阅已取消", zap.String("stream", streamName))
+				logger.Debug("订阅已取消", logger.String("stream", streamName))
 				return
 			case <-ticker.C:
 				// 获取新消息（非阻塞）
@@ -332,8 +331,8 @@ func (q *RedisStreamMessageQueue) Subscribe(ctx context.Context, streamName stri
 						return
 					default:
 						logger.Warn("订阅获取消息失败",
-							zap.String("stream", streamName),
-							zap.Error(err))
+							logger.String("stream", streamName),
+							logger.Err(err))
 						continue
 					}
 				}
@@ -355,8 +354,8 @@ func (q *RedisStreamMessageQueue) Subscribe(ctx context.Context, streamName stri
 				default:
 					// channel 满了，跳过这条消息
 					logger.Warn("消息 channel 已满，跳过消息",
-						zap.String("stream", streamName),
-						zap.String("message_id", id))
+						logger.String("stream", streamName),
+						logger.String("message_id", id))
 				}
 			}
 		}
@@ -407,8 +406,8 @@ func (q *RedisStreamMessageQueue) GetRange(ctx context.Context, streamName strin
 	messages, err := q.client.XRange(ctx, streamName, startID, endID).Result()
 	if err != nil {
 		logger.Error("获取范围消息失败",
-			zap.String("stream", streamName),
-			zap.Error(err))
+			logger.String("stream", streamName),
+			logger.Err(err))
 		return nil, fmt.Errorf("failed to get range messages: %w", err)
 	}
 
@@ -438,10 +437,10 @@ func (q *RedisStreamMessageQueue) GetRange(ctx context.Context, streamName strin
 	}
 
 	logger.Debug("获取范围消息成功",
-		zap.String("stream", streamName),
-		zap.String("start_id", startID),
-		zap.String("end_id", endID),
-		zap.Int("count", len(result)))
+		logger.String("stream", streamName),
+		logger.String("start_id", startID),
+		logger.String("end_id", endID),
+		logger.Int("count", len(result)))
 
 	return result, nil
 }
@@ -453,8 +452,8 @@ func (q *RedisStreamMessageQueue) GetLatestID(ctx context.Context, streamName st
 	messages, err := q.client.XRevRange(ctx, streamName, "+", "-").Result()
 	if err != nil {
 		logger.Error("获取最新消息ID失败",
-			zap.String("stream", streamName),
-			zap.Error(err))
+			logger.String("stream", streamName),
+			logger.Err(err))
 		return "", fmt.Errorf("failed to get latest message ID: %w", err)
 	}
 
@@ -463,8 +462,8 @@ func (q *RedisStreamMessageQueue) GetLatestID(ctx context.Context, streamName st
 	}
 
 	logger.Debug("获取最新消息ID成功",
-		zap.String("stream", streamName),
-		zap.String("latest_id", messages[0].ID))
+		logger.String("stream", streamName),
+		logger.String("latest_id", messages[0].ID))
 
 	return messages[0].ID, nil
 }
@@ -483,8 +482,8 @@ func (q *RedisStreamMessageQueue) releaseLock(ctx context.Context, lockKey strin
 	result, err := script.Run(ctx, q.client, []string{lockKey}, lockValue).Int()
 	if err != nil {
 		logger.Warn("释放分布式锁失败",
-			zap.String("lock_key", lockKey),
-			zap.Error(err))
+			logger.String("lock_key", lockKey),
+			logger.Err(err))
 		return false
 	}
 

@@ -11,7 +11,6 @@ import (
 
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
 	"github.com/redis/go-redis/v9"
-	"go.uber.org/zap"
 )
 
 // RedisConsumerGroup Redis 消费者组实现
@@ -41,7 +40,7 @@ func NewRedisConsumerGroup(client *redis.Client, groupName string, streamName st
 	// 尝试创建消费者组（如果已存在会忽略错误）
 	err := client.XGroupCreateMkStream(ctx, streamName, groupName, "0").Err()
 	if err != nil && !strings.Contains(err.Error(), "BUSYGROUP") {
-		logger.Warn("创建消费者组失败", zap.Error(err))
+		logger.Warn("创建消费者组失败", logger.Err(err))
 	}
 
 	return cg, nil

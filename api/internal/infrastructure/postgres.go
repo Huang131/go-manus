@@ -8,7 +8,6 @@ import (
 
 	"github.com/mooc-manus/go-manus/api/config"
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
-	"go.uber.org/zap"
 )
 
 // Postgres PostgreSQL 客户端
@@ -40,9 +39,9 @@ func NewPostgres(cfg *config.DatabaseConfig) (*Postgres, error) {
 	}
 
 	logger.Info("PostgreSQL connection established",
-		zap.String("host", cfg.Host),
-		zap.Int("port", cfg.Port),
-		zap.String("database", cfg.Database),
+		logger.String("host", cfg.Host),
+		logger.Int("port", cfg.Port),
+		logger.String("database", cfg.Database),
 	)
 
 	return &Postgres{Pool: pool}, nil

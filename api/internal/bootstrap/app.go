@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
-
 	"github.com/mooc-manus/go-manus/api/config"
 	"github.com/mooc-manus/go-manus/api/internal/agent"
 	"github.com/mooc-manus/go-manus/api/internal/external"
@@ -197,7 +195,7 @@ func (a *App) initInfrastructure(cfg *config.Config, opts Options, factories Fac
 			if cos != nil {
 				_ = cos.Close()
 			}
-			logger.Warn("storage init failed, continuing without storage", zap.Error(storageErr))
+			logger.Warn("storage init failed, continuing without storage", logger.Err(storageErr))
 		} else {
 			a.COS = cos
 			if a.COS == nil {
@@ -345,8 +343,8 @@ func (a *App) initRoutes(cfg *config.Config, opts Options) {
 	// 没配置时回退到 ["127.0.0.1", "::1"]，只信任本机回环。
 	if err := engine.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
 		logger.Warn("invalid trusted_proxies config, falling back to loopback",
-			zap.Strings("configured", cfg.Server.TrustedProxies),
-			zap.Error(err))
+			logger.Strings("configured", cfg.Server.TrustedProxies),
+			logger.Err(err))
 		_ = engine.SetTrustedProxies([]string{"127.0.0.1", "::1"})
 	}
 	engine.Use(middleware.Recovery(), middleware.Logger(), middleware.CORS(), middleware.RequestID())
@@ -390,7 +388,7 @@ func (a *App) healthCheck(opts Options, cfg *config.Config) error {
 	}
 	if a.Sandbox != nil && cfg.Sandbox.Address != "" {
 		if err := a.Sandbox.HealthCheck(ctx); err != nil {
-			logger.Warn("Sandbox health check failed, continuing...", zap.Error(err))
+			logger.Warn("Sandbox health check failed, continuing...", logger.Err(err))
 		}
 	}
 	return nil

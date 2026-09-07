@@ -7,7 +7,6 @@ import (
 	"github.com/mooc-manus/go-manus/api/internal/external"
 	"github.com/mooc-manus/go-manus/api/internal/llmcore"
 	"github.com/mooc-manus/go-manus/api/internal/model"
-	"go.uber.org/zap"
 
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
 )
@@ -88,16 +87,16 @@ func (t *MCPTool) Invoke(ctx context.Context, params map[string]interface{}) (*m
 	}
 
 	logger.Info("调用 MCP 工具",
-		zap.String("server", serverName),
-		zap.String("tool", toolName))
+		logger.String("server", serverName),
+		logger.String("tool", toolName))
 
 	// 调用 MCP 工具
 	result, err := client.CallTool(ctx, toolName, paramsRaw)
 	if err != nil {
 		logger.Error("MCP 工具调用失败",
-			zap.String("server", serverName),
-			zap.String("tool", toolName),
-			zap.Error(err))
+			logger.String("server", serverName),
+			logger.String("tool", toolName),
+			logger.Err(err))
 		return model.NewToolError(err.Error()), nil
 	}
 
@@ -155,7 +154,7 @@ func (t *MCPTool) Initialize(cfg *MCPConfig) error {
 	// 初始化所有 MCP 客户端
 	ctx := context.Background()
 	if err := t.manager.Initialize(ctx); err != nil {
-		logger.Warn("MCP 客户端管理器初始化失败", zap.Error(err))
+		logger.Warn("MCP 客户端管理器初始化失败", logger.Err(err))
 		// 不返回错误，继续运行
 	}
 
@@ -163,7 +162,7 @@ func (t *MCPTool) Initialize(cfg *MCPConfig) error {
 	if t.manager != nil {
 		allTools, err := t.manager.ListAllTools(ctx)
 		if err != nil {
-			logger.Warn("获取 MCP 工具列表失败", zap.Error(err))
+			logger.Warn("获取 MCP 工具列表失败", logger.Err(err))
 		} else {
 			// 转换为 map[string]map[string]MCPToolInfo
 			t.tools = make(map[string]map[string]external.MCPToolInfo)
@@ -179,8 +178,8 @@ func (t *MCPTool) Initialize(cfg *MCPConfig) error {
 				total += len(tools)
 			}
 			logger.Info("MCP 工具加载成功",
-				zap.Int("servers", len(allTools)),
-				zap.Int("tools", total))
+				logger.Int("servers", len(allTools)),
+				logger.Int("tools", total))
 		}
 	}
 

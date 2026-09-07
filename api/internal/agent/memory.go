@@ -8,7 +8,6 @@ import (
 
 	"github.com/mooc-manus/go-manus/api/internal/model"
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
-	"go.uber.org/zap"
 )
 
 // Memory 记忆接口
@@ -187,8 +186,8 @@ func (m *SimpleMemory) SmartCompact() error {
 				msg.Message = "(removed)"
 				removedCount++
 				logger.Debug("从记忆中移除对应工具的结果",
-					zap.String("function_name", tc.Function.Name),
-					zap.Int("original_length", originalLen))
+					logger.String("function_name", tc.Function.Name),
+					logger.Int("original_length", originalLen))
 			}
 		}
 
@@ -198,8 +197,8 @@ func (m *SimpleMemory) SmartCompact() error {
 
 	if removedCount > 0 {
 		logger.Info("智能压缩记忆完成",
-			zap.Int("removed_count", removedCount),
-			zap.Int("total_messages", len(m.messages)))
+			logger.Int("removed_count", removedCount),
+			logger.Int("total_messages", len(m.messages)))
 	}
 
 	return nil
@@ -258,7 +257,7 @@ func (m *SmartMemory) SetCompressionStrategy(strategy CompressionStrategy) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.strategy = strategy
-	logger.Info("设置压缩策略", zap.Int("strategy", int(strategy)))
+	logger.Info("设置压缩策略", logger.Int("strategy", int(strategy)))
 }
 
 // AssessMessageImportance 评估消息重要性
@@ -379,12 +378,12 @@ func (m *SmartMemory) SmartCompact() error {
 	}
 
 	logger.Info("智能压缩记忆完成",
-		zap.Int("strategy", int(strategy)),
-		zap.Int("before_size", beforeSize),
-		zap.Int("after_size", afterSize),
-		zap.Int("before_tokens", beforeTokens),
-		zap.Int("after_tokens", afterTokens),
-		zap.Int("removed_count", beforeSize-afterSize))
+		logger.Int("strategy", int(strategy)),
+		logger.Int("before_size", beforeSize),
+		logger.Int("after_size", afterSize),
+		logger.Int("before_tokens", beforeTokens),
+		logger.Int("after_tokens", afterTokens),
+		logger.Int("removed_count", beforeSize-afterSize))
 
 	return nil
 }
@@ -444,6 +443,6 @@ func (m *SmartMemory) compactAggressive() {
 	m.messages = append(systemMessages, nonSystemMessages...)
 
 	logger.Debug("激进压缩完成",
-		zap.Int("system_messages", len(systemMessages)),
-		zap.Int("non_system_messages", len(nonSystemMessages)))
+		logger.Int("system_messages", len(systemMessages)),
+		logger.Int("non_system_messages", len(nonSystemMessages)))
 }

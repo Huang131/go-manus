@@ -14,7 +14,6 @@ import (
 
 	appconfig "github.com/mooc-manus/go-manus/api/config"
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
-	"go.uber.org/zap"
 )
 
 // Storage 对象存储接口
@@ -72,8 +71,8 @@ func NewS3Storage(cfg *appconfig.COSConfig) (*S3Storage, error) {
 	})
 
 	logger.Info("S3-compatible storage connection established",
-		zap.String("endpoint", endpoint),
-		zap.String("bucket", cfg.Bucket),
+		logger.String("endpoint", endpoint),
+		logger.String("bucket", cfg.Bucket),
 	)
 
 	return &S3Storage{
@@ -109,7 +108,7 @@ func (s *S3Storage) Upload(ctx context.Context, key string, reader io.Reader, si
 		return fmt.Errorf("S3 client not initialized")
 	}
 
-	logger.Debug("S3 Uploading", zap.String("key", key), zap.Int64("size", size))
+	logger.Debug("S3 Uploading", logger.String("key", key), logger.Int64("size", size))
 
 	// 读取全部内容到内存
 	data, err := io.ReadAll(reader)
@@ -131,11 +130,11 @@ func (s *S3Storage) Upload(ctx context.Context, key string, reader io.Reader, si
 
 	_, err = s.client.PutObject(ctx, input)
 	if err != nil {
-		logger.Error("S3 upload failed", zap.String("key", key), zap.Error(err))
+		logger.Error("S3 upload failed", logger.String("key", key), logger.Err(err))
 		return fmt.Errorf("S3 upload failed: %w", err)
 	}
 
-	logger.Info("S3 upload success", zap.String("key", key))
+	logger.Info("S3 upload success", logger.String("key", key))
 	return nil
 }
 
@@ -230,14 +229,14 @@ func (s *S3Storage) Download(ctx context.Context, key string) (io.ReadCloser, er
 		return nil, fmt.Errorf("S3 client not initialized")
 	}
 
-	logger.Debug("S3 Downloading", zap.String("key", key))
+	logger.Debug("S3 Downloading", logger.String("key", key))
 
 	resp, err := s.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
 	})
 	if err != nil {
-		logger.Error("S3 download failed", zap.String("key", key), zap.Error(err))
+		logger.Error("S3 download failed", logger.String("key", key), logger.Err(err))
 		return nil, fmt.Errorf("S3 download failed: %w", err)
 	}
 
@@ -250,18 +249,18 @@ func (s *S3Storage) Delete(ctx context.Context, key string) error {
 		return fmt.Errorf("S3 client not initialized")
 	}
 
-	logger.Debug("S3 Deleting", zap.String("key", key))
+	logger.Debug("S3 Deleting", logger.String("key", key))
 
 	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
 	})
 	if err != nil {
-		logger.Error("S3 delete failed", zap.String("key", key), zap.Error(err))
+		logger.Error("S3 delete failed", logger.String("key", key), logger.Err(err))
 		return fmt.Errorf("S3 delete failed: %w", err)
 	}
 
-	logger.Info("S3 delete success", zap.String("key", key))
+	logger.Info("S3 delete success", logger.String("key", key))
 	return nil
 }
 

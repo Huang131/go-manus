@@ -6,8 +6,6 @@ import (
 	"github.com/bytedance/sonic"
 	"sync"
 
-	"go.uber.org/zap"
-
 	"github.com/mooc-manus/go-manus/api/internal/external"
 	"github.com/mooc-manus/go-manus/api/internal/model"
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
@@ -162,15 +160,15 @@ func (t *A2ATool) callAgent(ctx context.Context, params map[string]interface{}) 
 	}
 
 	logger.Info("调用远程 Agent",
-		zap.String("agent_id", agentID),
-		zap.String("task", task))
+		logger.String("agent_id", agentID),
+		logger.String("task", task))
 
 	// 调用远程 Agent
 	result, err := manager.Invoke(ctx, agentID, task)
 	if err != nil {
 		logger.Error("调用远程 Agent 失败",
-			zap.String("agent_id", agentID),
-			zap.Error(err))
+			logger.String("agent_id", agentID),
+			logger.Err(err))
 		return model.NewToolError(err.Error()), nil
 	}
 
@@ -261,7 +259,7 @@ func (t *A2ATool) Initialize(cfg *A2AConfig) error {
 	// 初始化客户端管理器
 	ctx := context.Background()
 	if err := t.manager.Initialize(ctx, config); err != nil {
-		logger.Error("A2A 客户端管理器初始化失败", zap.Error(err))
+		logger.Error("A2A 客户端管理器初始化失败", logger.Err(err))
 		return err
 	}
 

@@ -6,8 +6,6 @@ import (
 	"github.com/bytedance/sonic"
 	"strings"
 
-	"go.uber.org/zap"
-
 	"github.com/mooc-manus/go-manus/api/internal/external"
 	"github.com/mooc-manus/go-manus/api/internal/llmcore"
 	"github.com/mooc-manus/go-manus/api/internal/model"
@@ -85,9 +83,9 @@ func (a *PlannerAgent) CreatePlan(ctx context.Context, message *model.Message) (
 		// 这里不再把解析失败伪装成成功计划。
 		// 计划阶段必须给出结构化 JSON；如果模型没做到，说明当前模型能力或 prompt 契约不满足。
 		logger.Warn("计划 JSON 解析失败",
-			zap.String("session_id", a.sessionID),
-			zap.Int("content_len", len(resp.Content)),
-			zap.Error(err))
+			logger.String("session_id", a.sessionID),
+			logger.Int("content_len", len(resp.Content)),
+			logger.Err(err))
 		// 阶段 1d：兜底内容由调用方基于 ReasoningContent 自行决定（不再由协议层注入 Content）
 		reply := strings.TrimSpace(resp.Content)
 		if reply == "" {

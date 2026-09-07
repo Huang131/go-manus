@@ -10,7 +10,6 @@ import (
 
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
 	"github.com/mooc-manus/go-manus/api/pkg/response"
-	"go.uber.org/zap"
 )
 
 // Recovery 错误恢复中间件
@@ -20,8 +19,8 @@ func Recovery() gin.HandlerFunc {
 			if err := recover(); err != nil {
 				// 记录堆栈信息
 				logger.Error("panic recovered",
-					zap.Any("error", err),
-					zap.String("stack", string(debug.Stack())),
+					logger.Any("error", err),
+					logger.String("stack", string(debug.Stack())),
 				)
 
 				response.Error(c, "Internal server error")
@@ -39,9 +38,9 @@ func Logger() gin.HandlerFunc {
 
 		// 请求前
 		logger.Info("request started",
-			zap.String("method", c.Request.Method),
-			zap.String("path", c.Request.URL.Path),
-			zap.String("client_ip", c.ClientIP()),
+			logger.String("method", c.Request.Method),
+			logger.String("path", c.Request.URL.Path),
+			logger.String("client_ip", c.ClientIP()),
 		)
 
 		// 处理请求
@@ -49,10 +48,10 @@ func Logger() gin.HandlerFunc {
 
 		// 请求后
 		logger.Info("request finished",
-			zap.String("method", c.Request.Method),
-			zap.String("path", c.Request.URL.Path),
-			zap.Int("status", c.Writer.Status()),
-			zap.Int64("latency_ms", time.Since(start).Milliseconds()),
+			logger.String("method", c.Request.Method),
+			logger.String("path", c.Request.URL.Path),
+			logger.Int("status", c.Writer.Status()),
+			logger.Int64("latency_ms", time.Since(start).Milliseconds()),
 		)
 	}
 }

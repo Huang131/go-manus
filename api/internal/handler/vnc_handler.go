@@ -11,7 +11,6 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/mooc-manus/go-manus/api/internal/service"
 	"github.com/mooc-manus/go-manus/api/pkg/logger"
-	"go.uber.org/zap"
 )
 
 // vncUpgrader 接受浏览器 noVNC 客户端的 WebSocket 升级请求。
@@ -31,14 +30,14 @@ func VNCProxy(svc service.SessionService, _ *http.Client) gin.HandlerFunc {
 
 		vncURL, err := svc.GetVNCURL(c.Request.Context(), sessionID)
 		if err != nil {
-			logger.Warn("VNC URL 解析失败", zap.String("session_id", sessionID), zap.Error(err))
+			logger.Warn("VNC URL 解析失败", logger.String("session_id", sessionID), logger.Err(err))
 			c.String(http.StatusBadGateway, "vnc url resolve failed: %s", err.Error())
 			return
 		}
 
 		clientConn, err := vncUpgrader.Upgrade(c.Writer, c.Request, nil)
 		if err != nil {
-			logger.Warn("VNC WS 升级失败", zap.Error(err))
+			logger.Warn("VNC WS 升级失败", logger.Err(err))
 			return
 		}
 		defer clientConn.Close()
@@ -46,8 +45,8 @@ func VNCProxy(svc service.SessionService, _ *http.Client) gin.HandlerFunc {
 		serverConn, err := dialSandboxVNC(c.Request.Context(), vncURL, clientConn.Subprotocol())
 		if err != nil {
 			logger.Warn("VNC 连接 sandbox 失败",
-				zap.String("vnc_url", vncURL),
-				zap.Error(err))
+				logger.String("vnc_url", vncURL),
+				logger.Err(err))
 			_ = clientConn.WriteMessage(websocket.CloseMessage,
 				websocket.FormatCloseMessage(websocket.CloseInternalServerErr, err.Error()))
 			return

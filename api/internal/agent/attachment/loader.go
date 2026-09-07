@@ -6,7 +6,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"go.uber.org/zap"
+	"github.com/mooc-manus/go-manus/api/pkg/logger"
 
 	"github.com/mooc-manus/go-manus/api/internal/model"
 )
@@ -46,11 +46,11 @@ func (l *Loader) Load(ctx context.Context, files []model.File, userMessage strin
 }
 
 func (l *Loader) loadOne(ctx context.Context, f model.File, userMessage string, budget *int) FileContext {
-	zap.L().Info("加载附件",
-		zap.String("file_id", f.ID),
-		zap.String("filename", f.Filename),
-		zap.Int64("size", f.Size),
-		zap.String("mime", f.MimeType))
+	logger.Info("加载附件",
+		logger.String("file_id", f.ID),
+		logger.String("filename", f.Filename),
+		logger.Int64("size", f.Size),
+		logger.String("mime", f.MimeType))
 
 	if IsLikelyBinary(f.MimeType) {
 		return FileContext{
@@ -74,9 +74,9 @@ func (l *Loader) loadOne(ctx context.Context, f model.File, userMessage string, 
 
 	reader, err := l.storage.Download(ctx, f.Key)
 	if err != nil {
-		zap.L().Warn("下载附件失败",
-			zap.String("file_id", f.ID),
-			zap.Error(err))
+		logger.Warn("下载附件失败",
+			logger.String("file_id", f.ID),
+			logger.Err(err))
 		return FileContext{
 			Filename: f.Filename,
 			Filepath: f.Filepath,
@@ -89,9 +89,9 @@ func (l *Loader) loadOne(ctx context.Context, f model.File, userMessage string, 
 
 	data, err := io.ReadAll(reader)
 	if err != nil {
-		zap.L().Warn("读取附件内容失败",
-			zap.String("file_id", f.ID),
-			zap.Error(err))
+		logger.Warn("读取附件内容失败",
+			logger.String("file_id", f.ID),
+			logger.Err(err))
 		return FileContext{
 			Filename: f.Filename,
 			Filepath: f.Filepath,
