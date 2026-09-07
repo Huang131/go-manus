@@ -95,8 +95,8 @@ func run() int {
 
 	select {
 	case err := <-serverErr:
-		// ListenAndServe 主动关闭（ErrServerClosed）走 OK；
-		// 其他错误视为服务异常退出。
+		// http.ErrServerClosed = 优雅关闭（正常退出）
+		// 其他非 nil 错误 = 服务器异常
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("server error", logger.Err(err))
 			return ExitCodeServerError
@@ -135,18 +135,14 @@ func run() int {
 
 // serve 异步启动 HTTP 服务器。
 //
-// ListenAndServe 正常返回 ErrServerClosed 时说明 http.Server 已被 Shutdown，
-// 这时向 errs 写入 nil，让 main 的 select 走 OK 路径。
+// ListenAndServe 返回值直接透传给 errs：
+//   - http.ErrServerClosed = 优雅关闭（由 run() 判断为正常退出）
+//   - 其他非 nil 错误 = 服务器启动/运行失败
+//   - nil = 永不返回（服务器持续运行）
 func serve(server *http.Server, errs chan<- error) {
 	go func() {
 		logger.Info("server starting", logger.String("addr", server.Addr))
-
-		serveErr := server.ListenAndServe()
-		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-			errs <- serveErr
-			return
-		}
-		errs <- nil
+		errs <- server.ListenAndServe()
 	}()
 }
 
