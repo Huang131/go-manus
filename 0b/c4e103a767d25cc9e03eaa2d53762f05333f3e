@@ -1,0 +1,60 @@
+api/internal/handler/file_handler.go
+  s_04de466a78fa57::t_249f8a96bf747b 6,28,35,42,48,62,73,84
+api/internal/handler/session_handler.go
+  s_04de466a78fa57::t_b9015d5cfeeb69 12,46,57,73,83,93,132,154,160,198,299,312,316,320,325,329,342,346,350,355,359,369
+api/pkg/middleware/middleware.go
+  s_04de466a78fa57::t_af4e6bfb08e842 11,27
+api/pkg/response/response.go
+  s_04de466a78fa57::t_2843ae2d8f0bd3 4,7,63-81
+  s_04de466a78fa57::t_44ccfe65fc19d0 82
+api/internal/apperr/apperr.go
+  s_04de466a78fa57::t_2843ae2d8f0bd3 1-134
+api/internal/handler/llm_model_handler.go
+  s_04de466a78fa57::t_c07dd6baf8e190 25,39,47,49,52,59,64,75,81,91,101,110
+api/internal/service/llm_model_service.go
+  s_04de466a78fa57::t_c07dd6baf8e190 27-28
+  s_04de466a78fa57::t_2843ae2d8f0bd3 11,43-46,219,239-241,245,251,253
+api/internal/service/session_service.go
+  s_04de466a78fa57::t_2843ae2d8f0bd3 11,113,142,188,197
+api/internal/service/app_config_service.go
+  h_ec777d6650665b 7
+  s_04de466a78fa57::t_2843ae2d8f0bd3 9,47,183
+api/internal/handler/app_config_handler.go
+  s_04de466a78fa57::t_c07dd6baf8e190 25,38,42,52,65,69,79,92,96,106,116,129,133
+api/internal/handler/status_handler.go
+  s_04de466a78fa57::t_c07dd6baf8e190 23,33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "0bc4e103a767d25cc9e03eaa2d53762f05333f3e",
+  "prompts": {},
+  "humans": {
+    "h_ec777d6650665b": {
+      "author": "Huang131 <1315970725@qq.com>"
+    }
+  },
+  "sessions": {
+    "s_04de466a78fa57": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a9fa6c75f8bfc5c33242121",
+        "model": "minimax-m2.7"
+      },
+      "human_author": "Huang131 <1315970725@qq.com>",
+      "custom_attributes": {
+        "tool_use_id": "6a9fca5d5f8bfc5c33242427",
+        "source_scene": "unknown",
+        "external_session_id": "6a9fa6c75f8bfc5c33242121",
+        "tool_type": "agent",
+        "dedupe_key": "6a9fa6c75f8bfc5c33242121:6a9fca5d5f8bfc5c33242427:afterEdit:d7a1ae72",
+        "runtime_client": "trae-tob-git-ai",
+        "edit_kind": "file_edit",
+        "tool_id": "Write",
+        "operation_id": "6a9fca5d5f8bfc5c33242427",
+        "session_id": "6a9fa6c75f8bfc5c33242121",
+        "client_type": "ide"
+      }
+    }
+  }
+}
