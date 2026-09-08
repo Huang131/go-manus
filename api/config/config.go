@@ -129,7 +129,7 @@ type LLMConfig struct {
 	ModelName       string  `mapstructure:"model_name"`
 	Temperature     float64 `mapstructure:"temperature"`
 	MaxTokens       int     `mapstructure:"max_tokens"`
-	ToolCallTimeout int     `mapstructure:"tool_call_timeout"` // tool calling 超时秒数，默认 15
+	ToolCallTimeout int     `mapstructure:"tool_call_timeout"` // tool calling 超时秒数，兜底 15s
 }
 
 // SearchConfig 搜索配置
@@ -239,6 +239,8 @@ var validate = validator.New(validator.WithRequiredStructEnabled())
 //
 // 规则集中在各字段的 `validate:"..."` 标签中；新增字段时只需追加 tag 即可，
 // 不必再修改 if 链，便于审计与单元测试。
+//
+// 同时补充各字段的默认值。
 func (c *Config) Validate() error {
 	if err := validate.Struct(c); err != nil {
 		// 把 validator.ValidationErrors 转成运维友好描述，便于 CLI 排错。
@@ -251,5 +253,41 @@ func (c *Config) Validate() error {
 		}
 		return fmt.Errorf("config validation failed: %w", err)
 	}
+
+	// 补充默认值
+	c.applyDefaults()
+
 	return nil
+}
+
+// applyDefaults 补充配置字段的默认值
+func (c *Config) applyDefaults() {
+	// LLM 配置默认值
+	if c.LLM.ToolCallTimeout == 0 {
+		c.LLM.ToolCallTimeout = 15
+	}
+
+	// Server 配置默认值
+	if c.Server.ShutdownTimeoutSec == 0 {
+		c.Server.ShutdownTimeoutSec = 30
+	}
+
+	// 日志配置默认值
+	if c.Log.MaxSize == 0 {
+		c.Log.MaxSize = 100 // 默认 100MB
+	}
+	if c.Log.MaxBackups == 0 {
+		c.Log.MaxBackups = 7
+	}
+	if c.Log.MaxAge == 0 {
+		c.Log.MaxAge = 30
+	}
+
+	// 数据库连接池默认值
+	if c.Database.MaxOpenConns == 0 {
+		c.Database.MaxOpenConns = 25
+	}
+	if c.Database.MaxIdleConns == 0 {
+		c.Database.MaxIdleConns = 5
+	}
 }
