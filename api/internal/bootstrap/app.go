@@ -234,17 +234,23 @@ func (a *App) initLLM(cfg *config.Config, opts Options) external.LLM {
 		ToolCallTimeout: cfg.LLM.ToolCallTimeout,
 	}
 	routed := external.NewRoutedLLMFromSingleProvider(func(ctx context.Context) (*external.LLMRuntimeConfig, error) {
-		if a.Postgres != nil {
+		if a.Postgres != nil && a.repos.llmModel != nil {
 			if mid := external.ModelIDFromContext(ctx); mid != "" {
 				chosen, err := a.repos.llmModel.GetByID(ctx, mid)
-				if err == nil && chosen != nil && chosen.IsEnabled {
+				if err != nil {
+					logger.Warn("failed to get model by ID", logger.String("model_id", mid), logger.Err(err))
+				} else if chosen != nil && chosen.IsEnabled {
 					return external.BuildRuntimeConfigFromModel(chosen, cfg.LLM.ToolCallTimeout), nil
 				}
 			}
-			if def, err := a.repos.llmModel.GetDefault(ctx); err == nil && def != nil && def.IsEnabled {
+			if def, err := a.repos.llmModel.GetDefault(ctx); err != nil {
+				logger.Warn("failed to get default model", logger.Err(err))
+			} else if def != nil && def.IsEnabled {
 				return external.BuildRuntimeConfigFromModel(def, cfg.LLM.ToolCallTimeout), nil
 			}
-			if first, err := a.repos.llmModel.GetFirstEnabled(ctx); err == nil && first != nil {
+			if first, err := a.repos.llmModel.GetFirstEnabled(ctx); err != nil {
+				logger.Warn("failed to get first enabled model", logger.Err(err))
+			} else if first != nil {
 				return external.BuildRuntimeConfigFromModel(first, cfg.LLM.ToolCallTimeout), nil
 			}
 		}
@@ -340,10 +346,15 @@ func (a *App) initRoutes(cfg *config.Config, opts Options) {
 
 	engine := gin.New()
 	// 把受信反向代理列表注入 Gin，避免使用默认的 0.0.0.0/0（生产环境不安全）。
-	// 没配置时回退到 ["127.0.0.1", "::1"]，只信任本机回环。
-	if err := engine.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+	// 没配置（空切片）时回退到 ["127.0.0.1", "::1"]，只信任本机回环。
+	trustedProxies := cfg.Server.TrustedProxies
+	if len(trustedProxies) == 0 {
+		trustedProxies = []string{"127.0.0.1", "::1"}
+		logger.Warn("trusted_proxies not configured, falling back to loopback addresses")
+	}
+	if err := engine.SetTrustedProxies(trustedProxies); err != nil {
 		logger.Warn("invalid trusted_proxies config, falling back to loopback",
-			logger.Strings("configured", cfg.Server.TrustedProxies),
+			logger.Strings("configured", trustedProxies),
 			logger.Err(err))
 		_ = engine.SetTrustedProxies([]string{"127.0.0.1", "::1"})
 	}

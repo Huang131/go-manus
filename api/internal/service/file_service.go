@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"path/filepath"
 	"time"
@@ -10,6 +12,9 @@ import (
 	"github.com/Huang131/go-manus/api/internal/repository"
 	"github.com/google/uuid"
 )
+
+// ErrStorageUnavailable 表示存储服务不可用
+var ErrStorageUnavailable = errors.New("storage unavailable")
 
 // FileService 文件服务接口
 type FileService interface {
@@ -43,14 +48,16 @@ func NewFileService(repo repository.FileRepository, storage COSFileStorage) File
 
 // UploadFile 上传文件
 func (s *DefaultFileService) UploadFile(ctx context.Context, sessionID, filename string, reader io.Reader, size int64, contentType string) (*model.File, error) {
+	if s.storage == nil {
+		return nil, fmt.Errorf("%w: cannot upload file without storage", ErrStorageUnavailable)
+	}
+
 	fileID := uuid.New().String()
 	ext := filepath.Ext(filename)
 	key := "files/" + sessionID + "/" + fileID + ext
 
-	if s.storage != nil {
-		if err := s.storage.Upload(ctx, key, reader, size, contentType); err != nil {
-			return nil, err
-		}
+	if err := s.storage.Upload(ctx, key, reader, size, contentType); err != nil {
+		return nil, err
 	}
 
 	file := &model.File{

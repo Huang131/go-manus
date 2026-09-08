@@ -274,6 +274,13 @@ func (c *Config) applyDefaults() {
 	if c.Server.ShutdownTimeoutSec == 0 {
 		c.Server.ShutdownTimeoutSec = 30
 	}
+	if c.Server.ReadTimeoutSec == 0 {
+		c.Server.ReadTimeoutSec = 30
+	}
+	if c.Server.IdleTimeoutSec == 0 {
+		c.Server.IdleTimeoutSec = 60
+	}
+	// WriteTimeoutSec 保持 0，留给流式接口
 
 	// 日志配置默认值
 	if c.Log.MaxSize == 0 {

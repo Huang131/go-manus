@@ -107,9 +107,9 @@ func run() int {
 		logger.Info("shutting down server...")
 
 		// ShutdownTimeoutSec 为 0 时兜底 30s。
-		timeout := time.Duration(cfg.Server.ShutdownTimeoutSec)
+		timeout := time.Duration(cfg.Server.ShutdownTimeoutSec) * time.Second
 		if timeout == 0 {
-			timeout = 30
+			timeout = 30 * time.Second
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()

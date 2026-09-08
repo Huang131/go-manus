@@ -2,6 +2,7 @@ package infrastructure
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/redis/go-redis/v9"
@@ -50,5 +51,8 @@ func (r *Redis) Close() error {
 
 // HealthCheck 健康检查
 func (r *Redis) HealthCheck(ctx context.Context) error {
+	if r == nil || r.Client == nil {
+		return errors.New("redis not initialized")
+	}
 	return r.Client.Ping(ctx).Err()
 }

@@ -57,5 +57,8 @@ func (p *Postgres) Close() {
 
 // HealthCheck 健康检查
 func (p *Postgres) HealthCheck(ctx context.Context) error {
+	if p == nil || p.Pool == nil {
+		return fmt.Errorf("postgres not initialized")
+	}
 	return p.Pool.Ping(ctx)
 }

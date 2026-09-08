@@ -37,22 +37,32 @@ func (s *DefaultStatusService) GetHealthStatus(ctx context.Context) (*model.Heal
 	}
 
 	// 检查 PostgreSQL
-	postgresStatus := model.ServiceStatus{Name: "postgres", Status: "healthy"}
-	if err := s.db.HealthCheck(ctx); err != nil {
-		postgresStatus.Status = "unhealthy"
-		postgresStatus.Error = err.Error()
+	if s.db != nil {
+		postgresStatus := model.ServiceStatus{Name: "postgres", Status: "healthy"}
+		if err := s.db.HealthCheck(ctx); err != nil {
+			postgresStatus.Status = "unhealthy"
+			postgresStatus.Error = err.Error()
+			status.Status = "degraded"
+		}
+		status.Services["postgres"] = postgresStatus
+	} else {
+		status.Services["postgres"] = model.ServiceStatus{Name: "postgres", Status: "skipped"}
 		status.Status = "degraded"
 	}
-	status.Services["postgres"] = postgresStatus
 
 	// 检查 Redis
-	redisStatus := model.ServiceStatus{Name: "redis", Status: "healthy"}
-	if err := s.redis.HealthCheck(ctx); err != nil {
-		redisStatus.Status = "unhealthy"
-		redisStatus.Error = err.Error()
+	if s.redis != nil {
+		redisStatus := model.ServiceStatus{Name: "redis", Status: "healthy"}
+		if err := s.redis.HealthCheck(ctx); err != nil {
+			redisStatus.Status = "unhealthy"
+			redisStatus.Error = err.Error()
+			status.Status = "degraded"
+		}
+		status.Services["redis"] = redisStatus
+	} else {
+		status.Services["redis"] = model.ServiceStatus{Name: "redis", Status: "skipped"}
 		status.Status = "degraded"
 	}
-	status.Services["redis"] = redisStatus
 
 	// 检查 OSS
 	if s.oss != nil {
@@ -60,8 +70,12 @@ func (s *DefaultStatusService) GetHealthStatus(ctx context.Context) (*model.Heal
 		if err := s.oss.HealthCheck(ctx); err != nil {
 			ossStatus.Status = "unhealthy"
 			ossStatus.Error = err.Error()
+			status.Status = "degraded"
 		}
 		status.Services["oss"] = ossStatus
+	} else {
+		status.Services["oss"] = model.ServiceStatus{Name: "oss", Status: "skipped"}
+		status.Status = "degraded"
 	}
 
 	return status, nil
