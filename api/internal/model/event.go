@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/bytedance/sonic"
+
+	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
 // BaseEvent 事件接口
@@ -13,6 +15,17 @@ type BaseEvent interface {
 	GetType() EventType
 	// ToJSON 将事件转换为 JSON 字符串
 	ToJSON() string
+}
+
+// toJSON 统一的事件序列化入口
+// 序列化失败时记录告警并返回空串
+// 避免非法 json.RawMessage 静默变成空事件污染 Redis/SSE 下游。
+func toJSON(v any) string {
+	s, err := sonic.MarshalString(v)
+	if err != nil {
+		logger.Warn("event serialize failed", logger.Err(err))
+	}
+	return s
 }
 
 // ExecutionStatus 执行状态
@@ -72,18 +85,14 @@ type Event struct {
 }
 
 // ToJSON 将事件转换为 JSON 字符串
-func (e *Event) ToJSON() string {
-	data, _ := sonic.Marshal(e)
-	return string(data)
-}
+func (e *Event) ToJSON() string { return toJSON(e) }
 
 // MessageEvent 消息事件
-// 对齐 Python 版本的 MessageEvent
 type MessageEvent struct {
 	Type        EventType `json:"type"`
-	Role        string    `json:"role"`        // 消息角色: user, assistant
-	Message     string    `json:"message"`     // 消息本身
-	Attachments []File    `json:"attachments"` // 附件列表
+	Role        string    `json:"role"`                  // 消息角色: user, assistant
+	Message     string    `json:"message"`               // 消息本身
+	Attachments []File    `json:"attachments,omitempty"` // 附件列表
 }
 
 // GetType 返回事件类型
@@ -92,10 +101,7 @@ func (e *MessageEvent) GetType() EventType {
 }
 
 // ToJSON 将事件转换为 JSON 字符串
-func (e *MessageEvent) ToJSON() string {
-	data, _ := sonic.Marshal(e)
-	return string(data)
-}
+func (e *MessageEvent) ToJSON() string { return toJSON(e) }
 
 // PlanEvent 计划事件
 type PlanEvent struct {
@@ -137,22 +143,13 @@ type PlanStep struct {
 	Result       string          `json:"result,omitempty"`
 	Error        string          `json:"error,omitempty"`
 	Success      bool            `json:"success"`
-	Attachments  []string        `json:"attachments"`
+	Attachments  []string        `json:"attachments,omitempty"`
 	UserQuestion string          `json:"user_question,omitempty"` // 等待用户输入时的问题
 }
 
 // Done 步骤是否完成
 func (s *PlanStep) Done() bool {
 	return s.Status == ExecutionStatusCompleted || s.Status == ExecutionStatusFailed
-}
-
-// ToolEvent 工具事件
-type ToolEvent struct {
-	Tool   string `json:"tool"`
-	Input  string `json:"input"`
-	Output string `json:"output,omitempty"`
-	Status string `json:"status"`
-	Error  string `json:"error,omitempty"`
 }
 
 // ErrorEvent 错误事件
@@ -166,10 +163,7 @@ func (e *ErrorEvent) GetType() EventType {
 }
 
 // ToJSON 将事件转换为 JSON 字符串
-func (e *ErrorEvent) ToJSON() string {
-	data, _ := sonic.Marshal(e)
-	return string(data)
-}
+func (e *ErrorEvent) ToJSON() string { return toJSON(e) }
 
 // DoneEvent 完成事件
 type DoneEvent struct {
@@ -182,10 +176,7 @@ func (e *DoneEvent) GetType() EventType {
 }
 
 // ToJSON 将事件转换为 JSON 字符串
-func (e *DoneEvent) ToJSON() string {
-	data, _ := sonic.Marshal(e)
-	return string(data)
-}
+func (e *DoneEvent) ToJSON() string { return toJSON(e) }
 
 // StepEvent 步骤事件
 type StepEvent struct {
@@ -235,10 +226,7 @@ func (e *TitleEvent) GetType() EventType {
 }
 
 // ToJSON 将事件转换为 JSON 字符串
-func (e *TitleEvent) ToJSON() string {
-	data, _ := sonic.Marshal(e)
-	return string(data)
-}
+func (e *TitleEvent) ToJSON() string { return toJSON(e) }
 
 // WaitEvent 等待事件
 type WaitEvent struct {
@@ -251,10 +239,7 @@ func (e *WaitEvent) GetType() EventType {
 }
 
 // ToJSON 将事件转换为 JSON 字符串
-func (e *WaitEvent) ToJSON() string {
-	data, _ := sonic.Marshal(e)
-	return string(data)
-}
+func (e *WaitEvent) ToJSON() string { return toJSON(e) }
 
 // FullPlanEvent 完整计划事件（用于 Agent 间传递）
 type FullPlanEvent struct {
@@ -268,10 +253,7 @@ func (e *FullPlanEvent) GetType() EventType {
 }
 
 // ToJSON 将事件转换为 JSON 字符串
-func (e *FullPlanEvent) ToJSON() string {
-	data, _ := sonic.Marshal(e)
-	return string(data)
-}
+func (e *FullPlanEvent) ToJSON() string { return toJSON(e) }
 
 // FullStepEvent 完整步骤事件（用于 Agent 间传递）
 type FullStepEvent struct {
@@ -285,10 +267,7 @@ func (e *FullStepEvent) GetType() EventType {
 }
 
 // ToJSON 将事件转换为 JSON 字符串
-func (e *FullStepEvent) ToJSON() string {
-	data, _ := sonic.Marshal(e)
-	return string(data)
-}
+func (e *FullStepEvent) ToJSON() string { return toJSON(e) }
 
 // NewErrorEvent 创建错误事件
 func NewErrorEvent(message string) *ErrorEvent {
@@ -348,10 +327,7 @@ func (e *ToolCallingEvent) GetType() EventType {
 }
 
 // ToJSON 将事件转换为 JSON 字符串
-func (e *ToolCallingEvent) ToJSON() string {
-	data, _ := sonic.Marshal(e)
-	return string(data)
-}
+func (e *ToolCallingEvent) ToJSON() string { return toJSON(e) }
 
 // ToolCalledEvent 工具调用完成事件
 type ToolCalledEvent struct {
@@ -367,10 +343,7 @@ func (e *ToolCalledEvent) GetType() EventType {
 }
 
 // ToJSON 将事件转换为 JSON 字符串
-func (e *ToolCalledEvent) ToJSON() string {
-	data, _ := sonic.Marshal(e)
-	return string(data)
-}
+func (e *ToolCalledEvent) ToJSON() string { return toJSON(e) }
 
 // NewToolCallingEvent 创建工具调用中事件
 func NewToolCallingEvent(toolCallID, functionName string, arguments map[string]interface{}) *ToolCallingEvent {
