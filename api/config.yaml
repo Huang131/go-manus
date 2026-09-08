@@ -26,13 +26,13 @@ redis:
   db: 0
   password: ""
 
-cos:
+oss:
+  provider: tencent  # aws / tencent / volcengine / minio / custom
+  endpoint: ""       # 留空则根据 provider 自动推断
   secret_id: ""
   secret_key: ""
   region: ap-guangzhou
-  scheme: https
   bucket: ""
-  domain: ""
 
 sandbox:
   address: ""

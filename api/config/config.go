@@ -22,8 +22,8 @@ type Config struct {
 	// Redis 配置
 	Redis RedisConfig `mapstructure:"redis" validate:"required"`
 
-	// COS 配置
-	COS COSConfig `mapstructure:"cos"`
+	// ObjectStorage 配置（支持 AWS S3 / 腾讯云 COS / 火山云 TOS / MinIO）
+	OSS ObjectStorageConfig `mapstructure:"oss"`
 
 	// Sandbox 配置
 	Sandbox SandboxConfig `mapstructure:"sandbox"`
@@ -84,9 +84,12 @@ func (r *RedisConfig) Addr() string {
 	return fmt.Sprintf("%s:%d", r.Host, r.Port)
 }
 
-// COSConfig 对象存储配置（支持 AWS S3 / MinIO / 腾讯云 COS S3 兼容模式）
-type COSConfig struct {
-	Endpoint  string `mapstructure:"endpoint"`   // 对象存储端点（如 http://localhost:9000）
+// ObjectStorageConfig 对象存储配置。
+// 支持 AWS S3、腾讯云 COS、火山云 TOS、MinIO 等 S3 兼容存储。
+// Provider 可选：aws / tencent / volcengine / minio / custom
+type ObjectStorageConfig struct {
+	Provider  string `mapstructure:"provider"`   // 存储服务商：aws / tencent / volcengine / minio / custom
+	Endpoint  string `mapstructure:"endpoint"`   // 对象存储端点，留空则根据 Provider 自动推断
 	SecretID  string `mapstructure:"secret_id"`  // 访问密钥 ID
 	SecretKey string `mapstructure:"secret_key"` // 访问密钥密码
 	Region    string `mapstructure:"region"`     // 区域

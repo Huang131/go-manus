@@ -35,12 +35,12 @@ redis:
   db: 1                   # 与开发 db 0 隔离
   password: ""
 
-cos:
+oss:
+  provider: minio
   endpoint: "http://localhost:9000"   # 复用开发 MinIO
   secret_id: "minioadmin"
   secret_key: "minioadmin"
   region: us-east-1
-  scheme: http
   bucket: "go-manus-test-files"       # 与开发 bucket 隔离
 
 sandbox:

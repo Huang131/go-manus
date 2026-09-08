@@ -56,7 +56,7 @@ func DefaultOptions() Options {
 type Factories struct {
 	NewPostgres func(*config.DatabaseConfig) (*infrastructure.Postgres, error)
 	NewRedis    func(*config.RedisConfig) (*infrastructure.Redis, error)
-	NewStorage  func(*config.COSConfig) (*infrastructure.S3Storage, error)
+	NewOSS      func(*config.ObjectStorageConfig) (*infrastructure.OSS, error)
 }
 
 type repositories struct {
@@ -79,7 +79,7 @@ func defaultFactories() Factories {
 	return Factories{
 		NewPostgres: infrastructure.NewPostgres,
 		NewRedis:    infrastructure.NewRedis,
-		NewStorage:  infrastructure.NewS3Storage,
+		NewOSS:      infrastructure.NewOSS,
 	}
 }
 
@@ -90,7 +90,7 @@ type App struct {
 	Engine         *gin.Engine
 	Postgres       *infrastructure.Postgres
 	Redis          *infrastructure.Redis
-	COS            *infrastructure.S3Storage
+	OSS            *infrastructure.OSS
 	Sandbox        *external.SandboxClient
 	AgentService   *agent.AgentService
 	SessionService service.SessionService
@@ -149,8 +149,8 @@ func normalizeFactories(factories Factories) Factories {
 	if factories.NewRedis == nil {
 		factories.NewRedis = defaults.NewRedis
 	}
-	if factories.NewStorage == nil {
-		factories.NewStorage = defaults.NewStorage
+	if factories.NewOSS == nil {
+		factories.NewOSS = defaults.NewOSS
 	}
 	return factories
 }
@@ -190,19 +190,19 @@ func (a *App) initInfrastructure(cfg *config.Config, opts Options, factories Fac
 	}
 
 	if opts.EnableStorage {
-		cos, storageErr := factories.NewStorage(&cfg.COS)
+		oss, storageErr := factories.NewOSS(&cfg.OSS)
 		if storageErr != nil {
-			if cos != nil {
-				_ = cos.Close()
+			if oss != nil {
+				_ = oss.Close()
 			}
 			logger.Warn("storage init failed, continuing without storage", logger.Err(storageErr))
 		} else {
-			a.COS = cos
-			if a.COS == nil {
+			a.OSS = oss
+			if a.OSS == nil {
 				return fmt.Errorf("storage: %w: factory returned nil", ErrInitialize)
 			}
 			a.shutdownHooks = append(a.shutdownHooks, func() {
-				_ = a.COS.Close()
+				_ = a.OSS.Close()
 			})
 		}
 	}
@@ -213,8 +213,8 @@ func (a *App) initInfrastructure(cfg *config.Config, opts Options, factories Fac
 func (a *App) initServices(cfg *config.Config) {
 	a.repos = newRepositories(a.Postgres)
 	a.SessionService = service.NewSessionServiceWithSandbox(a.repos.session, a.repos.file, cfg.Sandbox.Address)
-	a.FileService = service.NewFileService(a.repos.file, a.COS)
-	a.StatusService = service.NewStatusService(a.Postgres, a.Redis, a.COS)
+	a.FileService = service.NewFileService(a.repos.file, a.OSS)
+	a.StatusService = service.NewStatusService(a.Postgres, a.Redis, a.OSS)
 	a.AppConfigSvc = service.NewAppConfigService(a.repos.appConfig)
 	a.LLMModelSvc = service.NewLLMModelService(a.repos.llmModel)
 }
@@ -323,7 +323,7 @@ func (a *App) initAgent(opts Options, llm external.LLM, browser external.Browser
 
 	a.AgentService = agent.NewAgentService(
 		a.repos.session, a.repos.file, a.repos.appConfig, llm, a.Sandbox,
-		agent.DefaultAgentConfig(), mcpConfig, a2aConfig, browser, search, mq, a.COS,
+		agent.DefaultAgentConfig(), mcpConfig, a2aConfig, browser, search, mq, a.OSS,
 	)
 	a.shutdownHooks = append(a.shutdownHooks, func() {
 		if a.AgentService != nil {

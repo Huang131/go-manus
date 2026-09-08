@@ -16,15 +16,15 @@ type StatusService interface {
 type DefaultStatusService struct {
 	db    *infrastructure.Postgres
 	redis *infrastructure.Redis
-	cos   *infrastructure.S3Storage
+	oss   *infrastructure.OSS
 }
 
 // NewStatusService 创建状态服务
-func NewStatusService(db *infrastructure.Postgres, redis *infrastructure.Redis, cos *infrastructure.S3Storage) StatusService {
+func NewStatusService(db *infrastructure.Postgres, redis *infrastructure.Redis, oss *infrastructure.OSS) StatusService {
 	return &DefaultStatusService{
 		db:    db,
 		redis: redis,
-		cos:   cos,
+		oss:   oss,
 	}
 }
 
@@ -54,14 +54,14 @@ func (s *DefaultStatusService) GetHealthStatus(ctx context.Context) (*model.Heal
 	}
 	status.Services["redis"] = redisStatus
 
-	// 检查 COS
-	if s.cos != nil {
-		cosStatus := model.ServiceStatus{Name: "cos", Status: "healthy"}
-		if err := s.cos.HealthCheck(ctx); err != nil {
-			cosStatus.Status = "unhealthy"
-			cosStatus.Error = err.Error()
+	// 检查 OSS
+	if s.oss != nil {
+		ossStatus := model.ServiceStatus{Name: "oss", Status: "healthy"}
+		if err := s.oss.HealthCheck(ctx); err != nil {
+			ossStatus.Status = "unhealthy"
+			ossStatus.Error = err.Error()
 		}
-		status.Services["cos"] = cosStatus
+		status.Services["oss"] = ossStatus
 	}
 
 	return status, nil
