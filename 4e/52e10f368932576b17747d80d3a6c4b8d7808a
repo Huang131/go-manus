@@ -1,0 +1,62 @@
+api/config.docker.yaml
+  s_19398f7640e839::t_7ca21ce93055a5 29-30
+api/config.yaml
+  s_19398f7640e839::t_45a40965386040 29-31
+api/internal/infrastructure/oss_test.go
+  s_19398f7640e839::t_e1c37993c0bd97 177-178,187-188,197-198
+  s_19398f7640e839::t_e9542ae3f21ce9 1-163,168-176,179-186,189-196,199-214,217-247
+  s_19398f7640e839::t_7fa6efaa7845ee 164-167,215-216
+api/internal/infrastructure/oss.go
+  s_19398f7640e839::t_8bc1a0b6bf18a7 8,20,31-99,102,106-108,113,119-123,142-143,147,152,160-161,166-167,178-179,213-214,293-294,313-314,334-340,342-343,346,349-350
+api/internal/service/status_service.go
+  s_19398f7640e839::t_2fc4c6fcf87b2a 19,23,27
+  s_19398f7640e839::t_2d86f8f42b13f7 57-62,64
+api/config/config.go
+  s_19398f7640e839::t_fbd8fe21d0cb07 25-26
+  s_19398f7640e839::t_8dc87295821841 87-90
+  s_19398f7640e839::t_35fb23f5f1345b 91-92
+api/internal/bootstrap/app.go
+  s_19398f7640e839::t_c1d0366054175f 193,195-196,200-201,205
+  s_19398f7640e839::t_350cff1f51a272 59
+  s_19398f7640e839::t_21707639d6d68d 326
+  s_19398f7640e839::t_b96a8075c08321 82
+  s_19398f7640e839::t_5b2e12ac504ee5 93
+  s_19398f7640e839::t_c1cc151be04eb3 216-217
+  s_19398f7640e839::t_374cebdb191ae3 152-153
+api/config.test.yaml
+  s_19398f7640e839::t_359ab15d209213 38-39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "4e52e10f368932576b17747d80d3a6c4b8d7808a",
+  "prompts": {},
+  "humans": {
+    "h_ec777d6650665b": {
+      "author": "Huang131 <1315970725@qq.com>"
+    }
+  },
+  "sessions": {
+    "s_19398f7640e839": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a9f80835f8bfc5c33241f6f",
+        "model": "minimax-m2.7"
+      },
+      "human_author": "Huang131 <1315970725@qq.com>",
+      "custom_attributes": {
+        "session_id": "6a9f80835f8bfc5c33241f6f",
+        "edit_kind": "file_edit",
+        "tool_id": "SearchReplace",
+        "tool_use_id": "6a9fa0735f8bfc5c3324202f",
+        "source_scene": "unknown",
+        "runtime_client": "trae-tob-git-ai",
+        "external_session_id": "6a9f80835f8bfc5c33241f6f",
+        "tool_type": "agent",
+        "client_type": "ide",
+        "dedupe_key": "6a9f80835f8bfc5c33241f6f:6a9fa0735f8bfc5c3324202f:afterEdit:599d38dc",
+        "operation_id": "6a9fa0735f8bfc5c3324202f"
+      }
+    }
+  }
+}
