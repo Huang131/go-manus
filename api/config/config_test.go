@@ -57,7 +57,7 @@ func TestValidate_OK(t *testing.T) {
 // validConfig 返回一个能通过校验的最小配置；测试通过 mutate 修改后断言失败。
 func validConfig() *Config {
 	return &Config{
-		Env: "development",
+		Env: EnvDevelopment,
 		Log: LoggerConfig{
 			Level: "info",
 		},

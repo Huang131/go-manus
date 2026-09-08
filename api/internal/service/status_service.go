@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 
+	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
 	"github.com/Huang131/go-manus/api/internal/model"
 )
@@ -41,7 +42,7 @@ func (s *DefaultStatusService) GetHealthStatus(ctx context.Context) (*model.Heal
 		postgresStatus := model.ServiceStatus{Name: "postgres", Status: "healthy"}
 		if err := s.db.HealthCheck(ctx); err != nil {
 			postgresStatus.Status = "unhealthy"
-			postgresStatus.Error = err.Error()
+			postgresStatus.Error = apperr.ToInternal(err).Error()
 			status.Status = "degraded"
 		}
 		status.Services["postgres"] = postgresStatus
@@ -55,7 +56,7 @@ func (s *DefaultStatusService) GetHealthStatus(ctx context.Context) (*model.Heal
 		redisStatus := model.ServiceStatus{Name: "redis", Status: "healthy"}
 		if err := s.redis.HealthCheck(ctx); err != nil {
 			redisStatus.Status = "unhealthy"
-			redisStatus.Error = err.Error()
+			redisStatus.Error = apperr.ToInternal(err).Error()
 			status.Status = "degraded"
 		}
 		status.Services["redis"] = redisStatus
@@ -69,7 +70,7 @@ func (s *DefaultStatusService) GetHealthStatus(ctx context.Context) (*model.Heal
 		ossStatus := model.ServiceStatus{Name: "oss", Status: "healthy"}
 		if err := s.oss.HealthCheck(ctx); err != nil {
 			ossStatus.Status = "unhealthy"
-			ossStatus.Error = err.Error()
+			ossStatus.Error = apperr.ToInternal(err).Error()
 			status.Status = "degraded"
 		}
 		status.Services["oss"] = ossStatus

@@ -131,4 +131,15 @@ func Unavailable(msg string) *Error { return New(KindUnavailable, msg) }
 // Internal 创建 500 错误。
 func Internal(msg string) *Error { return New(KindInternal, msg) }
 
+// ToInternal 将任意错误包装为内部错误，便于统一向上抛出。
+func ToInternal(err error) *Error {
+	if err == nil {
+		return nil
+	}
+	if ae, ok := err.(*Error); ok && ae != nil && ae.Kind == KindInternal {
+		return ae
+	}
+	return Wrap(KindInternal, "internal server error", err)
+}
+
 var _ error = (*Error)(nil)

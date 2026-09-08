@@ -22,6 +22,66 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// lifecycleManager 管理应用生命周期钩子
+// 启动钩子按注册顺序执行，关闭钩子逆序执行
+type lifecycleManager struct {
+	startHooks []func() error
+	stopHooks  []func()
+	mu         sync.Mutex
+}
+
+// AppendStartHook 注册启动钩子（按注册顺序执行）
+func (l *lifecycleManager) AppendStartHook(fn func() error) {
+	if fn == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.startHooks = append(l.startHooks, fn)
+}
+
+// AppendStopHook 注册关闭钩子（Stop 时逆序执行）
+func (l *lifecycleManager) AppendStopHook(fn func()) {
+	if fn == nil {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.stopHooks = append(l.stopHooks, fn)
+}
+
+// Start 执行所有启动钩子，按注册顺序
+func (l *lifecycleManager) Start() error {
+	l.mu.Lock()
+	hooks := l.startHooks
+	l.mu.Unlock()
+
+	for _, fn := range hooks {
+		if err := fn(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Stop 执行所有关闭钩子，按注册顺序逆序（后注册的先关闭）
+func (l *lifecycleManager) Stop() {
+	l.mu.Lock()
+	hooks := l.stopHooks
+	l.mu.Unlock()
+
+	for i := len(hooks) - 1; i >= 0; i-- {
+		if hooks[i] != nil {
+			hooks[i]()
+		}
+	}
+}
+
+// newLifecycleManager 创建生命周期管理器
+func newLifecycleManager() *lifecycleManager {
+	return &lifecycleManager{}
+}
+
 // Options 控制 bootstrap 的装配行为。
 type Options struct {
 	EnablePostgres    bool
@@ -83,14 +143,18 @@ func defaultFactories() Factories {
 	}
 }
 
-// App 代表已装配完成的应用。
+// App 是所有组件的容器。
 type App struct {
-	Config         *config.Config
-	Server         *http.Server
-	Engine         *gin.Engine
-	Postgres       *infrastructure.Postgres
-	Redis          *infrastructure.Redis
-	OSS            *infrastructure.OSS
+	Config *config.Config // 全局配置
+	Server *http.Server   // HTTP 服务器
+	Engine *gin.Engine    // Gin 引擎
+
+	// 基础设施层
+	Postgres *infrastructure.Postgres
+	Redis    *infrastructure.Redis
+	OSS      *infrastructure.OSS
+
+	// 服务层
 	Sandbox        *external.SandboxClient
 	AgentService   *agent.AgentService
 	SessionService service.SessionService
@@ -99,9 +163,15 @@ type App struct {
 	AppConfigSvc   service.AppConfigService
 	LLMModelSvc    service.LLMModelService
 
-	repos         repositories
-	shutdownHooks []func()
-	closeOnce     sync.Once
+	repos     repositories      // 私有仓库层
+	lifecycle *lifecycleManager // 生命周期管理器
+	closeOnce sync.Once         // 幂等关闭
+}
+
+func (a *App) lifecycleHook(fn func()) {
+	if a.lifecycle != nil {
+		a.lifecycle.AppendStopHook(fn)
+	}
 }
 
 // Close 关闭应用资源。关闭动作只执行一次，便于同时支持 defer 和显式关闭。
@@ -111,11 +181,8 @@ func (a *App) Close() {
 	}
 
 	a.closeOnce.Do(func() {
-		// 按注册顺序逆序关闭，保证上层服务先于底层连接退出。
-		for i := len(a.shutdownHooks) - 1; i >= 0; i-- {
-			if a.shutdownHooks[i] != nil {
-				a.shutdownHooks[i]()
-			}
+		if a.lifecycle != nil {
+			a.lifecycle.Stop()
 		}
 	})
 }
@@ -168,7 +235,7 @@ func (a *App) initInfrastructure(cfg *config.Config, opts Options, factories Fac
 		if a.Postgres == nil {
 			return fmt.Errorf("postgres: %w: factory returned nil", ErrInitialize)
 		}
-		a.shutdownHooks = append(a.shutdownHooks, func() {
+		a.lifecycleHook(func() {
 			a.Postgres.Close()
 		})
 	}
@@ -184,7 +251,7 @@ func (a *App) initInfrastructure(cfg *config.Config, opts Options, factories Fac
 		if a.Redis == nil {
 			return fmt.Errorf("redis: %w: factory returned nil", ErrInitialize)
 		}
-		a.shutdownHooks = append(a.shutdownHooks, func() {
+		a.lifecycleHook(func() {
 			_ = a.Redis.Close()
 		})
 	}
@@ -201,7 +268,7 @@ func (a *App) initInfrastructure(cfg *config.Config, opts Options, factories Fac
 			if a.OSS == nil {
 				return fmt.Errorf("storage: %w: factory returned nil", ErrInitialize)
 			}
-			a.shutdownHooks = append(a.shutdownHooks, func() {
+			a.lifecycleHook(func() {
 				_ = a.OSS.Close()
 			})
 		}
@@ -321,17 +388,17 @@ func (a *App) initAgent(opts Options, llm external.LLM, browser external.Browser
 		return nil
 	}
 	if a.Postgres == nil || mq == nil {
-		return fmt.Errorf("agent requires postgres and redis")
+		return ErrAgentRequiresDependencies
 	}
 	if llm == nil {
-		return fmt.Errorf("agent requires llm")
+		return ErrAgentRequiresLLM
 	}
 
 	a.AgentService = agent.NewAgentService(
 		a.repos.session, a.repos.file, a.repos.appConfig, llm, a.Sandbox,
 		agent.DefaultAgentConfig(), mcpConfig, a2aConfig, browser, search, mq, a.OSS,
 	)
-	a.shutdownHooks = append(a.shutdownHooks, func() {
+	a.lifecycleHook(func() {
 		if a.AgentService != nil {
 			a.AgentService.Shutdown()
 		}
@@ -413,15 +480,18 @@ func Build(cfg *config.Config, opts Options) (*App, error) {
 // BuildWithFactories 构建应用，并允许调用方注入基础设施构造器。
 func BuildWithFactories(cfg *config.Config, opts Options, factories Factories) (*App, error) {
 	if cfg == nil {
-		return nil, fmt.Errorf("config is nil")
+		return nil, ErrConfigNil
 	}
 	factories = normalizeFactories(factories)
 
-	if cfg.Env == "production" {
+	if cfg.Env == config.EnvProduction {
 		gin.SetMode(gin.ReleaseMode)
 	}
 
-	app := &App{Config: cfg}
+	app := &App{
+		Config:    cfg,
+		lifecycle: newLifecycleManager(),
+	}
 	if err := app.initInfrastructure(cfg, opts, factories); err != nil {
 		app.Close()
 		return nil, err

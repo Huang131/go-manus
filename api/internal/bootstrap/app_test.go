@@ -7,17 +7,21 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Huang131/go-manus/api/config"
+	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
 )
 
 func TestAppCloseIsIdempotent(t *testing.T) {
 	var closeCount int
 	app := &App{
-		shutdownHooks: []func(){
-			func() {
-				closeCount++
+		lifecycle: &lifecycleManager{
+			stopHooks: []func(){
+				func() {
+					closeCount++
+				},
 			},
 		},
 	}
@@ -38,9 +42,11 @@ func TestAppCloseHandlesNilReceiver(t *testing.T) {
 func TestAppShutdownClosesRegisteredResources(t *testing.T) {
 	var closeCount int
 	app := &App{
-		shutdownHooks: []func(){
-			func() {
-				closeCount++
+		lifecycle: &lifecycleManager{
+			stopHooks: []func(){
+				func() {
+					closeCount++
+				},
 			},
 		},
 	}
@@ -148,6 +154,67 @@ func TestBuildInitializeErrorWrapsSentinel(t *testing.T) {
 		t.Fatalf("Build() error = %v, want errors.Is(_, ErrInitialize)", err)
 	}
 }
+
+func TestBuildRejectsNilConfigSentinel(t *testing.T) {
+	_, err := Build(nil, Options{})
+	if err == nil {
+		t.Fatal("Build(nil) error = nil, want config sentinel")
+	}
+	if !errors.Is(err, ErrConfigNil) {
+		t.Fatalf("Build(nil) error = %v, want errors.Is(_, ErrConfigNil)", err)
+	}
+}
+
+func TestInitAgentReturnsSentinelErrors(t *testing.T) {
+	app := &App{lifecycle: newLifecycleManager()}
+
+	if err := app.initAgent(Options{EnableAgent: true}, nil, nil, nil, nil, nil, nil); !errors.Is(err, ErrAgentRequiresDependencies) {
+		t.Fatalf("initAgent() error = %v, want ErrAgentRequiresDependencies", err)
+	}
+
+	app.Postgres = &infrastructure.Postgres{}
+	if err := app.initAgent(Options{EnableAgent: true}, nil, nil, nil, &mockMessageQueue{}, nil, nil); !errors.Is(err, ErrAgentRequiresLLM) {
+		t.Fatalf("initAgent() error = %v, want ErrAgentRequiresLLM", err)
+	}
+}
+
+type mockMessageQueue struct{}
+
+func (m *mockMessageQueue) Put(ctx context.Context, streamName string, message interface{}) (string, error) {
+	return "", nil
+}
+func (m *mockMessageQueue) Get(ctx context.Context, streamName string, startID string, blockMs *int) (string, interface{}, error) {
+	return "", nil, nil
+}
+func (m *mockMessageQueue) GetBlocking(ctx context.Context, streamName string, startID string, timeout ...time.Duration) (string, interface{}, error) {
+	return "", nil, nil
+}
+func (m *mockMessageQueue) GetRange(ctx context.Context, streamName string, startID, endID string, limit int64) ([]*external.Message, error) {
+	return nil, nil
+}
+func (m *mockMessageQueue) GetLatestID(ctx context.Context, streamName string) (string, error) {
+	return "", nil
+}
+func (m *mockMessageQueue) Pop(ctx context.Context, streamName string) (string, interface{}, error) {
+	return "", nil, nil
+}
+func (m *mockMessageQueue) Clear(ctx context.Context, streamName string) error {
+	return nil
+}
+func (m *mockMessageQueue) IsEmpty(ctx context.Context, streamName string) (bool, error) {
+	return true, nil
+}
+func (m *mockMessageQueue) Size(ctx context.Context, streamName string) (int64, error) {
+	return 0, nil
+}
+func (m *mockMessageQueue) DeleteMessage(ctx context.Context, streamName string, messageID string) error {
+	return nil
+}
+func (m *mockMessageQueue) Subscribe(ctx context.Context, streamName string, bufferSize int) (<-chan *external.Message, func()) {
+	ch := make(chan *external.Message)
+	return ch, func() { close(ch) }
+}
+func (m *mockMessageQueue) Close() error { return nil }
 
 func TestBuildTestModeWithRoutesHealthEndpoint(t *testing.T) {
 	cfg := &config.Config{

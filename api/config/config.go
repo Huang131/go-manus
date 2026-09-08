@@ -8,6 +8,12 @@ import (
 	"github.com/spf13/viper"
 )
 
+// 环境常量
+const (
+	EnvDevelopment = "development"
+	EnvProduction  = "production"
+)
+
 // Config 应用程序配置
 type Config struct {
 	Env               string `mapstructure:"env"                 validate:"required,oneof=development production"` // 环境: development/production
