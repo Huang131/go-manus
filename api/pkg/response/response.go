@@ -1,8 +1,10 @@
 package response
 
 import (
+	"errors"
 	"net/http"
 
+	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/gin-gonic/gin"
 )
 
@@ -58,11 +60,26 @@ func Error(c *gin.Context, msg string) {
 	})
 }
 
-// ErrorWithCode 带错误码的响应
-func ErrorWithCode(c *gin.Context, code int, msg string) {
-	c.JSON(http.StatusOK, Response{
-		Code: code,
-		Msg:  msg,
+// FromError 将业务错误映射为统一响应。
+func FromError(c *gin.Context, err error) {
+	if err == nil {
+		Success(c, nil)
+		return
+	}
+
+	var ae *apperr.Error
+	if errors.As(err, &ae) {
+		c.JSON(ae.Status(), Response{
+			Code: ae.Code(),
+			Msg:  ae.Msg,
+			Data: nil,
+		})
+		return
+	}
+
+	c.JSON(http.StatusInternalServerError, Response{
+		Code: http.StatusInternalServerError,
+		Msg:  "internal server error",
 		Data: nil,
 	})
 }

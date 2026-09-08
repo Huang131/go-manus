@@ -22,7 +22,7 @@ func NewLLMModelHandler(svc service.LLMModelService) *LLMModelHandler {
 func (h *LLMModelHandler) List(c *gin.Context) {
 	items, err := h.svc.List(c.Request.Context())
 	if err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	if items == nil {
@@ -36,7 +36,7 @@ func (h *LLMModelHandler) Get(c *gin.Context) {
 	id := c.Param("id")
 	m, err := h.svc.GetByID(c.Request.Context(), id)
 	if err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, m)
@@ -44,41 +44,24 @@ func (h *LLMModelHandler) Get(c *gin.Context) {
 
 // GetDefault 取当前默认（agent 启动用）
 func (h *LLMModelHandler) GetDefault(c *gin.Context) {
-	m, err := h.svc.GetByID(c.Request.Context(), "")
-	_ = m
-	_ = err
-	// 直接走 service 接口
-	items, err := h.svc.List(c.Request.Context())
+	m, err := h.svc.GetDefaultForAgent(c.Request.Context())
 	if err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
-	for _, it := range items {
-		if it.IsDefault {
-			response.Success(c, it)
-			return
-		}
-	}
-	// 降级：取第一个 enabled
-	for _, it := range items {
-		if it.IsEnabled {
-			response.Success(c, it)
-			return
-		}
-	}
-	response.Error(c, "no model available")
+	response.Success(c, m)
 }
 
 // Create 新增
 func (h *LLMModelHandler) Create(c *gin.Context) {
 	var req model.LLMModel
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	m, err := h.svc.Create(c.Request.Context(), &req)
 	if err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, m)
@@ -89,13 +72,13 @@ func (h *LLMModelHandler) Update(c *gin.Context) {
 	id := c.Param("id")
 	var req model.LLMModel
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	req.ID = id
 	m, err := h.svc.Update(c.Request.Context(), &req)
 	if err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, m)
@@ -105,7 +88,7 @@ func (h *LLMModelHandler) Update(c *gin.Context) {
 func (h *LLMModelHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.svc.Delete(c.Request.Context(), id); err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, nil)
@@ -115,7 +98,7 @@ func (h *LLMModelHandler) Delete(c *gin.Context) {
 func (h *LLMModelHandler) SetDefault(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.svc.SetDefault(c.Request.Context(), id); err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, nil)
@@ -124,7 +107,7 @@ func (h *LLMModelHandler) SetDefault(c *gin.Context) {
 // UnsetDefault 取消默认（agent 启动时会降级到第一个 enabled）
 func (h *LLMModelHandler) UnsetDefault(c *gin.Context) {
 	if err := h.svc.UnsetDefault(c.Request.Context()); err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, nil)

@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
 )
@@ -224,7 +225,10 @@ func TestLLMModelService_GetDefaultForAgent_DefaultEnabled(t *testing.T) {
 	svc.Create(context.Background(), &model.LLMModel{
 		Name: "d", Provider: "p", BaseURL: "u", ModelName: "m", IsDefault: true, IsEnabled: true,
 	})
-	m := svc.GetDefaultForAgent(context.Background())
+	m, err := svc.GetDefaultForAgent(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if m.Name != "d" {
 		t.Errorf("got %s", m.Name)
 	}
@@ -262,20 +266,21 @@ func TestLLMModelService_GetDefaultForAgent_DefaultDisabledFallback(t *testing.T
 		Name: "fallback", Provider: "p", BaseURL: "u2", ModelName: "m2",
 		IsDefault: false, IsEnabled: true, SortOrder: 1,
 	})
-	m := svc.GetDefaultForAgent(context.Background())
+	m, err := svc.GetDefaultForAgent(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if m.Name != "fallback" {
 		t.Errorf("want fallback, got %s", m.Name)
 	}
 }
 
-func TestLLMModelService_GetDefaultForAgent_PanicWhenEmpty(t *testing.T) {
+func TestLLMModelService_GetDefaultForAgent_ReturnsUnavailableWhenEmpty(t *testing.T) {
 	svc := NewLLMModelService(NewMockLLMModelRepository())
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("should panic when no model available")
-		}
-	}()
-	svc.GetDefaultForAgent(context.Background())
+	_, err := svc.GetDefaultForAgent(context.Background())
+	if !errors.Is(err, apperr.Unavailable("")) {
+		t.Fatalf("err = %v, want unavailable", err)
+	}
 }
 
 func TestLLMModelService_Update_KeepAPIKey(t *testing.T) {

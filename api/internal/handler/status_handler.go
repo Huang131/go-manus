@@ -20,7 +20,7 @@ func NewStatusHandler(svc service.StatusService) *StatusHandler {
 func (h *StatusHandler) Health(c *gin.Context) {
 	status, err := h.service.GetHealthStatus(c.Request.Context())
 	if err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, status)
@@ -30,7 +30,7 @@ func (h *StatusHandler) Health(c *gin.Context) {
 func (h *StatusHandler) GetStatus(c *gin.Context) {
 	status, err := h.service.GetHealthStatus(c.Request.Context())
 	if err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, status)

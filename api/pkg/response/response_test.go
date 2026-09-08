@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/gin-gonic/gin"
 )
 
@@ -104,5 +105,40 @@ func TestError_HttpResponse(t *testing.T) {
 	}
 	if resp.Msg != "bad request" {
 		t.Errorf("Error() msg = %s, want bad request", resp.Msg)
+	}
+}
+
+func TestFromError_MappedBusinessError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	FromError(c, apperr.NotFound("模型不存在"))
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("FromError() status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+
+	var resp Response
+	if err := sonic.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("FromError() response invalid JSON: %v", err)
+	}
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("FromError() code = %d, want %d", resp.Code, http.StatusNotFound)
+	}
+	if resp.Msg != "模型不存在" {
+		t.Fatalf("FromError() msg = %q, want %q", resp.Msg, "模型不存在")
+	}
+}
+
+func TestFromError_GenericError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	FromError(c, http.ErrServerClosed)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("FromError() status = %d, want %d", w.Code, http.StatusInternalServerError)
 	}
 }

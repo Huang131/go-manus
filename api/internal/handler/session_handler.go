@@ -9,6 +9,7 @@ import (
 	"github.com/bytedance/sonic"
 
 	"github.com/Huang131/go-manus/api/internal/agent"
+	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/service"
@@ -42,7 +43,7 @@ func (h *SessionHandler) Service() service.SessionService {
 func (h *SessionHandler) Create(c *gin.Context) {
 	session, err := h.service.CreateSession(c.Request.Context())
 	if err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, session)
@@ -53,7 +54,7 @@ func (h *SessionHandler) Get(c *gin.Context) {
 	id := c.Param("id")
 	session, err := h.service.GetSession(c.Request.Context(), id)
 	if err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	// 用户打开会话时自动清零未读数，并更新返回值
@@ -69,7 +70,7 @@ func (h *SessionHandler) List(c *gin.Context) {
 
 	sessions, total, err := h.service.ListSessions(c.Request.Context(), limit, offset)
 	if err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	response.SuccessWithTotal(c, sessions, total)
@@ -79,7 +80,7 @@ func (h *SessionHandler) List(c *gin.Context) {
 func (h *SessionHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.service.DeleteSession(c.Request.Context(), id); err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, nil)
@@ -89,7 +90,7 @@ func (h *SessionHandler) Delete(c *gin.Context) {
 func (h *SessionHandler) ClearUnread(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.service.ClearUnreadCount(c.Request.Context(), id); err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, nil)
@@ -128,7 +129,7 @@ func (h *SessionHandler) Stream(c *gin.Context) {
 func (h *SessionHandler) Chat(c *gin.Context) {
 	id := c.Param("id")
 	if h.agent == nil {
-		response.Error(c, "Agent 服务未配置")
+		response.FromError(c, apperr.FailedPrecondition("agent 服务未配置"))
 		return
 	}
 
@@ -150,13 +151,13 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 	}
 	if len(rawBody) > 0 {
 		if err := sonic.Unmarshal(rawBody, &req); err != nil {
-			response.Error(c, err.Error())
+			response.FromError(c, apperr.BadRequest(err.Error()))
 			return
 		}
 	}
 
 	if hasMessage && strings.TrimSpace(req.Message) == "" {
-		response.Error(c, "消息内容不能为空")
+		response.FromError(c, apperr.BadRequest("消息内容不能为空"))
 		return
 	}
 
@@ -194,7 +195,7 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 		chatCtx := external.WithModelID(c.Request.Context(), req.ModelID)
 		taskID, err = h.agent.Chat(chatCtx, id, msg)
 		if err != nil {
-			response.Error(c, err.Error())
+			response.FromError(c, err)
 			return
 		}
 
@@ -295,7 +296,7 @@ func (h *SessionHandler) GetFiles(c *gin.Context) {
 	id := c.Param("id")
 	files, err := h.service.GetSessionFiles(c.Request.Context(), id)
 	if err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, files)
@@ -308,24 +309,24 @@ func (h *SessionHandler) ReadFile(c *gin.Context) {
 		Filepath string `json:"filepath"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, "请求参数错误: "+err.Error())
+		response.FromError(c, apperr.BadRequest("请求参数错误: "+err.Error()))
 		return
 	}
 	if strings.TrimSpace(req.Filepath) == "" {
-		response.Error(c, "filepath 不能为空")
+		response.FromError(c, apperr.BadRequest("filepath 不能为空"))
 		return
 	}
 	if h.sandbox == nil {
-		response.Error(c, "沙箱服务未配置")
+		response.FromError(c, apperr.FailedPrecondition("沙箱服务未配置"))
 		return
 	}
 	result, err := h.sandbox.ReadFile(c.Request.Context(), req.Filepath, nil, nil, false, 0)
 	if err != nil {
-		response.Error(c, "读取文件失败: "+err.Error())
+		response.FromError(c, apperr.Internal("读取文件失败: "+err.Error()))
 		return
 	}
 	if !result.Success {
-		response.Error(c, result.Message)
+		response.FromError(c, apperr.Internal(result.Message))
 		return
 	}
 	response.Success(c, result.Data)
@@ -338,24 +339,24 @@ func (h *SessionHandler) ReadShell(c *gin.Context) {
 		ShellSessionID string `json:"shell_session_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Error(c, "请求参数错误: "+err.Error())
+		response.FromError(c, apperr.BadRequest("请求参数错误: "+err.Error()))
 		return
 	}
 	if strings.TrimSpace(req.ShellSessionID) == "" {
-		response.Error(c, "shell_session_id 不能为空")
+		response.FromError(c, apperr.BadRequest("shell_session_id 不能为空"))
 		return
 	}
 	if h.sandbox == nil {
-		response.Error(c, "沙箱服务未配置")
+		response.FromError(c, apperr.FailedPrecondition("沙箱服务未配置"))
 		return
 	}
 	result, err := h.sandbox.ReadShellOutput(c.Request.Context(), req.ShellSessionID, true)
 	if err != nil {
-		response.Error(c, "读取 Shell 输出失败: "+err.Error())
+		response.FromError(c, apperr.Internal("读取 Shell 输出失败: "+err.Error()))
 		return
 	}
 	if !result.Success {
-		response.Error(c, result.Message)
+		response.FromError(c, apperr.Internal(result.Message))
 		return
 	}
 	response.Success(c, result.Data)
@@ -365,7 +366,7 @@ func (h *SessionHandler) ReadShell(c *gin.Context) {
 func (h *SessionHandler) Stop(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.agent.StopSession(c.Request.Context(), id); err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, nil)

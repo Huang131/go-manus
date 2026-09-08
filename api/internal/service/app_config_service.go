@@ -2,10 +2,11 @@ package service
 
 import (
 	"context"
-	"errors"
-	"github.com/bytedance/sonic"
 	"time"
 
+	"github.com/bytedance/sonic"
+
+	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
 	"github.com/google/uuid"
@@ -43,7 +44,7 @@ func unmarshalConfigValue(data interface{}, v interface{}) error {
 	case string:
 		jsonData = []byte(val)
 	default:
-		return errors.New("unsupported config value type")
+		return apperr.BadRequest("unsupported config value type")
 	}
 	return sonic.Unmarshal(jsonData, v)
 }
@@ -179,7 +180,7 @@ func (s *DefaultAppConfigService) DeleteMCPServer(ctx context.Context, serverNam
 		newServers = append(newServers, server)
 	}
 	if !found {
-		return errors.New("MCP服务器不存在")
+		return apperr.NotFound("MCP服务器不存在")
 	}
 
 	cfg.Servers = newServers

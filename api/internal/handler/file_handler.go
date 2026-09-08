@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 
+	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/service"
 	"github.com/Huang131/go-manus/api/pkg/response"
 	"github.com/gin-gonic/gin"
@@ -24,27 +25,27 @@ func NewFileHandler(svc service.FileService, sessionSvc service.SessionService) 
 func (h *FileHandler) Upload(c *gin.Context) {
 	sessionID := c.PostForm("session_id")
 	if sessionID == "" {
-		response.Error(c, "session_id is required")
+		response.FromError(c, apperr.BadRequest("session_id is required"))
 		return
 	}
 
 	// Issue #5：先校验 session 存在性，避免上传到不存在的 session
 	if h.sessionSvc != nil {
 		if _, err := h.sessionSvc.GetSession(c.Request.Context(), sessionID); err != nil {
-			response.Error(c, "session not found: "+sessionID)
+			response.FromError(c, apperr.NotFound("session not found: "+sessionID))
 			return
 		}
 	}
 
 	file, err := c.FormFile("file")
 	if err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, apperr.BadRequest(err.Error()))
 		return
 	}
 
 	src, err := file.Open()
 	if err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, apperr.Internal(err.Error()))
 		return
 	}
 	defer src.Close()
@@ -58,7 +59,7 @@ func (h *FileHandler) Upload(c *gin.Context) {
 		file.Header.Get("Content-Type"),
 	)
 	if err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, result)
@@ -69,7 +70,7 @@ func (h *FileHandler) GetInfo(c *gin.Context) {
 	id := c.Param("id")
 	file, err := h.service.GetFileInfo(c.Request.Context(), id)
 	if err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, file)
@@ -80,7 +81,7 @@ func (h *FileHandler) Download(c *gin.Context) {
 	id := c.Param("id")
 	file, reader, err := h.service.DownloadFile(c.Request.Context(), id)
 	if err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	defer reader.Close()

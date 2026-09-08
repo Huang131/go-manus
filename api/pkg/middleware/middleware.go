@@ -8,6 +8,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 
+	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/pkg/logger"
 	"github.com/Huang131/go-manus/api/pkg/response"
 )
@@ -23,7 +24,7 @@ func Recovery() gin.HandlerFunc {
 					logger.String("stack", string(debug.Stack())),
 				)
 
-				response.Error(c, "Internal server error")
+				response.FromError(c, apperr.Internal("internal server error"))
 				c.Abort()
 			}
 		}()

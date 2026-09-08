@@ -2,13 +2,13 @@ package service
 
 import (
 	"context"
-	"errors"
 	"github.com/bytedance/sonic"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
 	"github.com/google/uuid"
@@ -110,7 +110,7 @@ func (s *DefaultSessionService) DeleteSession(ctx context.Context, id string) er
 		return err
 	}
 	if session == nil {
-		return errors.New("会话不存在")
+		return apperr.NotFound("会话不存在")
 	}
 	return s.repo.Delete(ctx, id)
 }
@@ -139,7 +139,7 @@ func (s *DefaultSessionService) GetSessionFiles(ctx context.Context, id string) 
 		return nil, err
 	}
 	if s.fileRepo == nil {
-		return nil, errors.New("file repository 未注入，GetSessionFiles 不可用")
+		return nil, apperr.FailedPrecondition("file repository 未注入，GetSessionFiles 不可用")
 	}
 	files, err := s.fileRepo.ListBySessionID(ctx, id)
 	if err != nil {
@@ -185,7 +185,7 @@ func (s *DefaultSessionService) GetVNCURL(ctx context.Context, sessionID string)
 		return "", err
 	}
 	if s.sandboxAddress == "" {
-		return "", errors.New("sandbox 地址未配置")
+		return "", apperr.FailedPrecondition("sandbox 地址未配置")
 	}
 
 	u, err := url.Parse(s.sandboxAddress)
@@ -194,7 +194,7 @@ func (s *DefaultSessionService) GetVNCURL(ctx context.Context, sessionID string)
 	}
 	host := u.Hostname()
 	if host == "" {
-		return "", errors.New("sandbox 地址缺少 host")
+		return "", apperr.BadRequest("sandbox 地址缺少 host")
 	}
 
 	scheme := "ws"

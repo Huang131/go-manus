@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/service"
 	"github.com/Huang131/go-manus/api/pkg/response"
@@ -21,7 +22,7 @@ func NewAppConfigHandler(svc service.AppConfigService) *AppConfigHandler {
 func (h *AppConfigHandler) GetLLMConfig(c *gin.Context) {
 	cfg, err := h.service.GetLLMConfig(c.Request.Context())
 	if err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	if cfg == nil {
@@ -34,11 +35,11 @@ func (h *AppConfigHandler) GetLLMConfig(c *gin.Context) {
 func (h *AppConfigHandler) UpdateLLMConfig(c *gin.Context) {
 	var cfg model.LLMConfig
 	if err := c.ShouldBindJSON(&cfg); err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, apperr.BadRequest(err.Error()))
 		return
 	}
 	if err := h.service.UpdateLLMConfig(c.Request.Context(), &cfg); err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, nil)
@@ -48,7 +49,7 @@ func (h *AppConfigHandler) UpdateLLMConfig(c *gin.Context) {
 func (h *AppConfigHandler) GetAgentConfig(c *gin.Context) {
 	cfg, err := h.service.GetAgentConfig(c.Request.Context())
 	if err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	if cfg == nil {
@@ -61,11 +62,11 @@ func (h *AppConfigHandler) GetAgentConfig(c *gin.Context) {
 func (h *AppConfigHandler) UpdateAgentConfig(c *gin.Context) {
 	var cfg model.AgentConfig
 	if err := c.ShouldBindJSON(&cfg); err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, apperr.BadRequest(err.Error()))
 		return
 	}
 	if err := h.service.UpdateAgentConfig(c.Request.Context(), &cfg); err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, nil)
@@ -75,7 +76,7 @@ func (h *AppConfigHandler) UpdateAgentConfig(c *gin.Context) {
 func (h *AppConfigHandler) GetMCPConfig(c *gin.Context) {
 	cfg, err := h.service.GetMCPConfig(c.Request.Context())
 	if err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	if cfg == nil {
@@ -88,11 +89,11 @@ func (h *AppConfigHandler) GetMCPConfig(c *gin.Context) {
 func (h *AppConfigHandler) UpdateMCPConfig(c *gin.Context) {
 	var cfg model.MCPConfig
 	if err := c.ShouldBindJSON(&cfg); err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, apperr.BadRequest(err.Error()))
 		return
 	}
 	if err := h.service.UpdateMCPConfig(c.Request.Context(), &cfg); err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, nil)
@@ -102,7 +103,7 @@ func (h *AppConfigHandler) UpdateMCPConfig(c *gin.Context) {
 func (h *AppConfigHandler) DeleteMCPServer(c *gin.Context) {
 	serverName := c.Param("server_name")
 	if err := h.service.DeleteMCPServer(c.Request.Context(), serverName); err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, nil)
@@ -112,7 +113,7 @@ func (h *AppConfigHandler) DeleteMCPServer(c *gin.Context) {
 func (h *AppConfigHandler) GetA2AConfig(c *gin.Context) {
 	cfg, err := h.service.GetA2AConfig(c.Request.Context())
 	if err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	if cfg == nil {
@@ -125,11 +126,11 @@ func (h *AppConfigHandler) GetA2AConfig(c *gin.Context) {
 func (h *AppConfigHandler) UpdateA2AConfig(c *gin.Context) {
 	var cfg model.A2AConfig
 	if err := c.ShouldBindJSON(&cfg); err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, apperr.BadRequest(err.Error()))
 		return
 	}
 	if err := h.service.UpdateA2AConfig(c.Request.Context(), &cfg); err != nil {
-		response.Error(c, err.Error())
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, nil)

@@ -2,13 +2,13 @@ package service
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
 )
@@ -24,9 +24,8 @@ type LLMModelService interface {
 	SetDefault(ctx context.Context, id string) error
 	// UnsetDefault 取消默认模型（允许系统处于"无默认"状态，agent 启动时降级到第一个 enabled）
 	UnsetDefault(ctx context.Context) error
-	// GetDefaultForAgent 启动读取：default 优先，否则第一个 enabled
-	// 找不到则 panic (与原"必须配 LLM" 行为一致)
-	GetDefaultForAgent(ctx context.Context) *model.LLMModel
+	// GetDefaultForAgent 启动读取：default 优先，否则第一个 enabled。
+	GetDefaultForAgent(ctx context.Context) (*model.LLMModel, error)
 }
 
 // DefaultLLMModelService 默认实现
@@ -41,9 +40,10 @@ func NewLLMModelService(repo repository.LLMModelRepository) LLMModelService {
 
 // 业务错误
 var (
-	ErrModelNotFound     = errors.New("模型不存在")
-	ErrModelNameRequired = errors.New("name/provider/base_url/model_name 不能为空")
-	ErrModelConflict     = errors.New("同名同 provider+url+model 已存在")
+	ErrModelNotFound     = apperr.NotFound("模型不存在")
+	ErrModelNameRequired = apperr.BadRequest("name/provider/base_url/model_name 不能为空")
+	ErrModelConflict     = apperr.Conflict("同名同 provider+url+model 已存在")
+	ErrModelDisabled     = apperr.FailedPrecondition("不能将停用的模型设为默认，请先启用")
 )
 
 // validateRequired 校验必填字段
@@ -216,7 +216,7 @@ func (s *DefaultLLMModelService) SetDefault(ctx context.Context, id string) erro
 		return nil
 	}
 	if !target.IsEnabled {
-		return errors.New("不能将停用的模型设为默认，请先启用")
+		return ErrModelDisabled
 	}
 
 	return s.repo.WithTx(ctx, func(r repository.LLMModelRepository) error {
@@ -236,22 +236,21 @@ func (s *DefaultLLMModelService) UnsetDefault(ctx context.Context) error {
 	return s.repo.ClearDefault(ctx, nil)
 }
 
-// GetDefaultForAgent agent 启动读默认模型
-// 找不到 default → 降级到第一个 enabled
-// 都没有 → panic（强制要求至少配 1 个 enabled 模型）
-func (s *DefaultLLMModelService) GetDefaultForAgent(ctx context.Context) *model.LLMModel {
+// GetDefaultForAgent agent 启动读默认模型。
+// 找不到 default → 降级到第一个 enabled。
+func (s *DefaultLLMModelService) GetDefaultForAgent(ctx context.Context) (*model.LLMModel, error) {
 	def, err := s.repo.GetDefault(ctx)
 	if err == nil && def != nil {
 		if def.IsEnabled {
-			return def
+			return def, nil
 		}
 	}
 	// 降级
 	first, err := s.repo.GetFirstEnabled(ctx)
 	if err == nil && first != nil {
-		return first
+		return first, nil
 	}
-	panic("no LLM model available: please add and enable at least one model in settings")
+	return nil, apperr.Unavailable("no LLM model available: please add and enable at least one model in settings")
 }
 
 // 防止 pgx 未使用
