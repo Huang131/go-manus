@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/bytedance/sonic"
@@ -86,7 +87,7 @@ func TestEvent_Data_NotBase64(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	if contains(string(out), `"data":"eyJ`) {
+	if strings.Contains(string(out), `"data":"eyJ`) {
 		t.Errorf("Data was base64-encoded, JSON output:\n%s", out)
 	}
 }
@@ -148,7 +149,7 @@ func TestEvent_Data_Nil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if !contains(string(out), `"data":null`) {
+	if !strings.Contains(string(out), `"data":null`) {
 		t.Errorf("nil Data should serialize as null, got: %s", out)
 	}
 }

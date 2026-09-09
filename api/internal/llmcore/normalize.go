@@ -22,14 +22,6 @@ func NormalizeResponse(resp *LLMResponse) *LLMResponse {
 	return resp
 }
 
-// NormalizeDelta 归一化流式增量
-func NormalizeDelta(delta *LLMDelta) *LLMDelta {
-	if delta == nil {
-		return nil
-	}
-	return delta
-}
-
 // MergeDeltas 把流式 delta 累积成完整 response
 // 用于在流结束时把 content 拼起来
 func MergeDeltas(model string, deltas []LLMDelta) *LLMResponse {

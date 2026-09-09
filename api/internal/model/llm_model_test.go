@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/bytedance/sonic"
@@ -29,7 +30,7 @@ func TestRequestPolicy_Extra_JSONRoundtrip(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	if contains(string(out), `"extra":{"reasoning_effort":"Im5vbmU`) {
+	if strings.Contains(string(out), `"extra":{"reasoning_effort":"Im5vbmU`) {
 		t.Errorf("Extra value was base64-encoded, JSON output:\n%s", out)
 	}
 
@@ -56,7 +57,7 @@ func TestRequestPolicy_Extra_Omitempty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if contains(string(out), `"extra"`) {
+	if strings.Contains(string(out), `"extra"`) {
 		t.Errorf("empty Extra should be omitted, got: %s", out)
 	}
 }
@@ -100,7 +101,7 @@ func TestLLMModelAPIKey_InputOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if contains(string(out), "secret") || contains(string(out), "api_key") {
+	if strings.Contains(string(out), "secret") || strings.Contains(string(out), "api_key") {
 		t.Fatalf("API key leaked in response: %s", out)
 	}
 }
