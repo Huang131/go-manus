@@ -1,0 +1,72 @@
+api/internal/handler/session_handler.go
+  s_574f855e98726f::t_4c3dbe8a7dff1a 63-66
+  s_574f855e98726f::t_1f617e04d7b506 72-81,169
+  s_574f855e98726f::t_ebc738ffad54f0 128
+  s_574f855e98726f::t_9124c53e879e6f 129
+  s_574f855e98726f::t_31558e8124a6c7 170
+ui/src/hooks/use-session-detail.ts
+  s_574f855e98726f::t_6718913da7c349 72-76
+api/internal/agent/planner_react_flow.go
+  s_574f855e98726f::t_a4af514c09d4b4 67-71
+api/internal/agent/task_redis.go
+  s_574f855e98726f::t_4c3dbe8a7dff1a 158,371,403
+  s_574f855e98726f::t_3dd07ad52b452b 447
+ui/src/lib/session-events.ts
+  s_574f855e98726f::t_96e9dc2e140129 228-229
+  s_574f855e98726f::t_01c42510dac093 230-239,241-243
+  s_574f855e98726f::t_0992bf922fec7c 240
+  s_574f855e98726f::t_de72e3d6d69f15 17-18
+api/internal/agent/task_runner.go
+  s_574f855e98726f::t_d6ec31a7e97585 298
+  s_574f855e98726f::t_416db0a3595dee 305
+  s_574f855e98726f::t_69d493f8bece61 194
+api/internal/model/llm_model.go
+  s_574f855e98726f::t_1f617e04d7b506 34-48
+api/internal/agent/base.go
+  s_574f855e98726f::t_dcd5621677f4f0 28
+  s_574f855e98726f::t_f358526dede6d4 95-108
+  s_574f855e98726f::t_cbb98033f20fd5 500-504,537-541,551-554
+  s_574f855e98726f::t_159452d149fe3e 555
+api/internal/repository/session_repository.go
+  s_574f855e98726f::t_1f617e04d7b506 135
+ui/src/lib/api/types.ts
+  s_574f855e98726f::t_ee4396e4537240 287,298
+  s_574f855e98726f::t_fc06ae06baa6f7 328-329
+  s_574f855e98726f::t_425fdb28e285ac 314-315
+  s_574f855e98726f::t_71a097edca5b40 274,284-286,288-297,299-305
+  s_574f855e98726f::t_c4c4c745d6ae8c 275-283
+api/internal/model/event.go
+  s_574f855e98726f::t_aa15b2d5f60324 234-235,241,246,248-249,255,260,282-283,290-291,334
+  s_574f855e98726f::t_2241db00abc4ba 46-60
+  s_574f855e98726f::t_d62f97df3f08cf 317
+  s_574f855e98726f::t_d4a314541dc9be 27
+  s_574f855e98726f::t_ea849d170c6454 309,325
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "40c2e8cabb2d661da772f591a3ec784040f67a33",
+  "prompts": {},
+  "sessions": {
+    "s_574f855e98726f": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa10d205f8bfc5c33242bf2",
+        "model": "deepseek_v4_flash_official__dev"
+      },
+      "human_author": "Huang131 <1315970725@qq.com>",
+      "custom_attributes": {
+        "client_type": "ide",
+        "tool_name": "RunCommand",
+        "session_id": "6aa10d205f8bfc5c33242bf2",
+        "tool_use_id": "6aa11f665f8bfc5c33242e3e",
+        "source_scene": "agent",
+        "operation_id": "6aa11f665f8bfc5c33242e3e",
+        "external_session_id": "6aa10d205f8bfc5c33242bf2",
+        "edit_kind": "bash",
+        "runtime_client": "trae-tob-git-ai",
+        "display_model_name": "DeepSeek-V4-Flash 正式版"
+      }
+    }
+  }
+}
