@@ -64,6 +64,11 @@ func (f *PlannerReActFlow) LoadMemory(ctx context.Context) error {
 func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan model.BaseEvent {
 	ch := make(chan model.BaseEvent, 100)
 
+	// 注入事件通道，让 agent 层工具调用事件（tool_calling/tool_called）进入事件流。
+	// planner 不调用工具，注入仅为统一；react 的工具调用发生在 Invoke 内的 handleToolCall。
+	f.planner.SetEventCh(ch)
+	f.react.SetEventCh(ch)
+
 	go func() {
 		defer close(ch)
 

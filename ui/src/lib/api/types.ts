@@ -272,6 +272,38 @@ export type ToolEvent = {
 };
 
 /**
+ * 工具执行结果
+ */
+export type ToolResult = {
+  success: boolean;
+  message: string;
+  data?: unknown;
+};
+
+/**
+ * 工具调用中事件（SSE tool_calling）
+ */
+export type ToolCallingEvent = {
+  name?: string;
+  tool_call_id: string;
+  function_name: string;
+  arguments: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+/**
+ * 工具调用完成事件（SSE tool_called）
+ */
+export type ToolCalledEvent = {
+  name?: string;
+  tool_call_id: string;
+  function_name: string;
+  arguments: Record<string, unknown>;
+  result?: ToolResult;
+  [key: string]: unknown;
+};
+
+/**
  * SSE 事件类型
  */
 export type SSEEventType =
@@ -279,7 +311,8 @@ export type SSEEventType =
   | "title"
   | "plan"
   | "step"
-  | "tool"
+  | "tool_calling"
+  | "tool_called"
   | "wait"
   | "done"
   | "error";
@@ -292,7 +325,8 @@ export type SSEEventData =
   | { type: "title"; data: { title: string } }
   | { type: "plan"; data: PlanEvent }
   | { type: "step"; data: StepEvent }
-  | { type: "tool"; data: ToolEvent }
+  | { type: "tool_calling"; data: ToolCallingEvent }
+  | { type: "tool_called"; data: ToolCalledEvent }
   | { type: "wait"; data: Record<string, unknown> }
   | { type: "done"; data: Record<string, unknown> }
   | { type: "error"; data: { error: string } };

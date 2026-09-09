@@ -31,6 +31,21 @@ type LLMModel struct {
 	RuntimeHealth RuntimeHealth     `json:"runtime_health"`
 }
 
+// UnmarshalJSON 允许接收 API key，但 APIKey 仍不会被响应序列化。
+func (m *LLMModel) UnmarshalJSON(data []byte) error {
+	type alias LLMModel
+	var payload struct {
+		*alias
+		APIKey string `json:"api_key"`
+	}
+	payload.alias = (*alias)(m)
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return err
+	}
+	m.APIKey = payload.APIKey
+	return nil
+}
+
 // ModelCapabilities 模型能力画像
 // 字段是 LLM Control Plane 决策依据
 type ModelCapabilities struct {

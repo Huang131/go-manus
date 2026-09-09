@@ -60,14 +60,25 @@ func (h *SessionHandler) Get(c *gin.Context) {
 	}
 	// 用户打开会话时自动清零未读数，并更新返回值
 	session.UnreadMessageCount = 0
-	_ = h.service.ClearUnreadCount(c.Request.Context(), id)
+	if err := h.service.ClearUnreadCount(c.Request.Context(), id); err != nil {
+		response.FromError(c, err)
+		return
+	}
 	response.Success(c, session)
 }
 
 // List 获取会话列表
 func (h *SessionHandler) List(c *gin.Context) {
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	if err != nil || limit < 1 || limit > 100 {
+		response.FromError(c, apperr.BadRequest("limit must be between 1 and 100"))
+		return
+	}
+	offset, err := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if err != nil || offset < 0 {
+		response.FromError(c, apperr.BadRequest("offset must be non-negative"))
+		return
+	}
 
 	sessions, total, err := h.service.ListSessions(c.Request.Context(), limit, offset)
 	if err != nil {
@@ -114,8 +125,8 @@ func (h *SessionHandler) Stream(c *gin.Context) {
 			if err != nil {
 				continue
 			}
-			data, _ := sonic.Marshal(sessions)
-			c.SSEvent(sseEventSessions, string(data))
+			data, _ := sonic.MarshalString(sessions)
+			c.SSEvent(sseEventSessions, data)
 			c.Writer.Flush()
 		}
 	}
@@ -133,11 +144,14 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 	//   1. 发送新消息：body 含 "message" 键（非空字符串），进入 chat 流程
 	//   2. 空流续读：body 不含 "message" 键 或 message 为空，仅传 event_id 订阅当前 task 的事件流
 	// 之前所有路径都 h.agent.Chat(...)，导致 startEmptyStream 触发"空消息"被 LLM 误读为合法输入。
-	rawBody, _ := c.GetRawData()
-	hasMessage := strings.Contains(string(rawBody), `"message"`)
+	rawBody, err := c.GetRawData()
+	if err != nil {
+		response.FromError(c, apperr.BadRequest("读取请求体失败"))
+		return
+	}
 
 	var req struct {
-		Message     string   `json:"message"`
+		Message     *string  `json:"message"`
 		Attachments []string `json:"attachments"`
 		// 兼容两种命名：前端 startEmptyStream 发的 event_id，HTTP 标准 SSE 的 Last-Event-ID
 		EventID string `json:"event_id"`
@@ -152,7 +166,8 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 		}
 	}
 
-	if hasMessage && strings.TrimSpace(req.Message) == "" {
+	hasMessage := req.Message != nil
+	if hasMessage && strings.TrimSpace(*req.Message) == "" {
 		response.FromError(c, apperr.BadRequest("消息内容不能为空"))
 		return
 	}
@@ -172,11 +187,11 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 	var taskID string
 
 	// 仅当"显式发送新消息"时才进入 chat 流程；空流续读跳过此步。
-	if hasMessage && strings.TrimSpace(req.Message) != "" {
+	if hasMessage && strings.TrimSpace(*req.Message) != "" {
 		// 创建消息对象
 		msg := &llmcore.Message{
 			Role:        llmcore.RoleUser,
-			ContentText: req.Message,
+			ContentText: *req.Message,
 			Attachments: req.Attachments,
 		}
 

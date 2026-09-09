@@ -25,6 +25,7 @@ type BaseAgent struct {
 	toolRegistry *ToolRegistry
 	jsonParser   external.JSONParser
 	sessionRepo  repository.SessionRepository
+	eventCh      chan<- model.BaseEvent // 事件输出通道（由 Flow 注入，nil 时静默）
 }
 
 // NewBaseAgent 创建基础 Agent
@@ -89,6 +90,20 @@ func NewBaseAgentWithRepoAndParser(name, sessionID string, config *AgentConfig, 
 // SetSessionRepo 设置 Session 仓储
 func (a *BaseAgent) SetSessionRepo(sessionRepo repository.SessionRepository) {
 	a.sessionRepo = sessionRepo
+}
+
+// SetEventCh 注入事件输出通道（Flow 创建事件流后调用）
+func (a *BaseAgent) SetEventCh(ch chan<- model.BaseEvent) {
+	a.eventCh = ch
+}
+
+// emitEvent 向事件通道发送事件，通道未注入时静默跳过。
+// 由 Flow 保证事件通道的消费方（task_runner）持续消费，此处阻塞发送安全。
+func (a *BaseAgent) emitEvent(ev model.BaseEvent) {
+	if a.eventCh == nil {
+		return
+	}
+	a.eventCh <- ev
 }
 
 // Name 返回 Agent 名称
@@ -482,6 +497,11 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 		logger.String("function", functionName),
 		logger.Any("arguments", arguments))
 
+	// 发出工具调用开始事件（tool_calling），前端 SSE 实时展示调用参数
+	callingEvent := model.NewToolCallingEvent(toolCallID, functionName, arguments)
+	callingEvent.Name = tool.Name()
+	a.emitEvent(callingEvent)
+
 	// 特殊处理 message_ask_user 工具
 	if functionName == MessageFunctionAskUser {
 		// 返回成功结果，并标记需要等待用户输入
@@ -514,6 +534,11 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 	}
 
 	if err != nil {
+		// 失败也发出 tool_called 事件，携带错误结果，前端可展示失败详情
+		calledEvent := model.NewToolCalledEvent(toolCallID, functionName, arguments, model.NewToolError(err.Error()))
+		calledEvent.Name = tool.Name()
+		a.emitEvent(calledEvent)
+
 		return &ToolCallResult{
 			ToolCallID:   toolCallID,
 			ToolName:     tool.Name(),
@@ -522,6 +547,11 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 			Result:       model.NewToolError(err.Error()),
 		}, err
 	}
+
+	// 发出工具调用完成事件（tool_called）
+	calledEvent := model.NewToolCalledEvent(toolCallID, functionName, arguments, result)
+	calledEvent.Name = tool.Name()
+	a.emitEvent(calledEvent)
 
 	return &ToolCallResult{
 		ToolCallID:   toolCallID,

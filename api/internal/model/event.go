@@ -24,6 +24,7 @@ func toJSON(v any) string {
 	s, err := sonic.MarshalString(v)
 	if err != nil {
 		logger.Warn("event serialize failed", logger.Err(err))
+		return ""
 	}
 	return s
 }
@@ -42,20 +43,21 @@ const (
 type EventType string
 
 const (
-	EventTypeMessage EventType = "message"
-	EventTypePlan    EventType = "plan"
-	EventTypeTool    EventType = "tool"
-	EventTypeStep    EventType = "step"
-	EventTypeError   EventType = "error"
-	EventTypeTitle   EventType = "title"
-	EventTypeWait    EventType = "wait"
-	EventTypeDone    EventType = "done"
-	EventTypeBrowser EventType = "browser"
-	EventTypeSearch  EventType = "search"
-	EventTypeShell   EventType = "shell"
-	EventTypeFile    EventType = "file"
-	EventTypeMCP     EventType = "mcp"
-	EventTypeA2A     EventType = "a2a"
+	EventTypeMessage     EventType = "message"
+	EventTypePlan        EventType = "plan"
+	EventTypeToolCalling EventType = "tool_calling"
+	EventTypeToolCalled  EventType = "tool_called"
+	EventTypeStep        EventType = "step"
+	EventTypeError       EventType = "error"
+	EventTypeTitle       EventType = "title"
+	EventTypeWait        EventType = "wait"
+	EventTypeDone        EventType = "done"
+	EventTypeBrowser     EventType = "browser"
+	EventTypeSearch      EventType = "search"
+	EventTypeShell       EventType = "shell"
+	EventTypeFile        EventType = "file"
+	EventTypeMCP         EventType = "mcp"
+	EventTypeA2A         EventType = "a2a"
 )
 
 // PlanEventStatus 计划事件状态
@@ -229,33 +231,33 @@ func (e *WaitEvent) GetType() EventType {
 // ToJSON 将事件转换为 JSON 字符串
 func (e *WaitEvent) ToJSON() string { return toJSON(e) }
 
-// FullPlanEvent 完整计划事件（用于 Agent 间传递）
-type FullPlanEvent struct {
+// PlanEvent 计划事件（用于 Agent 间传递）
+type PlanEvent struct {
 	Plan   *Plan           `json:"plan"`
 	Status PlanEventStatus `json:"status"`
 }
 
 // GetType 返回事件类型
-func (e *FullPlanEvent) GetType() EventType {
+func (e *PlanEvent) GetType() EventType {
 	return EventTypePlan
 }
 
 // ToJSON 将事件转换为 JSON 字符串
-func (e *FullPlanEvent) ToJSON() string { return toJSON(e) }
+func (e *PlanEvent) ToJSON() string { return toJSON(e) }
 
-// FullStepEvent 完整步骤事件（用于 Agent 间传递）
-type FullStepEvent struct {
+// StepEvent 步骤事件（用于 Agent 间传递，对应 SSE 协议中的 step 类型）
+type StepEvent struct {
 	Step   *PlanStep       `json:"step"`
 	Status StepEventStatus `json:"status"`
 }
 
 // GetType 返回事件类型
-func (e *FullStepEvent) GetType() EventType {
+func (e *StepEvent) GetType() EventType {
 	return EventTypeStep
 }
 
 // ToJSON 将事件转换为 JSON 字符串
-func (e *FullStepEvent) ToJSON() string { return toJSON(e) }
+func (e *StepEvent) ToJSON() string { return toJSON(e) }
 
 // NewErrorEvent 创建错误事件
 func NewErrorEvent(message string) *ErrorEvent {
@@ -277,16 +279,16 @@ func NewMessageEvent(role, content string) *MessageEvent {
 }
 
 // NewPlanEvent 创建计划事件
-func NewPlanEvent(plan *Plan, status PlanEventStatus) *FullPlanEvent {
-	return &FullPlanEvent{
+func NewPlanEvent(plan *Plan, status PlanEventStatus) *PlanEvent {
+	return &PlanEvent{
 		Plan:   plan,
 		Status: status,
 	}
 }
 
 // NewStepEvent 创建步骤事件
-func NewStepEvent(step *PlanStep, status StepEventStatus) *FullStepEvent {
-	return &FullStepEvent{
+func NewStepEvent(step *PlanStep, status StepEventStatus) *StepEvent {
+	return &StepEvent{
 		Step:   step,
 		Status: status,
 	}
@@ -304,6 +306,7 @@ func NewWaitEvent() *WaitEvent {
 
 // ToolCallingEvent 工具调用中事件
 type ToolCallingEvent struct {
+	Name         string                 `json:"name"`
 	ToolCallID   string                 `json:"tool_call_id"`
 	FunctionName string                 `json:"function_name"`
 	Arguments    map[string]interface{} `json:"arguments"`
@@ -311,7 +314,7 @@ type ToolCallingEvent struct {
 
 // GetType 返回事件类型
 func (e *ToolCallingEvent) GetType() EventType {
-	return EventTypeTool
+	return EventTypeToolCalling
 }
 
 // ToJSON 将事件转换为 JSON 字符串
@@ -319,6 +322,7 @@ func (e *ToolCallingEvent) ToJSON() string { return toJSON(e) }
 
 // ToolCalledEvent 工具调用完成事件
 type ToolCalledEvent struct {
+	Name         string                 `json:"name"`
 	ToolCallID   string                 `json:"tool_call_id"`
 	FunctionName string                 `json:"function_name"`
 	Arguments    map[string]interface{} `json:"arguments"`
@@ -327,7 +331,7 @@ type ToolCalledEvent struct {
 
 // GetType 返回事件类型
 func (e *ToolCalledEvent) GetType() EventType {
-	return EventTypeTool
+	return EventTypeToolCalled
 }
 
 // ToJSON 将事件转换为 JSON 字符串

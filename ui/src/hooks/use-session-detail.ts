@@ -69,10 +69,11 @@ export function useSessionDetail(
       }
     }
 
-    // message_ask_user calling → 等待用户输入，切换为 waiting
-    if (evToAppend.type === 'tool') {
-      const toolData = evToAppend.data as { function?: string; status?: string }
-      if (toolData.function === 'message_ask_user' && toolData.status === 'calling') {
+    // message_ask_user → 等待用户输入，切换为 waiting
+    // chat 流中 tool_calling 事件携带原始字段 function_name（未归一化）
+    if (evToAppend.type === 'tool_calling') {
+      const toolData = evToAppend.data as { function_name?: string }
+      if (toolData.function_name === 'message_ask_user') {
         setSession((prev) => prev ? { ...prev, status: 'waiting' } : null)
         setStreaming(false)
       }

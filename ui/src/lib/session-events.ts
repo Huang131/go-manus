@@ -14,6 +14,8 @@ import type {
   PlanEvent,
   StepEvent,
   ToolEvent,
+  ToolCallingEvent,
+  ToolCalledEvent,
   SessionFile,
 } from "@/lib/api/types";
 
@@ -223,9 +225,22 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
         
         break;
       }
-      case "tool": {
-        const tool = ev.data as ToolEvent;
-        const toolCallId = (tool as { tool_call_id?: string }).tool_call_id;
+      case "tool_calling":
+      case "tool_called": {
+        // 后端事件字段为 name/tool_call_id/function_name/arguments/result，
+        // 归一化为渲染层 ToolEvent（name/function/args/content/status），
+        // 使 tool-use 各组件与预览面板无需感知协议字段差异。
+        const raw = ev.data as ToolCallingEvent | ToolCalledEvent;
+        const isCalling = ev.type === 'tool_calling';
+        const tool: ToolEvent = {
+          ...raw,
+          name: raw.name ?? '',
+          function: raw.function_name ?? '',
+          args: raw.arguments ?? {},
+          status: isCalling ? 'calling' : 'called',
+          content: isCalling ? undefined : (raw as ToolCalledEvent).result?.data,
+        };
+        const toolCallId = tool.tool_call_id;
 
         if (lastStepId !== null) {
           // 工具属于当前 step，添加到 step 的 tools 中

@@ -155,6 +155,7 @@ type RedisStreamTask struct {
 	cancelFunc   context.CancelFunc
 	done         atomic.Bool
 	doneChan     chan struct{}
+	doneOnce     sync.Once
 	mu           sync.RWMutex
 	registry     TaskRegistryInterface // 任务注册表（用于注销）
 
@@ -367,7 +368,7 @@ func (t *RedisStreamTask) onDone() {
 	t.done.Store(true)
 
 	// 关闭完成通知 channel
-	close(t.doneChan)
+	t.doneOnce.Do(func() { close(t.doneChan) })
 
 	// 调用 runner 的 OnDone 回调
 	if t.runner != nil {
@@ -399,12 +400,7 @@ func (t *RedisStreamTask) Cancel() bool {
 	t.done.Store(true)
 
 	// 关闭完成通知 channel
-	select {
-	case <-t.doneChan:
-		// channel 已关闭
-	default:
-		close(t.doneChan)
-	}
+	t.doneOnce.Do(func() { close(t.doneChan) })
 
 	if t.registry != nil {
 		t.registry.Unregister(t.id)
@@ -448,7 +444,7 @@ func (t *RedisStreamTask) GetOutput(ctx context.Context, startID string, blockTi
 
 	// 解析事件
 	var event model.Event
-	if err := sonic.Unmarshal([]byte(data.(string)), &event); err != nil {
+	if err := sonic.UnmarshalString(data.(string), &event); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal event: %w", err)
 	}
 	event.ID = id

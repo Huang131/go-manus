@@ -87,3 +87,20 @@ func TestRequestPolicy_Extra_NestedObject(t *testing.T) {
 		t.Errorf("nested object lost: %s", rf)
 	}
 }
+
+func TestLLMModelAPIKey_InputOnly(t *testing.T) {
+	var m LLMModel
+	if err := sonic.Unmarshal([]byte(`{"api_key":"secret"}`), &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if m.APIKey != "secret" {
+		t.Fatalf("APIKey = %q, want secret", m.APIKey)
+	}
+	out, err := sonic.Marshal(m)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if contains(string(out), "secret") || contains(string(out), "api_key") {
+		t.Fatalf("API key leaked in response: %s", out)
+	}
+}

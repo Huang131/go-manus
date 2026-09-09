@@ -191,7 +191,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 
 		// 解析事件
 		var inputEvent model.MessageEvent
-		if err := sonic.Unmarshal([]byte(data), &inputEvent); err != nil {
+		if err := sonic.UnmarshalString(data, &inputEvent); err != nil {
 			logger.Warn("解析输入事件失败",
 				logger.String("data", data),
 				logger.Err(err))
@@ -295,14 +295,14 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 
 			// 处理不同类型的事件
 			switch e := event.(type) {
-			case *model.FullPlanEvent:
+			case *model.PlanEvent:
 				if e.Status == model.PlanEventStatusCompleted {
 					// 计划完成，更新会话状态
 					_ = r.sessionRep.UpdateStatus(ctx, r.sessionID, model.SessionStatusCompleted)
 				}
 			case *model.ErrorEvent:
 				logger.Error("Agent 运行出错", logger.String("error", e.Message))
-			case *model.FullStepEvent:
+			case *model.StepEvent:
 				if e.Status == model.StepEventStatusCompleted && e.Step.Success {
 					// 步骤完成，同步附件文件
 					for _, filePath := range e.Step.Attachments {

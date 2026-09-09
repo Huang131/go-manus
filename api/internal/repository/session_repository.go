@@ -132,7 +132,7 @@ func (r *PostgresSessionRepository) GetByID(ctx context.Context, id string) (*mo
 	var eventsJSON []byte
 	err := q.QueryRow(ctx, query, id).Scan(
 		&s.ID, &s.SandboxID, &s.TaskID, &s.Title, &s.UnreadMessageCount,
-		&s.LatestMessage, &s.LatestMessageAt,
+		&s.LatestMessage, &s.LatestMessageAt, &eventsJSON,
 		&s.Status, &s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
