@@ -7,6 +7,7 @@ import (
 	"github.com/bytedance/sonic"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
@@ -49,10 +50,35 @@ type AnthropicRequest struct {
 	Thinking    map[string]interface{}   `json:"thinking,omitempty"`
 }
 
-// AnthropicMessage Anthropic 消息格式（wire）
+// AnthropicMessage Anthropic 消息格式（wire）。
+// Content 既可以是纯字符串，也可以是内容块数组（assistant 的 tool_use、
+// user 的 tool_result / 多模态 part 都要求块数组形状）。
 type AnthropicMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string      `json:"role"`
+	Content interface{} `json:"content"`
+}
+
+// AnthropicContent Anthropic 内容块（请求与响应共用）
+type AnthropicContent struct {
+	Type string `json:"type"`
+	// text / thinking 块
+	Text     string `json:"text,omitempty"`
+	Thinking string `json:"thinking,omitempty"`
+	// tool_use 块
+	ID    string                 `json:"id,omitempty"`
+	Name  string                 `json:"name,omitempty"`
+	Input map[string]interface{} `json:"input,omitempty"`
+	// image 块
+	Source *AnthropicImageSource `json:"source,omitempty"`
+	// tool_result 块（仅出现在请求侧 user 消息中）
+	ToolUseID string `json:"tool_use_id,omitempty"`
+	Content   string `json:"content,omitempty"`
+}
+
+// AnthropicImageSource 图片来源（URL 引用）
+type AnthropicImageSource struct {
+	Type string `json:"type"` // "url"
+	URL  string `json:"url"`
 }
 
 // AnthropicResponse Anthropic API 响应（wire）
@@ -64,15 +90,6 @@ type AnthropicResponse struct {
 	StopReason   string             `json:"stop_reason"`
 	StopSequence string             `json:"stop_sequence"`
 	Usage        AnthropicUsage     `json:"usage"`
-}
-
-// AnthropicContent Anthropic 内容块
-type AnthropicContent struct {
-	Type      string                 `json:"type"`
-	Text      string                 `json:"text,omitempty"`
-	ID        string                 `json:"id,omitempty"`
-	Name      string                 `json:"name,omitempty"`
-	InputJSON map[string]interface{} `json:"input,omitempty"`
 }
 
 // AnthropicUsage Anthropic 使用量
@@ -110,88 +127,25 @@ func NewAnthropicClient(cfg *AnthropicClientConfig) *AnthropicClient {
 
 // Invoke 调用 Anthropic API
 //
-// 阶段 1d 改造点：
-//  1. 入参 req.Messages 是 []llmcore.Message，迭代时按 role 拆 system / 非 system
-//  2. req.Tools 是 []llmcore.ToolSpec，序列化前转成 wire format（map）
-//     （Anthropic wire 仍吃 map —— 阶段 2 可以引入 anthropic 专属结构体）
-//  3. 响应 tool_use 解析后转 []llmcore.ToolCall，与 openai 协议统一
-//  4. 去掉 NormalizeLLMResponse 调用：Content 与 ReasoningContent 严格分离，
-//     业务兜底下沉到 agent 消费侧
+// 协议映射：
+//  1. system 消息抽到 AnthropicRequest.System；user/assistant 按序转换
+//  2. assistant 的 ToolCalls 转为 content[] 中的 tool_use 块（input 解析自 Arguments JSON）
+//  3. tool 角色消息转为 user 消息中的 tool_result 块（相邻 tool 消息合并，满足角色交替约束）
+//  4. tools 定义转 {name, description, input_schema}
+//  5. 响应按块解析：text → ContentText，thinking → Reasoning，tool_use → ToolCalls
 func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMResponse, error) {
-	// 1. 转换 messages：llmcore.Message → wire
-	//    system 单独抽到 AnthropicRequest.System 字段；其余按 role/content 构造 AnthropicMessage
-	messages := make([]AnthropicMessage, 0, len(req.Messages))
-	var systemMessage string
+	messages, systemMessage := c.toAnthropicMessages(req.Messages)
 
-	for _, msg := range req.Messages {
-		role := string(msg.Role)
-
-		// 工具结果消息：Anthropic 协议上是 user + tool_result block，
-		// 这里走纯文本降级路径，把 ToolCallID/ContentText 拼成可读字符串
-		// 阶段 2 再补 Anthropic 原生 tool_result block 支持
-		content := msg.ContentText
-		if content == "" && len(msg.ContentParts) > 0 {
-			// 简化处理：只取 parts 里的 text
-			for _, p := range msg.ContentParts {
-				if p.Type == "text" {
-					content += p.Text
-				}
-			}
-		}
-
-		if role == string(llmcore.RoleSystem) {
-			systemMessage += content + "\n"
-			continue
-		}
-
-		// assistant 消息带 tool_calls → Anthropic wire 是 content[] tool_use block
-		// 阶段 1d 简化：tool_use 走 map 注入；这里只放纯文本
-		if role == string(llmcore.RoleAssistant) && len(msg.ToolCalls) > 0 {
-			// 暂不展开 tool_use block；只把 content 文本带上，tool_calls 由业务侧另传
-			// （实际生产 Anthropic 走法在阶段 2 重做）
-			messages = append(messages, AnthropicMessage{
-				Role:    "assistant",
-				Content: content,
-			})
-			continue
-		}
-
-		// tool role 消息：Anthropic 协议上是 user + tool_result block
-		// 阶段 1d 简化：合并成 user 文本（带 tool name 标识）
-		if role == string(llmcore.RoleTool) {
-			name := msg.Name
-			if name == "" {
-				name = "tool"
-			}
-			messages = append(messages, AnthropicMessage{
-				Role:    "user",
-				Content: fmt.Sprintf("[%s result] %s", name, content),
-			})
-			continue
-		}
-
-		// user / assistant 普通文本
-		messages = append(messages, AnthropicMessage{
-			Role:    role,
-			Content: content,
-		})
-	}
-
-	// 2. 转换 tools：llmcore.ToolSpec → wire map
-	//    阶段 1d：直接用 struct 自己的 JSON 序列化结果（外层再包一层）
+	// 转换 tools：llmcore.ToolSpec → Anthropic wire（{name, description, input_schema}）
 	tools := make([]map[string]interface{}, 0, len(req.Tools))
 	for _, t := range req.Tools {
-		// ToolSpec 序列化：{type, function:{name,description,parameters}, read_only}
-		// Anthropic wire 期望 {name, description, input_schema}，所以重写字段名
-		fn := map[string]interface{}{
+		tools = append(tools, map[string]interface{}{
 			"name":         t.Function.Name,
 			"description":  t.Function.Description,
 			"input_schema": t.Function.Parameters,
-		}
-		tools = append(tools, fn)
+		})
 	}
 
-	// 构建请求
 	anthropicReq := AnthropicRequest{
 		Model:       c.modelName,
 		Messages:    messages,
@@ -202,32 +156,27 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 		Thinking:    c.effectiveThinking(),
 	}
 
-	// 序列化请求
 	reqBody, err := sonic.Marshal(anthropicReq)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	// 创建 HTTP 请求
 	url := fmt.Sprintf("%s/v1/messages", c.baseURL)
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	// 设置请求头
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-api-key", c.apiKey)
 	httpReq.Header.Set("anthropic-version", c.version)
 
-	// 发送请求
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// 读取响应
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read response: %w", err)
@@ -241,13 +190,11 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 		return nil, fmt.Errorf("Anthropic API error: status=%d, body=%s", resp.StatusCode, string(respBody))
 	}
 
-	// 解析响应
 	var anthropicResp AnthropicResponse
 	if err := sonic.Unmarshal(respBody, &anthropicResp); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
 
-	// 转换响应：按 content block 区分 text / tool_use，统一装进 Message
 	result := &llmcore.LLMResponse{
 		ID: anthropicResp.ID,
 		Message: llmcore.Message{
@@ -256,21 +203,26 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 		FinishReason: anthropicResp.StopReason,
 	}
 
-	for _, content := range anthropicResp.Content {
-		switch content.Type {
+	for i := range anthropicResp.Content {
+		block := &anthropicResp.Content[i]
+		switch block.Type {
 		case "text":
-			result.Message.ContentText += content.Text
+			result.Message.ContentText += block.Text
+		case "thinking":
+			// 扩展思考块 → Reasoning（不回传给用户，可审计、可随记忆往返）
+			result.Message.Reasoning += block.Thinking
 		case "tool_use":
-			// Arguments 把 input map 重新 marshal 成 JSON 字符串，保持和 openai 协议形状一致
-			argsBytes, _ := sonic.Marshal(content.InputJSON)
 			result.Message.ToolCalls = append(result.Message.ToolCalls, llmcore.ToolCall{
-				ID:   content.ID,
+				ID:   block.ID,
 				Type: "function",
 				Function: llmcore.ToolCallFunction{
-					Name:      content.Name,
-					Arguments: string(argsBytes),
+					Name:      block.Name,
+					Arguments: string(mustMarshalMap(block.Input)),
 				},
 			})
+		default:
+			// redacted_thinking 等未知块：无法还原内容，跳过
+			logger.Debug("Anthropic 响应包含未处理的内容块", logger.String("type", block.Type))
 		}
 	}
 
@@ -281,8 +233,145 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 	}
 	result.CostUSD = estimateCostUSD(c.costPolicy, result.Usage)
 
-	// 协议层严格分离 ContentText / Reasoning；业务兜底由调用方自行决定
 	return result, nil
+}
+
+// toAnthropicMessages 将 llmcore 消息列表转为 Anthropic wire 格式。
+// 返回值第二个是抽取出来的 system 文本。
+func (c *AnthropicClient) toAnthropicMessages(reqMessages []llmcore.Message) ([]AnthropicMessage, string) {
+	messages := make([]AnthropicMessage, 0, len(reqMessages))
+	var systemMessage string
+
+	appendMessage := func(role string, content interface{}) {
+		messages = append(messages, AnthropicMessage{Role: role, Content: content})
+	}
+
+	// appendToolResult 把 tool_result 块追加到最后一条 user 消息；
+	// 若最后一条不是"由 tool 结果聚合出的 user 消息"，则新建。
+	// Anthropic 要求 user/assistant 角色严格交替，相邻 tool 结果必须合并进同一条 user 消息。
+	appendToolResult := func(block AnthropicContent) {
+		if n := len(messages); n > 0 {
+			if blocks, ok := messages[n-1].Content.([]AnthropicContent); ok && len(blocks) > 0 && blocks[0].Type == "tool_result" {
+				messages[n-1].Content = append(blocks, block)
+				return
+			}
+		}
+		appendMessage("user", []AnthropicContent{block})
+	}
+
+	for _, msg := range reqMessages {
+		switch msg.Role {
+		case llmcore.RoleSystem:
+			systemMessage += msg.ContentText + "\n"
+			continue
+
+		case llmcore.RoleAssistant:
+			if len(msg.ToolCalls) == 0 {
+				appendMessage("assistant", msg.ContentText)
+				continue
+			}
+			// assistant + tool_calls → content[]：text 块（可空）+ tool_use 块
+			blocks := make([]AnthropicContent, 0, len(msg.ToolCalls)+1)
+			if text := textOf(msg); text != "" {
+				blocks = append(blocks, AnthropicContent{Type: "text", Text: text})
+			}
+			for _, tc := range msg.ToolCalls {
+				blocks = append(blocks, AnthropicContent{
+					Type:  "tool_use",
+					ID:    tc.ID,
+					Name:  tc.Function.Name,
+					Input: parseJSONMap(tc.Function.Arguments),
+				})
+			}
+			appendMessage("assistant", blocks)
+
+		case llmcore.RoleTool:
+			appendToolResult(AnthropicContent{
+				Type:      "tool_result",
+				ToolUseID: msg.ToolCallID,
+				Content:   msg.ContentText,
+			})
+
+		default: // user
+			appendMessage("user", userContent(msg))
+		}
+	}
+
+	return messages, systemMessage
+}
+
+// textOf 取消息的纯文本内容（ContentText 优先，ContentParts 中的 text 拼接兜底）
+func textOf(msg llmcore.Message) string {
+	if msg.ContentText != "" {
+		return msg.ContentText
+	}
+	var sb strings.Builder
+	for _, p := range msg.ContentParts {
+		if p.Type == "text" {
+			sb.WriteString(p.Text)
+		}
+	}
+	return sb.String()
+}
+
+// userContent 构造 user 消息内容：纯文本用 string；含图片等多模态 part 时用块数组
+func userContent(msg llmcore.Message) interface{} {
+	hasMultimodal := false
+	for _, p := range msg.ContentParts {
+		if p.Type != "text" {
+			hasMultimodal = true
+			break
+		}
+	}
+	if !hasMultimodal {
+		return textOf(msg)
+	}
+
+	blocks := make([]AnthropicContent, 0, len(msg.ContentParts))
+	if text := msg.ContentText; text != "" {
+		blocks = append(blocks, AnthropicContent{Type: "text", Text: text})
+	}
+	for _, p := range msg.ContentParts {
+		switch p.Type {
+		case "text":
+			blocks = append(blocks, AnthropicContent{Type: "text", Text: p.Text})
+		case "image_url":
+			if p.ImageURL != nil && p.ImageURL.URL != "" {
+				// Anthropic 支持 URL source 的图片输入
+				blocks = append(blocks, AnthropicContent{
+					Type: "image",
+					Source: &AnthropicImageSource{
+						Type: "url",
+						URL:  p.ImageURL.URL,
+					},
+				})
+			}
+		default:
+			logger.Debug("Anthropic 跳过不支持的内容块", logger.String("type", p.Type))
+		}
+	}
+	return blocks
+}
+
+// parseJSONMap 把工具调用参数 JSON 字符串解析为 map；空串或非法 JSON 返回空 map
+func parseJSONMap(arguments string) map[string]interface{} {
+	input := make(map[string]interface{})
+	if arguments != "" {
+		_ = sonic.Unmarshal([]byte(arguments), &input)
+	}
+	return input
+}
+
+// mustMarshalMap 把 input map 序列化回 JSON 字符串（与 openai 协议的 Arguments 形状保持一致）
+func mustMarshalMap(input map[string]interface{}) []byte {
+	if input == nil {
+		return []byte("{}")
+	}
+	data, err := sonic.Marshal(input)
+	if err != nil {
+		return []byte("{}")
+	}
+	return data
 }
 
 func (c *AnthropicClient) effectiveTemperature() float64 {
@@ -299,12 +388,25 @@ func (c *AnthropicClient) effectiveMaxTokens() int {
 	return c.maxTokens
 }
 
+// effectiveThinking 构造扩展思考配置。
+// Anthropic 要求 thinking 启用时必须带 budget_tokens，且 budget < max_tokens。
 func (c *AnthropicClient) effectiveThinking() map[string]interface{} {
 	switch c.requestPolicy.ReasoningMode {
 	case llmcore.ReasoningOff:
 		return map[string]interface{}{"type": "disabled"}
 	case llmcore.ReasoningLow, llmcore.ReasoningAuto, llmcore.ReasoningHigh:
-		return map[string]interface{}{"type": "enabled"}
+		budget := 2048
+		if c.requestPolicy.ReasoningMode == llmcore.ReasoningHigh {
+			budget = 8192
+		}
+		if maxTokens := c.effectiveMaxTokens(); maxTokens <= budget {
+			budget = maxTokens / 2
+		}
+		if budget < 1024 {
+			// max_tokens 过小，无法启用扩展思考
+			return nil
+		}
+		return map[string]interface{}{"type": "enabled", "budget_tokens": budget}
 	default:
 		return nil
 	}
@@ -323,21 +425,4 @@ func (c *AnthropicClient) Temperature() float64 {
 // MaxTokens 返回最大 token 数
 func (c *AnthropicClient) MaxTokens() int {
 	return c.maxTokens
-}
-
-// IsAnthropicModel 判断是否为 Anthropic 模型
-func IsAnthropicModel(modelName string) bool {
-	anthropicModels := []string{
-		"claude-3-opus",
-		"claude-3-sonnet",
-		"claude-3-haiku",
-		"claude-2",
-		"claude-instant",
-	}
-	for _, model := range anthropicModels {
-		if len(modelName) >= len(model) && modelName[:len(model)] == model {
-			return true
-		}
-	}
-	return false
 }

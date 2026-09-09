@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"github.com/bytedance/sonic"
 	"sync"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
@@ -15,8 +14,6 @@ type Memory interface {
 	MergeMessages(msgs []llmcore.Message) error
 	// GetMessages 获取消息列表
 	GetMessages() []llmcore.Message
-	// Size 返回记忆大小 (token 数估算)
-	Size() int
 	// Clear 清空记忆
 	Clear()
 	// Compact 压缩记忆（保留最近消息）
@@ -58,19 +55,6 @@ func (m *SimpleMemory) GetMessages() []llmcore.Message {
 	result := make([]llmcore.Message, len(m.messages))
 	copy(result, m.messages)
 	return result
-}
-
-func (m *SimpleMemory) Size() int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	total := 0
-	for _, msg := range m.messages {
-		data, _ := sonic.Marshal(msg)
-		total += len(data)
-	}
-	// 简单估算: 1 token ≈ 4 字符
-	return total / 4
 }
 
 func (m *SimpleMemory) Clear() {

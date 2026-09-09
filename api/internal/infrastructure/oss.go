@@ -1,7 +1,6 @@
 package infrastructure
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -10,8 +9,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 
 	appconfig "github.com/Huang131/go-manus/api/config"
 	"github.com/Huang131/go-manus/api/pkg/logger"
@@ -98,6 +97,7 @@ func generateURL(provider, bucket, region, key string) string {
 // OSS AWS S3 兼容的对象存储客户端。
 type OSS struct {
 	client   *s3.Client
+	uploader *manager.Uploader
 	bucket   string
 	cfg      *appconfig.ObjectStorageConfig
 	endpoint string
@@ -151,13 +151,25 @@ func NewOSS(cfg *appconfig.ObjectStorageConfig) (*OSS, error) {
 
 	return &OSS{
 		client:   client,
+		uploader: newUploader(client),
 		bucket:   cfg.Bucket,
 		cfg:      cfg,
 		endpoint: endpoint,
 	}, nil
 }
 
+// newUploader 创建流式分片上传器。
+// 小文件自动走单次 PutObject，大文件自动分片并发上传，避免全量读入内存。
+func newUploader(client *s3.Client) *manager.Uploader {
+	return manager.NewUploader(client, func(u *manager.Uploader) {
+		u.PartSize = 10 * 1024 * 1024 // 每个分片 10MB
+		u.Concurrency = 4
+	})
+}
+
 // Close 关闭客户端。
+// aws-sdk-go-v2 的 s3.Client 基于 net/http 连接池，无需也无法显式关闭底层连接；
+// 此方法仅为满足 Storage 生命周期接口。
 func (s *OSS) Close() error {
 	logger.Info("S3 storage connection closed")
 	return nil
@@ -176,6 +188,8 @@ func (s *OSS) HealthCheck(ctx context.Context) error {
 }
 
 // Upload 上传文件。
+// 通过 manager.Uploader 流式上传：数据不整块读入内存，
+// 小文件单次 PutObject，大文件自动 10MB 分片并发上传。
 func (s *OSS) Upload(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error {
 	if s.client == nil {
 		return fmt.Errorf("S3 client not initialized")
@@ -183,110 +197,24 @@ func (s *OSS) Upload(ctx context.Context, key string, reader io.Reader, size int
 
 	logger.Debug("S3 Uploading", logger.String("key", key), logger.Int64("size", size))
 
-	data, err := io.ReadAll(reader)
-	if err != nil {
-		return fmt.Errorf("failed to read data: %w", err)
-	}
-
-	input := &s3.PutObjectInput{
+	_, err := s.uploader.Upload(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(s.bucket),
 		Key:         aws.String(key),
-		Body:        bytes.NewReader(data),
+		Body:        reader,
 		ContentType: aws.String(contentType),
-	}
-
-	// 大文件使用分片上传
-	if size > 100*1024*1024 { // > 100MB
-		return s.uploadLarge(ctx, key, bytes.NewReader(data), size, contentType)
-	}
-
-	_, err = s.client.PutObject(ctx, input)
+		ContentLength: func() *int64 {
+			if size > 0 {
+				return aws.Int64(size)
+			}
+			return nil
+		}(),
+	})
 	if err != nil {
 		logger.Error("S3 upload failed", logger.String("key", key), logger.Err(err))
 		return fmt.Errorf("S3 upload failed: %w", err)
 	}
 
-	logger.Info("S3 upload success", logger.String("key", key))
-	return nil
-}
-
-// uploadLarge 分片上传大文件 (> 100MB)。
-func (s *OSS) uploadLarge(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error {
-	createOutput, err := s.client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
-		Bucket:      aws.String(s.bucket),
-		Key:         aws.String(key),
-		ContentType: aws.String(contentType),
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create multipart upload: %w", err)
-	}
-
-	uploadID := *createOutput.UploadId
-	const partSize = 10 * 1024 * 1024 // 每个分片 10MB
-	var uploadedParts []s3types.CompletedPart
-
-	partNumber := 1
-	offset := int64(0)
-
-	for offset < size {
-		remaining := size - offset
-		readSize := partSize
-		if remaining < partSize {
-			readSize = int(remaining)
-		}
-
-		chunk := make([]byte, readSize)
-		n, err := reader.Read(chunk)
-		if err != nil && err != io.EOF {
-			s.client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
-				Bucket:   aws.String(s.bucket),
-				Key:      aws.String(key),
-				UploadId: aws.String(uploadID),
-			})
-			return fmt.Errorf("failed to read chunk: %w", err)
-		}
-
-		if n == 0 {
-			break
-		}
-
-		uploadPartOutput, err := s.client.UploadPart(ctx, &s3.UploadPartInput{
-			Bucket:     aws.String(s.bucket),
-			Key:        aws.String(key),
-			UploadId:   aws.String(uploadID),
-			PartNumber: aws.Int32(int32(partNumber)),
-			Body:       bytes.NewReader(chunk[:n]),
-		})
-		if err != nil {
-			s.client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
-				Bucket:   aws.String(s.bucket),
-				Key:      aws.String(key),
-				UploadId: aws.String(uploadID),
-			})
-			return fmt.Errorf("failed to upload part %d: %w", partNumber, err)
-		}
-
-		uploadedParts = append(uploadedParts, s3types.CompletedPart{
-			PartNumber: aws.Int32(int32(partNumber)),
-			ETag:       uploadPartOutput.ETag,
-		})
-
-		offset += int64(n)
-		partNumber++
-	}
-
-	_, err = s.client.CompleteMultipartUpload(ctx, &s3.CompleteMultipartUploadInput{
-		Bucket:   aws.String(s.bucket),
-		Key:      aws.String(key),
-		UploadId: aws.String(uploadID),
-		MultipartUpload: &s3types.CompletedMultipartUpload{
-			Parts: uploadedParts,
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("failed to complete multipart upload: %w", err)
-	}
-
+	logger.Debug("S3 upload success", logger.String("key", key))
 	return nil
 }
 
@@ -358,6 +286,7 @@ func (s *OSS) Exists(ctx context.Context, key string) (bool, error) {
 	})
 	if err != nil {
 		// 404 错误表示文件不存在
+		logger.Error("S3 head object failed", logger.String("key", key), logger.Err(err))
 		return false, nil
 	}
 	return true, nil

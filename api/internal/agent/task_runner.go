@@ -14,6 +14,7 @@ import (
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
+	"github.com/google/uuid"
 
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
@@ -240,12 +241,35 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 				continue
 			}
 
+			// 生成事件元数据：event_id 与 created_at 在创建时确定，
+			// 平铺进业务 payload（对齐 Python 版 BaseEventData 结构），
+			// Redis 流与 DB 各存一份，SSE 直传无需再解析重组。
+			eventID := uuid.New().String()
+			eventCreatedAt := time.Now()
+
+			// 业务事件序列化为 payload 并注入元数据
+			var payload map[string]interface{}
+			if err := sonic.Unmarshal(eventJSON, &payload); err == nil {
+				payload["event_id"] = eventID
+				payload["created_at"] = eventCreatedAt.Unix()
+				eventJSON, err = sonic.Marshal(payload)
+				if err != nil {
+					logger.Error("序列化事件 payload 失败",
+						logger.String("task_id", task.ID()),
+						logger.Err(err))
+					continue
+				}
+			}
+			// payload 不是对象时（罕见），保留原始 payload，仅元数据落在信封上
+
 			// 同时包一层 model.Event（与 DB 一致），并写入 Redis Stream，
 			// 否则 GetOutput 反序列化得到的是业务 payload，event.Type 永远是空，
 			// SSE 推送时没有 event:xxx 业务类型行，前端 lastEventIdRef 也拿不到。
 			baseEvent := &model.Event{
-				Type: event.GetType(),
-				Data: eventJSON,
+				ID:        eventID,
+				Type:      event.GetType(),
+				CreatedAt: eventCreatedAt,
+				Data:      eventJSON,
 			}
 			wrappedJSON, err := sonic.Marshal(baseEvent)
 			if err != nil {

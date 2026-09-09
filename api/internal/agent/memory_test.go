@@ -17,7 +17,7 @@ func TestSimpleMemory_Add(t *testing.T) {
 		t.Errorf("Add() error = %v", err)
 	}
 
-	if mem.Size() == 0 {
+	if len(mem.GetMessages()) == 0 {
 		t.Error("Add() did not add message")
 	}
 }
@@ -60,7 +60,7 @@ func TestSimpleMemory_Clear(t *testing.T) {
 
 	mem.Clear()
 
-	if mem.Size() != 0 {
+	if len(mem.GetMessages()) != 0 {
 		t.Error("Clear() should remove all messages")
 	}
 }
