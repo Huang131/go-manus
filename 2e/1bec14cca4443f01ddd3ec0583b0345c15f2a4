@@ -1,0 +1,45 @@
+api/internal/repository/session_repository.go
+  s_b0d9ce2a00c5fd::t_86a5d9500fdef1 240-241,244
+  s_b0d9ce2a00c5fd::t_69444e86551f45 150,156
+  s_b0d9ce2a00c5fd::t_0fa422a03ad77d 182,185,194
+api/internal/repository/file_repository.go
+  s_b0d9ce2a00c5fd::t_af850b0b3090fb 275-276,279-284,287
+  s_b0d9ce2a00c5fd::t_7d4680dd3f593f 210-214,217-225,227
+api/internal/service/file_cleanup_service.go
+  s_b0d9ce2a00c5fd::t_eb7c35cd26455e 14-19,205,237-239
+api/internal/external/fallback_llm_test.go
+  s_b0d9ce2a00c5fd::t_66d0de60206bfe 452-665
+api/internal/model/session.go
+  s_b0d9ce2a00c5fd::t_ce6b6628d77d10 30
+api/migrations/001_create_sessions.sql
+  s_b0d9ce2a00c5fd::t_8968c1c69fb76d 18,27
+  s_b0d9ce2a00c5fd::t_32b2f318ff615c 43
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "2e1bec14cca4443f01ddd3ec0583b0345c15f2a4",
+  "prompts": {},
+  "sessions": {
+    "s_b0d9ce2a00c5fd": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a9fe53d5f8bfc5c33242567",
+        "model": "minimax-m2.7"
+      },
+      "human_author": "Huang131 <1315970725@qq.com>",
+      "custom_attributes": {
+        "tool_name": "RunCommand",
+        "session_id": "6a9fe53d5f8bfc5c33242567",
+        "tool_use_id": "6aa0c0d55f8bfc5c33242780",
+        "edit_kind": "bash",
+        "client_type": "ide",
+        "source_scene": "agent",
+        "operation_id": "6aa0c0d55f8bfc5c33242780",
+        "external_session_id": "6a9fe53d5f8bfc5c33242567",
+        "display_model_name": "minimax-m2.7",
+        "runtime_client": "trae-tob-git-ai"
+      }
+    }
+  }
+}
