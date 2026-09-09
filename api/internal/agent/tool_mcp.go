@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"github.com/Huang131/go-manus/api/internal/external"
@@ -65,12 +66,9 @@ func (t *MCPTool) ReadOnly() bool {
 
 // Invoke 调用工具
 func (t *MCPTool) Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
-	serverName, _ := params["server"].(string)
-	toolName, _ := params["tool"].(string)
-	paramsRaw, _ := params["params"].(map[string]interface{})
-
-	if paramsRaw == nil {
-		paramsRaw = make(map[string]interface{})
+	serverName, toolName, paramsRaw, validationErr := parseMCPInvokeParams(params)
+	if validationErr != "" {
+		return model.NewToolError(validationErr), nil
 	}
 
 	t.mu.RLock()
@@ -122,6 +120,27 @@ func (t *MCPTool) Invoke(ctx context.Context, params map[string]interface{}) (*m
 		"tool":   toolName,
 		"result": result,
 	}), nil
+}
+
+// parseMCPInvokeParams 在访问远端 MCP manager 前校验模型生成的动态参数。
+func parseMCPInvokeParams(params map[string]interface{}) (string, string, map[string]interface{}, string) {
+	serverName, ok := params["server"].(string)
+	if !ok || strings.TrimSpace(serverName) == "" {
+		return "", "", nil, "server must be a non-empty string"
+	}
+	toolName, ok := params["tool"].(string)
+	if !ok || strings.TrimSpace(toolName) == "" {
+		return "", "", nil, "tool must be a non-empty string"
+	}
+	paramsValue, exists := params["params"]
+	if !exists || paramsValue == nil {
+		return strings.TrimSpace(serverName), strings.TrimSpace(toolName), map[string]interface{}{}, ""
+	}
+	paramsRaw, ok := paramsValue.(map[string]interface{})
+	if !ok {
+		return "", "", nil, "params must be an object"
+	}
+	return strings.TrimSpace(serverName), strings.TrimSpace(toolName), paramsRaw, ""
 }
 
 // Initialize 初始化 MCP 工具

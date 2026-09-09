@@ -3,9 +3,11 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
-	"github.com/bytedance/sonic"
 	"time"
+
+	"github.com/bytedance/sonic"
 
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
@@ -111,8 +113,11 @@ func (r *PostgresSessionRepository) Create(ctx context.Context, session *model.S
 			latest_message_at, events, memories, status, created_at, updated_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '{}'::jsonb, $9, $10, $11)
 	`
-	events, _ := sonic.Marshal(session.Events)
-	_, err := q.Exec(ctx, query,
+	events, err := marshalSessionEvents(session.Events)
+	if err != nil {
+		return err
+	}
+	_, err = q.Exec(ctx, query,
 		session.ID, session.SandboxID, session.TaskID, session.Title,
 		session.UnreadMessageCount, session.LatestMessage, session.LatestMessageAt,
 		events, session.Status, session.CreatedAt, session.UpdatedAt,
@@ -126,17 +131,24 @@ func (r *PostgresSessionRepository) GetByID(ctx context.Context, id string) (*mo
 	query := `
 		SELECT id, COALESCE(sandbox_id, ''), COALESCE(task_id, ''), title, unread_message_count, COALESCE(latest_message, ''),
 			latest_message_at, events, status, created_at, updated_at
-		FROM sessions WHERE id = $1
+		FROM sessions WHERE id = $1 AND deleted_at IS NULL
 	`
 	var s model.Session
 	var eventsJSON []byte
+	var latestMessageAt sql.NullTime
 	err := q.QueryRow(ctx, query, id).Scan(
 		&s.ID, &s.SandboxID, &s.TaskID, &s.Title, &s.UnreadMessageCount,
-		&s.LatestMessage, &s.LatestMessageAt, &eventsJSON,
+		&s.LatestMessage, &latestMessageAt, &eventsJSON,
 		&s.Status, &s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, err
+	}
+	if latestMessageAt.Valid {
+		s.LatestMessageAt = &latestMessageAt.Time
 	}
 	if err := sonic.Unmarshal(eventsJSON, &s.Events); err != nil {
 		return nil, err
@@ -150,7 +162,8 @@ func (r *PostgresSessionRepository) GetAll(ctx context.Context) ([]*model.Sessio
 	query := `
 		SELECT id, COALESCE(sandbox_id, ''), COALESCE(task_id, ''), title, unread_message_count, COALESCE(latest_message, ''),
 			latest_message_at, status, created_at, updated_at
-		FROM sessions WHERE deleted_at IS NULL ORDER BY latest_message_at DESC NULLS LAST
+		FROM sessions WHERE deleted_at IS NULL
+		ORDER BY latest_message_at DESC NULLS LAST, created_at DESC, id DESC
 	`
 	rows, err := q.Query(ctx, query)
 	if err != nil {
@@ -161,14 +174,21 @@ func (r *PostgresSessionRepository) GetAll(ctx context.Context) ([]*model.Sessio
 	var sessions []*model.Session
 	for rows.Next() {
 		var s model.Session
+		var latestMessageAt sql.NullTime
 		if err := rows.Scan(
 			&s.ID, &s.SandboxID, &s.TaskID, &s.Title, &s.UnreadMessageCount,
-			&s.LatestMessage, &s.LatestMessageAt,
+			&s.LatestMessage, &latestMessageAt,
 			&s.Status, &s.CreatedAt, &s.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
+		if latestMessageAt.Valid {
+			s.LatestMessageAt = &latestMessageAt.Time
+		}
 		sessions = append(sessions, &s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return sessions, nil
 }
@@ -185,7 +205,9 @@ func (r *PostgresSessionRepository) List(ctx context.Context, limit, offset int)
 	query := `
 		SELECT id, COALESCE(sandbox_id, ''), COALESCE(task_id, ''), title, unread_message_count, COALESCE(latest_message, ''),
 			latest_message_at, status, created_at, updated_at
-		FROM sessions WHERE deleted_at IS NULL ORDER BY latest_message_at DESC NULLS LAST LIMIT $1 OFFSET $2
+		FROM sessions WHERE deleted_at IS NULL
+		ORDER BY latest_message_at DESC NULLS LAST, created_at DESC, id DESC
+		LIMIT $1 OFFSET $2
 	`
 	rows, err := q.Query(ctx, query, limit, offset)
 	if err != nil {
@@ -196,14 +218,21 @@ func (r *PostgresSessionRepository) List(ctx context.Context, limit, offset int)
 	var sessions []*model.Session
 	for rows.Next() {
 		var s model.Session
+		var latestMessageAt sql.NullTime
 		if err := rows.Scan(
 			&s.ID, &s.SandboxID, &s.TaskID, &s.Title, &s.UnreadMessageCount,
-			&s.LatestMessage, &s.LatestMessageAt,
+			&s.LatestMessage, &latestMessageAt,
 			&s.Status, &s.CreatedAt, &s.UpdatedAt,
 		); err != nil {
 			return nil, 0, err
 		}
+		if latestMessageAt.Valid {
+			s.LatestMessageAt = &latestMessageAt.Time
+		}
 		sessions = append(sessions, &s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
 	}
 	return sessions, total, nil
 }
@@ -218,13 +247,25 @@ func (r *PostgresSessionRepository) Update(ctx context.Context, session *model.S
 			status = $9, updated_at = $10
 		WHERE id = $1
 	`
-	events, _ := sonic.Marshal(session.Events)
-	_, err := q.Exec(ctx, query,
+	events, err := marshalSessionEvents(session.Events)
+	if err != nil {
+		return err
+	}
+	_, err = q.Exec(ctx, query,
 		session.ID, session.SandboxID, session.TaskID, session.Title,
 		session.UnreadMessageCount, session.LatestMessage, session.LatestMessageAt,
 		events, session.Status, session.UpdatedAt,
 	)
 	return err
+}
+
+// marshalSessionEvents 为持久化错误补充字段上下文，避免非法 RawMessage 静默写入。
+func marshalSessionEvents(events []model.Event) ([]byte, error) {
+	data, err := sonic.Marshal(events)
+	if err != nil {
+		return nil, fmt.Errorf("encode session events: %w", err)
+	}
+	return data, nil
 }
 
 // Delete 删除会话（软删除）

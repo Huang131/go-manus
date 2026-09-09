@@ -353,6 +353,16 @@ func TestSessionService_GetSessionFiles(t *testing.T) {
 	}
 }
 
+func TestSessionService_GetSessionFiles_NotFound(t *testing.T) {
+	repo := NewMockSessionRepository()
+	svc := NewSessionServiceWithSandbox(repo, newMockFileRepo(), "")
+
+	_, err := svc.GetSessionFiles(context.Background(), "missing-session")
+	if err == nil {
+		t.Fatal("GetSessionFiles() error = nil, want not found")
+	}
+}
+
 // newMockFileRepo 为 GetSessionFiles 测试提供最小化的 FileRepository mock
 func newMockFileRepo() *mockFileRepo {
 	return &mockFileRepo{files: map[string][]*model.File{}}

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -111,6 +112,9 @@ func (r *PostgresFileRepository) GetBySessionAndFilepath(ctx context.Context, se
 		&file.Key, &file.Extension, &file.MimeType, &file.Size, &file.CreatedAt,
 	)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &file, nil
@@ -129,6 +133,9 @@ func (r *PostgresFileRepository) GetByID(ctx context.Context, id string) (*model
 		&file.Key, &file.Extension, &file.MimeType, &file.Size, &file.CreatedAt,
 	)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &file, nil
@@ -180,6 +187,9 @@ func (r *PostgresFileRepository) ListBySessionID(ctx context.Context, sessionID 
 			return nil, err
 		}
 		files = append(files, &f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return files, nil
 }
@@ -238,6 +248,9 @@ func (r *PostgresFileRepository) GetExpiredFiles(ctx context.Context, expireDura
 		}
 		files = append(files, &f)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return files, nil
 }
 
@@ -268,6 +281,9 @@ func (r *PostgresFileRepository) GetFilesBySessionIDs(ctx context.Context, sessi
 			return nil, err
 		}
 		files = append(files, &f)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return files, nil
 }

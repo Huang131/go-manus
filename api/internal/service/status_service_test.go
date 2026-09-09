@@ -4,11 +4,25 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
 	"github.com/Huang131/go-manus/api/internal/model"
 )
+
+func TestStatusServiceUsesInjectedClock(t *testing.T) {
+	svc := &DefaultStatusService{
+		now: func() time.Time { return time.Unix(123, 0) },
+	}
+	status, err := svc.GetHealthStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetHealthStatus() error = %v", err)
+	}
+	if status.Timestamp != 123 {
+		t.Fatalf("Timestamp = %d, want 123", status.Timestamp)
+	}
+}
 
 type fakePostgres struct {
 	err error

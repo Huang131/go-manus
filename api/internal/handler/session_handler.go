@@ -125,7 +125,11 @@ func (h *SessionHandler) Stream(c *gin.Context) {
 			if err != nil {
 				continue
 			}
-			data, _ := sonic.MarshalString(sessions)
+			data, err := sonic.MarshalString(sessions)
+			if err != nil {
+				logger.Error("序列化会话 SSE 数据失败", logger.Err(err))
+				continue
+			}
 			c.SSEvent(sseEventSessions, data)
 			c.Writer.Flush()
 		}
@@ -206,16 +210,24 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 		}
 
 		// 先推送用户消息事件（让前端能立即展示用户发送的内容）
-		userPayload, _ := sonic.Marshal(&model.MessageEvent{
+		userPayload, err := sonic.Marshal(&model.MessageEvent{
 			Type:    model.EventTypeMessage,
 			Role:    string(msg.Role),
 			Message: msg.ContentText,
 		})
+		if err != nil {
+			logger.Error("序列化用户消息 SSE 数据失败", logger.Err(err))
+			return
+		}
 		c.SSEvent(sseEventMessage, string(userPayload))
 		c.Writer.Flush()
 
 		// 再推送 task_id 事件（单独业务类型，前端可识别）
-		taskIDData, _ := sonic.Marshal(map[string]interface{}{"task_id": taskID})
+		taskIDData, err := sonic.Marshal(map[string]interface{}{"task_id": taskID})
+		if err != nil {
+			logger.Error("序列化 task_id SSE 数据失败", logger.Err(err))
+			return
+		}
 		c.SSEvent(sseEventTaskID, string(taskIDData))
 		c.Writer.Flush()
 	} else {
@@ -396,10 +408,14 @@ func mergeEventMetadata(event *model.Event) []byte {
 	}
 
 	if len(event.Data) == 0 {
-		out, _ := sonic.Marshal(map[string]interface{}{
+		out, err := sonic.Marshal(map[string]interface{}{
 			"event_id":   event.ID,
 			"created_at": createdAt.Unix(),
 		})
+		if err != nil {
+			logger.Error("序列化空事件元数据失败", logger.Err(err))
+			return []byte(`{}`)
+		}
 		return out
 	}
 
@@ -412,6 +428,7 @@ func mergeEventMetadata(event *model.Event) []byte {
 	payload["created_at"] = createdAt.Unix()
 	out, err := sonic.Marshal(payload)
 	if err != nil {
+		logger.Error("序列化事件元数据失败", logger.Err(err))
 		return event.Data
 	}
 	return out

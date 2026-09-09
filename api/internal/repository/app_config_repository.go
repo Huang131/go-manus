@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+
 	"github.com/bytedance/sonic"
 
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
@@ -182,6 +183,9 @@ func (r *PostgresAppConfigRepository) ListConfigs(ctx context.Context, configTyp
 		}
 		configs = append(configs, &c)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return configs, nil
 }
 
@@ -209,6 +213,9 @@ func (r *PostgresAppConfigRepository) ListAllConfigs(ctx context.Context) ([]*mo
 			return nil, err
 		}
 		configs = append(configs, &c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return configs, nil
 }

@@ -2,13 +2,30 @@ package repository
 
 import (
 	"context"
-	"github.com/bytedance/sonic"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/bytedance/sonic"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 )
+
+func TestMarshalSessionEventsRejectsInvalidJSON(t *testing.T) {
+	events := []model.Event{{
+		Type: model.EventTypeMessage,
+		Data: []byte(`{"message":`),
+	}}
+
+	_, err := marshalSessionEvents(events)
+	if err == nil {
+		t.Fatal("marshalSessionEvents() error = nil, want invalid JSON error")
+	}
+	if !strings.Contains(err.Error(), "encode session events") {
+		t.Fatalf("marshalSessionEvents() error = %q, want context", err)
+	}
+}
 
 // MockQueryContext 用于测试的 QueryContext Mock
 type MockQueryContext struct {

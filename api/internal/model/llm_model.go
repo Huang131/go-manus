@@ -34,6 +34,9 @@ type LLMModel struct {
 // UnmarshalJSON 允许接收 API key，但 APIKey 仍不会被响应序列化。
 func (m *LLMModel) UnmarshalJSON(data []byte) error {
 	type alias LLMModel
+	if m.Capabilities == (ModelCapabilities{}) {
+		m.Capabilities = DefaultCapabilities()
+	}
 	var payload struct {
 		*alias
 		APIKey string `json:"api_key"`

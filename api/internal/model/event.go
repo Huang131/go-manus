@@ -233,7 +233,7 @@ func (e *WaitEvent) ToJSON() string { return toJSON(e) }
 
 // PlanEvent 计划事件（用于 Agent 间传递）
 type PlanEvent struct {
-	Plan   *Plan           `json:"plan"`
+	Plan   Plan            `json:"plan"`
 	Status PlanEventStatus `json:"status"`
 }
 
@@ -247,7 +247,7 @@ func (e *PlanEvent) ToJSON() string { return toJSON(e) }
 
 // StepEvent 步骤事件（用于 Agent 间传递，对应 SSE 协议中的 step 类型）
 type StepEvent struct {
-	Step   *PlanStep       `json:"step"`
+	Step   PlanStep        `json:"step"`
 	Status StepEventStatus `json:"status"`
 }
 
@@ -279,7 +279,8 @@ func NewMessageEvent(role, content string) *MessageEvent {
 }
 
 // NewPlanEvent 创建计划事件
-func NewPlanEvent(plan *Plan, status PlanEventStatus) *PlanEvent {
+func NewPlanEvent(plan Plan, status PlanEventStatus) *PlanEvent {
+	plan.Steps = clonePlanSteps(plan.Steps)
 	return &PlanEvent{
 		Plan:   plan,
 		Status: status,
@@ -287,11 +288,35 @@ func NewPlanEvent(plan *Plan, status PlanEventStatus) *PlanEvent {
 }
 
 // NewStepEvent 创建步骤事件
-func NewStepEvent(step *PlanStep, status StepEventStatus) *StepEvent {
+func NewStepEvent(step PlanStep, status StepEventStatus) *StepEvent {
+	step.Attachments = cloneStrings(step.Attachments)
 	return &StepEvent{
 		Step:   step,
 		Status: status,
 	}
+}
+
+// clonePlanSteps 复制计划步骤及其附件，确保事件只保存创建时的快照。
+func clonePlanSteps(steps []PlanStep) []PlanStep {
+	if steps == nil {
+		return nil
+	}
+	cloned := make([]PlanStep, len(steps))
+	copy(cloned, steps)
+	for i := range cloned {
+		cloned[i].Attachments = cloneStrings(steps[i].Attachments)
+	}
+	return cloned
+}
+
+// cloneStrings 保留 nil 与空但非 nil 切片的区别，避免改变 JSON 序列化结果。
+func cloneStrings(values []string) []string {
+	if values == nil {
+		return nil
+	}
+	cloned := make([]string, len(values))
+	copy(cloned, values)
+	return cloned
 }
 
 // NewDoneEvent 创建完成事件

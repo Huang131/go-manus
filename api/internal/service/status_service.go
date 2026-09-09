@@ -28,14 +28,19 @@ func NewStatusService(db *infrastructure.Postgres, redis *infrastructure.Redis, 
 		db:    db,
 		redis: redis,
 		oss:   oss,
+		now:   time.Now,
 	}
 }
 
 // GetHealthStatus 获取健康状态
 func (s *DefaultStatusService) GetHealthStatus(ctx context.Context) (*model.HealthStatus, error) {
+	now := s.now
+	if now == nil {
+		now = time.Now
+	}
 	status := &model.HealthStatus{
 		Status:    model.HealthStateHealthy,
-		Timestamp: time.Now().Unix(),
+		Timestamp: now().Unix(),
 		Services:  make(map[model.ServiceName]model.ServiceStatus),
 	}
 

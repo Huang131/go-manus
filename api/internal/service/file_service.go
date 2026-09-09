@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
 	"github.com/google/uuid"
@@ -84,6 +85,9 @@ func (s *DefaultFileService) DownloadFile(ctx context.Context, id string) (*mode
 	if err != nil {
 		return nil, nil, err
 	}
+	if file == nil {
+		return nil, nil, apperr.NotFound("文件不存在")
+	}
 
 	if s.storage != nil {
 		reader, err := s.storage.Download(ctx, file.Key)
@@ -94,7 +98,14 @@ func (s *DefaultFileService) DownloadFile(ctx context.Context, id string) (*mode
 
 // GetFileInfo 获取文件信息
 func (s *DefaultFileService) GetFileInfo(ctx context.Context, id string) (*model.File, error) {
-	return s.repo.GetByID(ctx, id)
+	file, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if file == nil {
+		return nil, apperr.NotFound("文件不存在")
+	}
+	return file, nil
 }
 
 // DeleteFile 删除文件
@@ -102,6 +113,9 @@ func (s *DefaultFileService) DeleteFile(ctx context.Context, id string) error {
 	file, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return err
+	}
+	if file == nil {
+		return apperr.NotFound("文件不存在")
 	}
 
 	if s.storage != nil {

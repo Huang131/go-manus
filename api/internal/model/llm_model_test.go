@@ -104,3 +104,23 @@ func TestLLMModelAPIKey_InputOnly(t *testing.T) {
 		t.Fatalf("API key leaked in response: %s", out)
 	}
 }
+
+func TestLLMModelCapabilitiesApplyDefaultsWithoutOverwritingExplicitFalse(t *testing.T) {
+	var m LLMModel
+	input := []byte(`{"capabilities":{"supports_text":false,"supports_vision":true,"max_context_tokens":100000}}`)
+	if err := sonic.Unmarshal(input, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if m.Capabilities.SupportsText {
+		t.Fatal("explicit supports_text=false was overwritten")
+	}
+	if !m.Capabilities.SupportsToolCalls || !m.Capabilities.SupportsStreaming {
+		t.Fatalf("missing boolean defaults were not applied: %+v", m.Capabilities)
+	}
+	if !m.Capabilities.SupportsVision {
+		t.Fatal("explicit supports_vision=true was lost")
+	}
+	if m.Capabilities.MaxContextTokens != 100000 || m.Capabilities.MaxOutputTokens == 0 {
+		t.Fatalf("token defaults were not merged correctly: %+v", m.Capabilities)
+	}
+}

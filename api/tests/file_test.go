@@ -183,7 +183,7 @@ func TestFileAPI_Upload_LargeFile(t *testing.T) {
 // TestFileAPI_GetInfo_NotFound 测试获取不存在的文件
 func TestFileAPI_GetInfo_NotFound(t *testing.T) {
 	w := getJSON(t, "/api/files/non-existent-id")
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 // TestFileAPI_Delete_NotFound 测试删除不存在的文件

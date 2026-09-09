@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -103,11 +105,17 @@ func (s *DefaultLLMModelService) Create(ctx context.Context, m *model.LLMModel) 
 		// 检查唯一约束（提前校验，依赖 DB 错误也可）
 		// 直接插入，让 unique constraint 兜底
 		if err := r.Create(ctx, m); err != nil {
-			return ErrModelConflict
+			if isUniqueViolation(err) {
+				return ErrModelConflict
+			}
+			return err
 		}
 		if autoSetDefault {
 			// 当前表里没有 default 才自动设置
-			cur, _ := r.GetDefault(ctx)
+			cur, err := r.GetDefault(ctx)
+			if err != nil {
+				return err
+			}
 			if cur == nil {
 				if err := r.ClearDefault(ctx, nil); err != nil {
 					return err
@@ -155,7 +163,10 @@ func (s *DefaultLLMModelService) Update(ctx context.Context, m *model.LLMModel) 
 			}
 		}
 		if err := r.Update(ctx, m); err != nil {
-			return ErrModelConflict
+			if isUniqueViolation(err) {
+				return ErrModelConflict
+			}
+			return err
 		}
 		if m.IsDefault && !old.IsDefault {
 			if err := r.SetDefault(ctx, nil, m.ID); err != nil {
@@ -168,6 +179,11 @@ func (s *DefaultLLMModelService) Update(ctx context.Context, m *model.LLMModel) 
 		return nil, err
 	}
 	return m, nil
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 // UpdateRuntimeHealth 仅更新运行时健康快照。

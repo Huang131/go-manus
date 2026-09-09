@@ -77,7 +77,7 @@ func TestSessionAPI_Lifecycle(t *testing.T) {
 
 	// 4. 验证会话已删除
 	w = getJSON(t, "/api/sessions/"+sessionID)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 // TestSessionAPI_CreateAndList 测试创建后会话出现在列表中
@@ -103,10 +103,10 @@ func TestSessionAPI_GetNotFound(t *testing.T) {
 	w := getJSON(t, "/api/sessions/non-existent-id")
 
 	// 应该返回错误
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, http.StatusNotFound, w.Code)
 
 	resp := parseResponse(t, w)
-	assert.Equal(t, 400, resp.Code)
+	assert.Equal(t, http.StatusNotFound, resp.Code)
 }
 
 // TestSessionAPI_ListPagination 测试会话列表分页
@@ -191,14 +191,13 @@ func TestSessionAPI_List(t *testing.T) {
 // TestSessionAPI_DeleteNotFound 测试删除不存在的会话
 func TestSessionAPI_DeleteNotFound(t *testing.T) {
 	w := postJSON(t, "/api/sessions/non-existent-id/delete", nil)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 // TestSessionAPI_GetInvalidID 测试无效的会话 ID 格式
 func TestSessionAPI_GetInvalidID(t *testing.T) {
 	w := getJSON(t, "/api/sessions/invalid-uuid-format")
-	// 无效的 UUID 格式可能导致不同的错误响应
-	assert.True(t, w.Code == http.StatusBadRequest || w.Code == http.StatusInternalServerError)
+	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
 // 防止 sonic 包未使用（用于类型断言）

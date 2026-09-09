@@ -127,7 +127,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 				// 配合 json_object 模式 + 中文 prompt，planner 输出的 planMsg 已经是结构化中文，
 				// 不会再泄露英文 CoT。
 				ch <- model.NewMessageEvent("assistant", planMsg)
-				ch <- model.NewPlanEvent(plan, model.PlanEventStatusCreated)
+				ch <- model.NewPlanEvent(*plan, model.PlanEventStatusCreated)
 
 				logger.Info("Planner 创建计划成功",
 					logger.String("session_id", f.sessionID),
@@ -160,7 +160,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 
 				// 更新计划状态
 				f.plan.Status = model.ExecutionStatusRunning
-				ch <- model.NewStepEvent(step, model.StepEventStatusStarted)
+				ch <- model.NewStepEvent(*step, model.StepEventStatusStarted)
 
 				// 执行步骤
 				logger.Info("ReActAgent 开始执行步骤",
@@ -181,11 +181,11 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 						continue
 					}
 					logger.Error("ReActAgent 执行步骤失败", logger.Err(err))
-					ch <- model.NewStepEvent(step, model.StepEventStatusFailed)
+					ch <- model.NewStepEvent(*step, model.StepEventStatusFailed)
 					step.Status = model.ExecutionStatusFailed
 					step.Error = err.Error()
 				} else {
-					ch <- model.NewStepEvent(step, model.StepEventStatusCompleted)
+					ch <- model.NewStepEvent(*step, model.StepEventStatusCompleted)
 
 					// 发送步骤结果消息
 					if step.Result != "" {
@@ -234,7 +234,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 						logger.Warn("Planner 更新计划失败", logger.Err(err))
 					} else {
 						f.plan = updatedPlan
-						ch <- model.NewPlanEvent(updatedPlan, model.PlanEventStatusUpdated)
+						ch <- model.NewPlanEvent(*updatedPlan, model.PlanEventStatusUpdated)
 					}
 				}
 
@@ -268,7 +268,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 				// 完成状态 -> 发送完成事件
 				if f.plan != nil {
 					f.plan.Status = model.ExecutionStatusCompleted
-					ch <- model.NewPlanEvent(f.plan, model.PlanEventStatusCompleted)
+					ch <- model.NewPlanEvent(*f.plan, model.PlanEventStatusCompleted)
 				}
 				ch <- model.NewDoneEvent()
 				logger.Info("PlannerReActFlow 执行完成",

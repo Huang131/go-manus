@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
-	"github.com/bytedance/sonic"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/bytedance/sonic"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -85,7 +87,14 @@ func (s *DefaultSessionService) CreateSession(ctx context.Context) (*model.Sessi
 
 // GetSession 获取会话
 func (s *DefaultSessionService) GetSession(ctx context.Context, id string) (*model.Session, error) {
-	return s.repo.GetByID(ctx, id)
+	session, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil {
+		return nil, apperr.NotFound("会话不存在")
+	}
+	return session, nil
 }
 
 // GetAllSessions 获取所有会话
@@ -133,9 +142,12 @@ func (s *DefaultSessionService) DecrementUnreadCount(ctx context.Context, id str
 // 统一走 files 表（替代旧 sessions.files JSONB），单一数据源，永不不一致
 func (s *DefaultSessionService) GetSessionFiles(ctx context.Context, id string) ([]*model.File, error) {
 	// 先确认 session 存在
-	_, err := s.repo.GetByID(ctx, id)
+	session, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if session == nil {
+		return nil, apperr.NotFound("会话不存在")
 	}
 	if s.fileRepo == nil {
 		return nil, apperr.FailedPrecondition("file repository 未注入，GetSessionFiles 不可用")
@@ -164,7 +176,10 @@ func (s *DefaultSessionService) Chat(ctx context.Context, sessionID string, mess
 		Role:    "user",
 		Message: message,
 	}
-	data, _ := sonic.Marshal(msgEvent)
+	data, err := sonic.Marshal(msgEvent)
+	if err != nil {
+		return fmt.Errorf("encode chat message event: %w", err)
+	}
 
 	event := &model.Event{
 		ID:        uuid.New().String(),

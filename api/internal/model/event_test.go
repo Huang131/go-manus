@@ -152,3 +152,32 @@ func TestEvent_Data_Nil(t *testing.T) {
 		t.Errorf("nil Data should serialize as null, got: %s", out)
 	}
 }
+
+func TestPlanAndStepEventsSnapshotMutableInput(t *testing.T) {
+	plan := Plan{Title: "before", Steps: []PlanStep{{ID: "step-1", Attachments: []string{"a"}}}}
+	planEvent := NewPlanEvent(plan, PlanEventStatusCreated)
+	stepEvent := NewStepEvent(plan.Steps[0], StepEventStatusStarted)
+
+	plan.Title = "after"
+	plan.Steps[0].ID = "changed"
+	plan.Steps[0].Attachments[0] = "changed"
+
+	if planEvent.Plan.Title != "before" || planEvent.Plan.Steps[0].ID != "step-1" || planEvent.Plan.Steps[0].Attachments[0] != "a" {
+		t.Fatalf("plan event changed with source mutation: %+v", planEvent.Plan)
+	}
+	if stepEvent.Step.ID != "step-1" || stepEvent.Step.Attachments[0] != "a" {
+		t.Fatalf("step event changed with source mutation: %+v", stepEvent.Step)
+	}
+}
+
+func TestPlanAndStepEventsUseValueSnapshots(t *testing.T) {
+	plan := Plan{Title: "plan", Steps: []PlanStep{{ID: "step"}}}
+	planEvent := NewPlanEvent(plan, PlanEventStatusCreated)
+	stepEvent := NewStepEvent(plan.Steps[0], StepEventStatusStarted)
+
+	planEvent.Plan.Title = "changed in event"
+	stepEvent.Step.ID = "changed in event"
+	if plan.Title != "plan" || plan.Steps[0].ID != "step" {
+		t.Fatalf("event mutation should not affect source: plan=%+v step=%+v", plan, plan.Steps[0])
+	}
+}

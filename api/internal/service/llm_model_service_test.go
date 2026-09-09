@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -15,11 +16,13 @@ import (
 
 // MockLLMModelRepository 仓储 mock
 type MockLLMModelRepository struct {
-	models       map[string]*model.LLMModel
-	defaultID    string
-	conflict     bool
-	listErr      error
-	getDefaultOK bool
+	models        map[string]*model.LLMModel
+	defaultID     string
+	conflict      bool
+	listErr       error
+	getDefaultErr error
+	createErr     error
+	updateErr     error
 }
 
 func NewMockLLMModelRepository() *MockLLMModelRepository {
@@ -27,8 +30,11 @@ func NewMockLLMModelRepository() *MockLLMModelRepository {
 }
 
 func (m *MockLLMModelRepository) Create(ctx context.Context, mm *model.LLMModel) error {
+	if m.createErr != nil {
+		return m.createErr
+	}
 	if m.conflict {
-		return errors.New("duplicate key")
+		return &pgconn.PgError{Code: "23505"}
 	}
 	mm.UpdatedAt = time.Now()
 	if mm.CreatedAt.IsZero() {
@@ -39,9 +45,69 @@ func (m *MockLLMModelRepository) Create(ctx context.Context, mm *model.LLMModel)
 }
 
 func (m *MockLLMModelRepository) Update(ctx context.Context, mm *model.LLMModel) error {
+	if m.updateErr != nil {
+		return m.updateErr
+	}
 	mm.UpdatedAt = time.Now()
 	m.models[mm.ID] = mm
 	return nil
+}
+
+func TestLLMModelService_Create_PreservesRepositoryError(t *testing.T) {
+	repo := NewMockLLMModelRepository()
+	repo.createErr = errors.New("database unavailable")
+	svc := NewLLMModelService(repo)
+
+	_, err := svc.Create(context.Background(), &model.LLMModel{
+		Name: "model", Provider: "provider", BaseURL: "https://example.test", ModelName: "m",
+	})
+	if err == nil || err.Error() != "database unavailable" {
+		t.Fatalf("Create() error = %v, want repository error", err)
+	}
+}
+
+func TestLLMModelService_Create_PreservesDefaultLookupError(t *testing.T) {
+	repo := NewMockLLMModelRepository()
+	repo.getDefaultErr = errors.New("database unavailable")
+	svc := NewLLMModelService(repo)
+
+	_, err := svc.Create(context.Background(), &model.LLMModel{
+		Name: "model", Provider: "provider", BaseURL: "https://example.test", ModelName: "m",
+	})
+	if err == nil || err.Error() != "database unavailable" {
+		t.Fatalf("Create() error = %v, want default lookup error", err)
+	}
+}
+
+func TestLLMModelService_Create_MapsUniqueViolationToConflict(t *testing.T) {
+	repo := NewMockLLMModelRepository()
+	repo.conflict = true
+	svc := NewLLMModelService(repo)
+
+	_, err := svc.Create(context.Background(), &model.LLMModel{
+		Name: "model", Provider: "provider", BaseURL: "https://example.test", ModelName: "m",
+	})
+	if !errors.Is(err, ErrModelConflict) {
+		t.Fatalf("Create() error = %v, want conflict", err)
+	}
+}
+
+func TestLLMModelService_Update_PreservesRepositoryError(t *testing.T) {
+	repo := NewMockLLMModelRepository()
+	svc := NewLLMModelService(repo)
+	m, err := svc.Create(context.Background(), &model.LLMModel{
+		Name: "model", Provider: "provider", BaseURL: "https://example.test", ModelName: "m",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.updateErr = errors.New("database unavailable")
+	_, err = svc.Update(context.Background(), &model.LLMModel{
+		ID: m.ID, Name: "model", Provider: "provider", BaseURL: "https://example.test", ModelName: "m",
+	})
+	if err == nil || err.Error() != "database unavailable" {
+		t.Fatalf("Update() error = %v, want repository error", err)
+	}
 }
 
 func (m *MockLLMModelRepository) UpdateRuntimeHealth(ctx context.Context, id string, health model.RuntimeHealth) error {
@@ -67,6 +133,9 @@ func (m *MockLLMModelRepository) GetByID(ctx context.Context, id string) (*model
 }
 
 func (m *MockLLMModelRepository) GetDefault(ctx context.Context) (*model.LLMModel, error) {
+	if m.getDefaultErr != nil {
+		return nil, m.getDefaultErr
+	}
 	if m.defaultID == "" {
 		return nil, nil
 	}
