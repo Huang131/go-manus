@@ -1,0 +1,32 @@
+api/internal/bootstrap/app.go
+  s_b179bace541cd0::t_c5b16b53a25060 25-37,39-41,44,54,98-107,110-112,128-131,133-146,148-151,154-157,159-162,165-170,180-184,196-231,233-254,256-258,261-267,274-278,313-317,330,338-340,342-355,358-359,376,393,397,416-417,419,421-422,430-445,447,452,462-487,490-493,500-511,513,516,521,527,538,547-552,566-571,583-594,599,607,620-632,634,642,644-645,648-650,666-678,684,686-688,700-701,703-704,710,717-719,729-741,767-771,776-795,797,803,808,813-814,819-820,822-823,825-826,831-832,837-838,840-841,846-847,852
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "93f502133e158eb23e2e6e6e0d6c7e9ed9af7115",
+  "prompts": {},
+  "sessions": {
+    "s_b179bace541cd0": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa0e5cf5f8bfc5c33242a0c",
+        "model": "minimax-m2.7"
+      },
+      "human_author": "Huang131 <1315970725@qq.com>",
+      "custom_attributes": {
+        "session_id": "6aa0e5cf5f8bfc5c33242a0c",
+        "dedupe_key": "6aa0e5cf5f8bfc5c33242a0c:6aa0f92c5f8bfc5c33242a6e:afterEdit:d7a1ae72",
+        "operation_id": "6aa0f92c5f8bfc5c33242a6e",
+        "tool_use_id": "6aa0f92c5f8bfc5c33242a6e",
+        "tool_type": "agent",
+        "runtime_client": "trae-tob-git-ai",
+        "edit_kind": "file_edit",
+        "external_session_id": "6aa0e5cf5f8bfc5c33242a0c",
+        "client_type": "ide",
+        "source_scene": "unknown",
+        "tool_id": "Write"
+      }
+    }
+  }
+}
