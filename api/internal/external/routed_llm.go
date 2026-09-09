@@ -72,7 +72,7 @@ func NewRoutedLLMFromSingleProvider(provider LLMConfigProvider, fallback *LLMRun
 }
 
 // Invoke 先选主模型，再按严格规则 fallback。
-func (r *RoutedLLM) Invoke(ctx context.Context, req *LLMRequest) (*LLMResponse, error) {
+func (r *RoutedLLM) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMResponse, error) {
 	plan := r.plan(ctx, req)
 	var lastErr error
 	for idx, cfg := range plan {

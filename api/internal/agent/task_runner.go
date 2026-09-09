@@ -11,6 +11,7 @@ import (
 
 	"github.com/Huang131/go-manus/api/internal/agent/attachment"
 	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
 
@@ -27,17 +28,18 @@ const (
 // AgentTaskRunner 基于 Agent 智能体的任务运行器
 // 对齐 Python 版本的 AgentTaskRunner
 type AgentTaskRunner struct {
-	mu          sync.Mutex
-	sessionID   string
-	config      *AgentConfig
-	llm         external.LLM
-	tools       []Tool
-	flow        *PlannerReActFlow
-	sessionRep  repository.SessionRepository
-	fileRep     repository.FileRepository
-	sandbox     external.Sandbox
-	fileStorage COSFileStorage
-	attLoader   *attachment.Loader
+	mu           sync.Mutex
+	memoryLoaded bool
+	sessionID    string
+	config       *AgentConfig
+	llm          external.LLM
+	tools        []Tool
+	flow         *PlannerReActFlow
+	sessionRep   repository.SessionRepository
+	fileRep      repository.FileRepository
+	sandbox      external.Sandbox
+	fileStorage  COSFileStorage
+	attLoader    *attachment.Loader
 }
 
 // COSFileStorage 文件存储接口（简化版）
@@ -90,6 +92,18 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 		r.flow = NewPlannerReActFlow(r.sessionID, r.config, r.llm, r.tools)
 	}
 	r.mu.Unlock()
+
+	// flow 生命周期内只恢复一次历史记忆
+	if !r.memoryLoaded {
+		if err := r.flow.LoadMemory(ctx); err != nil {
+			logger.Warn("恢复历史记忆失败，将使用空记忆继续",
+				logger.String("session_id", r.sessionID),
+				logger.Err(err))
+		}
+		r.mu.Lock()
+		r.memoryLoaded = true
+		r.mu.Unlock()
+	}
 
 	// 首次运行，更新会话状态为运行中
 	if r.flow.GetPlan() == nil {
@@ -202,16 +216,18 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 			}
 		}
 
-		// 转换为 Flow 需要的 Message
-		message := &model.Message{
-			Role:               inputEvent.Role,
-			Message:            inputEvent.Message,
-			Attachments:        attachments,
+		// 转换为 Flow 需要的任务输入
+		input := &TaskInput{
+			Message: llmcore.Message{
+				Role:        llmcore.MessageRole(inputEvent.Role),
+				ContentText: inputEvent.Message,
+				Attachments: attachments,
+			},
 			AttachmentContexts: attachmentContexts,
 		}
 
 		// 运行 Flow
-		eventChan := r.flow.Invoke(ctx, message)
+		eventChan := r.flow.Invoke(ctx, input)
 
 		// 处理 Flow 输出事件
 		for event := range eventChan {
@@ -305,68 +321,6 @@ func (r *AgentTaskRunner) OnDone(task *RedisStreamTask) {
 
 	// 可选：更新会话状态为完成
 	// _ = r.sessionRep.UpdateStatus(context.Background(), r.sessionID, model.SessionStatusCompleted)
-}
-
-// Run 运行任务（保留向后兼容）
-// 对齐 Python: task.invoke() 后的同步等待逻辑
-func (r *AgentTaskRunner) Run(ctx context.Context, message *model.Message) error {
-	r.mu.Lock()
-	if r.flow == nil {
-		r.flow = NewPlannerReActFlow(r.sessionID, r.config, r.llm, r.tools)
-	}
-	r.mu.Unlock()
-
-	// 首次运行，更新会话状态为运行中
-	if r.flow.GetPlan() == nil {
-		_ = r.sessionRep.UpdateStatus(ctx, r.sessionID, model.SessionStatusRunning)
-	}
-
-	// 运行流程
-	eventChan := r.flow.Invoke(ctx, message)
-
-	// 处理事件
-	for event := range eventChan {
-		// 添加事件到会话
-		eventJSON, err := sonic.Marshal(event)
-		if err != nil {
-			logger.Error("序列化事件失败",
-				logger.String("session_id", r.sessionID),
-				logger.String("event_type", string(event.GetType())),
-				logger.Err(err))
-			continue
-		}
-
-		baseEvent := &model.Event{
-			Type: event.GetType(),
-			Data: eventJSON,
-		}
-
-		if err := r.sessionRep.AppendEvent(ctx, r.sessionID, baseEvent); err != nil {
-			logger.Warn("添加事件到会话失败",
-				logger.String("session_id", r.sessionID),
-				logger.Err(err))
-		}
-
-		// 处理不同类型的事件
-		switch e := event.(type) {
-		case *model.FullPlanEvent:
-			if e.Status == model.PlanEventStatusCompleted {
-				// 计划完成，更新会话状态
-				_ = r.sessionRep.UpdateStatus(ctx, r.sessionID, model.SessionStatusCompleted)
-			}
-		case *model.ErrorEvent:
-			logger.Error("Agent 运行出错", logger.String("error", e.Message))
-		case *model.FullStepEvent:
-			if e.Status == model.StepEventStatusCompleted && e.Step.Success {
-				// 步骤完成，同步附件文件
-				for _, filePath := range e.Step.Attachments {
-					_ = r.syncFileToStorage(ctx, filePath)
-				}
-			}
-		}
-	}
-
-	return nil
 }
 
 // Done 返回任务是否完成

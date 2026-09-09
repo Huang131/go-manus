@@ -109,14 +109,14 @@ func TestOpenAIClient_ContentOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
-	if resp.Content != "你好，我是助手。" {
-		t.Errorf("Content = %q, want %q", resp.Content, "你好，我是助手。")
+	if resp.Message.ContentText != "你好，我是助手。" {
+		t.Errorf("Content = %q, want %q", resp.Message.ContentText, "你好，我是助手。")
 	}
-	if resp.ReasoningContent != "" {
-		t.Errorf("ReasoningContent should be empty, got %q", resp.ReasoningContent)
+	if resp.Message.Reasoning != "" {
+		t.Errorf("ReasoningContent should be empty, got %q", resp.Message.Reasoning)
 	}
-	if len(resp.ToolUse) != 0 {
-		t.Errorf("ToolUse should be empty, got %d", len(resp.ToolUse))
+	if len(resp.Message.ToolCalls) != 0 {
+		t.Errorf("ToolUse should be empty, got %d", len(resp.Message.ToolCalls))
 	}
 }
 
@@ -228,16 +228,16 @@ func TestOpenAIClient_ReasoningOnly_NoContentLeak(t *testing.T) {
 		t.Fatalf("Invoke: %v", err)
 	}
 	// 协议层断言 1：Content 必须是上游原始 content（空）
-	if resp.Content != "" {
-		t.Errorf("Content should be EMPTY (no reasoning→content leak at protocol layer), got %q", resp.Content)
+	if resp.Message.ContentText != "" {
+		t.Errorf("Content should be EMPTY (no reasoning→content leak at protocol layer), got %q", resp.Message.ContentText)
 	}
 	// 协议层断言 2：RawContent 必须是上游原始 content（空），不能是 reasoning
-	if resp.RawContent != "" {
-		t.Errorf("RawContent should be EMPTY (上游 content 为空), got %q", resp.RawContent)
+	if resp.Message.ContentText != "" {
+		t.Errorf("RawContent should be EMPTY (上游 content 为空), got %q", resp.Message.ContentText)
 	}
 	// 协议层断言 3：ReasoningContent 必须独立保留
-	if resp.ReasoningContent != "分析任务...拆解步骤..." {
-		t.Errorf("ReasoningContent = %q, want %q", resp.ReasoningContent, "分析任务...拆解步骤...")
+	if resp.Message.Reasoning != "分析任务...拆解步骤..." {
+		t.Errorf("ReasoningContent = %q, want %q", resp.Message.Reasoning, "分析任务...拆解步骤...")
 	}
 }
 
@@ -270,14 +270,14 @@ func TestOpenAIClient_ContentAndReasoning_Separated(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
-	if resp.Content != "最终回答。" {
-		t.Errorf("Content = %q, want %q", resp.Content, "最终回答。")
+	if resp.Message.ContentText != "最终回答。" {
+		t.Errorf("Content = %q, want %q", resp.Message.ContentText, "最终回答。")
 	}
-	if resp.ReasoningContent != "思考中...先分析用户问题。" {
-		t.Errorf("ReasoningContent = %q, want %q", resp.ReasoningContent, "思考中...先分析用户问题。")
+	if resp.Message.Reasoning != "思考中...先分析用户问题。" {
+		t.Errorf("ReasoningContent = %q, want %q", resp.Message.Reasoning, "思考中...先分析用户问题。")
 	}
 	// 防止 reasoning 覆盖 content
-	if resp.Content == resp.ReasoningContent {
+	if resp.Message.ContentText == resp.Message.Reasoning {
 		t.Fatal("reasoning leaked into content")
 	}
 }
@@ -311,11 +311,11 @@ func TestOpenAIClient_ReasoningAltField(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
-	if resp.ReasoningContent != "thinking..." {
-		t.Errorf("ReasoningContent = %q, want %q", resp.ReasoningContent, "thinking...")
+	if resp.Message.Reasoning != "thinking..." {
+		t.Errorf("ReasoningContent = %q, want %q", resp.Message.Reasoning, "thinking...")
 	}
-	if resp.Content != "ok" {
-		t.Errorf("Content = %q, want %q", resp.Content, "ok")
+	if resp.Message.ContentText != "ok" {
+		t.Errorf("Content = %q, want %q", resp.Message.ContentText, "ok")
 	}
 }
 
@@ -370,10 +370,10 @@ func TestOpenAIClient_ToolCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
-	if len(resp.ToolUse) != 1 {
-		t.Fatalf("ToolUse len = %d, want 1", len(resp.ToolUse))
+	if len(resp.Message.ToolCalls) != 1 {
+		t.Fatalf("ToolUse len = %d, want 1", len(resp.Message.ToolCalls))
 	}
-	tc := resp.ToolUse[0]
+	tc := resp.Message.ToolCalls[0]
 	if tc.ID != "call_abc" {
 		t.Errorf("tool.id = %v, want call_abc", tc.ID)
 	}

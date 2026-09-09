@@ -15,12 +15,12 @@ import (
 // 阶段 1d 改造点：req.Messages / req.Tools 改 llmcore 强类型。
 // 深拷贝用 slice 内置 copy，不再做 map-by-map 拷贝。
 type mockLLM struct {
-	responses []*external.LLMResponse
+	responses []*llmcore.LLMResponse
 	errs      []error
 	calls     []*external.LLMRequest
 }
 
-func (m *mockLLM) Invoke(ctx context.Context, req *external.LLMRequest) (*external.LLMResponse, error) {
+func (m *mockLLM) Invoke(ctx context.Context, req *external.LLMRequest) (*llmcore.LLMResponse, error) {
 	// 深拷贝请求以避免后续 mutation 干扰断言
 	dup := &external.LLMRequest{
 		Messages: append([]llmcore.Message{}, req.Messages...),
@@ -54,10 +54,10 @@ func (m *mockLLM) MaxTokens() int       { return 0 }
 // BaseAgent.invokeWithEmptyRetry 会注入 "AI 无响应内容，请继续。" 并重试，最终得到有效响应。
 func TestBaseAgent_InvokeWithEmptyRetry(t *testing.T) {
 	mock := &mockLLM{
-		responses: []*external.LLMResponse{
-			{Content: ""},                  // 第 1 次：空内容
-			{Content: ""},                  // 第 2 次：仍然空
-			{Content: `{"hello":"world"}`}, // 第 3 次：成功
+		responses: []*llmcore.LLMResponse{
+			{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: ""}},                  // 第 1 次：空内容
+			{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: ""}},                  // 第 2 次：仍然空
+			{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: `{"hello":"world"}`}}, // 第 3 次：成功
 		},
 	}
 
@@ -69,8 +69,8 @@ func TestBaseAgent_InvokeWithEmptyRetry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("invokeWithEmptyRetry() error = %v", err)
 	}
-	if resp.Content != `{"hello":"world"}` {
-		t.Errorf("resp.Content = %q, want non-empty JSON", resp.Content)
+	if resp.Message.ContentText != `{"hello":"world"}` {
+		t.Errorf("resp.Message.ContentText = %q, want non-empty JSON", resp.Message.ContentText)
 	}
 	if attempts != 3 {
 		t.Errorf("attempts = %d, want 3", attempts)
@@ -96,9 +96,9 @@ func TestBaseAgent_InvokeWithEmptyRetry(t *testing.T) {
 // TestBaseAgent_InvokeWithEmptyRetry_AllEmpty 验证：超过 maxRetries 后返回错误。
 func TestBaseAgent_InvokeWithEmptyRetry_AllEmpty(t *testing.T) {
 	mock := &mockLLM{
-		responses: []*external.LLMResponse{
-			{Content: ""},
-			{Content: ""},
+		responses: []*llmcore.LLMResponse{
+			{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: ""}},
+			{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: ""}},
 		},
 	}
 	agent := NewBaseAgent("test", "session-1", DefaultAgentConfig(), mock, nil)
@@ -114,8 +114,8 @@ func TestBaseAgent_InvokeWithEmptyRetry_AllEmpty(t *testing.T) {
 // TestBaseAgent_InvokeWithEmptyRetry_FirstSuccess 验证：首次返回有效内容时不重试。
 func TestBaseAgent_InvokeWithEmptyRetry_FirstSuccess(t *testing.T) {
 	mock := &mockLLM{
-		responses: []*external.LLMResponse{
-			{Content: `{"ok":true}`},
+		responses: []*llmcore.LLMResponse{
+			{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: `{"ok":true}`}},
 		},
 	}
 	agent := NewBaseAgent("test", "session-1", DefaultAgentConfig(), mock, nil)
@@ -129,7 +129,7 @@ func TestBaseAgent_InvokeWithEmptyRetry_FirstSuccess(t *testing.T) {
 	if attempts != 1 {
 		t.Errorf("attempts = %d, want 1", attempts)
 	}
-	if resp.Content != `{"ok":true}` {
-		t.Errorf("resp.Content = %q", resp.Content)
+	if resp.Message.ContentText != `{"ok":true}` {
+		t.Errorf("resp.Message.ContentText = %q", resp.Message.ContentText)
 	}
 }

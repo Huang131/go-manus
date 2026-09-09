@@ -37,21 +37,10 @@ type LLMRequest struct {
 	ToolChoice     string                  `json:"tool_choice,omitempty"`
 }
 
-// LLMResponse LLM 响应（阶段 1d：ToolUse 改 []llmcore.ToolCall）
-type LLMResponse struct {
-	ID               string             `json:"id"`
-	Content          string             `json:"content"`
-	ReasoningContent string             `json:"reasoning_content,omitempty"`
-	RawContent       string             `json:"raw_content,omitempty"`
-	ToolUse          []llmcore.ToolCall `json:"tool_calls,omitempty"`
-	Usage            llmcore.Usage      `json:"usage,omitempty"`
-	CostUSD          float64            `json:"cost_usd,omitempty"`
-}
-
 // LLM LLM 接口
 type LLM interface {
-	// Invoke 调用 LLM
-	Invoke(ctx context.Context, req *LLMRequest) (*LLMResponse, error)
+	// Invoke 调用 LLM，响应统一为 llmcore.LLMResponse 强类型
+	Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMResponse, error)
 
 	// ModelName 返回模型名称
 	ModelName() string
@@ -121,7 +110,7 @@ func NewDynamicLLMWithFactory(provider LLMConfigProvider, fallback *LLMRuntimeCo
 // Reasoning→Content 兜底是 agent 消费方（react_agent / planner_agent）的责任，
 // 由调用方基于 LLMResponse.ReasoningContent 字段自行决定是否兜底。
 // 协议层只保证"上游给什么字段就如实返回什么字段"。
-func (d *DynamicLLM) Invoke(ctx context.Context, req *LLMRequest) (*LLMResponse, error) {
+func (d *DynamicLLM) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMResponse, error) {
 	cfg := d.fallback
 	if d.provider != nil {
 		if c, err := d.provider(ctx); err == nil && c != nil && c.BaseURL != "" {

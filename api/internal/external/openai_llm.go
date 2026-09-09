@@ -158,9 +158,8 @@ type openAIChatResponse struct {
 //     —— Reasoning 不再覆盖 Content；调用方读 ReasoningContent 字段
 //  4. 上游错误按 401/403/429/5xx/timeout 分类为 llmcore.ProviderError，
 //     为阶段 3 fallback 矩阵提供 ErrorKind 钩子
-//  5. 对外仍返回 external.LLMResponse（业务侧契约字段不变），
-//     但 ToolUse 改 []llmcore.ToolCall；Message 结构由调用方按需构造
-func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMResponse, error) {
+//  5. 对外返回 llmcore.LLMResponse（与 anthropic adapter 一致的统一响应形状）
+func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMResponse, error) {
 	// 构建 wire format 请求
 	temp := c.effectiveTemperature()
 	maxTok := c.effectiveMaxTokens()
@@ -285,14 +284,18 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMRespons
 		}
 	}
 
-	// === 转回 external.LLMResponse ===
-	// 阶段 1d：ToolUse 改 []llmcore.ToolCall，不再有 map 转换
-	out := &LLMResponse{
-		ID:               chatResp.ID,
-		Content:          choice.Message.Content, // 严格：content 即 content，不被 reasoning 覆盖
-		ReasoningContent: reasoning,
-		RawContent:       choice.Message.Content,
-		ToolUse:          toolCalls,
+	// === 转为 llmcore.LLMResponse ===
+	// Content 严格取 content，不被 reasoning 覆盖；Reasoning 单独携带
+	out := &llmcore.LLMResponse{
+		ID:    chatResp.ID,
+		Model: chatResp.Model,
+		Message: llmcore.Message{
+			Role:        llmcore.RoleAssistant,
+			ContentText: choice.Message.Content,
+			Reasoning:   reasoning,
+			ToolCalls:   toolCalls,
+		},
+		FinishReason: choice.FinishReason,
 		Usage: llmcore.Usage{
 			PromptTokens:     chatResp.Usage.PromptTokens,
 			CompletionTokens: chatResp.Usage.CompletionTokens,

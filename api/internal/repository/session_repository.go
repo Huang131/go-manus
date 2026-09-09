@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
+	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -28,8 +29,8 @@ type SessionRepository interface {
 	AppendEvent(ctx context.Context, id string, event *model.Event) error
 
 	// 内存操作
-	GetMemory(ctx context.Context, id string, agentName string) (*model.Memory, error)
-	SaveMemory(ctx context.Context, id string, agentName string, memory *model.Memory) error
+	GetMemory(ctx context.Context, id string, agentName string) ([]llmcore.Message, error)
+	SaveMemory(ctx context.Context, id string, agentName string, messages []llmcore.Message) error
 
 	// 原子更新
 	UpdateTitle(ctx context.Context, id string, title string) error
@@ -108,14 +109,13 @@ func (r *PostgresSessionRepository) Create(ctx context.Context, session *model.S
 	query := `
 		INSERT INTO sessions (id, sandbox_id, task_id, title, unread_message_count, latest_message,
 			latest_message_at, events, memories, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '{}'::jsonb, $9, $10, $11)
 	`
 	events, _ := sonic.Marshal(session.Events)
-	memories, _ := sonic.Marshal(session.Memories)
 	_, err := q.Exec(ctx, query,
 		session.ID, session.SandboxID, session.TaskID, session.Title,
 		session.UnreadMessageCount, session.LatestMessage, session.LatestMessageAt,
-		events, memories, session.Status, session.CreatedAt, session.UpdatedAt,
+		events, session.Status, session.CreatedAt, session.UpdatedAt,
 	)
 	return err
 }
@@ -125,23 +125,20 @@ func (r *PostgresSessionRepository) GetByID(ctx context.Context, id string) (*mo
 	q := r.queryer(ctx)
 	query := `
 		SELECT id, sandbox_id, task_id, title, unread_message_count, latest_message,
-			latest_message_at, events, memories, status, created_at, updated_at
+			latest_message_at, events, status, created_at, updated_at
 		FROM sessions WHERE id = $1
 	`
 	var s model.Session
-	var eventsJSON, memoriesJSON []byte
+	var eventsJSON []byte
 	err := q.QueryRow(ctx, query, id).Scan(
 		&s.ID, &s.SandboxID, &s.TaskID, &s.Title, &s.UnreadMessageCount,
-		&s.LatestMessage, &s.LatestMessageAt, &eventsJSON, &memoriesJSON,
+		&s.LatestMessage, &s.LatestMessageAt, &eventsJSON,
 		&s.Status, &s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 	if err := sonic.Unmarshal(eventsJSON, &s.Events); err != nil {
-		return nil, err
-	}
-	if err := sonic.Unmarshal(memoriesJSON, &s.Memories); err != nil {
 		return nil, err
 	}
 	return &s, nil
@@ -152,7 +149,7 @@ func (r *PostgresSessionRepository) GetAll(ctx context.Context) ([]*model.Sessio
 	q := r.queryer(ctx)
 	query := `
 		SELECT id, sandbox_id, task_id, title, unread_message_count, latest_message,
-			latest_message_at, events, memories, status, created_at, updated_at
+			latest_message_at, events, status, created_at, updated_at
 		FROM sessions ORDER BY latest_message_at DESC NULLS LAST
 	`
 	rows, err := q.Query(ctx, query)
@@ -164,16 +161,15 @@ func (r *PostgresSessionRepository) GetAll(ctx context.Context) ([]*model.Sessio
 	var sessions []*model.Session
 	for rows.Next() {
 		var s model.Session
-		var eventsJSON, memoriesJSON []byte
+		var eventsJSON []byte
 		if err := rows.Scan(
 			&s.ID, &s.SandboxID, &s.TaskID, &s.Title, &s.UnreadMessageCount,
-			&s.LatestMessage, &s.LatestMessageAt, &eventsJSON, &memoriesJSON,
+			&s.LatestMessage, &s.LatestMessageAt, &eventsJSON,
 			&s.Status, &s.CreatedAt, &s.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
 		sonic.Unmarshal(eventsJSON, &s.Events)
-		sonic.Unmarshal(memoriesJSON, &s.Memories)
 		sessions = append(sessions, &s)
 	}
 	return sessions, nil
@@ -190,7 +186,7 @@ func (r *PostgresSessionRepository) List(ctx context.Context, limit, offset int)
 
 	query := `
 		SELECT id, sandbox_id, task_id, title, unread_message_count, latest_message,
-			latest_message_at, events, memories, status, created_at, updated_at
+			latest_message_at, events, status, created_at, updated_at
 		FROM sessions ORDER BY latest_message_at DESC NULLS LAST LIMIT $1 OFFSET $2
 	`
 	rows, err := q.Query(ctx, query, limit, offset)
@@ -202,37 +198,35 @@ func (r *PostgresSessionRepository) List(ctx context.Context, limit, offset int)
 	var sessions []*model.Session
 	for rows.Next() {
 		var s model.Session
-		var eventsJSON, memoriesJSON []byte
+		var eventsJSON []byte
 		if err := rows.Scan(
 			&s.ID, &s.SandboxID, &s.TaskID, &s.Title, &s.UnreadMessageCount,
-			&s.LatestMessage, &s.LatestMessageAt, &eventsJSON, &memoriesJSON,
+			&s.LatestMessage, &s.LatestMessageAt, &eventsJSON,
 			&s.Status, &s.CreatedAt, &s.UpdatedAt,
 		); err != nil {
 			return nil, 0, err
 		}
 		sonic.Unmarshal(eventsJSON, &s.Events)
-		sonic.Unmarshal(memoriesJSON, &s.Memories)
 		sessions = append(sessions, &s)
 	}
 	return sessions, total, nil
 }
 
-// Update 更新会话 (全字段)
+// Update 更新会话 (全字段，memories 列由 SaveMemory 独立管理，此处不触碰)
 func (r *PostgresSessionRepository) Update(ctx context.Context, session *model.Session) error {
 	q := r.queryer(ctx)
 	query := `
 		UPDATE sessions SET
 			sandbox_id = $2, task_id = $3, title = $4, unread_message_count = $5,
 			latest_message = $6, latest_message_at = $7, events = $8,
-			memories = $9, status = $10, updated_at = $11
+			status = $9, updated_at = $10
 		WHERE id = $1
 	`
 	events, _ := sonic.Marshal(session.Events)
-	memories, _ := sonic.Marshal(session.Memories)
 	_, err := q.Exec(ctx, query,
 		session.ID, session.SandboxID, session.TaskID, session.Title,
 		session.UnreadMessageCount, session.LatestMessage, session.LatestMessageAt,
-		events, memories, session.Status, session.UpdatedAt,
+		events, session.Status, session.UpdatedAt,
 	)
 	return err
 }
@@ -292,28 +286,34 @@ func (r *PostgresSessionRepository) AppendEvent(ctx context.Context, id string, 
 }
 
 // GetMemory 获取指定 Agent 的记忆
-func (r *PostgresSessionRepository) GetMemory(ctx context.Context, id string, agentName string) (*model.Memory, error) {
+func (r *PostgresSessionRepository) GetMemory(ctx context.Context, id string, agentName string) ([]llmcore.Message, error) {
 	q := r.queryer(ctx)
 	query := `SELECT memories->>$2 FROM sessions WHERE id = $1`
 	var memoryJSON []byte
 	err := q.QueryRow(ctx, query, id, agentName).Scan(&memoryJSON)
 	if err == sql.ErrNoRows {
-		return model.NewMemory(), nil
+		return []llmcore.Message{}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	var m model.Memory
-	if err := sonic.Unmarshal(memoryJSON, &m); err != nil {
+	if len(memoryJSON) == 0 {
+		return []llmcore.Message{}, nil
+	}
+	var messages []llmcore.Message
+	if err := sonic.Unmarshal(memoryJSON, &messages); err != nil {
 		return nil, err
 	}
-	return &m, nil
+	return messages, nil
 }
 
 // SaveMemory 保存指定 Agent 的记忆
-func (r *PostgresSessionRepository) SaveMemory(ctx context.Context, id string, agentName string, memory *model.Memory) error {
+func (r *PostgresSessionRepository) SaveMemory(ctx context.Context, id string, agentName string, messages []llmcore.Message) error {
 	q := r.queryer(ctx)
-	memoryJSON, err := sonic.Marshal(memory)
+	if messages == nil {
+		messages = []llmcore.Message{}
+	}
+	memoryJSON, err := sonic.Marshal(messages)
 	if err != nil {
 		return err
 	}

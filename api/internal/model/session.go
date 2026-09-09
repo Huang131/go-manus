@@ -17,18 +17,17 @@ const (
 
 // Session 会话模型
 type Session struct {
-	ID                 string                 `json:"id"`
-	SandboxID          string                 `json:"sandbox_id,omitempty"`
-	TaskID             string                 `json:"task_id,omitempty"`
-	Title              string                 `json:"title"`
-	UnreadMessageCount int                    `json:"unread_message_count"`
-	LatestMessage      string                 `json:"latest_message"`
-	LatestMessageAt    *time.Time             `json:"latest_message_at,omitempty"`
-	Events             []Event                `json:"events"`
-	Memories           map[string]interface{} `json:"memories"`
-	Status             SessionStatus          `json:"status"`
-	UpdatedAt          time.Time              `json:"updated_at"`
-	CreatedAt          time.Time              `json:"created_at"`
+	ID                 string        `json:"id"`
+	SandboxID          string        `json:"sandbox_id,omitempty"`
+	TaskID             string        `json:"task_id,omitempty"`
+	Title              string        `json:"title"`
+	UnreadMessageCount int           `json:"unread_message_count"`
+	LatestMessage      string        `json:"latest_message"`
+	LatestMessageAt    *time.Time    `json:"latest_message_at,omitempty"`
+	Events             []Event       `json:"events"`
+	Status             SessionStatus `json:"status"`
+	UpdatedAt          time.Time     `json:"updated_at"`
+	CreatedAt          time.Time     `json:"created_at"`
 }
 
 // MarshalJSON 自定义 JSON 序列化

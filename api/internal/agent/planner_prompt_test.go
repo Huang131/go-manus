@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/Huang131/go-manus/api/internal/agent/attachment"
-	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 func TestBuildAttachmentContextSection_IncludesContent(t *testing.T) {
@@ -28,12 +27,8 @@ func TestBuildAttachmentContextSection_IncludesContent(t *testing.T) {
 }
 
 func TestCreatePlanPrompt_UsesAttachmentContext(t *testing.T) {
-	msg := &model.Message{
-		Message: "分析文档",
-	}
-
 	prompt := CreatePlanPrompt
-	prompt = strings.Replace(prompt, "{message}", msg.Message, 1)
+	prompt = strings.Replace(prompt, "{message}", "分析文档", 1)
 	prompt = strings.Replace(prompt, "{attachments}", "- /home/ubuntu/upload/manual.md\n", 1)
 	prompt = strings.Replace(prompt, "{context}", BuildAttachmentContextSection([]attachment.FileContext{
 		{

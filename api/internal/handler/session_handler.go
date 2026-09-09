@@ -10,6 +10,7 @@ import (
 
 	"github.com/Huang131/go-manus/api/internal/agent"
 	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/service"
 	"github.com/Huang131/go-manus/api/pkg/logger"
@@ -182,9 +183,9 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 	// 仅当"显式发送新消息"时才进入 chat 流程；空流续读跳过此步。
 	if hasMessage && strings.TrimSpace(req.Message) != "" {
 		// 创建消息对象
-		msg := &model.Message{
-			Role:        "user",
-			Message:     req.Message,
+		msg := &llmcore.Message{
+			Role:        llmcore.RoleUser,
+			ContentText: req.Message,
 			Attachments: req.Attachments,
 		}
 
@@ -199,11 +200,10 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 		}
 
 		// 先推送用户消息事件（让前端能立即展示用户发送的内容）
-		userPayload, _ := sonic.Marshal(map[string]interface{}{
-			"event_id":   "",
-			"created_at": time.Now().Unix(),
-			"role":       msg.Role,
-			"message":    msg.Message,
+		userPayload, _ := sonic.Marshal(&model.MessageEvent{
+			Type:    model.EventTypeMessage,
+			Role:    string(msg.Role),
+			Message: msg.ContentText,
 		})
 		c.SSEvent("message", string(userPayload))
 		c.Writer.Flush()

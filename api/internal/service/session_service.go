@@ -73,7 +73,6 @@ func (s *DefaultSessionService) CreateSession(ctx context.Context) (*model.Sessi
 		LatestMessage:      "",
 		LatestMessageAt:    nil,
 		Events:             []model.Event{},
-		Memories:           make(map[string]interface{}),
 		Status:             model.SessionStatusPending,
 		CreatedAt:          now,
 		UpdatedAt:          now,

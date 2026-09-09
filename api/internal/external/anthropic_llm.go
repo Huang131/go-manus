@@ -117,7 +117,7 @@ func NewAnthropicClient(cfg *AnthropicClientConfig) *AnthropicClient {
 //  3. 响应 tool_use 解析后转 []llmcore.ToolCall，与 openai 协议统一
 //  4. 去掉 NormalizeLLMResponse 调用：Content 与 ReasoningContent 严格分离，
 //     业务兜底下沉到 agent 消费侧
-func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMResponse, error) {
+func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMResponse, error) {
 	// 1. 转换 messages：llmcore.Message → wire
 	//    system 单独抽到 AnthropicRequest.System 字段；其余按 role/content 构造 AnthropicMessage
 	messages := make([]AnthropicMessage, 0, len(req.Messages))
@@ -247,20 +247,23 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMResp
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
 
-	// 转换响应：按 content block 区分 text / tool_use
-	result := &LLMResponse{
+	// 转换响应：按 content block 区分 text / tool_use，统一装进 Message
+	result := &llmcore.LLMResponse{
 		ID: anthropicResp.ID,
+		Message: llmcore.Message{
+			Role: llmcore.RoleAssistant,
+		},
+		FinishReason: anthropicResp.StopReason,
 	}
 
 	for _, content := range anthropicResp.Content {
 		switch content.Type {
 		case "text":
-			result.Content += content.Text
+			result.Message.ContentText += content.Text
 		case "tool_use":
-			// 阶段 1d：转 llmcore.ToolCall（ID + Function{Name, Arguments} JSON 字符串）
 			// Arguments 把 input map 重新 marshal 成 JSON 字符串，保持和 openai 协议形状一致
 			argsBytes, _ := sonic.Marshal(content.InputJSON)
-			result.ToolUse = append(result.ToolUse, llmcore.ToolCall{
+			result.Message.ToolCalls = append(result.Message.ToolCalls, llmcore.ToolCall{
 				ID:   content.ID,
 				Type: "function",
 				Function: llmcore.ToolCallFunction{
@@ -278,8 +281,7 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*LLMResp
 	}
 	result.CostUSD = estimateCostUSD(c.costPolicy, result.Usage)
 
-	// 阶段 1d：不再调用 NormalizeLLMResponse —— 协议层严格分离 Content / ReasoningContent
-	// 业务兜底（如有）由调用方读 ReasoningContent 自行决定
+	// 协议层严格分离 ContentText / Reasoning；业务兜底由调用方自行决定
 	return result, nil
 }
 

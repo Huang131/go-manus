@@ -20,13 +20,16 @@ type MockLLM struct {
 	invokeErr    error
 }
 
-func (m *MockLLM) Invoke(ctx context.Context, req *LLMRequest) (*LLMResponse, error) {
+func (m *MockLLM) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMResponse, error) {
 	if m.invokeErr != nil {
 		return nil, m.invokeErr
 	}
-	return &LLMResponse{
-		ID:      "mock-response",
-		Content: m.invokeResult,
+	return &llmcore.LLMResponse{
+		ID: "mock-response",
+		Message: llmcore.Message{
+			Role:        llmcore.RoleAssistant,
+			ContentText: m.invokeResult,
+		},
 	}, nil
 }
 
@@ -63,8 +66,8 @@ func TestLLM_Invoke(t *testing.T) {
 		t.Error("Invoke() should return a result")
 	}
 
-	if result.Content != "This is a mock response" {
-		t.Errorf("Invoke() Content = %s, want This is a mock response", result.Content)
+	if result.Message.ContentText != "This is a mock response" {
+		t.Errorf("Invoke() Content = %s, want This is a mock response", result.Message.ContentText)
 	}
 }
 
