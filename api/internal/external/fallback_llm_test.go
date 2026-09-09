@@ -449,3 +449,217 @@ func openAITextProfile() llmcore.ModelProfile {
 		},
 	}
 }
+
+// ============================================================================
+// 健康状态记录与衰减逻辑单元测试
+// ============================================================================
+
+// getHealth 读取内部健康快照（测试辅助）
+func (r *RoutedLLM) getHealth(modelKey string) LLMRuntimeHealth {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.health[modelKey]
+}
+
+func TestRoutedLLM_RecordFailureEscalatesToUnhealthy(t *testing.T) {
+	router := NewRoutedLLM(nil, nil, nil)
+	const key = "model-x"
+
+	// 第 1 次失败：degraded, failures=1
+	router.RecordFailure(key, nil, 10*time.Millisecond)
+	h := router.getHealth(key)
+	if h.Status != LLMHealthDegraded || h.RecentFailures != 1 {
+		t.Fatalf("after 1st failure: status=%s failures=%d, want degraded/1", h.Status, h.RecentFailures)
+	}
+
+	// 第 2 次失败：仍 degraded, failures=2
+	router.RecordFailure(key, nil, 10*time.Millisecond)
+	h = router.getHealth(key)
+	if h.Status != LLMHealthDegraded || h.RecentFailures != 2 {
+		t.Fatalf("after 2nd failure: status=%s failures=%d, want degraded/2", h.Status, h.RecentFailures)
+	}
+
+	// 第 3 次失败：升级为 unhealthy, failures=3
+	router.RecordFailure(key, nil, 10*time.Millisecond)
+	h = router.getHealth(key)
+	if h.Status != LLMHealthUnhealthy || h.RecentFailures != 3 {
+		t.Fatalf("after 3rd failure: status=%s failures=%d, want unhealthy/3", h.Status, h.RecentFailures)
+	}
+}
+
+func TestRoutedLLM_RecordSuccessDecaysFailuresAndRecovers(t *testing.T) {
+	router := NewRoutedLLM(nil, nil, nil)
+	const key = "model-y"
+
+	// 先失败 2 次：degraded, failures=2
+	router.RecordFailure(key, nil, 10*time.Millisecond)
+	router.RecordFailure(key, nil, 10*time.Millisecond)
+
+	// 第 1 次成功：failures 衰减到 1，仍 degraded
+	router.RecordSuccess(key, 50*time.Millisecond)
+	h := router.getHealth(key)
+	if h.RecentFailures != 1 || h.Status != LLMHealthDegraded {
+		t.Fatalf("after 1st success: status=%s failures=%d, want degraded/1", h.Status, h.RecentFailures)
+	}
+
+	// 第 2 次成功：failures 归零，恢复 healthy
+	router.RecordSuccess(key, 50*time.Millisecond)
+	h = router.getHealth(key)
+	if h.RecentFailures != 0 || h.Status != LLMHealthHealthy {
+		t.Fatalf("after 2nd success: status=%s failures=%d, want healthy/0", h.Status, h.RecentFailures)
+	}
+}
+
+func TestRoutedLLM_RecordSuccessTracksLatency(t *testing.T) {
+	router := NewRoutedLLM(nil, nil, nil)
+	const key = "model-z"
+
+	// 首次成功：延迟直接记录（10ms）
+	router.RecordSuccess(key, 10*time.Millisecond)
+	h := router.getHealth(key)
+	if h.AverageLatencyMS != 10 {
+		t.Fatalf("first latency = %d, want 10", h.AverageLatencyMS)
+	}
+
+	// 第二次成功：滑动平均 (10+30)/2 = 20
+	router.RecordSuccess(key, 30*time.Millisecond)
+	h = router.getHealth(key)
+	if h.AverageLatencyMS != 20 {
+		t.Fatalf("second latency = %d, want 20", h.AverageLatencyMS)
+	}
+}
+
+func TestRoutedLLM_RecordIgnoresEmptyModelKey(t *testing.T) {
+	router := NewRoutedLLM(nil, nil, nil)
+
+	router.RecordSuccess("", 10*time.Millisecond)
+	router.RecordFailure("", nil, 10*time.Millisecond)
+
+	router.mu.RLock()
+	count := len(router.health)
+	router.mu.RUnlock()
+	if count != 0 {
+		t.Fatalf("health map size = %d, want 0 (empty key should be ignored)", count)
+	}
+}
+
+// ============================================================================
+// plan() 排序逻辑单元测试
+// ============================================================================
+
+func TestRoutedLLM_PlanSortsByHealthThenLatency(t *testing.T) {
+	catalog := []*LLMRuntimeConfig{
+		{Profile: openAITextProfile(), ModelName: "unhealthy"},
+		{Profile: openAITextProfile(), ModelName: "degraded-slow"},
+		{Profile: openAITextProfile(), ModelName: "degraded-fast"},
+		{Profile: openAITextProfile(), ModelName: "healthy-slow"},
+		{Profile: openAITextProfile(), ModelName: "healthy-fast"},
+	}
+	router := NewRoutedLLM(func(ctx context.Context) ([]*LLMRuntimeConfig, error) {
+		return catalog, nil
+	}, nil, nil)
+
+	// 通过 RecordFailure 构造 unhealthy（3 次失败）
+	for i := 0; i < 3; i++ {
+		router.RecordFailure("unhealthy", nil, 100*time.Millisecond)
+	}
+	// 构造 degraded：1 次失败 + 不同延迟
+	router.RecordFailure("degraded-slow", nil, 2000*time.Millisecond)
+	router.RecordFailure("degraded-fast", nil, 100*time.Millisecond)
+	// 构造 healthy：记录不同延迟
+	router.RecordSuccess("healthy-slow", 1500*time.Millisecond)
+	router.RecordSuccess("healthy-fast", 100*time.Millisecond)
+
+	plan := router.plan(context.Background(), &LLMRequest{})
+	if len(plan) != 5 {
+		t.Fatalf("plan size = %d, want 5", len(plan))
+	}
+
+	wantOrder := []string{"healthy-fast", "healthy-slow", "degraded-fast", "degraded-slow", "unhealthy"}
+	for i, want := range wantOrder {
+		if plan[i].ModelName != want {
+			t.Fatalf("plan[%d] = %s, want %s (full order: %v)", i, plan[i].ModelName, want, modelNames(plan))
+		}
+	}
+}
+
+func TestRoutedLLM_PlanFallsBackWhenCatalogEmpty(t *testing.T) {
+	router := NewRoutedLLM(nil, &LLMRuntimeConfig{
+		Profile:   openAITextProfile(),
+		ModelName: "fallback-only",
+	}, nil)
+
+	// catalog 为 nil → 应返回 [fallback]
+	plan := router.plan(context.Background(), &LLMRequest{})
+	if len(plan) != 1 || plan[0].ModelName != "fallback-only" {
+		t.Fatalf("plan = %v, want [fallback-only]", modelNames(plan))
+	}
+}
+
+func TestRoutedLLM_PlanPrefersFewerFailuresOnSameStatus(t *testing.T) {
+	// 相同健康状态（degraded）下，失败次数更少者优先
+	catalog := []*LLMRuntimeConfig{
+		{Profile: openAITextProfile(), ModelName: "more-failures"},
+		{Profile: openAITextProfile(), ModelName: "fewer-failures"},
+	}
+	router := NewRoutedLLM(func(ctx context.Context) ([]*LLMRuntimeConfig, error) {
+		return catalog, nil
+	}, nil, nil)
+
+	// 两个模型都 degraded、延迟相同，但失败次数不同
+	for i := 0; i < 2; i++ {
+		router.RecordFailure("more-failures", nil, 100*time.Millisecond)
+	}
+	router.RecordFailure("fewer-failures", nil, 100*time.Millisecond)
+
+	plan := router.plan(context.Background(), &LLMRequest{})
+	if len(plan) < 2 {
+		t.Fatalf("plan size = %d, want >= 2", len(plan))
+	}
+	if plan[0].ModelName != "fewer-failures" {
+		t.Fatalf("plan[0] = %s, want fewer-failures", plan[0].ModelName)
+	}
+}
+
+// ============================================================================
+// persistHealth 边界单元测试
+// ============================================================================
+
+func TestRoutedLLM_PersistHealthSkipsModelsOnlyInMemory(t *testing.T) {
+	// Profile.ID 为空的模型不持久化（configKey 回退到 ModelName，但 persistHealth 明确要求 Profile.ID）
+	store := newMockRuntimeHealthStore()
+	router := NewRoutedLLM(
+		func(ctx context.Context) ([]*LLMRuntimeConfig, error) {
+			return []*LLMRuntimeConfig{
+				{Profile: openAITextProfile(), ModelName: "no-profile-id"},
+			}, nil
+		},
+		nil,
+		func(cfg *LLMRuntimeConfig) LLM {
+			return &stubLLM{name: cfg.ModelName}
+		},
+	)
+	router.SetHealthStore(store)
+
+	_, err := router.Invoke(context.Background(), &LLMRequest{
+		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+
+	if len(store.updates) != 0 {
+		t.Fatalf("store updates = %v, want empty (no Profile.ID should skip persistence)", store.updates)
+	}
+}
+
+// modelNames 提取 plan 中模型名列表（测试辅助，用于失败信息打印）
+func modelNames(plan []*LLMRuntimeConfig) []string {
+	names := make([]string, 0, len(plan))
+	for _, cfg := range plan {
+		if cfg != nil {
+			names = append(names, cfg.ModelName)
+		}
+	}
+	return names
+}

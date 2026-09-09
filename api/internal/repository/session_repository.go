@@ -147,13 +147,13 @@ func (r *PostgresSessionRepository) GetByID(ctx context.Context, id string) (*mo
 	return &s, nil
 }
 
-// GetAll 获取所有会话 (按最新消息时间排序)
+// GetAll 获取所有会话 (按最新消息时间排序，排除已删除)
 func (r *PostgresSessionRepository) GetAll(ctx context.Context) ([]*model.Session, error) {
 	q := r.queryer(ctx)
 	query := `
 		SELECT id, sandbox_id, task_id, title, unread_message_count, latest_message,
 			latest_message_at, events, memories, status, created_at, updated_at
-		FROM sessions ORDER BY latest_message_at DESC NULLS LAST
+		FROM sessions WHERE deleted_at IS NULL ORDER BY latest_message_at DESC NULLS LAST
 	`
 	rows, err := q.Query(ctx, query)
 	if err != nil {
@@ -179,10 +179,10 @@ func (r *PostgresSessionRepository) GetAll(ctx context.Context) ([]*model.Sessio
 	return sessions, nil
 }
 
-// List 获取会话列表 (按最新消息时间排序)
+// List 获取会话列表 (按最新消息时间排序，排除已删除)
 func (r *PostgresSessionRepository) List(ctx context.Context, limit, offset int) ([]*model.Session, int, error) {
 	q := r.queryer(ctx)
-	countQuery := `SELECT COUNT(*) FROM sessions`
+	countQuery := `SELECT COUNT(*) FROM sessions WHERE deleted_at IS NULL`
 	var total int
 	if err := q.QueryRow(ctx, countQuery).Scan(&total); err != nil {
 		return nil, 0, err
@@ -191,7 +191,7 @@ func (r *PostgresSessionRepository) List(ctx context.Context, limit, offset int)
 	query := `
 		SELECT id, sandbox_id, task_id, title, unread_message_count, latest_message,
 			latest_message_at, events, memories, status, created_at, updated_at
-		FROM sessions ORDER BY latest_message_at DESC NULLS LAST LIMIT $1 OFFSET $2
+		FROM sessions WHERE deleted_at IS NULL ORDER BY latest_message_at DESC NULLS LAST LIMIT $1 OFFSET $2
 	`
 	rows, err := q.Query(ctx, query, limit, offset)
 	if err != nil {
@@ -237,10 +237,11 @@ func (r *PostgresSessionRepository) Update(ctx context.Context, session *model.S
 	return err
 }
 
-// Delete 删除会话
+// Delete 删除会话（软删除）
+// 设置 deleted_at 时间戳，会话关联的文件在过期后会被自动清理
 func (r *PostgresSessionRepository) Delete(ctx context.Context, id string) error {
 	q := r.queryer(ctx)
-	query := `DELETE FROM sessions WHERE id = $1`
+	query := `UPDATE sessions SET deleted_at = NOW() WHERE id = $1`
 	_, err := q.Exec(ctx, query, id)
 	return err
 }

@@ -11,6 +11,12 @@ import (
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
+// SchedulerRunner 表示可启动和停止的后台调度器。
+type SchedulerRunner interface {
+	Start()
+	Stop()
+}
+
 // FileCleanupService 文件清理服务接口
 type FileCleanupService interface {
 	// CleanExpiredFiles 清理过期文件
@@ -196,6 +202,7 @@ type FileCleanupScheduler struct {
 	batchSize      int
 	interval       time.Duration
 	stopChan       chan struct{}
+	stopOnce       sync.Once
 	wg             sync.WaitGroup
 }
 
@@ -227,7 +234,9 @@ func (s *FileCleanupScheduler) Start() {
 
 // Stop 停止清理调度器
 func (s *FileCleanupScheduler) Stop() {
-	close(s.stopChan)
+	s.stopOnce.Do(func() {
+		close(s.stopChan)
+	})
 	s.wg.Wait()
 	logger.Info("文件清理调度器已停止")
 }

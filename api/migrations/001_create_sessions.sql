@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     events                  JSONB NOT NULL DEFAULT '[]',
     memories                JSONB NOT NULL DEFAULT '{}',
     status                  VARCHAR(255) NOT NULL DEFAULT '',
+    deleted_at              TIMESTAMP,                              -- 软删除时间，为空表示未删除
     updated_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     created_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(0)
 );
@@ -23,6 +24,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
 CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_task_id ON sessions(task_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_deleted_at ON sessions(deleted_at);  -- 用于文件清理查询
 
 -- ============================================================
 -- 字段注释
@@ -38,6 +40,7 @@ COMMENT ON COLUMN sessions.latest_message_at IS '最新消息的时间戳，用�
 COMMENT ON COLUMN sessions.events IS '会话事件历史 JSON 数组，存储完整对话记录';
 COMMENT ON COLUMN sessions.memories IS 'AI 记忆数据 JSON 对象，存储会话中学到的关键信息';
 COMMENT ON COLUMN sessions.status IS '会话状态：空字符串=初始, active=活跃, completed=完成, failed=失败, cancelled=取消';
+COMMENT ON COLUMN sessions.deleted_at IS '软删除时间，为空表示未删除，非空表示已删除（关联文件在过期后会被自动清理）';
 COMMENT ON COLUMN sessions.updated_at IS '最后更新时间，任何字段修改都会更新';
 COMMENT ON COLUMN sessions.created_at IS '创建时间，记录会话创建时刻';
 

@@ -27,6 +27,7 @@ type Session struct {
 	Events             []Event                `json:"events"`
 	Memories           map[string]interface{} `json:"memories"`
 	Status             SessionStatus          `json:"status"`
+	DeletedAt          *time.Time             `json:"deleted_at,omitempty"` // 软删除时间，非空表示已删除
 	UpdatedAt          time.Time              `json:"updated_at"`
 	CreatedAt          time.Time              `json:"created_at"`
 }

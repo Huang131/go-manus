@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -208,18 +207,24 @@ func (r *PostgresFileRepository) WithTx(ctx context.Context, fn func(repo FileRe
 }
 
 // GetExpiredFiles 获取过期文件列表
-// expireDuration: 文件过期时间，超过这个时间的文件将被视为过期
+// 只清理孤立文件（无关联会话或关联会话已删除）：
+// 1. session_id IS NULL：未关联会话的文件
+// 2. session.deleted_at IS NOT NULL：关联的会话已被软删除
+//
+// 不会清理关联活跃会话的文件，保证"会话文件与会话同寿命"
 func (r *PostgresFileRepository) GetExpiredFiles(ctx context.Context, expireDuration string, limit int64) ([]*model.File, error) {
 	q := r.queryer()
-	query := fmt.Sprintf(`
-		SELECT id, session_id, filename, filepath, key, extension, mime_type, size, created_at
-		FROM files
-		WHERE created_at < NOW() - INTERVAL '%s'
-		ORDER BY created_at ASC
-		LIMIT $1
-	`, expireDuration)
+	query := `
+		SELECT f.id, f.session_id, f.filename, f.filepath, f.key, f.extension, f.mime_type, f.size, f.created_at
+		FROM files f
+		LEFT JOIN sessions s ON f.session_id = s.id
+		WHERE f.created_at < NOW() - INTERVAL $1
+		  AND (f.session_id IS NULL OR s.deleted_at IS NOT NULL)
+		ORDER BY f.created_at ASC
+		LIMIT $2
+	`
 
-	rows, err := q.Query(ctx, query, limit)
+	rows, err := q.Query(ctx, query, expireDuration, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -267,16 +272,19 @@ func (r *PostgresFileRepository) GetFilesBySessionIDs(ctx context.Context, sessi
 	return files, nil
 }
 
-// CountExpiredFiles 统计过期文件数量
+// CountExpiredFiles 统计可清理的过期文件数量
+// 只统计孤立文件（无关联会话或关联会话已删除）
 func (r *PostgresFileRepository) CountExpiredFiles(ctx context.Context, expireDuration string) (int64, error) {
 	q := r.queryer()
-	query := fmt.Sprintf(`
-		SELECT COUNT(*) FROM files
-		WHERE created_at < NOW() - INTERVAL '%s'
-	`, expireDuration)
+	query := `
+		SELECT COUNT(*) FROM files f
+		LEFT JOIN sessions s ON f.session_id = s.id
+		WHERE f.created_at < NOW() - INTERVAL $1
+		  AND (f.session_id IS NULL OR s.deleted_at IS NOT NULL)
+	`
 
 	var count int64
-	err := q.QueryRow(ctx, query).Scan(&count)
+	err := q.QueryRow(ctx, query, expireDuration).Scan(&count)
 	return count, err
 }
 
