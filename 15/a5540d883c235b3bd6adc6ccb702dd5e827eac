@@ -1,0 +1,70 @@
+api/tests/session_test.go
+  s_31f27eced9dde7::t_b0e4d2ea3200b0 194,200
+api/internal/repository/session_repository.go
+  s_574f855e98726f::t_fd9f378fff0fa3 119,138,141,147,177,180,191,221,224,262
+  s_574f855e98726f::t_0be321bc250316 150-152,185-187,229-230,253
+  s_574f855e98726f::t_b470a9300a52f0 116-118
+  s_574f855e98726f::t_28715e83853219 120
+  s_574f855e98726f::t_c80612db8d0026 145-146
+  s_574f855e98726f::t_7fd55c579d4500 190
+  s_574f855e98726f::t_53d3bdbcad84f6 192
+  s_574f855e98726f::t_9baab4d8bbd8df 231
+  s_574f855e98726f::t_25a8821ccc9b19 250-252
+  s_574f855e98726f::t_4696fd864f45e9 254
+  s_574f855e98726f::t_af718739c6ea68 263-265
+api/internal/model/file.go
+  s_31f27eced9dde7::t_58d6ac44224aed 10
+api/internal/service/session_service.go
+  s_31f27eced9dde7::t_b0e4d2ea3200b0 90-97,145,149,181
+  s_31f27eced9dde7::t_ccb4f75a79757d 150-151
+  s_31f27eced9dde7::t_3b8c8708678be1 179-180
+  s_31f27eced9dde7::t_bd58fd3780d4e7 182
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "15a5540d883c235b3bd6adc6ccb702dd5e827eac",
+  "prompts": {},
+  "sessions": {
+    "s_31f27eced9dde7": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa126775f8bfc5c33242f61",
+        "model": "minimax-m2.7"
+      },
+      "human_author": "Huang131 <1315970725@qq.com>",
+      "custom_attributes": {
+        "edit_kind": "bash",
+        "source_scene": "agent",
+        "tool_use_id": "6aa13ad35f8bfc5c3324301a",
+        "runtime_client": "trae-tob-git-ai",
+        "operation_id": "6aa13ad35f8bfc5c3324301a",
+        "external_session_id": "6aa126775f8bfc5c33242f61",
+        "display_model_name": "minimax-m2.7",
+        "tool_name": "RunCommand",
+        "session_id": "6aa126775f8bfc5c33242f61",
+        "client_type": "ide"
+      }
+    },
+    "s_574f855e98726f": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa10d205f8bfc5c33242bf2",
+        "model": "minimax-m2.7"
+      },
+      "human_author": "Huang131 <1315970725@qq.com>",
+      "custom_attributes": {
+        "client_type": "ide",
+        "tool_use_id": "6aa125d85f8bfc5c33242f54",
+        "runtime_client": "trae-tob-git-ai",
+        "tool_name": "RunCommand",
+        "session_id": "6aa10d205f8bfc5c33242bf2",
+        "edit_kind": "bash",
+        "display_model_name": "minimax-m2.7",
+        "source_scene": "agent",
+        "operation_id": "6aa125d85f8bfc5c33242f54",
+        "external_session_id": "6aa10d205f8bfc5c33242bf2"
+      }
+    }
+  }
+}
