@@ -1,0 +1,36 @@
+api/internal/infrastructure/oss_test.go
+  s_b0d9ce2a00c5fd::t_e31af6d8edced8 257
+  s_b0d9ce2a00c5fd::t_eb7c35cd26455e 8,249-256
+api/internal/infrastructure/oss.go
+  s_b0d9ce2a00c5fd::t_eb7c35cd26455e 106-110
+api/pkg/response/response_test.go
+  s_b0d9ce2a00c5fd::t_eb7c35cd26455e 120-130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "5bd0270663c7e25c45c929109846c0453b97d06a",
+  "prompts": {},
+  "sessions": {
+    "s_b0d9ce2a00c5fd": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a9fe53d5f8bfc5c33242567",
+        "model": "minimax-m2.7"
+      },
+      "human_author": "Huang131 <1315970725@qq.com>",
+      "custom_attributes": {
+        "tool_use_id": "6aa0c0d55f8bfc5c33242780",
+        "tool_name": "RunCommand",
+        "session_id": "6a9fe53d5f8bfc5c33242567",
+        "edit_kind": "bash",
+        "display_model_name": "minimax-m2.7",
+        "runtime_client": "trae-tob-git-ai",
+        "external_session_id": "6a9fe53d5f8bfc5c33242567",
+        "source_scene": "agent",
+        "client_type": "ide",
+        "operation_id": "6aa0c0d55f8bfc5c33242780"
+      }
+    }
+  }
+}
