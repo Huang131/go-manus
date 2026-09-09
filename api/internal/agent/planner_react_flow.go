@@ -49,8 +49,19 @@ func NewPlannerReActFlow(
 	return flow
 }
 
+// LoadMemory 从数据库恢复 planner/react 两个 Agent 的记忆（flow 生命周期内只应调用一次）
+func (f *PlannerReActFlow) LoadMemory(ctx context.Context) error {
+	if err := f.planner.LoadMemory(ctx); err != nil {
+		return fmt.Errorf("加载 planner 记忆失败: %w", err)
+	}
+	if err := f.react.LoadMemory(ctx); err != nil {
+		return fmt.Errorf("加载 react 记忆失败: %w", err)
+	}
+	return nil
+}
+
 // Invoke 运行流，返回事件流
-func (f *PlannerReActFlow) Invoke(ctx context.Context, message *model.Message) <-chan model.BaseEvent {
+func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan model.BaseEvent {
 	ch := make(chan model.BaseEvent, 100)
 
 	go func() {
@@ -76,7 +87,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, message *model.Message) <
 
 		logger.Info("PlannerReActFlow 开始执行",
 			logger.String("session_id", f.sessionID),
-			logger.String("message", message.Message))
+			logger.String("message", input.Message.ContentText))
 
 		// 状态机循环
 		for {
@@ -93,7 +104,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, message *model.Message) <
 
 			case FlowStatusPlanning:
 				// 规划状态 -> 调用 Planner 创建计划
-				plan, planMsg, err := f.planner.CreatePlan(ctx, message)
+				plan, planMsg, err := f.planner.CreatePlan(ctx, input)
 				if err != nil {
 					logger.Error("Planner 创建计划失败", logger.Err(err))
 					ch <- model.NewErrorEvent(err.Error())
@@ -151,7 +162,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, message *model.Message) <
 					logger.String("step_id", step.ID),
 					logger.String("description", step.Description))
 
-				if err := f.react.ExecuteStep(ctx, f.plan, step, message); err != nil {
+				if err := f.react.ExecuteStep(ctx, f.plan, step, input); err != nil {
 					if err == ErrWaitForUser {
 						// 需要等待用户输入
 						logger.Info("ReActAgent 等待用户输入",
@@ -186,8 +197,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, message *model.Message) <
 
 			case FlowStatusWaiting:
 				// 等待状态 -> 等待用户输入后继续执行
-				// 当用户输入新消息时，会触发 RollBack，然后继续调用 Invoke
-				// 这里我们只是继续执行，因为 RollBack 已经处理了用户响应
+				// 用户输入新消息后会再次触发 Invoke，继续执行当前计划
 				f.mu.Lock()
 				f.status = FlowStatusExecuting
 				f.mu.Unlock()

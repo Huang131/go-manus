@@ -30,7 +30,9 @@ func NewPlannerAgent(
 }
 
 // CreatePlan 根据消息创建计划
-func (a *PlannerAgent) CreatePlan(ctx context.Context, message *model.Message) (*model.Plan, string, error) {
+func (a *PlannerAgent) CreatePlan(ctx context.Context, input *TaskInput) (*model.Plan, string, error) {
+	message := &input.Message
+
 	// 构建附件字符串
 	attachments := ""
 	for _, att := range message.Attachments {
@@ -38,11 +40,11 @@ func (a *PlannerAgent) CreatePlan(ctx context.Context, message *model.Message) (
 	}
 
 	// 构建附件内容段（已加载到 LLM 上下文的文件正文）
-	contextSection := BuildAttachmentContextSection(message.AttachmentContexts)
+	contextSection := BuildAttachmentContextSection(input.AttachmentContexts)
 
 	// 构建提示词
 	prompt := CreatePlanPrompt
-	prompt = strings.Replace(prompt, "{message}", message.Message, 1)
+	prompt = strings.Replace(prompt, "{message}", message.ContentText, 1)
 	prompt = strings.Replace(prompt, "{attachments}", attachments, 1)
 	prompt = strings.Replace(prompt, "{context}", contextSection, 1)
 
@@ -79,17 +81,17 @@ func (a *PlannerAgent) CreatePlan(ctx context.Context, message *model.Message) (
 		} `json:"steps"`
 	}
 
-	if err := a.jsonParser.Parse(resp.Content, &result); err != nil {
+	if err := a.jsonParser.Parse(resp.Message.ContentText, &result); err != nil {
 		// 这里不再把解析失败伪装成成功计划。
 		// 计划阶段必须给出结构化 JSON；如果模型没做到，说明当前模型能力或 prompt 契约不满足。
 		logger.Warn("计划 JSON 解析失败",
 			logger.String("session_id", a.sessionID),
-			logger.Int("content_len", len(resp.Content)),
+			logger.Int("content_len", len(resp.Message.ContentText)),
 			logger.Err(err))
 		// 阶段 1d：兜底内容由调用方基于 ReasoningContent 自行决定（不再由协议层注入 Content）
-		reply := strings.TrimSpace(resp.Content)
+		reply := strings.TrimSpace(resp.Message.ContentText)
 		if reply == "" {
-			reply = strings.TrimSpace(resp.ReasoningContent)
+			reply = strings.TrimSpace(resp.Message.Reasoning)
 		}
 		if reply == "" {
 			reply = "当前模型未返回可解析的计划结果"
@@ -117,7 +119,7 @@ func (a *PlannerAgent) CreatePlan(ctx context.Context, message *model.Message) (
 	}
 
 	// 添加到记忆
-	_ = a.AddMemory(ctx, message)
+	_ = a.AddMemory(ctx, *message)
 
 	return plan, result.Message, nil
 }
@@ -168,7 +170,7 @@ func (a *PlannerAgent) UpdatePlan(ctx context.Context, plan *model.Plan, complet
 		} `json:"steps"`
 	}
 
-	if err := a.jsonParser.Parse(resp.Content, &result); err != nil {
+	if err := a.jsonParser.Parse(resp.Message.ContentText, &result); err != nil {
 		return nil, fmt.Errorf("解析更新计划失败: %w", err)
 	}
 

@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/Huang131/go-manus/api/internal/external"
-	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 
 	"github.com/Huang131/go-manus/api/pkg/logger"
@@ -30,7 +29,9 @@ func NewReActAgent(
 }
 
 // ExecuteStep 执行单个步骤
-func (a *ReActAgent) ExecuteStep(ctx context.Context, plan *model.Plan, step *model.PlanStep, message *model.Message) error {
+func (a *ReActAgent) ExecuteStep(ctx context.Context, plan *model.Plan, step *model.PlanStep, input *TaskInput) error {
+	message := &input.Message
+
 	// 构建附件字符串
 	attachments := ""
 	for _, att := range message.Attachments {
@@ -38,11 +39,11 @@ func (a *ReActAgent) ExecuteStep(ctx context.Context, plan *model.Plan, step *mo
 	}
 
 	// 构建附件内容段
-	contextSection := BuildAttachmentContextSection(message.AttachmentContexts)
+	contextSection := BuildAttachmentContextSection(input.AttachmentContexts)
 
 	// 构建提示词
 	prompt := ExecutionPrompt
-	prompt = strings.Replace(prompt, "{message}", message.Message, 1)
+	prompt = strings.Replace(prompt, "{message}", message.ContentText, 1)
 	prompt = strings.Replace(prompt, "{attachments}", attachments, 1)
 	prompt = strings.Replace(prompt, "{context}", contextSection, 1)
 	prompt = strings.Replace(prompt, "{language}", plan.Language, 1)
@@ -51,18 +52,8 @@ func (a *ReActAgent) ExecuteStep(ctx context.Context, plan *model.Plan, step *mo
 	// 添加系统提示词
 	systemPrompt := SystemPrompt + "\n" + ReActSystemPrompt
 
-	// 添加记忆上下文
-	memoryContext := a.GetMemoryContext()
-
-	// 构建消息（包含系统提示和记忆）
-	fullQuery := systemPrompt + "\n\n"
-	if memoryContext != "" {
-		fullQuery += "历史上下文:\n" + memoryContext + "\n\n"
-	}
-	fullQuery += prompt
-
-	// 使用完整的 ReAct 循环调用 LLM
-	result, err := a.Invoke(ctx, fullQuery)
+	// 使用完整的 ReAct 循环调用 LLM（记忆以原生消息注入，不再拼字符串）
+	result, err := a.Invoke(ctx, systemPrompt, prompt)
 	if err != nil {
 		// 如果是等待用户输入的错误，记录用户问题到 step
 		if err == ErrWaitForUser {
@@ -117,9 +108,6 @@ func (a *ReActAgent) ExecuteStep(ctx context.Context, plan *model.Plan, step *mo
 		logger.Bool("success", step.Success),
 		logger.String("result", step.Result))
 
-	// 添加到记忆
-	_ = a.AddMemory(ctx, message)
-
 	return nil
 }
 
@@ -131,26 +119,8 @@ func (a *ReActAgent) Summarize(ctx context.Context) (string, []string, error) {
 	// 添加系统提示词
 	systemPrompt := SystemPrompt + "\n" + ReActSystemPrompt
 
-	// 添加记忆上下文
-	memoryContext := a.GetMemoryContext()
-
-	// 构建消息历史（阶段 1d：改 llmcore.Message 强类型）
-	messages := []llmcore.Message{
-		{Role: llmcore.RoleSystem, ContentText: systemPrompt},
-	}
-
-	// 添加记忆上下文
-	if memoryContext != "" {
-		messages = append(messages, llmcore.Message{
-			Role:        llmcore.RoleSystem,
-			ContentText: "任务执行上下文:\n" + memoryContext,
-		})
-	}
-
-	messages = append(messages, llmcore.Message{
-		Role:        llmcore.RoleUser,
-		ContentText: prompt,
-	})
+	// 构建消息历史：system + 记忆原生消息 + 总结请求
+	messages := a.buildConversationMessages(systemPrompt, prompt)
 
 	// 调用 LLM
 	resp, _, err := a.invokeWithEmptyRetry(ctx, &external.LLMRequest{
@@ -166,30 +136,11 @@ func (a *ReActAgent) Summarize(ctx context.Context) (string, []string, error) {
 		Attachments []string `json:"attachments"`
 	}
 
-	if err := a.jsonParser.Parse(resp.Content, &result); err != nil {
+	if err := a.jsonParser.Parse(resp.Message.ContentText, &result); err != nil {
 		// 如果 JSON 解析失败，返回原始内容
-		return resp.Content, nil, nil
+		return resp.Message.ContentText, nil, nil
 	}
 
 	logger.Info("ReActAgent 任务总结完成")
 	return result.Message, result.Attachments, nil
-}
-
-// GetMemoryContext 获取记忆上下文
-func (a *ReActAgent) GetMemoryContext() string {
-	messages := a.GetMemory()
-	if len(messages) == 0 {
-		return ""
-	}
-
-	var builder strings.Builder
-	for _, msg := range messages {
-		role := "用户"
-		if msg.Role == "assistant" {
-			role = "助手"
-		}
-		builder.WriteString(fmt.Sprintf("[%s] %s\n", role, msg.Message))
-	}
-
-	return builder.String()
 }

@@ -69,12 +69,12 @@ func TestRoutedLLM_FallbackOnRateLimit(t *testing.T) {
 		func(cfg *LLMRuntimeConfig) LLM {
 			return &stubLLM{
 				name: cfg.ModelName,
-				invoke: func(ctx context.Context, req *LLMRequest) (*LLMResponse, error) {
+				invoke: func(ctx context.Context, req *LLMRequest) (*llmcore.LLMResponse, error) {
 					attempts = append(attempts, cfg.ModelName)
 					if cfg.ModelName == "primary" {
 						return nil, llmcore.NewProviderError(llmcore.KindRateLimit, "openai_compat", cfg.ModelName, "rate limit")
 					}
-					return &LLMResponse{Content: cfg.ModelName}, nil
+					return &llmcore.LLMResponse{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: cfg.ModelName}}, nil
 				},
 			}
 		},
@@ -86,8 +86,8 @@ func TestRoutedLLM_FallbackOnRateLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
-	if resp.Content != "backup" {
-		t.Fatalf("content = %q, want backup", resp.Content)
+	if resp.Message.ContentText != "backup" {
+		t.Fatalf("content = %q, want backup", resp.Message.ContentText)
 	}
 	if len(attempts) != 2 {
 		t.Fatalf("attempts = %v, want 2 attempts", attempts)
@@ -135,8 +135,8 @@ func TestRoutedLLM_PreferHealthyCandidate(t *testing.T) {
 	if gotModel != "healthy" {
 		t.Fatalf("got model %s, want healthy", gotModel)
 	}
-	if resp.Content != "healthy" {
-		t.Fatalf("content = %q, want healthy", resp.Content)
+	if resp.Message.ContentText != "healthy" {
+		t.Fatalf("content = %q, want healthy", resp.Message.ContentText)
 	}
 }
 
@@ -177,7 +177,7 @@ func TestRoutedLLM_DoNotFallbackAcrossProtocol(t *testing.T) {
 		func(cfg *LLMRuntimeConfig) LLM {
 			return &stubLLM{
 				name: cfg.ModelName,
-				invoke: func(ctx context.Context, req *LLMRequest) (*LLMResponse, error) {
+				invoke: func(ctx context.Context, req *LLMRequest) (*llmcore.LLMResponse, error) {
 					attempts = append(attempts, cfg.ModelName)
 					return nil, llmcore.NewProviderError(llmcore.KindRateLimit, "openai_compat", cfg.ModelName, "rate limit")
 				},
@@ -236,7 +236,7 @@ func TestRoutedLLM_DoNotFallbackAfterToolUseSideEffect(t *testing.T) {
 		func(cfg *LLMRuntimeConfig) LLM {
 			return &stubLLM{
 				name: cfg.ModelName,
-				invoke: func(ctx context.Context, req *LLMRequest) (*LLMResponse, error) {
+				invoke: func(ctx context.Context, req *LLMRequest) (*llmcore.LLMResponse, error) {
 					attempts = append(attempts, cfg.ModelName)
 					return nil, llmcore.NewProviderError(llmcore.KindServer, "openai_compat", cfg.ModelName, "server error")
 				},
@@ -291,7 +291,7 @@ func TestRoutedLLM_AllowFallbackBeforeToolExecution(t *testing.T) {
 		func(cfg *LLMRuntimeConfig) LLM {
 			return &stubLLM{
 				name: cfg.ModelName,
-				invoke: func(ctx context.Context, req *LLMRequest) (*LLMResponse, error) {
+				invoke: func(ctx context.Context, req *LLMRequest) (*llmcore.LLMResponse, error) {
 					attempts = append(attempts, cfg.ModelName)
 					return nil, llmcore.NewProviderError(llmcore.KindServer, "openai_compat", cfg.ModelName, "server error")
 				},
@@ -353,8 +353,8 @@ func TestRoutedLLM_RecordSuccessUpdatesRuntimeHealth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
-	if resp.Content != "fast" {
-		t.Fatalf("content = %q, want fast", resp.Content)
+	if resp.Message.ContentText != "fast" {
+		t.Fatalf("content = %q, want fast", resp.Message.ContentText)
 	}
 }
 
@@ -387,8 +387,8 @@ func TestRoutedLLM_RecordFailureUpdatesRuntimeHealth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
-	if resp.Content != "backup" {
-		t.Fatalf("content = %q, want backup", resp.Content)
+	if resp.Message.ContentText != "backup" {
+		t.Fatalf("content = %q, want backup", resp.Message.ContentText)
 	}
 }
 
@@ -411,8 +411,8 @@ func TestRoutedLLM_PersistRuntimeHealth(t *testing.T) {
 		func(cfg *LLMRuntimeConfig) LLM {
 			return &stubLLM{
 				name: cfg.ModelName,
-				invoke: func(ctx context.Context, req *LLMRequest) (*LLMResponse, error) {
-					return &LLMResponse{Content: "ok"}, nil
+				invoke: func(ctx context.Context, req *LLMRequest) (*llmcore.LLMResponse, error) {
+					return &llmcore.LLMResponse{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: "ok"}}, nil
 				},
 			}
 		},

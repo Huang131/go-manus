@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 )
 
@@ -159,13 +160,15 @@ func TestPlannerReActFlow_InvokeContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // 立即取消
 
-	message := &model.Message{
-		Role:    "user",
-		Message: "test message",
+	input := &TaskInput{
+		Message: llmcore.Message{
+			Role:        llmcore.RoleUser,
+			ContentText: "test message",
+		},
 	}
 
 	// 由于上下文已取消，Invoke 应该会很快结束
-	eventCh := flow.Invoke(ctx, message)
+	eventCh := flow.Invoke(ctx, input)
 
 	// 验证事件通道是否正常返回
 	eventCount := 0
@@ -185,10 +188,13 @@ type mockLLMForTest struct {
 	response string
 }
 
-func (m *mockLLMForTest) Invoke(ctx context.Context, req *external.LLMRequest) (*external.LLMResponse, error) {
-	return &external.LLMResponse{
-		ID:      "mock-response",
-		Content: m.response,
+func (m *mockLLMForTest) Invoke(ctx context.Context, req *external.LLMRequest) (*llmcore.LLMResponse, error) {
+	return &llmcore.LLMResponse{
+		ID: "mock-response",
+		Message: llmcore.Message{
+			Role:        llmcore.RoleAssistant,
+			ContentText: m.response,
+		},
 	}, nil
 }
 

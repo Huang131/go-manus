@@ -53,6 +53,9 @@ type Message struct {
 	// Name 工具消息场景标识是哪个 tool；可空
 	Name string `json:"name,omitempty"`
 
+	// Attachments 附件列表 (file_id 或沙箱路径)，主要用于 user 消息
+	Attachments []string `json:"attachments,omitempty"`
+
 	// 助手消息专用
 	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
 	// 推理过程（reasoning 模型的思考内容）

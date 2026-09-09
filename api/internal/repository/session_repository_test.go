@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 )
 
@@ -107,35 +108,55 @@ func TestSessionRepository_UpdateLatestMessage(t *testing.T) {
 
 // TestSessionRepository_Memory 测试记忆操作
 func TestSessionRepository_Memory(t *testing.T) {
-	session := &model.Session{
-		ID:        "test-session-6",
-		Title:     "Test Session 6",
-		Memories:  map[string]interface{}{},
-		Status:    model.SessionStatusPending,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
-
-	// 模拟添加记忆
-	memory := &model.Memory{
-		Messages: []map[string]interface{}{
-			{"role": "user", "content": "Hello"},
+	// 构造含 ToolCalls/Attachments 的完整消息，验证序列化往返无损
+	messages := []llmcore.Message{
+		{
+			Role:        llmcore.RoleUser,
+			ContentText: "Hello",
+			Attachments: []string{"file-1", "file-2"},
+		},
+		{
+			Role:        llmcore.RoleAssistant,
+			ContentText: "调用工具",
+			ToolCalls: []llmcore.ToolCall{
+				{
+					ID:   "call-1",
+					Type: "function",
+					Function: llmcore.ToolCallFunction{
+						Name:      "search",
+						Arguments: `{"query":"go"}`,
+					},
+				},
+			},
+		},
+		{
+			Role:        llmcore.RoleTool,
+			ContentText: `{"result":"ok"}`,
 		},
 	}
 
 	// 序列化记忆
-	memoryJSON, _ := sonic.Marshal(memory)
-	session.Memories["summary"] = string(memoryJSON)
-
-	if len(session.Memories) != 1 {
-		t.Errorf("Memories 数量应为 1，实际: %d", len(session.Memories))
+	memoryJSON, err := sonic.Marshal(messages)
+	if err != nil {
+		t.Fatalf("记忆序列化失败: %v", err)
 	}
 
 	// 反序列化验证
-	var restored model.Memory
-	sonic.Unmarshal([]byte(session.Memories["summary"].(string)), &restored)
-	if len(restored.Messages) != 1 {
-		t.Error("记忆内容不匹配")
+	var restored []llmcore.Message
+	if err := sonic.Unmarshal(memoryJSON, &restored); err != nil {
+		t.Fatalf("记忆反序列化失败: %v", err)
+	}
+	if len(restored) != 3 {
+		t.Fatalf("消息数量应为 3，实际: %d", len(restored))
+	}
+	if restored[0].ContentText != "Hello" || len(restored[0].Attachments) != 2 {
+		t.Errorf("user 消息内容/附件不匹配: %+v", restored[0])
+	}
+	if len(restored[1].ToolCalls) != 1 || restored[1].ToolCalls[0].Function.Name != "search" {
+		t.Errorf("assistant 消息 ToolCalls 不匹配: %+v", restored[1])
+	}
+	if restored[1].ToolCalls[0].Function.Arguments != `{"query":"go"}` {
+		t.Errorf("工具调用参数不匹配: %s", restored[1].ToolCalls[0].Function.Arguments)
 	}
 }
 
@@ -226,7 +247,6 @@ func TestSessionRepository_JSONSerialization(t *testing.T) {
 		UnreadMessageCount: 1,
 		LatestMessage:      "Hello",
 		Events:             []model.Event{},
-		Memories:           map[string]interface{}{},
 		CreatedAt:          time.Now(),
 		UpdatedAt:          time.Now(),
 	}

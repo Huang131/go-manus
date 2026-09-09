@@ -6,7 +6,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/bytedance/sonic"
+
 	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
 
@@ -87,7 +90,7 @@ func NewAgentService(
 
 // Chat 处理聊天消息
 // 对齐 Python 版本的 RedisStreamTask 架构
-func (s *AgentService) Chat(ctx context.Context, sessionID string, message *model.Message) (string, error) {
+func (s *AgentService) Chat(ctx context.Context, sessionID string, message *llmcore.Message) (string, error) {
 	// 获取会话
 	session, err := s.sessionRep.GetByID(ctx, sessionID)
 	if err != nil {
@@ -98,15 +101,26 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *mode
 	}
 
 	// 更新最新消息
-	if err := s.sessionRep.UpdateLatestMessage(ctx, sessionID, message.Message); err != nil {
+	if err := s.sessionRep.UpdateLatestMessage(ctx, sessionID, message.ContentText); err != nil {
 		logger.Warn("更新最新消息失败", logger.String("session_id", sessionID), logger.Err(err))
 	}
 
+	// 创建独立的 task context，不受 HTTP 请求取消影响，但保留请求中的 trace 等 values。
+	// 任务真正的取消由 RedisStreamTask.Invoke 创建并管理，避免这里遗留未释放的 cancel 函数。
+	taskCtx := context.WithoutCancel(ctx)
+
+	// 构建用户消息事件（DB 事件与 Redis 输入共用同一份，避免两种形状重复序列化）
+	msgEvent := &model.MessageEvent{
+		Type:    model.EventTypeMessage,
+		Role:    string(message.Role),
+		Message: message.ContentText,
+	}
+	if len(message.Attachments) > 0 {
+		msgEvent.Attachments = s.resolveMessageAttachments(taskCtx, sessionID, message.Attachments)
+	}
+
 	// 添加用户消息事件到数据库
-	userEventData, err := safeMarshal(map[string]interface{}{
-		"role":    "user",
-		"message": message.Message,
-	})
+	userEventData, err := sonic.Marshal(msgEvent)
 	if err != nil {
 		logger.Error("序列化用户消息事件失败",
 			logger.String("session_id", sessionID),
@@ -122,10 +136,6 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *mode
 		logger.Warn("添加用户消息事件失败", logger.String("session_id", sessionID), logger.Err(err))
 	}
 
-	// 创建独立的 task context，不受 HTTP 请求取消影响，但保留请求中的 trace 等 values。
-	// 任务真正的取消由 RedisStreamTask.Invoke 创建并管理，避免这里遗留未释放的 cancel 函数。
-	taskCtx := context.WithoutCancel(ctx)
-
 	// 获取或创建 RedisStreamTask
 	task, err := s.getOrCreateTask(ctx, session, s.getTools())
 	if err != nil {
@@ -139,14 +149,6 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *mode
 	}
 
 	// 将消息放入 input_stream
-	msgEvent := &model.MessageEvent{
-		Type:    model.EventTypeMessage,
-		Role:    message.Role,
-		Message: message.Message,
-	}
-	if len(message.Attachments) > 0 {
-		msgEvent.Attachments = s.resolveMessageAttachments(taskCtx, sessionID, message.Attachments)
-	}
 	if _, err := task.PutInput(taskCtx, msgEvent); err != nil {
 		logger.Error("放入消息失败", logger.String("session_id", sessionID), logger.Err(err))
 		return task.ID(), fmt.Errorf("放入消息失败: %w", err)

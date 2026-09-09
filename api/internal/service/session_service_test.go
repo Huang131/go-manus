@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
 )
@@ -105,11 +106,11 @@ func (m *MockSessionRepository) AppendEvent(ctx context.Context, id string, even
 	return nil
 }
 
-func (m *MockSessionRepository) GetMemory(ctx context.Context, id string, agentName string) (*model.Memory, error) {
+func (m *MockSessionRepository) GetMemory(ctx context.Context, id string, agentName string) ([]llmcore.Message, error) {
 	return nil, nil
 }
 
-func (m *MockSessionRepository) SaveMemory(ctx context.Context, id string, agentName string, memory *model.Memory) error {
+func (m *MockSessionRepository) SaveMemory(ctx context.Context, id string, agentName string, messages []llmcore.Message) error {
 	return nil
 }
 
@@ -186,9 +187,6 @@ func TestSessionService_CreateSession(t *testing.T) {
 	}
 	if len(session.Events) != 0 {
 		t.Errorf("Session Events length = %d, want 0", len(session.Events))
-	}
-	if session.Memories == nil {
-		t.Error("Session Memories should not be nil")
 	}
 }
 

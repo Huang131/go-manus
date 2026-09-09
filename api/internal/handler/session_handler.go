@@ -11,6 +11,7 @@ import (
 	"github.com/Huang131/go-manus/api/internal/agent"
 	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/service"
 	"github.com/Huang131/go-manus/api/pkg/logger"
@@ -183,9 +184,9 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 	// 仅当"显式发送新消息"时才进入 chat 流程；空流续读跳过此步。
 	if hasMessage && strings.TrimSpace(req.Message) != "" {
 		// 创建消息对象
-		msg := &model.Message{
-			Role:        "user",
-			Message:     req.Message,
+		msg := &llmcore.Message{
+			Role:        llmcore.RoleUser,
+			ContentText: req.Message,
 			Attachments: req.Attachments,
 		}
 
@@ -200,11 +201,10 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 		}
 
 		// 先推送用户消息事件（让前端能立即展示用户发送的内容）
-		userPayload, _ := sonic.Marshal(map[string]interface{}{
-			"event_id":   "",
-			"created_at": time.Now().Unix(),
-			"role":       msg.Role,
-			"message":    msg.Message,
+		userPayload, _ := sonic.Marshal(&model.MessageEvent{
+			Type:    model.EventTypeMessage,
+			Role:    string(msg.Role),
+			Message: msg.ContentText,
 		})
 		c.SSEvent("message", string(userPayload))
 		c.Writer.Flush()
@@ -374,8 +374,17 @@ func (h *SessionHandler) Stop(c *gin.Context) {
 
 // mergeEventMetadata 将 model.Event 的 Data 业务 payload 与元数据（event_id、created_at）合并
 // 对齐原 Python 版本的 BaseEventData 平铺结构。
-// 当 Data 解析失败时（极少见），退化为只包含元数据，保证前端不卡死。
+//
+// task_runner 创建事件时已把元数据平铺进 payload 并填充 Event.ID，
+// 此处对这类事件零序列化直传；仅对旧格式/其他生产方（payload 无元数据）
+// 的事件退化为解析重组。Data 解析失败时直接返回原始 Data，保证前端不卡死。
 func mergeEventMetadata(event *model.Event) []byte {
+	// 新格式：元数据已在 payload 内（以 Event.ID 是否回填为判据）
+	if event.ID != "" && len(event.Data) > 0 {
+		return event.Data
+	}
+
+	// 兜底：payload 未携带元数据，解析重组注入
 	createdAt := event.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now()

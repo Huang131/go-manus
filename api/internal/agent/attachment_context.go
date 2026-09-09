@@ -9,12 +9,8 @@ import (
 
 // BuildAttachmentContextSection 将已加载的附件内容拼成可注入 prompt 的字符串。
 // 若附件上下文为空，返回一个空段。
-func BuildAttachmentContextSection(raw interface{}) string {
-	if raw == nil {
-		return ""
-	}
-	contexts, ok := raw.([]attachment.FileContext)
-	if !ok || len(contexts) == 0 {
+func BuildAttachmentContextSection(contexts []attachment.FileContext) string {
+	if len(contexts) == 0 {
 		return ""
 	}
 
