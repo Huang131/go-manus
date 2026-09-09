@@ -232,13 +232,21 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
         // 使 tool-use 各组件与预览面板无需感知协议字段差异。
         const raw = ev.data as ToolCallingEvent | ToolCalledEvent;
         const isCalling = ev.type === 'tool_calling';
+        const calledRaw = raw as ToolCalledEvent;
+        const result = calledRaw.result;
+        // 失败时（success=false）展示错误信息，成功时展示 result.data
+        const content = isCalling
+          ? undefined
+          : result?.success === false
+            ? result.message // 失败时显示错误消息
+            : result?.data;   // 成功时显示结果数据
         const tool: ToolEvent = {
           ...raw,
           name: raw.name ?? '',
           function: raw.function_name ?? '',
           args: raw.arguments ?? {},
           status: isCalling ? 'calling' : 'called',
-          content: isCalling ? undefined : (raw as ToolCalledEvent).result?.data,
+          content,
         };
         const toolCallId = tool.tool_call_id;
 

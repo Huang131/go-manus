@@ -124,7 +124,7 @@ func (r *PostgresSessionRepository) Create(ctx context.Context, session *model.S
 func (r *PostgresSessionRepository) GetByID(ctx context.Context, id string) (*model.Session, error) {
 	q := r.queryer(ctx)
 	query := `
-		SELECT id, sandbox_id, task_id, title, unread_message_count, latest_message,
+		SELECT id, COALESCE(sandbox_id, ''), COALESCE(task_id, ''), title, unread_message_count, COALESCE(latest_message, ''),
 			latest_message_at, events, status, created_at, updated_at
 		FROM sessions WHERE id = $1
 	`
@@ -148,7 +148,7 @@ func (r *PostgresSessionRepository) GetByID(ctx context.Context, id string) (*mo
 func (r *PostgresSessionRepository) GetAll(ctx context.Context) ([]*model.Session, error) {
 	q := r.queryer(ctx)
 	query := `
-		SELECT id, sandbox_id, task_id, title, unread_message_count, latest_message,
+		SELECT id, COALESCE(sandbox_id, ''), COALESCE(task_id, ''), title, unread_message_count, COALESCE(latest_message, ''),
 			latest_message_at, status, created_at, updated_at
 		FROM sessions WHERE deleted_at IS NULL ORDER BY latest_message_at DESC NULLS LAST
 	`
@@ -183,7 +183,7 @@ func (r *PostgresSessionRepository) List(ctx context.Context, limit, offset int)
 	}
 
 	query := `
-		SELECT id, sandbox_id, task_id, title, unread_message_count, latest_message,
+		SELECT id, COALESCE(sandbox_id, ''), COALESCE(task_id, ''), title, unread_message_count, COALESCE(latest_message, ''),
 			latest_message_at, status, created_at, updated_at
 		FROM sessions WHERE deleted_at IS NULL ORDER BY latest_message_at DESC NULLS LAST LIMIT $1 OFFSET $2
 	`
