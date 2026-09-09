@@ -86,7 +86,7 @@ type A2AServerConfig struct {
 func NewA2AClientManager() *A2AClientManager {
 	return &A2AClientManager{
 		httpClient: &http.Client{
-			Timeout: 600 * time.Second, // 与 Python 版本一致，10 分钟超时
+			Timeout: defaultA2AHTTPTimeout, // 与 Python 版本一致，10 分钟超时
 		},
 		agentCards: make(map[string]*A2AAgentCard),
 		baseURLs:   make(map[string]string),
@@ -128,7 +128,7 @@ func (m *A2AClientManager) Initialize(ctx context.Context, config *A2AClientMana
 
 // fetchAgentCard 从远程服务器获取 AgentCard
 func (m *A2AClientManager) fetchAgentCard(ctx context.Context, baseURL string) (*A2AAgentCard, error) {
-	url := baseURL + "/.well-known/agent-card.json"
+	url := baseURL + a2aAgentCardPath
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -191,15 +191,15 @@ func (m *A2AClientManager) Invoke(ctx context.Context, agentID string, query str
 	// 3. 构建 A2A JSON-RPC 2.0 请求
 	request := A2AJSONRPCRequest{
 		ID:      uuid.New().String(),
-		JSONRPC: "2.0",
-		Method:  "message/send",
+		JSONRPC: a2aJSONRPCVersion,
+		Method:  a2aMethodMessageSend,
 		Params: A2AMessageSendParams{
 			Message: A2AMessage{
 				MessageID: uuid.New().String(),
-				Role:      "user",
+				Role:      a2aRoleUser,
 				Parts: []A2AMessagePart{
 					{
-						Kind: "text",
+						Kind: a2aPartKindText,
 						Text: query,
 					},
 				},

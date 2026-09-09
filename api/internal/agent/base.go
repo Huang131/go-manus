@@ -469,8 +469,8 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 	tool, ok := a.toolRegistry.Get(functionName)
 	if !ok {
 		// 可能是 MCP 工具，格式为 mcp_serverName_toolName
-		if strings.HasPrefix(functionName, "mcp_") {
-			tool, ok = a.toolRegistry.Get("mcp")
+		if strings.HasPrefix(functionName, MCPFunctionPrefix) {
+			tool, ok = a.toolRegistry.Get(ToolNameMCP)
 		}
 		if !ok {
 			return nil, fmt.Errorf("未知工具: %s", functionName)
@@ -483,7 +483,7 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 		logger.Any("arguments", arguments))
 
 	// 特殊处理 message_ask_user 工具
-	if functionName == "message_ask_user" {
+	if functionName == MessageFunctionAskUser {
 		// 返回成功结果，并标记需要等待用户输入
 		return &ToolCallResult{
 			ToolCallID:   toolCallID,

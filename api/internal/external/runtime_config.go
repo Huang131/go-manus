@@ -27,16 +27,10 @@ type LLMRuntimeConfig struct {
 // LLMRuntimeHealth 路由时的轻量健康摘要。
 // 这里只收口“能不能优先选”，不承担完整观测。
 type LLMRuntimeHealth struct {
-	Status           string
+	Status           model.HealthState
 	RecentFailures   int
 	AverageLatencyMS int
 }
-
-const (
-	LLMHealthHealthy   = "healthy"
-	LLMHealthDegraded  = "degraded"
-	LLMHealthUnhealthy = "unhealthy"
-)
 
 // ProtocolFromProvider 把数据库里的 provider 字段映射成协议类型。
 //
@@ -129,7 +123,7 @@ func convertRequestPolicyExtra(in map[string]json.RawMessage) map[string]llmcore
 			continue
 		}
 		out[k] = llmcore.ExtraParam{
-			Kind: "json",
+			Kind: llmcore.ExtraParamKindJSON,
 			Raw:  append([]byte(nil), raw...),
 		}
 	}
@@ -155,7 +149,7 @@ func runtimeConfigToOpenAIClientConfig(cfg *LLMRuntimeConfig) *OpenAIClientConfi
 func runtimeHealthFromModel(h model.RuntimeHealth) LLMRuntimeHealth {
 	status := h.Status
 	if status == "" {
-		status = LLMHealthHealthy
+		status = model.HealthStateHealthy
 	}
 	return LLMRuntimeHealth{
 		Status:           status,
@@ -167,7 +161,7 @@ func runtimeHealthFromModel(h model.RuntimeHealth) LLMRuntimeHealth {
 func runtimeHealthToModel(h LLMRuntimeHealth) model.RuntimeHealth {
 	status := h.Status
 	if status == "" {
-		status = LLMHealthHealthy
+		status = model.HealthStateHealthy
 	}
 	return model.RuntimeHealth{
 		Status:           status,

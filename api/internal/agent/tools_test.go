@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 )
 
@@ -101,7 +102,7 @@ func TestToolRegistry_GetToolsForLLM(t *testing.T) {
 		t.Errorf("GetToolsForLLM() got %d tools, want 1", len(tools))
 	}
 
-	if tools[0].Type != "function" {
+	if tools[0].Type != llmcore.ToolTypeFunction {
 		t.Error("GetToolsForLLM() should return function type")
 	}
 }

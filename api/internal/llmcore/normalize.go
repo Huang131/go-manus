@@ -35,7 +35,7 @@ func NormalizeDelta(delta *LLMDelta) *LLMDelta {
 func MergeDeltas(model string, deltas []LLMDelta) *LLMResponse {
 	resp := &LLMResponse{
 		Model:        model,
-		FinishReason: "stop",
+		FinishReason: FinishReasonStop,
 		Message:      Message{Role: RoleAssistant},
 	}
 	var argsBuf = make(map[int]string)
@@ -87,7 +87,7 @@ func MergeDeltas(model string, deltas []LLMDelta) *LLMResponse {
 	resp.Message.ToolCalls = currentCalls
 
 	// finish_reason=tool_calls 才算有 tool_calls
-	if resp.FinishReason != "tool_calls" {
+	if resp.FinishReason != FinishReasonToolCalls {
 		resp.Message.ToolCalls = nil
 	}
 

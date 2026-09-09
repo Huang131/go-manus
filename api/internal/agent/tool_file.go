@@ -19,7 +19,7 @@ func NewFileTool(sandbox external.Sandbox) *FileTool {
 
 // Name 返回工具名称
 func (t *FileTool) Name() string {
-	return "file"
+	return ToolNameFile
 }
 
 // Description 返回工具描述
@@ -35,7 +35,7 @@ func (t *FileTool) Parameters() map[string]interface{} {
 			"action": map[string]interface{}{
 				"type":        "string",
 				"description": "操作类型: read, write, delete, exists, list, search, replace",
-				"enum":        []string{"read", "write", "delete", "exists", "list", "search", "replace"},
+				"enum":        []string{FileActionRead, FileActionWrite, FileActionDelete, FileActionExists, FileActionList, FileActionSearch, FileActionReplace},
 			},
 			"filepath": map[string]interface{}{
 				"type":        "string",
@@ -101,7 +101,7 @@ func (t *FileTool) Invoke(ctx context.Context, params map[string]interface{}) (*
 	filepath, _ := params["filepath"].(string)
 
 	switch action {
-	case "read":
+	case FileActionRead:
 		var startLine, endLine *int
 		if v, ok := params["start_line"].(float64); ok {
 			n := int(v)
@@ -121,7 +121,7 @@ func (t *FileTool) Invoke(ctx context.Context, params map[string]interface{}) (*
 		}
 		return t.sandbox.ReadFile(ctx, filepath, startLine, endLine, sudo, maxLength)
 
-	case "write":
+	case FileActionWrite:
 		content, _ := params["content"].(string)
 		append := false
 		if v, ok := params["append"].(bool); ok {
@@ -133,20 +133,20 @@ func (t *FileTool) Invoke(ctx context.Context, params map[string]interface{}) (*
 		}
 		return t.sandbox.WriteFile(ctx, filepath, content, append, false, false, sudo)
 
-	case "delete":
+	case FileActionDelete:
 		return t.sandbox.DeleteFile(ctx, filepath)
 
-	case "exists":
+	case FileActionExists:
 		return t.sandbox.CheckFileExists(ctx, filepath)
 
-	case "list":
+	case FileActionList:
 		dirPath := filepath
 		if v, ok := params["dir_path"].(string); ok {
 			dirPath = v
 		}
 		return t.sandbox.ListFiles(ctx, dirPath)
 
-	case "search":
+	case FileActionSearch:
 		regex, _ := params["regex"].(string)
 		sudo := false
 		if v, ok := params["sudo"].(bool); ok {
@@ -154,7 +154,7 @@ func (t *FileTool) Invoke(ctx context.Context, params map[string]interface{}) (*
 		}
 		return t.sandbox.SearchInFile(ctx, filepath, regex, sudo)
 
-	case "replace":
+	case FileActionReplace:
 		oldStr, _ := params["old_str"].(string)
 		newStr, _ := params["new_str"].(string)
 		sudo := false

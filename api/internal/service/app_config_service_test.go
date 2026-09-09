@@ -24,7 +24,7 @@ func NewMockAppConfigRepository() *MockAppConfigRepository {
 	}
 }
 
-func (m *MockAppConfigRepository) GetConfig(ctx context.Context, configType, configKey string) (*model.AppConfig, error) {
+func (m *MockAppConfigRepository) GetConfig(ctx context.Context, configType model.AppConfigType, configKey string) (*model.AppConfig, error) {
 	if m.getErr != nil {
 		return nil, m.getErr
 	}
@@ -65,22 +65,22 @@ func (m *MockAppConfigRepository) SaveConfig(ctx context.Context, config *model.
 		UpdatedAt:   config.UpdatedAt,
 	}
 	// 删除旧配置
-	key := config.ConfigType + ":" + config.ConfigKey
+	key := string(config.ConfigType) + ":" + config.ConfigKey
 	delete(m.configs, key)
 	m.configs[key] = stored
 	return nil
 }
 
-func (m *MockAppConfigRepository) DeleteConfig(ctx context.Context, configType, configKey string) error {
+func (m *MockAppConfigRepository) DeleteConfig(ctx context.Context, configType model.AppConfigType, configKey string) error {
 	if m.deleteErr != nil {
 		return m.deleteErr
 	}
-	key := configType + ":" + configKey
+	key := string(configType) + ":" + configKey
 	delete(m.configs, key)
 	return nil
 }
 
-func (m *MockAppConfigRepository) ListConfigs(ctx context.Context, configType string) ([]*model.AppConfig, error) {
+func (m *MockAppConfigRepository) ListConfigs(ctx context.Context, configType model.AppConfigType) ([]*model.AppConfig, error) {
 	var result []*model.AppConfig
 	for _, c := range m.configs {
 		if c.ConfigType == configType {

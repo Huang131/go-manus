@@ -13,6 +13,12 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+const (
+	consumerGroupCreateTimeout = 5 * time.Second
+	consumerGroupBlockTimeout  = 3 * time.Second
+	consumerActiveWindow       = 5 * time.Minute
+)
+
 // RedisConsumerGroup Redis 消费者组实现
 type RedisConsumerGroup struct {
 	name       string
@@ -34,7 +40,7 @@ func NewRedisConsumerGroup(client *redis.Client, groupName string, streamName st
 	}
 
 	// 确保消费者组存在
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), consumerGroupCreateTimeout)
 	defer cancel()
 
 	// 尝试创建消费者组（如果已存在会忽略错误）
@@ -87,7 +93,7 @@ func (cg *RedisConsumerGroup) claimFromStream(ctx context.Context) (string, inte
 		Consumer: cg.consumerID,
 		Streams:  []string{cg.streamName, ">"},
 		Count:    1,
-		Block:    time.Second * 3,
+		Block:    consumerGroupBlockTimeout,
 	}).Result()
 
 	if err != nil {
@@ -193,7 +199,7 @@ func (cg *RedisConsumerGroup) Info(ctx context.Context) (*ConsumerGroupInfo, err
 						Name:     c.Name,
 						Pending:  c.Pending,
 						LastSeen: time.Now().Add(-c.Idle),
-						Active:   c.Idle < time.Minute*5,
+						Active:   c.Idle < consumerActiveWindow,
 					})
 				}
 			}

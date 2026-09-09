@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 )
 
@@ -18,7 +19,7 @@ func NewMessageTool() *MessageTool {
 
 // Name 返回工具名称
 func (t *MessageTool) Name() string {
-	return "message"
+	return ToolNameMessage
 }
 
 // Description 返回工具描述
@@ -35,8 +36,8 @@ func (t *MessageTool) ReadOnly() bool {
 func (t *MessageTool) GetTools() []map[string]interface{} {
 	return []map[string]interface{}{
 		{
-			"type":        "function",
-			"name":        "message_notify_user",
+			"type":        llmcore.ToolTypeFunction,
+			"name":        MessageFunctionNotifyUser,
 			"description": "向用户发送消息，且无需用户回复。用于确认收到消息、提供进度更新、报告任务完成情况，或解释处理方式的变更。",
 			"parameters": map[string]interface{}{
 				"type": "object",
@@ -50,8 +51,8 @@ func (t *MessageTool) GetTools() []map[string]interface{} {
 			},
 		},
 		{
-			"type":        "function",
-			"name":        "message_ask_user",
+			"type":        llmcore.ToolTypeFunction,
+			"name":        MessageFunctionAskUser,
 			"description": "向用户提问并等待回复。用于：请求澄清、寻求确认、或收集额外信息。",
 			"parameters": map[string]interface{}{
 				"type": "object",
@@ -107,9 +108,9 @@ func (t *MessageTool) Invoke(ctx context.Context, params map[string]interface{})
 // InvokeWithName 根据函数名调用工具
 func (t *MessageTool) InvokeWithName(functionName string, ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
 	switch functionName {
-	case "message_notify_user":
+	case MessageFunctionNotifyUser:
 		return t.invokeMessageSend(params)
-	case "message_ask_user":
+	case MessageFunctionAskUser:
 		return t.invokeMessageAskUser(params)
 	default:
 		return model.NewToolError("未知函数: " + functionName), nil
@@ -160,5 +161,5 @@ func (t *MessageTool) invokeMessageAskUser(params map[string]interface{}) (*mode
 
 // HasTool 检查是否包含指定工具
 func (t *MessageTool) HasTool(toolName string) bool {
-	return strings.HasPrefix(toolName, "message_")
+	return strings.HasPrefix(toolName, MessageFunctionPrefix)
 }

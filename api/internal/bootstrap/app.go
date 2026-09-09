@@ -476,14 +476,14 @@ func (a *App) initRoutes(cfg *config.Config, opts Options) {
 	// 没配置（空切片）时回退到 ["127.0.0.1", "::1"]，只信任本机回环。
 	trustedProxies := cfg.Server.TrustedProxies
 	if len(trustedProxies) == 0 {
-		trustedProxies = []string{"127.0.0.1", "::1"}
+		trustedProxies = defaultTrustedProxies()
 		logger.Warn("trusted_proxies not configured, falling back to loopback addresses")
 	}
 	if err := engine.SetTrustedProxies(trustedProxies); err != nil {
 		logger.Warn("invalid trusted_proxies config, falling back to loopback",
 			logger.Strings("configured", trustedProxies),
 			logger.Err(err))
-		_ = engine.SetTrustedProxies([]string{"127.0.0.1", "::1"})
+		_ = engine.SetTrustedProxies(defaultTrustedProxies())
 	}
 	engine.Use(middleware.Recovery(), middleware.RequestID(), middleware.Logger(), middleware.CORS())
 	sessionHandler := handler.NewSessionHandler(a.SessionService, a.AgentService, a.Sandbox)
@@ -512,7 +512,7 @@ func (a *App) healthCheck(opts Options, cfg *config.Config) error {
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), healthCheckTimeout)
 	defer cancel()
 	if a.Postgres != nil {
 		if err := a.Postgres.HealthCheck(ctx); err != nil {

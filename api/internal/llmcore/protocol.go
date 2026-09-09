@@ -10,6 +10,20 @@
 //   - 业务侧看到的是 external 包，但底下的 wire format 是 llmcore
 package llmcore
 
+// 通用 LLM 协议值，供业务层和各适配器共享。
+const (
+	ToolTypeFunction         = "function"
+	ContentTypeText          = "text"
+	ContentTypeImageURL      = "image_url"
+	ContentTypeAudioURL      = "audio_url"
+	ResponseFormatText       = "text"
+	ResponseFormatJSONObject = "json_object"
+	ResponseFormatJSONSchema = "json_schema"
+	FinishReasonStop         = "stop"
+	FinishReasonToolCalls    = "tool_calls"
+	ExtraParamKindJSON       = "json"
+)
+
 // ContentPart 消息内容片段
 // 多模态场景下 messages[i].content 是 []ContentPart；纯文本场景下是 string
 // 为简化，V1 让 messages 元素用统一 Message.ContentText / ContentParts 两种字段

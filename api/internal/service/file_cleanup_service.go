@@ -246,7 +246,6 @@ func (s *FileCleanupScheduler) run() {
 	defer s.wg.Done()
 
 	// 首次清理延迟（等待系统启动完成）
-	firstCleanupDelay := time.Minute * 5
 	timer := time.NewTimer(firstCleanupDelay)
 	defer timer.Stop()
 
@@ -263,7 +262,7 @@ func (s *FileCleanupScheduler) run() {
 
 // cleanup 执行清理
 func (s *FileCleanupScheduler) cleanup() {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*5)
+	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
 	defer cancel()
 
 	cleaned, err := s.cleanupService.CleanExpiredFiles(ctx, s.expireDuration, s.batchSize)

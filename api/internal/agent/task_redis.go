@@ -204,7 +204,7 @@ func (s *TaskStream) Pop(ctx context.Context) (string, string, error) {
 	s.mu.Unlock()
 
 	// 使用 GetBlocking 实现阻塞 Pop
-	id, data, err := s.mq.GetBlocking(ctx, s.streamName, startID, 3*DefaultBlockTimeout)
+	id, data, err := s.mq.GetBlocking(ctx, s.streamName, startID, DefaultBlockTimeout)
 	if err != nil {
 		return "", "", err
 	}
@@ -240,8 +240,8 @@ func (s *TaskStream) Len(ctx context.Context) (int, error) {
 	return int(size), err
 }
 
-// DefaultBlockTimeout 默认阻塞超时时间
-const DefaultBlockTimeout = 3e9 // 3秒（纳秒）
+// DefaultBlockTimeout 默认阻塞超时时间。
+const DefaultBlockTimeout = 3 * time.Second
 
 // NewRedisStreamTask 创建基于 Redis Stream 的任务
 // 参数:
@@ -435,7 +435,7 @@ func (t *RedisStreamTask) GetOutput(ctx context.Context, startID string, blockTi
 	if ms > 0 {
 		timeout = time.Duration(ms) * time.Millisecond
 	} else {
-		timeout = 3 * time.Second
+		timeout = DefaultBlockTimeout
 	}
 
 	id, data, err := t.outputStream.GetBlocking(ctx, t.outputStreamName(), startID, timeout)
@@ -481,7 +481,7 @@ func (t *RedisStreamTask) SubscribeOutput(ctx context.Context, bufferSize int) (
 				return
 			default:
 				// 获取下一条消息
-				id, data, err := t.outputStream.GetBlocking(ctx, t.outputStreamName(), lastID, 3*time.Second)
+				id, data, err := t.outputStream.GetBlocking(ctx, t.outputStreamName(), lastID, DefaultBlockTimeout)
 				if err != nil {
 					if ctx.Err() != nil {
 						return

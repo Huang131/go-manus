@@ -19,7 +19,7 @@ func NewBrowserTool(browser external.Browser) *BrowserTool {
 
 // Name 返回工具名称
 func (t *BrowserTool) Name() string {
-	return "browser"
+	return ToolNameBrowser
 }
 
 // Description 返回工具描述
@@ -35,7 +35,7 @@ func (t *BrowserTool) Parameters() map[string]interface{} {
 			"action": map[string]interface{}{
 				"type":        "string",
 				"description": "操作类型: navigate, view, screenshot, click, input, scroll_up, scroll_down, press_key",
-				"enum":        []string{"navigate", "view", "screenshot", "click", "input", "scroll_up", "scroll_down", "press_key"},
+				"enum":        []string{BrowserActionNavigate, BrowserActionView, BrowserActionScreenshot, BrowserActionClick, BrowserActionInput, BrowserActionScrollUp, BrowserActionScrollDown, BrowserActionPressKey},
 			},
 			"session_id": map[string]interface{}{
 				"type":        "string",
@@ -97,17 +97,17 @@ func (t *BrowserTool) Invoke(ctx context.Context, params map[string]interface{})
 	sessionID, _ := params["session_id"].(string)
 
 	switch action {
-	case "navigate":
+	case BrowserActionNavigate:
 		url := ""
 		if v, ok := params["url"].(string); ok {
 			url = v
 		}
 		return t.browser.Navigate(sessionID, url)
 
-	case "view":
+	case BrowserActionView:
 		return t.browser.ViewPage(sessionID)
 
-	case "screenshot":
+	case BrowserActionScreenshot:
 		var fullPage *bool
 		if v, ok := params["full_page"].(bool); ok {
 			fullPage = &v
@@ -120,7 +120,7 @@ func (t *BrowserTool) Invoke(ctx context.Context, params map[string]interface{})
 			"screenshot_data": data,
 		}), nil
 
-	case "click":
+	case BrowserActionClick:
 		var index *int
 		if v, ok := params["index"].(float64); ok {
 			n := int(v)
@@ -135,7 +135,7 @@ func (t *BrowserTool) Invoke(ctx context.Context, params map[string]interface{})
 		}
 		return t.browser.Click(sessionID, index, coordX, coordY)
 
-	case "input":
+	case BrowserActionInput:
 		text := ""
 		if v, ok := params["text"].(string); ok {
 			text = v
@@ -158,21 +158,21 @@ func (t *BrowserTool) Invoke(ctx context.Context, params map[string]interface{})
 		}
 		return t.browser.Input(sessionID, text, pressEnter, index, coordX, coordY)
 
-	case "scroll_up":
+	case BrowserActionScrollUp:
 		var toTop *bool
 		if v, ok := params["to_top"].(bool); ok {
 			toTop = &v
 		}
 		return t.browser.ScrollUp(sessionID, toTop)
 
-	case "scroll_down":
+	case BrowserActionScrollDown:
 		var toDown *bool
 		if v, ok := params["to_down"].(bool); ok {
 			toDown = &v
 		}
 		return t.browser.ScrollDown(sessionID, toDown)
 
-	case "press_key":
+	case BrowserActionPressKey:
 		key := ""
 		if v, ok := params["key"].(string); ok {
 			key = v

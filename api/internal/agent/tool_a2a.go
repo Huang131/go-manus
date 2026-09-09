@@ -28,7 +28,7 @@ func NewA2ATool() *A2ATool {
 
 // Name 返回工具名称
 func (t *A2ATool) Name() string {
-	return "a2a"
+	return ToolNameA2A
 }
 
 // Description 返回工具描述
@@ -44,7 +44,7 @@ func (t *A2ATool) Parameters() map[string]interface{} {
 			"action": map[string]interface{}{
 				"type":        "string",
 				"description": "操作类型: list_agents, call_agent",
-				"enum":        []string{"list_agents", "call_agent"},
+				"enum":        []string{A2AActionListAgents, A2AActionCallAgent},
 			},
 			"agent_id": map[string]interface{}{
 				"type":        "string",
@@ -74,9 +74,9 @@ func (t *A2ATool) Invoke(ctx context.Context, params map[string]interface{}) (*m
 	action, _ := params["action"].(string)
 
 	switch action {
-	case "list_agents":
+	case A2AActionListAgents:
 		return t.listAgents(ctx, params)
-	case "call_agent":
+	case A2AActionCallAgent:
 		return t.callAgent(ctx, params)
 	default:
 		return t.callAgent(ctx, params) // 默认为 call_agent，保持向后兼容

@@ -14,7 +14,7 @@ type mockRuntimeHealthStore struct {
 }
 
 type modelRuntimeHealthSnapshot struct {
-	status           string
+	status           model.HealthState
 	recentFailures   int
 	averageLatencyMS int
 }
@@ -103,7 +103,7 @@ func TestRoutedLLM_PreferHealthyCandidate(t *testing.T) {
 					Profile:   openAITextProfile(),
 					ModelName: "degraded",
 					Health: LLMRuntimeHealth{
-						Status:           LLMHealthDegraded,
+						Status:           model.HealthStateDegraded,
 						RecentFailures:   3,
 						AverageLatencyMS: 1200,
 					},
@@ -112,7 +112,7 @@ func TestRoutedLLM_PreferHealthyCandidate(t *testing.T) {
 					Profile:   openAITextProfile(),
 					ModelName: "healthy",
 					Health: LLMRuntimeHealth{
-						Status:           LLMHealthHealthy,
+						Status:           model.HealthStateHealthy,
 						RecentFailures:   0,
 						AverageLatencyMS: 300,
 					},
@@ -331,12 +331,12 @@ func TestRoutedLLM_RecordSuccessUpdatesRuntimeHealth(t *testing.T) {
 				{
 					Profile:   openAITextProfile(),
 					ModelName: "slow",
-					Health:    LLMRuntimeHealth{Status: LLMHealthHealthy, AverageLatencyMS: 1000},
+					Health:    LLMRuntimeHealth{Status: model.HealthStateHealthy, AverageLatencyMS: 1000},
 				},
 				{
 					Profile:   openAITextProfile(),
 					ModelName: "fast",
-					Health:    LLMRuntimeHealth{Status: LLMHealthHealthy, AverageLatencyMS: 1000},
+					Health:    LLMRuntimeHealth{Status: model.HealthStateHealthy, AverageLatencyMS: 1000},
 				},
 			}, nil
 		},
@@ -365,12 +365,12 @@ func TestRoutedLLM_RecordFailureUpdatesRuntimeHealth(t *testing.T) {
 				{
 					Profile:   openAITextProfile(),
 					ModelName: "primary",
-					Health:    LLMRuntimeHealth{Status: LLMHealthHealthy, AverageLatencyMS: 100},
+					Health:    LLMRuntimeHealth{Status: model.HealthStateHealthy, AverageLatencyMS: 100},
 				},
 				{
 					Profile:   openAITextProfile(),
 					ModelName: "backup",
-					Health:    LLMRuntimeHealth{Status: LLMHealthHealthy, AverageLatencyMS: 100},
+					Health:    LLMRuntimeHealth{Status: model.HealthStateHealthy, AverageLatencyMS: 100},
 				},
 			}, nil
 		},
@@ -429,7 +429,7 @@ func TestRoutedLLM_PersistRuntimeHealth(t *testing.T) {
 	if !ok {
 		t.Fatal("expected runtime health to be persisted")
 	}
-	if got.status != LLMHealthHealthy {
+	if got.status != model.HealthStateHealthy {
 		t.Fatalf("status = %s, want healthy", got.status)
 	}
 	if got.averageLatencyMS <= 0 {
@@ -468,21 +468,21 @@ func TestRoutedLLM_RecordFailureEscalatesToUnhealthy(t *testing.T) {
 	// 第 1 次失败：degraded, failures=1
 	router.RecordFailure(key, nil, 10*time.Millisecond)
 	h := router.getHealth(key)
-	if h.Status != LLMHealthDegraded || h.RecentFailures != 1 {
+	if h.Status != model.HealthStateDegraded || h.RecentFailures != 1 {
 		t.Fatalf("after 1st failure: status=%s failures=%d, want degraded/1", h.Status, h.RecentFailures)
 	}
 
 	// 第 2 次失败：仍 degraded, failures=2
 	router.RecordFailure(key, nil, 10*time.Millisecond)
 	h = router.getHealth(key)
-	if h.Status != LLMHealthDegraded || h.RecentFailures != 2 {
+	if h.Status != model.HealthStateDegraded || h.RecentFailures != 2 {
 		t.Fatalf("after 2nd failure: status=%s failures=%d, want degraded/2", h.Status, h.RecentFailures)
 	}
 
 	// 第 3 次失败：升级为 unhealthy, failures=3
 	router.RecordFailure(key, nil, 10*time.Millisecond)
 	h = router.getHealth(key)
-	if h.Status != LLMHealthUnhealthy || h.RecentFailures != 3 {
+	if h.Status != model.HealthStateUnhealthy || h.RecentFailures != 3 {
 		t.Fatalf("after 3rd failure: status=%s failures=%d, want unhealthy/3", h.Status, h.RecentFailures)
 	}
 }
@@ -498,14 +498,14 @@ func TestRoutedLLM_RecordSuccessDecaysFailuresAndRecovers(t *testing.T) {
 	// 第 1 次成功：failures 衰减到 1，仍 degraded
 	router.RecordSuccess(key, 50*time.Millisecond)
 	h := router.getHealth(key)
-	if h.RecentFailures != 1 || h.Status != LLMHealthDegraded {
+	if h.RecentFailures != 1 || h.Status != model.HealthStateDegraded {
 		t.Fatalf("after 1st success: status=%s failures=%d, want degraded/1", h.Status, h.RecentFailures)
 	}
 
 	// 第 2 次成功：failures 归零，恢复 healthy
 	router.RecordSuccess(key, 50*time.Millisecond)
 	h = router.getHealth(key)
-	if h.RecentFailures != 0 || h.Status != LLMHealthHealthy {
+	if h.RecentFailures != 0 || h.Status != model.HealthStateHealthy {
 		t.Fatalf("after 2nd success: status=%s failures=%d, want healthy/0", h.Status, h.RecentFailures)
 	}
 }

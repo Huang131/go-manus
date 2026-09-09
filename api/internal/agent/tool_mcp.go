@@ -28,7 +28,7 @@ func NewMCPTool() *MCPTool {
 
 // Name 返回工具名称
 func (t *MCPTool) Name() string {
-	return "mcp"
+	return ToolNameMCP
 }
 
 // Description 返回工具描述
@@ -112,7 +112,7 @@ func (t *MCPTool) Invoke(ctx context.Context, params map[string]interface{}) (*m
 	// 构建成功结果
 	var message string
 	for _, content := range result.Content {
-		if content.Type == "text" {
+		if content.Type == llmcore.ContentTypeText {
 			message += content.Text + "\n"
 		}
 	}
@@ -198,7 +198,7 @@ func (t *MCPTool) GetToolsForLLM() []llmcore.ToolSpec {
 	for serverName, tools := range t.tools {
 		for _, tool := range tools {
 			// 生成工具名称：mcp_{serverName}_{toolName}
-			toolName := "mcp_" + serverName + "_" + tool.Name
+			toolName := MCPFunctionPrefix + serverName + "_" + tool.Name
 
 			// 描述前缀
 			description := "[" + serverName + "] " + tool.Description
@@ -216,7 +216,7 @@ func (t *MCPTool) GetToolsForLLM() []llmcore.ToolSpec {
 			}
 
 			result = append(result, llmcore.ToolSpec{
-				Type: "function",
+				Type: llmcore.ToolTypeFunction,
 				Function: llmcore.ToolSpecFunction{
 					Name:        toolName,
 					Description: description,
@@ -238,7 +238,7 @@ func (t *MCPTool) HasTool(toolName string) bool {
 		for _, tool := range tools {
 			// 支持两种格式的检查：mcp_{server}_{name} 或 {name}
 			expectedName := tool.Name
-			fullName := "mcp_" + t.getServerNamePrefix() + "_" + tool.Name
+			fullName := MCPFunctionPrefix + t.getServerNamePrefix() + "_" + tool.Name
 
 			if toolName == expectedName || toolName == fullName {
 				return true

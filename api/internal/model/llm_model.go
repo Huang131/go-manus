@@ -81,9 +81,9 @@ type CostPolicy struct {
 // RuntimeHealth 模型运行时健康快照
 // 仅用于路由排序和 fallback 决策，不承载完整监控数据。
 type RuntimeHealth struct {
-	Status           string `json:"status"`
-	RecentFailures   int    `json:"recent_failures"`
-	AverageLatencyMS int    `json:"average_latency_ms"`
+	Status           HealthState `json:"status"`
+	RecentFailures   int         `json:"recent_failures"`
+	AverageLatencyMS int         `json:"average_latency_ms"`
 }
 
 // EstimateCostUSD 估算一次调用的成本（美元）

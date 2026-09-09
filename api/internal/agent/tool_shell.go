@@ -19,7 +19,7 @@ func NewShellTool(sandbox external.Sandbox) *ShellTool {
 
 // Name 返回工具名称
 func (t *ShellTool) Name() string {
-	return "shell"
+	return ToolNameShell
 }
 
 // Description 返回工具描述
@@ -35,7 +35,7 @@ func (t *ShellTool) Parameters() map[string]interface{} {
 			"action": map[string]interface{}{
 				"type":        "string",
 				"description": "操作类型: exec, read, write, wait, kill",
-				"enum":        []string{"exec", "read", "write", "wait", "kill"},
+				"enum":        []string{ShellActionExec, ShellActionRead, ShellActionWrite, ShellActionWait, ShellActionKill},
 			},
 			"session_id": map[string]interface{}{
 				"type":        "string",
@@ -81,7 +81,7 @@ func (t *ShellTool) Invoke(ctx context.Context, params map[string]interface{}) (
 	sessionID, _ := params["session_id"].(string)
 
 	switch action {
-	case "exec":
+	case ShellActionExec:
 		execDir := ""
 		if v, ok := params["exec_dir"].(string); ok {
 			execDir = v
@@ -92,14 +92,14 @@ func (t *ShellTool) Invoke(ctx context.Context, params map[string]interface{}) (
 		}
 		return t.sandbox.ExecCommand(ctx, sessionID, execDir, command)
 
-	case "read":
+	case ShellActionRead:
 		console := false
 		if v, ok := params["console"].(bool); ok {
 			console = v
 		}
 		return t.sandbox.ReadShellOutput(ctx, sessionID, console)
 
-	case "write":
+	case ShellActionWrite:
 		inputText := ""
 		if v, ok := params["input_text"].(string); ok {
 			inputText = v
@@ -110,7 +110,7 @@ func (t *ShellTool) Invoke(ctx context.Context, params map[string]interface{}) (
 		}
 		return t.sandbox.WriteShellInput(ctx, sessionID, inputText, pressEnter)
 
-	case "wait":
+	case ShellActionWait:
 		var seconds *int
 		if v, ok := params["seconds"].(float64); ok {
 			n := int(v)
@@ -118,7 +118,7 @@ func (t *ShellTool) Invoke(ctx context.Context, params map[string]interface{}) (
 		}
 		return t.sandbox.WaitProcess(ctx, sessionID, seconds)
 
-	case "kill":
+	case ShellActionKill:
 		return t.sandbox.KillProcess(ctx, sessionID)
 
 	default:

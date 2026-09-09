@@ -51,7 +51,7 @@ func unmarshalConfigValue(data interface{}, v interface{}) error {
 
 // GetLLMConfig 获取 LLM 配置
 func (s *DefaultAppConfigService) GetLLMConfig(ctx context.Context) (*model.LLMConfig, error) {
-	cfg, err := s.repo.GetConfig(ctx, "llm", "default")
+	cfg, err := s.repo.GetConfig(ctx, model.AppConfigTypeLLM, model.AppConfigKeyDefault)
 	if err != nil {
 		return nil, err
 	}
@@ -78,8 +78,8 @@ func (s *DefaultAppConfigService) UpdateLLMConfig(ctx context.Context, cfg *mode
 
 	appConfig := &model.AppConfig{
 		ID:          uuid.New().String(),
-		ConfigType:  "llm",
-		ConfigKey:   "default",
+		ConfigType:  model.AppConfigTypeLLM,
+		ConfigKey:   model.AppConfigKeyDefault,
 		ConfigValue: cfg,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
@@ -89,7 +89,7 @@ func (s *DefaultAppConfigService) UpdateLLMConfig(ctx context.Context, cfg *mode
 
 // GetAgentConfig 获取 Agent 配置
 func (s *DefaultAppConfigService) GetAgentConfig(ctx context.Context) (*model.AgentConfig, error) {
-	cfg, err := s.repo.GetConfig(ctx, "agent", "default")
+	cfg, err := s.repo.GetConfig(ctx, model.AppConfigTypeAgent, model.AppConfigKeyDefault)
 	if err != nil {
 		return nil, err
 	}
@@ -107,8 +107,8 @@ func (s *DefaultAppConfigService) GetAgentConfig(ctx context.Context) (*model.Ag
 func (s *DefaultAppConfigService) UpdateAgentConfig(ctx context.Context, cfg *model.AgentConfig) error {
 	appConfig := &model.AppConfig{
 		ID:          uuid.New().String(),
-		ConfigType:  "agent",
-		ConfigKey:   "default",
+		ConfigType:  model.AppConfigTypeAgent,
+		ConfigKey:   model.AppConfigKeyDefault,
 		ConfigValue: cfg,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
@@ -118,7 +118,7 @@ func (s *DefaultAppConfigService) UpdateAgentConfig(ctx context.Context, cfg *mo
 
 // GetMCPConfig 获取 MCP 配置
 func (s *DefaultAppConfigService) GetMCPConfig(ctx context.Context) (*model.MCPConfig, error) {
-	cfg, err := s.repo.GetConfig(ctx, "mcp", "default")
+	cfg, err := s.repo.GetConfig(ctx, model.AppConfigTypeMCP, model.AppConfigKeyDefault)
 	if err != nil {
 		return nil, err
 	}
@@ -153,8 +153,8 @@ func (s *DefaultAppConfigService) UpdateMCPConfig(ctx context.Context, cfg *mode
 
 	appConfig := &model.AppConfig{
 		ID:          uuid.New().String(),
-		ConfigType:  "mcp",
-		ConfigKey:   "default",
+		ConfigType:  model.AppConfigTypeMCP,
+		ConfigKey:   model.AppConfigKeyDefault,
 		ConfigValue: cfg,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
@@ -186,8 +186,8 @@ func (s *DefaultAppConfigService) DeleteMCPServer(ctx context.Context, serverNam
 	cfg.Servers = newServers
 	appConfig := &model.AppConfig{
 		ID:          uuid.New().String(),
-		ConfigType:  "mcp",
-		ConfigKey:   "default",
+		ConfigType:  model.AppConfigTypeMCP,
+		ConfigKey:   model.AppConfigKeyDefault,
 		ConfigValue: cfg,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
@@ -197,7 +197,7 @@ func (s *DefaultAppConfigService) DeleteMCPServer(ctx context.Context, serverNam
 
 // GetA2AConfig 获取 A2A 配置
 func (s *DefaultAppConfigService) GetA2AConfig(ctx context.Context) (*model.A2AConfig, error) {
-	cfg, err := s.repo.GetConfig(ctx, "a2a", "default")
+	cfg, err := s.repo.GetConfig(ctx, model.AppConfigTypeA2A, model.AppConfigKeyDefault)
 	if err != nil {
 		return nil, err
 	}
@@ -232,8 +232,8 @@ func (s *DefaultAppConfigService) UpdateA2AConfig(ctx context.Context, cfg *mode
 
 	appConfig := &model.AppConfig{
 		ID:          uuid.New().String(),
-		ConfigType:  "a2a",
-		ConfigKey:   "default",
+		ConfigType:  model.AppConfigTypeA2A,
+		ConfigKey:   model.AppConfigKeyDefault,
 		ConfigValue: cfg,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),

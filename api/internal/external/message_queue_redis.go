@@ -15,26 +15,27 @@ import (
 
 // 消息队列相关常量
 const (
-	defaultBufferSize   = 100 // 默认 channel 缓冲区大小
-	defaultBlockTimeout = 3   // 默认阻塞超时（秒）
-	maxBlockTimeout     = 5   // 最大阻塞超时（秒）
-	lockExpireSec       = 10  // 分布式锁默认过期时间（秒）
-	lockRetryInterval   = 100 // 锁重试间隔（毫秒）
-	pollInterval        = 100 // 轮询间隔（毫秒）
+	defaultBufferSize   = 100
+	defaultBlockTimeout = 3 * time.Second
+	maxBlockTimeout     = 5 * time.Second
+	defaultLockExpire   = 10 * time.Second
+	lockAcquireTimeout  = 5 * time.Second
+	lockRetryInterval   = 100 * time.Millisecond
+	pollInterval        = 100 * time.Millisecond
 )
 
 // RedisStreamMessageQueue 基于 Redis Stream 的消息队列
 type RedisStreamMessageQueue struct {
-	mu            sync.RWMutex
-	client        *redis.Client
-	lockExpireSec int
+	mu         sync.RWMutex
+	client     *redis.Client
+	lockExpire time.Duration
 }
 
 // NewRedisStreamMessageQueue 创建 Redis Stream 消息队列
 func NewRedisStreamMessageQueue(client *redis.Client) *RedisStreamMessageQueue {
 	return &RedisStreamMessageQueue{
-		client:        client,
-		lockExpireSec: 10,
+		client:     client,
+		lockExpire: defaultLockExpire,
 	}
 }
 
@@ -123,13 +124,13 @@ func (q *RedisStreamMessageQueue) Get(ctx context.Context, streamName string, st
 // timeout: 单次阻塞超时，建议 3-5 秒，最大不超过 5 秒
 func (q *RedisStreamMessageQueue) GetBlocking(ctx context.Context, streamName string, startID string, timeout ...time.Duration) (string, interface{}, error) {
 	// 默认超时使用常量
-	blockTimeout := time.Duration(defaultBlockTimeout) * time.Second
+	blockTimeout := defaultBlockTimeout
 	if len(timeout) > 0 && timeout[0] > 0 {
 		blockTimeout = timeout[0]
 	}
 	// 防止超时设置过大（使用常量限制）
-	if blockTimeout > time.Duration(maxBlockTimeout)*time.Second {
-		blockTimeout = time.Duration(maxBlockTimeout) * time.Second
+	if blockTimeout > maxBlockTimeout {
+		blockTimeout = maxBlockTimeout
 	}
 
 	// startID 为空时从最新消息开始
@@ -186,7 +187,7 @@ func (q *RedisStreamMessageQueue) Pop(ctx context.Context, streamName string) (s
 	lockKey := fmt.Sprintf("lock:%s:pop", streamName)
 
 	// 获取分布式锁
-	lockValue, err := q.acquireLock(ctx, lockKey, 5*time.Second)
+	lockValue, err := q.acquireLock(ctx, lockKey, lockAcquireTimeout)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to acquire lock: %w", err)
 	}
@@ -312,7 +313,7 @@ func (q *RedisStreamMessageQueue) Subscribe(ctx context.Context, streamName stri
 		defer cancel() // 确保 goroutine 结束时取消 context
 
 		lastID := "$" // 从最新消息开始
-		ticker := time.NewTicker(time.Duration(pollInterval) * time.Millisecond)
+		ticker := time.NewTicker(pollInterval)
 		defer ticker.Stop()
 
 		for {
@@ -371,7 +372,7 @@ func (q *RedisStreamMessageQueue) acquireLock(ctx context.Context, lockKey strin
 
 	for time.Now().Before(deadline) {
 		// 尝试设置锁
-		ok, err := q.client.SetNX(ctx, lockKey, lockValue, time.Duration(q.lockExpireSec)*time.Second).Result()
+		ok, err := q.client.SetNX(ctx, lockKey, lockValue, q.lockExpire).Result()
 		if err != nil {
 			return "", err
 		}
@@ -384,7 +385,7 @@ func (q *RedisStreamMessageQueue) acquireLock(ctx context.Context, lockKey strin
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(lockRetryInterval):
 		}
 	}
 

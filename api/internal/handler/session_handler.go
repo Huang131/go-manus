@@ -99,15 +99,10 @@ func (h *SessionHandler) ClearUnread(c *gin.Context) {
 
 // Stream SSE 流式推送所有会话列表
 func (h *SessionHandler) Stream(c *gin.Context) {
-	// SSE 流需要长时间保持连接，设置必要的响应头
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("Transfer-Encoding", "chunked")
-	c.Header("X-Accel-Buffering", "no") // 禁用 nginx 缓冲
+	setSSEHeaders(c)
 
 	clientGone := c.Request.Context().Done()
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(sessionStreamPollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -120,7 +115,7 @@ func (h *SessionHandler) Stream(c *gin.Context) {
 				continue
 			}
 			data, _ := sonic.Marshal(sessions)
-			c.SSEvent("sessions", string(data))
+			c.SSEvent(sseEventSessions, string(data))
 			c.Writer.Flush()
 		}
 	}
@@ -162,12 +157,7 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 		return
 	}
 
-	// 设置 SSE 响应头（空流续读也要带）
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-	c.Header("Transfer-Encoding", "chunked")
-	c.Header("X-Accel-Buffering", "no") // 禁用 nginx 缓冲
+	setSSEHeaders(c)
 
 	// 创建独立的 context 用于事件获取，不受 HTTP 请求影响
 	// 这样即使 HTTP 客户端断开，只要 Agent 还在运行，就会继续推送事件
@@ -177,7 +167,7 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 	// 检测 HTTP 连接断开，但使用独立的 timeout
 	clientGone := c.Request.Context().Done()
 	// SSE 流最长持续 30 分钟
-	streamTimeout := time.AfterFunc(30*time.Minute, eventCancel)
+	streamTimeout := time.AfterFunc(sessionStreamTimeout, eventCancel)
 
 	var taskID string
 
@@ -206,12 +196,12 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 			Role:    string(msg.Role),
 			Message: msg.ContentText,
 		})
-		c.SSEvent("message", string(userPayload))
+		c.SSEvent(sseEventMessage, string(userPayload))
 		c.Writer.Flush()
 
 		// 再推送 task_id 事件（单独业务类型，前端可识别）
 		taskIDData, _ := sonic.Marshal(map[string]interface{}{"task_id": taskID})
-		c.SSEvent("task_id", string(taskIDData))
+		c.SSEvent(sseEventTaskID, string(taskIDData))
 		c.Writer.Flush()
 	} else {
 		// 空流续读：从 session 当前活跃 task 续接事件流
@@ -223,7 +213,7 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 			// 当新 chat 请求创建 task 后再向该 session 推流（见 createTaskNotify 后续扩展）。
 			logger.Info("空流续读: session 无活跃 task，保持长连接心跳",
 				logger.String("session_id", id))
-			heartbeat := time.NewTicker(15 * time.Second)
+			heartbeat := time.NewTicker(sessionHeartbeatInterval)
 			defer heartbeat.Stop()
 			for {
 				select {
@@ -266,7 +256,7 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 				if eventCtx.Err() != nil {
 					return
 				}
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(sessionEventPollInterval)
 				continue
 			}
 
@@ -286,7 +276,7 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 					return
 				}
 			}
-			time.Sleep(100 * time.Millisecond)
+			time.Sleep(sessionEventPollInterval)
 		}
 	}
 }

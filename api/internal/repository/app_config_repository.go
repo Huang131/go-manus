@@ -15,10 +15,10 @@ import (
 
 // AppConfigRepository 应用配置仓储接口
 type AppConfigRepository interface {
-	GetConfig(ctx context.Context, configType, configKey string) (*model.AppConfig, error)
+	GetConfig(ctx context.Context, configType model.AppConfigType, configKey string) (*model.AppConfig, error)
 	SaveConfig(ctx context.Context, config *model.AppConfig) error
-	DeleteConfig(ctx context.Context, configType, configKey string) error
-	ListConfigs(ctx context.Context, configType string) ([]*model.AppConfig, error)
+	DeleteConfig(ctx context.Context, configType model.AppConfigType, configKey string) error
+	ListConfigs(ctx context.Context, configType model.AppConfigType) ([]*model.AppConfig, error)
 	ListAllConfigs(ctx context.Context) ([]*model.AppConfig, error)
 
 	// 事务支持
@@ -84,7 +84,7 @@ func (t *configTxQueryContext) Exec(ctx context.Context, sql string, args ...int
 }
 
 // GetConfig 获取配置
-func (r *PostgresAppConfigRepository) GetConfig(ctx context.Context, configType, configKey string) (*model.AppConfig, error) {
+func (r *PostgresAppConfigRepository) GetConfig(ctx context.Context, configType model.AppConfigType, configKey string) (*model.AppConfig, error) {
 	q := r.queryer()
 	query := `
 		SELECT id, config_type, config_key, config_value, created_at, updated_at
@@ -150,7 +150,7 @@ func (r *PostgresAppConfigRepository) SaveConfig(ctx context.Context, config *mo
 }
 
 // DeleteConfig 删除配置
-func (r *PostgresAppConfigRepository) DeleteConfig(ctx context.Context, configType, configKey string) error {
+func (r *PostgresAppConfigRepository) DeleteConfig(ctx context.Context, configType model.AppConfigType, configKey string) error {
 	q := r.queryer()
 	query := `DELETE FROM app_configs WHERE config_type = $1 AND config_key = $2`
 	_, err := q.Exec(ctx, query, configType, configKey)
@@ -158,7 +158,7 @@ func (r *PostgresAppConfigRepository) DeleteConfig(ctx context.Context, configTy
 }
 
 // ListConfigs 获取指定类型的配置列表
-func (r *PostgresAppConfigRepository) ListConfigs(ctx context.Context, configType string) ([]*model.AppConfig, error) {
+func (r *PostgresAppConfigRepository) ListConfigs(ctx context.Context, configType model.AppConfigType) ([]*model.AppConfig, error) {
 	q := r.queryer()
 	query := `
 		SELECT id, config_type, config_key, config_value, created_at, updated_at

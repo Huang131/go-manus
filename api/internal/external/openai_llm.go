@@ -57,7 +57,7 @@ func NewOpenAIClient(cfg *OpenAIClientConfig) *OpenAIClient {
 		requestPolicy:   cfg.RequestPolicy,
 		costPolicy:      cfg.CostPolicy,
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
+			Timeout: defaultExternalHTTPTimeout,
 		},
 	}
 }
@@ -193,7 +193,7 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LL
 	}
 
 	// 创建 HTTP 请求
-	httpReq, err := http.NewRequestWithContext(httpCtx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(reqBody))
+	httpReq, err := http.NewRequestWithContext(httpCtx, http.MethodPost, c.baseURL+openAIChatCompletionsPath, bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}

@@ -287,48 +287,48 @@ func (c *Config) Validate() error {
 func (c *Config) applyDefaults() {
 	// LLM 配置默认值
 	if c.LLM.ToolCallTimeout == 0 {
-		c.LLM.ToolCallTimeout = 15
+		c.LLM.ToolCallTimeout = DefaultLLMToolCallTimeoutSec
 	}
 
 	// 文件清理配置默认值
 	if c.FileCleanup.ExpiresAfter == "" {
-		c.FileCleanup.ExpiresAfter = "168h" // 默认 7 天
+		c.FileCleanup.ExpiresAfter = DefaultFileCleanupExpiresAfter
 	}
 	if c.FileCleanup.BatchSize == 0 {
-		c.FileCleanup.BatchSize = 100
+		c.FileCleanup.BatchSize = DefaultFileCleanupBatchSize
 	}
 	if c.FileCleanup.Interval == 0 {
-		c.FileCleanup.Interval = 3600 // 默认 1 小时
+		c.FileCleanup.Interval = DefaultFileCleanupIntervalSec
 	}
 
 	// Server 配置默认值
 	if c.Server.ShutdownTimeoutSec == 0 {
-		c.Server.ShutdownTimeoutSec = 30
+		c.Server.ShutdownTimeoutSec = DefaultServerShutdownTimeoutSec
 	}
 	if c.Server.ReadTimeoutSec == 0 {
-		c.Server.ReadTimeoutSec = 30
+		c.Server.ReadTimeoutSec = DefaultServerReadTimeoutSec
 	}
 	if c.Server.IdleTimeoutSec == 0 {
-		c.Server.IdleTimeoutSec = 60
+		c.Server.IdleTimeoutSec = DefaultServerIdleTimeoutSec
 	}
 	// WriteTimeoutSec 保持 0，留给流式接口
 
 	// 日志配置默认值
 	if c.Log.MaxSize == 0 {
-		c.Log.MaxSize = 100 // 默认 100MB
+		c.Log.MaxSize = DefaultLogMaxSize
 	}
 	if c.Log.MaxBackups == 0 {
-		c.Log.MaxBackups = 7
+		c.Log.MaxBackups = DefaultLogMaxBackups
 	}
 	if c.Log.MaxAge == 0 {
-		c.Log.MaxAge = 30
+		c.Log.MaxAge = DefaultLogMaxAge
 	}
 
 	// 数据库连接池默认值
 	if c.Database.MaxOpenConns == 0 {
-		c.Database.MaxOpenConns = 25
+		c.Database.MaxOpenConns = DefaultDatabaseMaxOpenConns
 	}
 	if c.Database.MaxIdleConns == 0 {
-		c.Database.MaxIdleConns = 5
+		c.Database.MaxIdleConns = DefaultDatabaseMaxIdleConns
 	}
 }

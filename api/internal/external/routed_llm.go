@@ -154,11 +154,11 @@ func healthRank(cfg *LLMRuntimeConfig) int {
 		return 3
 	}
 	switch cfg.Health.Status {
-	case LLMHealthHealthy:
+	case model.HealthStateHealthy:
 		return 0
-	case LLMHealthDegraded:
+	case model.HealthStateDegraded:
 		return 1
-	case LLMHealthUnhealthy:
+	case model.HealthStateUnhealthy:
 		return 2
 	default:
 		return 1
@@ -184,9 +184,9 @@ func (r *RoutedLLM) RecordSuccess(modelKey string, latency time.Duration) {
 		health.RecentFailures--
 	}
 	if health.RecentFailures == 0 {
-		health.Status = LLMHealthHealthy
+		health.Status = model.HealthStateHealthy
 	} else {
-		health.Status = LLMHealthDegraded
+		health.Status = model.HealthStateDegraded
 	}
 	r.health[modelKey] = health
 }
@@ -204,9 +204,9 @@ func (r *RoutedLLM) RecordFailure(modelKey string, err error, latency time.Durat
 	health.RecentFailures++
 	switch {
 	case health.RecentFailures >= 3:
-		health.Status = LLMHealthUnhealthy
+		health.Status = model.HealthStateUnhealthy
 	default:
-		health.Status = LLMHealthDegraded
+		health.Status = model.HealthStateDegraded
 	}
 	r.health[modelKey] = health
 	_ = err

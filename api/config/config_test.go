@@ -54,6 +54,26 @@ func TestValidate_OK(t *testing.T) {
 	}
 }
 
+func TestConfigApplyDefaultsUsesDomainDefaults(t *testing.T) {
+	cfg := validConfig()
+	cfg.Server.ShutdownTimeoutSec = 0
+
+	cfg.applyDefaults()
+
+	if cfg.LLM.ToolCallTimeout != DefaultLLMToolCallTimeoutSec {
+		t.Fatalf("LLM tool call timeout = %d, want %d", cfg.LLM.ToolCallTimeout, DefaultLLMToolCallTimeoutSec)
+	}
+	if cfg.FileCleanup.ExpiresAfter != DefaultFileCleanupExpiresAfter {
+		t.Fatalf("file cleanup expiry = %q, want %q", cfg.FileCleanup.ExpiresAfter, DefaultFileCleanupExpiresAfter)
+	}
+	if cfg.Server.ShutdownTimeoutSec != DefaultServerShutdownTimeoutSec {
+		t.Fatalf("shutdown timeout = %d, want %d", cfg.Server.ShutdownTimeoutSec, DefaultServerShutdownTimeoutSec)
+	}
+	if cfg.Database.MaxOpenConns != DefaultDatabaseMaxOpenConns {
+		t.Fatalf("database max open conns = %d, want %d", cfg.Database.MaxOpenConns, DefaultDatabaseMaxOpenConns)
+	}
+}
+
 // validConfig 返回一个能通过校验的最小配置；测试通过 mutate 修改后断言失败。
 func validConfig() *Config {
 	return &Config{

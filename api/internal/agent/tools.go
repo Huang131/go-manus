@@ -93,7 +93,7 @@ func (r *ToolRegistry) GetToolsForLLM() []llmcore.ToolSpec {
 		parameters, _ := schema["parameters"].(map[string]interface{})
 		description, _ := schema["description"].(string)
 		result = append(result, llmcore.ToolSpec{
-			Type: "function",
+			Type: llmcore.ToolTypeFunction,
 			Function: llmcore.ToolSpecFunction{
 				Name:        name,
 				Description: description,
@@ -108,7 +108,7 @@ func (r *ToolRegistry) GetToolsForLLM() []llmcore.ToolSpec {
 			continue
 		}
 		result = append(result, llmcore.ToolSpec{
-			Type: "function",
+			Type: llmcore.ToolTypeFunction,
 			Function: llmcore.ToolSpecFunction{
 				Name:        name,
 				Description: tool.Description(),
@@ -123,11 +123,11 @@ func (r *ToolRegistry) GetToolsForLLM() []llmcore.ToolSpec {
 // isReadOnlyToolSchema 根据工具名给出保守的只读判断。
 // 先保证 shell/browser/a2a 这类显式写操作默认为 false，其余默认 true。
 func isReadOnlyToolSchema(name string) bool {
-	if strings.HasPrefix(name, "message_") {
+	if strings.HasPrefix(name, MessageFunctionPrefix) {
 		return false
 	}
 	switch name {
-	case "shell", "browser", "a2a", "file", "message":
+	case ToolNameShell, ToolNameBrowser, ToolNameA2A, ToolNameFile, ToolNameMessage:
 		return false
 	default:
 		return true

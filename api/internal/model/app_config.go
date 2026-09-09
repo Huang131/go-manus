@@ -4,26 +4,26 @@ import "time"
 
 // AppConfig 应用配置
 type AppConfig struct {
-	ID          string      `json:"id"`
-	ConfigType  string      `json:"config_type"`
-	ConfigKey   string      `json:"config_key"`
-	ConfigValue interface{} `json:"config_value"`
-	CreatedAt   time.Time   `json:"created_at"`
-	UpdatedAt   time.Time   `json:"updated_at"`
+	ID          string        `json:"id"`
+	ConfigType  AppConfigType `json:"config_type"`
+	ConfigKey   string        `json:"config_key"`
+	ConfigValue interface{}   `json:"config_value"`
+	CreatedAt   time.Time     `json:"created_at"`
+	UpdatedAt   time.Time     `json:"updated_at"`
 }
 
 // HealthStatus 健康状态
 type HealthStatus struct {
-	Status    string                   `json:"status"`
-	Timestamp int64                    `json:"timestamp"`
-	Services  map[string]ServiceStatus `json:"services"`
+	Status    HealthState                   `json:"status"`
+	Timestamp int64                         `json:"timestamp"`
+	Services  map[ServiceName]ServiceStatus `json:"services"`
 }
 
 // ServiceStatus 服务状态
 type ServiceStatus struct {
-	Name   string `json:"name"`
-	Status string `json:"status"`
-	Error  string `json:"error,omitempty"`
+	Name   ServiceName `json:"name"`
+	Status HealthState `json:"status"`
+	Error  string      `json:"error,omitempty"`
 }
 
 // TimeFunc 时间函数，用于测试

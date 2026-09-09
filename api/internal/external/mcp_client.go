@@ -175,17 +175,17 @@ func (c *StdioMCPClient) getConfigEnv() map[string]string {
 // sendInitialize 发送初始化请求
 func (c *StdioMCPClient) sendInitialize(ctx context.Context) error {
 	req := MCPRequest{
-		JSONRPC: "2.0",
+		JSONRPC: mcpJSONRPCVersion,
 		ID:      c.nextID,
-		Method:  "initialize",
+		Method:  mcpMethodInitialize,
 		Params: map[string]interface{}{
-			"protocolVersion": "2024-11-05",
+			"protocolVersion": mcpProtocolVersion,
 			"capabilities": map[string]interface{}{
 				"tools": struct{}{},
 			},
 			"clientInfo": map[string]interface{}{
-				"name":    "go-manus",
-				"version": "1.0.0",
+				"name":    mcpClientName,
+				"version": mcpClientVersion,
 			},
 		},
 	}
@@ -207,9 +207,9 @@ func (c *StdioMCPClient) ListTools(ctx context.Context) ([]MCPToolInfo, error) {
 	}
 
 	req := MCPRequest{
-		JSONRPC: "2.0",
+		JSONRPC: mcpJSONRPCVersion,
 		ID:      c.nextID,
-		Method:  "tools/list",
+		Method:  mcpMethodListTools,
 	}
 	c.nextID++
 
@@ -276,9 +276,9 @@ func (c *StdioMCPClient) CallTool(ctx context.Context, name string, args map[str
 	}
 
 	req := MCPRequest{
-		JSONRPC: "2.0",
+		JSONRPC: mcpJSONRPCVersion,
 		ID:      c.nextID,
-		Method:  "tools/call",
+		Method:  mcpMethodCallTool,
 		Params: map[string]interface{}{
 			"name":      name,
 			"arguments": args,
@@ -297,7 +297,7 @@ func (c *StdioMCPClient) CallTool(ctx context.Context, name string, args map[str
 
 	if resp.Error != nil {
 		return &MCPToolResult{
-			Content: []MCPContent{{Type: "text", Text: resp.Error.Message}},
+			Content: []MCPContent{{Type: mcpContentTypeText, Text: resp.Error.Message}},
 			IsError: true,
 		}, nil
 	}

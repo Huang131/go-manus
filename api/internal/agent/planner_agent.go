@@ -62,7 +62,7 @@ func (a *PlannerAgent) CreatePlan(ctx context.Context, input *TaskInput) (*model
 		Messages: messages,
 		Tools:    a.GetToolsForLLM(),
 		ResponseFormat: &llmcore.ResponseFormat{
-			Type: "json_object",
+			Type: llmcore.ResponseFormatJSONObject,
 		},
 	}, a.config.MaxRetries)
 	if err != nil {
@@ -155,7 +155,7 @@ func (a *PlannerAgent) UpdatePlan(ctx context.Context, plan *model.Plan, complet
 		Messages: messages,
 		Tools:    a.GetToolsForLLM(),
 		ResponseFormat: &llmcore.ResponseFormat{
-			Type: "json_object",
+			Type: llmcore.ResponseFormatJSONObject,
 		},
 	}, a.config.MaxRetries)
 	if err != nil {

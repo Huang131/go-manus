@@ -19,7 +19,7 @@ func NewSearchTool(searchEngine external.SearchEngine) *SearchTool {
 
 // Name 返回工具名称
 func (t *SearchTool) Name() string {
-	return "search"
+	return ToolNameSearch
 }
 
 // Description 返回工具描述

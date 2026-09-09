@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/pkg/logger"
@@ -102,12 +101,12 @@ type AnthropicUsage struct {
 func NewAnthropicClient(cfg *AnthropicClientConfig) *AnthropicClient {
 	version := cfg.Version
 	if version == "" {
-		version = "2023-06-01"
+		version = defaultAnthropicVersion
 	}
 
 	baseURL := cfg.BaseURL
 	if baseURL == "" {
-		baseURL = "https://api.anthropic.com"
+		baseURL = defaultAnthropicBaseURL
 	}
 
 	return &AnthropicClient{
@@ -119,7 +118,7 @@ func NewAnthropicClient(cfg *AnthropicClientConfig) *AnthropicClient {
 		requestPolicy: cfg.RequestPolicy,
 		costPolicy:    cfg.CostPolicy,
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
+			Timeout: defaultExternalHTTPTimeout,
 		},
 		version: version,
 	}
@@ -161,7 +160,7 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/v1/messages", c.baseURL)
+	url := c.baseURL + anthropicMessagesPath
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -206,15 +205,15 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 	for i := range anthropicResp.Content {
 		block := &anthropicResp.Content[i]
 		switch block.Type {
-		case "text":
+		case anthropicContentTypeText:
 			result.Message.ContentText += block.Text
-		case "thinking":
+		case anthropicContentTypeThinking:
 			// 扩展思考块 → Reasoning（不回传给用户，可审计、可随记忆往返）
 			result.Message.Reasoning += block.Thinking
-		case "tool_use":
+		case anthropicContentTypeToolUse:
 			result.Message.ToolCalls = append(result.Message.ToolCalls, llmcore.ToolCall{
 				ID:   block.ID,
-				Type: "function",
+				Type: llmcore.ToolTypeFunction,
 				Function: llmcore.ToolCallFunction{
 					Name:      block.Name,
 					Arguments: string(mustMarshalMap(block.Input)),
@@ -251,7 +250,7 @@ func (c *AnthropicClient) toAnthropicMessages(reqMessages []llmcore.Message) ([]
 	// Anthropic 要求 user/assistant 角色严格交替，相邻 tool 结果必须合并进同一条 user 消息。
 	appendToolResult := func(block AnthropicContent) {
 		if n := len(messages); n > 0 {
-			if blocks, ok := messages[n-1].Content.([]AnthropicContent); ok && len(blocks) > 0 && blocks[0].Type == "tool_result" {
+			if blocks, ok := messages[n-1].Content.([]AnthropicContent); ok && len(blocks) > 0 && blocks[0].Type == anthropicContentTypeToolResult {
 				messages[n-1].Content = append(blocks, block)
 				return
 			}
@@ -273,11 +272,11 @@ func (c *AnthropicClient) toAnthropicMessages(reqMessages []llmcore.Message) ([]
 			// assistant + tool_calls → content[]：text 块（可空）+ tool_use 块
 			blocks := make([]AnthropicContent, 0, len(msg.ToolCalls)+1)
 			if text := textOf(msg); text != "" {
-				blocks = append(blocks, AnthropicContent{Type: "text", Text: text})
+				blocks = append(blocks, AnthropicContent{Type: llmcore.ContentTypeText, Text: text})
 			}
 			for _, tc := range msg.ToolCalls {
 				blocks = append(blocks, AnthropicContent{
-					Type:  "tool_use",
+					Type:  anthropicContentTypeToolUse,
 					ID:    tc.ID,
 					Name:  tc.Function.Name,
 					Input: parseJSONMap(tc.Function.Arguments),
@@ -287,7 +286,7 @@ func (c *AnthropicClient) toAnthropicMessages(reqMessages []llmcore.Message) ([]
 
 		case llmcore.RoleTool:
 			appendToolResult(AnthropicContent{
-				Type:      "tool_result",
+				Type:      anthropicContentTypeToolResult,
 				ToolUseID: msg.ToolCallID,
 				Content:   msg.ContentText,
 			})
@@ -307,7 +306,7 @@ func textOf(msg llmcore.Message) string {
 	}
 	var sb strings.Builder
 	for _, p := range msg.ContentParts {
-		if p.Type == "text" {
+		if p.Type == llmcore.ContentTypeText {
 			sb.WriteString(p.Text)
 		}
 	}
@@ -318,7 +317,7 @@ func textOf(msg llmcore.Message) string {
 func userContent(msg llmcore.Message) interface{} {
 	hasMultimodal := false
 	for _, p := range msg.ContentParts {
-		if p.Type != "text" {
+		if p.Type != llmcore.ContentTypeText {
 			hasMultimodal = true
 			break
 		}
@@ -329,19 +328,19 @@ func userContent(msg llmcore.Message) interface{} {
 
 	blocks := make([]AnthropicContent, 0, len(msg.ContentParts))
 	if text := msg.ContentText; text != "" {
-		blocks = append(blocks, AnthropicContent{Type: "text", Text: text})
+		blocks = append(blocks, AnthropicContent{Type: anthropicContentTypeText, Text: text})
 	}
 	for _, p := range msg.ContentParts {
 		switch p.Type {
-		case "text":
-			blocks = append(blocks, AnthropicContent{Type: "text", Text: p.Text})
-		case "image_url":
+		case llmcore.ContentTypeText:
+			blocks = append(blocks, AnthropicContent{Type: llmcore.ContentTypeText, Text: p.Text})
+		case llmcore.ContentTypeImageURL:
 			if p.ImageURL != nil && p.ImageURL.URL != "" {
 				// Anthropic 支持 URL source 的图片输入
 				blocks = append(blocks, AnthropicContent{
-					Type: "image",
+					Type: anthropicContentTypeImage,
 					Source: &AnthropicImageSource{
-						Type: "url",
+						Type: anthropicImageSourceTypeURL,
 						URL:  p.ImageURL.URL,
 					},
 				})
@@ -393,7 +392,7 @@ func (c *AnthropicClient) effectiveMaxTokens() int {
 func (c *AnthropicClient) effectiveThinking() map[string]interface{} {
 	switch c.requestPolicy.ReasoningMode {
 	case llmcore.ReasoningOff:
-		return map[string]interface{}{"type": "disabled"}
+		return map[string]interface{}{"type": anthropicThinkingTypeDisabled}
 	case llmcore.ReasoningLow, llmcore.ReasoningAuto, llmcore.ReasoningHigh:
 		budget := 2048
 		if c.requestPolicy.ReasoningMode == llmcore.ReasoningHigh {
@@ -406,7 +405,7 @@ func (c *AnthropicClient) effectiveThinking() map[string]interface{} {
 			// max_tokens 过小，无法启用扩展思考
 			return nil
 		}
-		return map[string]interface{}{"type": "enabled", "budget_tokens": budget}
+		return map[string]interface{}{"type": anthropicThinkingTypeEnabled, "budget_tokens": budget}
 	default:
 		return nil
 	}
