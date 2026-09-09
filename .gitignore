@@ -70,6 +70,30 @@ logs/
 .graphify
 
 # ============================================================
+# Code intelligence
+# ============================================================
+# GitNexus 本地数据库索引：绑定本机路径和当前工作区，不提交到仓库。
+.gitnexus/
+
+# Graphify 只提交根目录的当前快照。
+# 其余文件（包括 cache/ 和日期目录）属于本机缓存、历史备份，不提交。
+graphify-out/*
+!graphify-out/
+!graphify-out/.graphify_root
+!graphify-out/.graphify_labels.json
+!graphify-out/.graphify_labels.json.sig
+!graphify-out/GRAPH_REPORT.md
+!graphify-out/graph.json
+!graphify-out/graph.html
+!graphify-out/manifest.json
+
+# API 子目录中的 Graphify 快照与根目录重复，不单独维护。
+api/graphify-out/
+
+# Claude Code 的个人配置不提交；团队共享的 settings.json 和 GitNexus skills 可以提交。
+.claude/settings.local.json
+
+# ============================================================
 # Database
 # ============================================================
 *.db
