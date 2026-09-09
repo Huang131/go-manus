@@ -49,15 +49,11 @@ func NewPlannerReActFlow(
 	return flow
 }
 
-// LoadMemory 从数据库恢复 planner/react 两个 Agent 的记忆（flow 生命周期内只应调用一次）
-func (f *PlannerReActFlow) LoadMemory(ctx context.Context) error {
-	if err := f.planner.LoadMemory(ctx); err != nil {
-		return fmt.Errorf("加载 planner 记忆失败: %w", err)
-	}
-	if err := f.react.LoadMemory(ctx); err != nil {
-		return fmt.Errorf("加载 react 记忆失败: %w", err)
-	}
-	return nil
+// setStatus 在加锁状态下迁移流状态
+func (f *PlannerReActFlow) setStatus(s FlowStatus) {
+	f.mu.Lock()
+	f.status = s
+	f.mu.Unlock()
 }
 
 // Invoke 运行流，返回事件流
@@ -80,15 +76,11 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 					logger.Any("panic", r),
 					logger.String("stack", string(debug.Stack())))
 				ch <- model.NewErrorEvent(fmt.Sprintf("内部错误: %v", r))
-				f.mu.Lock()
-				f.status = FlowStatusCompleted
-				f.mu.Unlock()
+				f.setStatus(FlowStatusCompleted)
 			}
 		}()
 
-		f.mu.Lock()
-		f.status = FlowStatusPlanning
-		f.mu.Unlock()
+		f.setStatus(FlowStatusPlanning)
 
 		logger.Info("PlannerReActFlow 开始执行",
 			logger.String("session_id", f.sessionID),
@@ -103,9 +95,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 			switch status {
 			case FlowStatusIdle:
 				// 空闲状态 -> 规划状态
-				f.mu.Lock()
-				f.status = FlowStatusPlanning
-				f.mu.Unlock()
+				f.setStatus(FlowStatusPlanning)
 
 			case FlowStatusPlanning:
 				// 规划状态 -> 调用 Planner 创建计划
@@ -113,9 +103,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 				if err != nil {
 					logger.Error("Planner 创建计划失败", logger.Err(err))
 					ch <- model.NewErrorEvent(err.Error())
-					f.mu.Lock()
-					f.status = FlowStatusCompleted
-					f.mu.Unlock()
+					f.setStatus(FlowStatusCompleted)
 					break
 				}
 
@@ -133,9 +121,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 					logger.String("session_id", f.sessionID),
 					logger.Int("steps", len(plan.Steps)))
 
-				f.mu.Lock()
-				f.status = FlowStatusExecuting
-				f.mu.Unlock()
+				f.setStatus(FlowStatusExecuting)
 
 			case FlowStatusExecuting:
 				// 执行状态 -> 获取下一个步骤并执行
@@ -143,18 +129,14 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 					logger.Warn("计划为空，无法进入执行阶段",
 						logger.String("session_id", f.sessionID))
 					ch <- model.NewErrorEvent("计划为空，无法执行")
-					f.mu.Lock()
-					f.status = FlowStatusCompleted
-					f.mu.Unlock()
+					f.setStatus(FlowStatusCompleted)
 					break
 				}
 
 				step := f.plan.GetNextStep()
 				if step == nil {
 					logger.Info("所有步骤已执行完毕，进入总结阶段")
-					f.mu.Lock()
-					f.status = FlowStatusSummarizing
-					f.mu.Unlock()
+					f.setStatus(FlowStatusSummarizing)
 					break
 				}
 
@@ -174,9 +156,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 							logger.String("question", step.UserQuestion))
 						ch <- model.NewMessageEvent("assistant", step.UserQuestion)
 						ch <- model.NewWaitEvent()
-						f.mu.Lock()
-						f.status = FlowStatusWaiting
-						f.mu.Unlock()
+						f.setStatus(FlowStatusWaiting)
 						// 不压缩记忆，保留上下文
 						continue
 					}
@@ -196,16 +176,12 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 				// 压缩记忆
 				_ = f.react.CompactMemory()
 
-				f.mu.Lock()
-				f.status = FlowStatusUpdating
-				f.mu.Unlock()
+				f.setStatus(FlowStatusUpdating)
 
 			case FlowStatusWaiting:
 				// 等待状态 -> 等待用户输入后继续执行
 				// 用户输入新消息后会再次触发 Invoke，继续执行当前计划
-				f.mu.Lock()
-				f.status = FlowStatusExecuting
-				f.mu.Unlock()
+				f.setStatus(FlowStatusExecuting)
 				// 继续到 FlowStatusExecuting 状态
 
 			case FlowStatusUpdating:
@@ -213,9 +189,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 				step := f.plan.GetNextStep()
 				if step == nil {
 					// 没有未完成的步骤，进入总结阶段
-					f.mu.Lock()
-					f.status = FlowStatusSummarizing
-					f.mu.Unlock()
+					f.setStatus(FlowStatusSummarizing)
 					break
 				}
 
@@ -238,9 +212,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 					}
 				}
 
-				f.mu.Lock()
-				f.status = FlowStatusExecuting
-				f.mu.Unlock()
+				f.setStatus(FlowStatusExecuting)
 
 			case FlowStatusSummarizing:
 				// 只有真正执行过步骤的计划才进入总结。
@@ -260,9 +232,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 						logger.String("session_id", f.sessionID))
 				}
 
-				f.mu.Lock()
-				f.status = FlowStatusCompleted
-				f.mu.Unlock()
+				f.setStatus(FlowStatusCompleted)
 
 			case FlowStatusCompleted:
 				// 完成状态 -> 发送完成事件

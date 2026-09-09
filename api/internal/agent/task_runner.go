@@ -29,18 +29,17 @@ const (
 // AgentTaskRunner 基于 Agent 智能体的任务运行器
 // 对齐 Python 版本的 AgentTaskRunner
 type AgentTaskRunner struct {
-	mu           sync.Mutex
-	memoryLoaded bool
-	sessionID    string
-	config       *AgentConfig
-	llm          external.LLM
-	tools        []Tool
-	flow         *PlannerReActFlow
-	sessionRep   repository.SessionRepository
-	fileRep      repository.FileRepository
-	sandbox      external.Sandbox
-	fileStorage  COSFileStorage
-	attLoader    *attachment.Loader
+	mu          sync.Mutex
+	sessionID   string
+	config      *AgentConfig
+	llm         external.LLM
+	tools       []Tool
+	flow        *PlannerReActFlow
+	sessionRep  repository.SessionRepository
+	fileRep     repository.FileRepository
+	sandbox     external.Sandbox
+	fileStorage COSFileStorage
+	attLoader   *attachment.Loader
 }
 
 // COSFileStorage 文件存储接口（简化版）
@@ -93,18 +92,6 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 		r.flow = NewPlannerReActFlow(r.sessionID, r.config, r.llm, r.tools)
 	}
 	r.mu.Unlock()
-
-	// flow 生命周期内只恢复一次历史记忆
-	if !r.memoryLoaded {
-		if err := r.flow.LoadMemory(ctx); err != nil {
-			logger.Warn("恢复历史记忆失败，将使用空记忆继续",
-				logger.String("session_id", r.sessionID),
-				logger.Err(err))
-		}
-		r.mu.Lock()
-		r.memoryLoaded = true
-		r.mu.Unlock()
-	}
 
 	// 首次运行，更新会话状态为运行中
 	if r.flow.GetPlan() == nil {
@@ -371,15 +358,21 @@ func (r *AgentTaskRunner) GetPlan() *model.Plan {
 	return r.flow.GetPlan()
 }
 
-// syncFileToStorage 将沙箱中的文件同步到存储
-func (r *AgentTaskRunner) syncFileToStorage(ctx context.Context, filepath string) error {
+// syncFileToStorage 将沙箱中的文件同步到存储。
+// 同步是尽力而为的旁路逻辑，失败只记录告警、不中断事件循环。
+func (r *AgentTaskRunner) syncFileToStorage(ctx context.Context, filePath string) error {
 	if r.fileStorage == nil || r.sandbox == nil {
 		return nil
 	}
 
 	// 从沙箱读取文件
-	result, err := r.sandbox.ReadFile(ctx, filepath, nil, nil, false, 0)
-	if err != nil || !result.Success {
+	result, err := r.sandbox.ReadFile(ctx, filePath, nil, nil, false, 0)
+	if err != nil {
+		logger.Warn("从沙箱读取文件失败", logger.String("filepath", filePath), logger.Err(err))
+		return nil
+	}
+	if !result.Success {
+		logger.Warn("从沙箱读取文件失败", logger.String("filepath", filePath), logger.String("message", result.Message))
 		return nil
 	}
 
@@ -392,21 +385,21 @@ func (r *AgentTaskRunner) syncFileToStorage(ctx context.Context, filepath string
 	}
 
 	// 上传到存储
-	key := "agent/" + r.sessionID + "/" + filepath
+	key := "agent/" + r.sessionID + "/" + filePath
 	err = r.fileStorage.Upload(ctx, key, &readerWrapper{data: []byte(content)}, int64(len(content)), "text/plain")
 	if err != nil {
-		logger.Warn("同步文件到存储失败", logger.String("filepath", filepath), logger.Err(err))
+		logger.Warn("同步文件到存储失败", logger.String("filepath", filePath), logger.Err(err))
 		return nil
 	}
 
 	// 创建文件记录
 	file := &model.File{
-		Filename: filepath,
-		Filepath: filepath,
+		Filename: filePath,
+		Filepath: filePath,
 		Key:      key,
 	}
 	if err := r.fileRep.Create(ctx, file); err != nil {
-		logger.Warn("创建文件记录失败", logger.String("filepath", filepath), logger.Err(err))
+		logger.Warn("创建文件记录失败", logger.String("filepath", filePath), logger.Err(err))
 	}
 
 	return nil
@@ -502,20 +495,4 @@ func (r *readerWrapper) Read(p []byte) (n int, err error) {
 	n = copy(p, r.data[r.pos:])
 	r.pos += n
 	return n, nil
-}
-
-// mustMarshal JSON 序列化（保留向后兼容，但不推荐使用）
-// Deprecated: 请使用 safeMarshal 代替
-func mustMarshal(v interface{}) []byte {
-	data, _ := sonic.Marshal(v)
-	return data
-}
-
-// safeMarshal JSON 序列化（推荐使用）
-func safeMarshal(v interface{}) ([]byte, error) {
-	data, err := sonic.Marshal(v)
-	if err != nil {
-		return nil, fmt.Errorf("JSON marshal failed: %w", err)
-	}
-	return data, nil
 }

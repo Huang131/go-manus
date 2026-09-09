@@ -9,7 +9,6 @@ import (
 	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
-	"github.com/Huang131/go-manus/api/internal/repository"
 
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
@@ -24,7 +23,6 @@ type BaseAgent struct {
 	memory       Memory
 	toolRegistry *ToolRegistry
 	jsonParser   external.JSONParser
-	sessionRepo  repository.SessionRepository
 	eventCh      chan<- model.BaseEvent // 事件输出通道（由 Flow 注入，nil 时静默）
 }
 
@@ -73,25 +71,6 @@ func NewBaseAgentWithParser(name, sessionID string, config *AgentConfig, llm ext
 	}
 }
 
-// NewBaseAgentWithRepo 创建基础 Agent（带数据库仓储）
-func NewBaseAgentWithRepo(name, sessionID string, config *AgentConfig, llm external.LLM, tools []Tool, sessionRepo repository.SessionRepository) *BaseAgent {
-	agent := NewBaseAgent(name, sessionID, config, llm, tools)
-	agent.sessionRepo = sessionRepo
-	return agent
-}
-
-// NewBaseAgentWithRepoAndParser 创建基础 Agent（带数据库仓储和自定义 JSON 解析器）
-func NewBaseAgentWithRepoAndParser(name, sessionID string, config *AgentConfig, llm external.LLM, tools []Tool, sessionRepo repository.SessionRepository, jsonParser external.JSONParser) *BaseAgent {
-	agent := NewBaseAgentWithParser(name, sessionID, config, llm, tools, jsonParser)
-	agent.sessionRepo = sessionRepo
-	return agent
-}
-
-// SetSessionRepo 设置 Session 仓储
-func (a *BaseAgent) SetSessionRepo(sessionRepo repository.SessionRepository) {
-	a.sessionRepo = sessionRepo
-}
-
 // SetEventCh 注入事件输出通道（Flow 创建事件流后调用）
 func (a *BaseAgent) SetEventCh(ch chan<- model.BaseEvent) {
 	a.eventCh = ch
@@ -116,55 +95,14 @@ func (a *BaseAgent) SessionID() string {
 	return a.sessionID
 }
 
-// AddMemory 添加记忆（带持久化）
-func (a *BaseAgent) AddMemory(ctx context.Context, msg llmcore.Message) error {
-	// 1. 添加到内存
-	if err := a.memory.Add(msg); err != nil {
-		return err
-	}
-
-	// 2. 持久化到数据库
-	if a.sessionRepo != nil {
-		if err := a.sessionRepo.SaveMemory(ctx, a.sessionID, a.name, a.memory.GetMessages()); err != nil {
-			logger.Error("记忆持久化失败",
-				logger.String("session_id", a.sessionID),
-				logger.String("agent_name", a.name),
-				logger.Err(err))
-			// 不返回错误，因为内存已成功添加
-		}
-	}
-
-	return nil
-}
-
-// SaveMemory 手动保存记忆到数据库
-func (a *BaseAgent) SaveMemory(ctx context.Context) error {
-	if a.sessionRepo == nil {
-		return nil
-	}
-	return a.sessionRepo.SaveMemory(ctx, a.sessionID, a.name, a.memory.GetMessages())
-}
-
-// LoadMemory 从数据库恢复记忆到内存（agent 装配后调用一次）
+// LoadMemory 从数据库恢复记忆（当前未启用数据库持久化，保留为空操作）
 func (a *BaseAgent) LoadMemory(ctx context.Context) error {
-	if a.sessionRepo == nil {
-		return nil
-	}
-	messages, err := a.sessionRepo.GetMemory(ctx, a.sessionID, a.name)
-	if err != nil {
-		return err
-	}
-	if len(messages) == 0 {
-		return nil
-	}
-	if err := a.memory.MergeMessages(messages); err != nil {
-		return err
-	}
-	logger.Info("从数据库加载记忆成功",
-		logger.String("session_id", a.sessionID),
-		logger.String("agent_name", a.name),
-		logger.Int("message_count", len(messages)))
 	return nil
+}
+
+// AddMemory 添加记忆
+func (a *BaseAgent) AddMemory(ctx context.Context, msg llmcore.Message) error {
+	return a.memory.Add(msg)
 }
 
 // buildConversationMessages 构建带记忆的完整 LLM 消息列表：system + 记忆原生消息 + 本次请求。
@@ -180,7 +118,7 @@ func (a *BaseAgent) buildConversationMessages(systemPrompt, query string) []llmc
 	return messages
 }
 
-// mergeMemory 把本轮对话产生的新消息合并进记忆并持久化。
+// mergeMemory 把本轮对话产生的新消息合并进记忆。
 // msgs 必须只包含本轮新增的消息（不含 system 与历史记忆）。
 func (a *BaseAgent) mergeMemory(ctx context.Context, msgs []llmcore.Message) {
 	if len(msgs) == 0 {
@@ -188,13 +126,6 @@ func (a *BaseAgent) mergeMemory(ctx context.Context, msgs []llmcore.Message) {
 	}
 	if err := a.memory.MergeMessages(msgs); err != nil {
 		logger.Error("记忆合并失败", logger.Err(err))
-		return
-	}
-	if err := a.SaveMemory(ctx); err != nil {
-		logger.Error("记忆持久化失败",
-			logger.String("session_id", a.sessionID),
-			logger.String("agent_name", a.name),
-			logger.Err(err))
 	}
 }
 

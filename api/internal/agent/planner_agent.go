@@ -105,7 +105,7 @@ func (a *PlannerAgent) CreatePlan(ctx context.Context, input *TaskInput) (*model
 		Goal:     result.Goal,
 		Language: result.Language,
 		Message:  result.Message,
-		Status:   model.ExecutionStatusCompleted,
+		Status:   model.ExecutionStatusPending,
 		Steps:    make([]model.PlanStep, 0, len(result.Steps)),
 	}
 

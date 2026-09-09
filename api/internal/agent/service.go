@@ -34,9 +34,6 @@ type AgentService struct {
 	a2aTool      *A2ATool
 	mq           external.MessageQueue
 
-	// 运行中的任务
-	runningTasks map[string]*AgentTaskRunner
-
 	// Session 与 Task 的映射（用于对接 Task 架构）
 	taskBySession map[string]*RedisStreamTask
 }
@@ -82,7 +79,6 @@ func NewAgentService(
 		fileStorage:   fileStorage,
 		mcpTool:       mcpTool,
 		a2aTool:       a2aTool,
-		runningTasks:  make(map[string]*AgentTaskRunner),
 		taskBySession: make(map[string]*RedisStreamTask),
 		mq:            mq,
 	}
@@ -201,11 +197,6 @@ func (s *AgentService) StopSession(ctx context.Context, sessionID string) error 
 		delete(s.taskBySession, sessionID)
 	}
 
-	// 清理旧的 TaskRunner
-	if _, ok := s.runningTasks[sessionID]; ok {
-		delete(s.runningTasks, sessionID)
-	}
-
 	// 更新会话状态
 	_ = s.sessionRep.UpdateStatus(ctx, sessionID, model.SessionStatusCompleted)
 
@@ -225,35 +216,7 @@ func (s *AgentService) Shutdown() {
 		delete(s.taskBySession, sessionID)
 	}
 
-	s.runningTasks = make(map[string]*AgentTaskRunner)
 	logger.Info("Agent 服务已关闭")
-}
-
-// getOrCreateTaskRunner 获取或创建任务运行器
-// Deprecated: 此方法已废弃，请使用 getOrCreateTask() 代替
-func (s *AgentService) getOrCreateTaskRunner(session *model.Session, tools []Tool) *AgentTaskRunner {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// 如果已有运行中的任务，直接返回
-	if runner, ok := s.runningTasks[session.ID]; ok {
-		return runner
-	}
-
-	// 创建新的任务运行器
-	runner := NewAgentTaskRunner(&AgentTaskRunnerConfig{
-		SessionID:   session.ID,
-		AgentConfig: s.agentConfig,
-		LLM:         s.llm,
-		Tools:       tools,
-		SessionRep:  s.sessionRep,
-		FileRep:     s.fileRep,
-		Sandbox:     s.sandbox,
-		FileStorage: s.fileStorage,
-	})
-
-	s.runningTasks[session.ID] = runner
-	return runner
 }
 
 // getTools 获取工具列表
@@ -398,22 +361,4 @@ func (s *AgentService) GetActiveTaskID(ctx context.Context, sessionID string) (s
 		return "", nil
 	}
 	return task.ID(), nil
-}
-
-// RegisterTool 注册自定义工具
-func (s *AgentService) RegisterTool(tool Tool) {
-	// 工具注册到所有活跃任务
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	// 注意: AgentTaskRunner 创建时已固定工具列表
-	// 如需动态添加工具，需要修改设计
-	logger.Info("注册工具", logger.String("name", tool.Name()))
-}
-
-// GetRunningTasks 获取运行中的任务数
-func (s *AgentService) GetRunningTasks() int {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return len(s.runningTasks)
 }

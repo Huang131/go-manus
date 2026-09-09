@@ -2,13 +2,10 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/bytedance/sonic"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -23,13 +20,9 @@ type SessionService interface {
 	GetAllSessions(ctx context.Context) ([]*model.Session, error)
 	ListSessions(ctx context.Context, limit, offset int) ([]*model.Session, int, error)
 	DeleteSession(ctx context.Context, id string) error
-	IncrementUnreadCount(ctx context.Context, id string) error
-	DecrementUnreadCount(ctx context.Context, id string) error
 	ClearUnreadCount(ctx context.Context, id string) error
 	GetSessionFiles(ctx context.Context, id string) ([]*model.File, error)
 	AppendEvent(ctx context.Context, sessionID string, event *model.Event) error
-	StreamSession(ctx context.Context, id string) (*model.Session, error)
-	Chat(ctx context.Context, sessionID string, message string) error
 
 	// GetVNCURL 返回会话对应的 VNC WebSocket 地址。
 	// go-manus 当前使用单一共享 sandbox 服务（区别于 mooc-manus 的 per-session Docker），
@@ -128,16 +121,6 @@ func (s *DefaultSessionService) ClearUnreadCount(ctx context.Context, id string)
 	return s.repo.SetUnreadCount(ctx, id, 0)
 }
 
-// IncrementUnreadCount 原子增加未读数
-func (s *DefaultSessionService) IncrementUnreadCount(ctx context.Context, id string) error {
-	return s.repo.IncrementUnreadCount(ctx, id)
-}
-
-// DecrementUnreadCount 原子减少未读数 (最低为0)
-func (s *DefaultSessionService) DecrementUnreadCount(ctx context.Context, id string) error {
-	return s.repo.DecrementUnreadCount(ctx, id)
-}
-
 // GetSessionFiles 获取会话的文件列表
 // 统一走 files 表（替代旧 sessions.files JSONB），单一数据源，永不不一致
 func (s *DefaultSessionService) GetSessionFiles(ctx context.Context, id string) ([]*model.File, error) {
@@ -162,32 +145,6 @@ func (s *DefaultSessionService) GetSessionFiles(ctx context.Context, id string) 
 // AppendEvent 追加事件
 func (s *DefaultSessionService) AppendEvent(ctx context.Context, sessionID string, event *model.Event) error {
 	return s.repo.AppendEvent(ctx, sessionID, event)
-}
-
-// StreamSession 流式获取会话
-func (s *DefaultSessionService) StreamSession(ctx context.Context, id string) (*model.Session, error) {
-	return s.repo.GetByID(ctx, id)
-}
-
-// Chat 发送消息 (将消息内容封装到事件数据中)
-func (s *DefaultSessionService) Chat(ctx context.Context, sessionID string, message string) error {
-	msgEvent := model.MessageEvent{
-		Type:    model.EventTypeMessage,
-		Role:    "user",
-		Message: message,
-	}
-	data, err := sonic.Marshal(msgEvent)
-	if err != nil {
-		return fmt.Errorf("encode chat message event: %w", err)
-	}
-
-	event := &model.Event{
-		ID:        uuid.New().String(),
-		Type:      model.EventTypeMessage,
-		CreatedAt: time.Now(),
-		Data:      data,
-	}
-	return s.AppendEvent(ctx, sessionID, event)
 }
 
 // GetVNCURL 返回会话对应的 VNC WebSocket 地址。
