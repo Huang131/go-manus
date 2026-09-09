@@ -1,0 +1,90 @@
+api/internal/bootstrap/app.go
+  s_b0d9ce2a00c5fd::t_b12410351637dc 463
+  s_b0d9ce2a00c5fd::t_b566460afa5389 207,454-462
+  s_b0d9ce2a00c5fd::t_9ee252f198ae4a 565
+  s_b0d9ce2a00c5fd::t_a392cc5d14a477 269
+  s_b0d9ce2a00c5fd::t_1572b1a8700e3b 177-178
+  s_b0d9ce2a00c5fd::t_d9c54933fc616a 566-568
+  s_b0d9ce2a00c5fd::t_aa335027df0cbb 187,208,252,574-577
+  s_b0d9ce2a00c5fd::t_9379a4fb35ada9 117-120
+  s_b0d9ce2a00c5fd::t_9af2ced52f9192 302
+  s_b0d9ce2a00c5fd::t_f2954c26c3b90c 285
+  s_b0d9ce2a00c5fd::t_289af18c8a437c 432
+  s_b0d9ce2a00c5fd::t_a9f7130883e65f 440-453
+  s_b0d9ce2a00c5fd::t_abb301851ad540 214,464-466
+  s_b0d9ce2a00c5fd::t_c02580c93edcbe 488
+  s_b0d9ce2a00c5fd::t_7e2898d847ec1c 184-186
+  s_b0d9ce2a00c5fd::t_48b4d193e01165 188-189
+  s_b0d9ce2a00c5fd::t_dc0fb3e146cc21 204-206
+  s_b0d9ce2a00c5fd::t_0b239814865b32 209-213
+  s_b0d9ce2a00c5fd::t_c713471edc884d 215-217
+  s_b0d9ce2a00c5fd::t_1db11769a542e3 250-251
+  s_b0d9ce2a00c5fd::t_8572593df2c9b8 467-468
+api/config/config.go
+  s_b0d9ce2a00c5fd::t_917f4478c8cb9c 183-186
+  s_b0d9ce2a00c5fd::t_500e82fccbfd21 51-53
+  s_b0d9ce2a00c5fd::t_44fc86960577a8 293-294,296-303
+  s_b0d9ce2a00c5fd::t_6deae3b442060c 182,187-192
+  s_b0d9ce2a00c5fd::t_e3cb3d04e81fa7 295
+api/internal/bootstrap/app_test.go
+  s_b0d9ce2a00c5fd::t_83440ae0a5f0e6 658-660,663,667,672,675-683
+  s_b0d9ce2a00c5fd::t_76fe79328e4dcb 217,567,570,580-581,584,592-600
+  s_b0d9ce2a00c5fd::t_88db836b6a623d 385-387
+  s_b0d9ce2a00c5fd::t_44a98f47a4f7c6 67-69
+  s_b0d9ce2a00c5fd::t_3e6fd09073f532 454
+  s_b0d9ce2a00c5fd::t_79978433d01071 75-77
+  s_b0d9ce2a00c5fd::t_de35387f275a17 82-83
+  s_b0d9ce2a00c5fd::t_0a6cc81158c48e 207
+  s_b0d9ce2a00c5fd::t_24fd7170ed4dcd 14
+  s_b0d9ce2a00c5fd::t_d4a13676224d73 79-80
+  s_b0d9ce2a00c5fd::t_7a3e0ed9796a6a 71-73
+  s_b0d9ce2a00c5fd::t_923b1c39ec8069 249
+  s_b0d9ce2a00c5fd::t_186b25f4524185 228-232
+  s_b0d9ce2a00c5fd::t_9786cf853f7f4a 193
+  s_b0d9ce2a00c5fd::t_106a841098e253 201-203
+  s_b0d9ce2a00c5fd::t_c0b35e0c0c6721 86
+  s_b0d9ce2a00c5fd::t_56270efa922fbe 395-398
+  s_b0d9ce2a00c5fd::t_4ffbce52ebf72b 70,74,78,81,84-85,204-205,208,212-215,219,234-240,245,248,250,253-254,388,393-394,399-453,455-532,534,538-539,541-566,568-569,571-579,582-583,585-591,601-657,670-671,674,684-689
+  s_b0d9ce2a00c5fd::t_fdbdf7c21b4021 220-226
+  s_b0d9ce2a00c5fd::t_2171f760e6a702 194-200
+  s_b0d9ce2a00c5fd::t_49b469955d8823 251-252
+  s_b0d9ce2a00c5fd::t_d83b8fc36e96be 389-392
+  s_b0d9ce2a00c5fd::t_8a2f7858861c87 209-211
+  s_b0d9ce2a00c5fd::t_ec4c2bd9fac272 241-244
+  s_b0d9ce2a00c5fd::t_425778fa4a86e8 9,13
+  s_b0d9ce2a00c5fd::t_d0f9b7c12c76d5 533
+  s_b0d9ce2a00c5fd::t_60070854eac85b 216,218,227,233,661-662,664-666,668-669,673
+  s_b0d9ce2a00c5fd::t_aa335027df0cbb 384
+  s_b0d9ce2a00c5fd::t_384211063fbf7b 255
+  s_b0d9ce2a00c5fd::t_1d6fa0c5747624 246-247
+  s_b0d9ce2a00c5fd::t_109ce7f485dfc2 206,535-537,540
+  s_b0d9ce2a00c5fd::t_a9bba46bcef920 66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "6d68a0ff99fa791d1e24a206bb546c3d94440bc2",
+  "prompts": {},
+  "sessions": {
+    "s_b0d9ce2a00c5fd": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6a9fe53d5f8bfc5c33242567",
+        "model": "minimax-m2.7"
+      },
+      "human_author": "Huang131 <1315970725@qq.com>",
+      "custom_attributes": {
+        "edit_kind": "bash",
+        "tool_name": "RunCommand",
+        "operation_id": "6aa0c0d55f8bfc5c33242780",
+        "runtime_client": "trae-tob-git-ai",
+        "display_model_name": "minimax-m2.7",
+        "session_id": "6a9fe53d5f8bfc5c33242567",
+        "source_scene": "agent",
+        "external_session_id": "6a9fe53d5f8bfc5c33242567",
+        "tool_use_id": "6aa0c0d55f8bfc5c33242780",
+        "client_type": "ide"
+      }
+    }
+  }
+}
