@@ -78,4 +78,17 @@ a2a:
 server:
   host: 0.0.0.0
   port: 8080
-  shutdown_timeout_sec: 30
+  # 测试环境仅信任本地回环地址
+  trusted_proxies:
+    - 127.0.0.1
+    - ::1
+  read_timeout_sec: 10     # 测试环境缩短超时，加快测试
+  write_timeout_sec: 0     # 流式接口不设置写超时
+  idle_timeout_sec: 30     # 测试环境缩短超时
+  shutdown_timeout_sec: 10 # 测试环境缩短超时，加快测试
+
+# 测试环境可选择关闭文件清理或延长间隔，减少测试干扰
+# file_cleanup:
+#   expires_after: "168h"
+#   batch_size: 100
+#   interval: 3600

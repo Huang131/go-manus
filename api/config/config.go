@@ -11,13 +11,14 @@ import (
 // 环境常量
 const (
 	EnvDevelopment = "development"
+	EnvTest        = "test"
 	EnvProduction  = "production"
 )
 
 // Config 应用程序配置
 type Config struct {
-	Env               string `mapstructure:"env"                 validate:"required,oneof=development production"` // 环境: development/production
-	AppConfigFilepath string `mapstructure:"app_config_filepath"`                                                  // 应用配置文件路径
+	Env               string `mapstructure:"env"                 validate:"required,oneof=development test production"` // 环境: development/test/production
+	AppConfigFilepath string `mapstructure:"app_config_filepath"`                                                       // 应用配置文件路径
 
 	// 日志配置
 	Log LoggerConfig `mapstructure:"log"`

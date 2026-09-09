@@ -72,4 +72,18 @@ a2a:
 server:
   host: 0.0.0.0
   port: 8080
+  # Docker Compose 网络地址段，与 Nginx/网关通信需要信任此网段
+  trusted_proxies:
+    - 172.18.0.0/16
+    - 127.0.0.1
+    - ::1
+  read_timeout_sec: 30
+  write_timeout_sec: 0    # 流式接口不设置写超时
+  idle_timeout_sec: 60
   shutdown_timeout_sec: 30
+
+# 文件清理配置：定期清理过期的临时文件
+file_cleanup:
+  expires_after: "168h"   # 文件过期时间，默认 7 天
+  batch_size: 100         # 每批清理的文件数量
+  interval: 3600          # 清理间隔（秒），默认 1 小时

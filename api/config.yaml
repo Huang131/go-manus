@@ -89,3 +89,13 @@ server:
   write_timeout_sec: 0   # 流式接口不设置写超时
   idle_timeout_sec: 60
   shutdown_timeout_sec: 30
+
+# 文件清理配置：定期清理过期的临时文件，节省存储成本
+# 清理策略：只清理孤立文件（无关联会话或关联会话已删除的文件）
+# - 无 session_id 的文件：如临时上传
+# - session.deleted_at IS NOT NULL：关联的会话已被软删除
+# 不会清理关联活跃会话的文件，保证"会话文件与会话同寿命"
+file_cleanup:
+  expires_after: "168h" # 文件过期时间，默认 7 天（168h）
+  batch_size: 100       # 每批清理的文件数量
+  interval: 3600        # 清理间隔（秒），默认 1 小时

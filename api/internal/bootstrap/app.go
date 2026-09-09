@@ -145,10 +145,15 @@ func DefaultOptions() Options {
 //	}
 //	app, _ := BuildWithFactories(cfg, opts, factories)
 type Factories struct {
-	NewPostgres             func(*config.DatabaseConfig) (*infrastructure.Postgres, error)                       // PostgreSQL 构造器
-	NewRedis                func(*config.RedisConfig) (*infrastructure.Redis, error)                             // Redis 构造器
-	NewOSS                  func(*config.ObjectStorageConfig) (*infrastructure.OSS, error)                       // OSS 构造器
-	NewFileCleanupScheduler func(service.FileCleanupService, string, int, time.Duration) service.SchedulerRunner // 文件清理调度器构造器
+	NewPostgres             func(*config.DatabaseConfig) (*infrastructure.Postgres, error) // PostgreSQL 构造器
+	NewRedis                func(*config.RedisConfig) (*infrastructure.Redis, error)       // Redis 构造器
+	NewOSS                  func(*config.ObjectStorageConfig) (*infrastructure.OSS, error) // OSS 构造器
+	NewFileCleanupScheduler func(
+		cleanupService service.FileCleanupService, // 清理服务
+		expireDuration string, // 过期时间，如 "24h", "7d"
+		batchSize int, // 每批清理数量
+		interval time.Duration, // 执行间隔
+	) service.SchedulerRunner // 文件清理调度器构造器
 }
 
 // repositories 聚合所有仓库（Repository）实例。
@@ -644,10 +649,10 @@ func (a *App) initSchedulers(cfg *config.Config, opts Options, factories Factori
 
 	// 创建调度器
 	cleanupScheduler := factories.NewFileCleanupScheduler(
-		fileCleanupService,
-		cfg.FileCleanup.ExpiresAfter,                        // 过期时间，如 "24h"
-		cfg.FileCleanup.BatchSize,                           // 每批清理数量
-		time.Duration(cfg.FileCleanup.Interval)*time.Second, // 执行间隔
+		fileCleanupService,                                  // cleanupService: 清理服务
+		cfg.FileCleanup.ExpiresAfter,                        // expireDuration: 过期时间，如 "24h"
+		cfg.FileCleanup.BatchSize,                           // batchSize: 每批清理数量
+		time.Duration(cfg.FileCleanup.Interval)*time.Second, // interval: 执行间隔
 	)
 	if cleanupScheduler == nil {
 		return fmt.Errorf("file cleanup scheduler: %w", ErrInitialize)
