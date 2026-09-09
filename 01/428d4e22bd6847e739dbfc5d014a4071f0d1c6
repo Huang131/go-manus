@@ -1,0 +1,38 @@
+ui/src/lib/session-events.ts
+  s_574f855e98726f::t_bb93f4739e87ac 235-242,249
+api/internal/repository/session_repository.go
+  s_574f855e98726f::t_29ab502eb6ea2b 127,151,186
+api/internal/agent/tool_event_integration_test.go
+  s_574f855e98726f::t_c0d3b79ee9c34d 1-281,298-515
+  s_574f855e98726f::t_d1485a51253b83 516-657
+  s_574f855e98726f::t_1b4323a71b69df 282-297
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "01428d4e22bd6847e739dbfc5d014a4071f0d1c6",
+  "prompts": {},
+  "sessions": {
+    "s_574f855e98726f": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa10d205f8bfc5c33242bf2",
+        "model": "minimax-m2.7"
+      },
+      "human_author": "Huang131 <1315970725@qq.com>",
+      "custom_attributes": {
+        "edit_kind": "file_edit",
+        "tool_use_id": "6aa125325f8bfc5c33242f3a",
+        "tool_type": "agent",
+        "session_id": "6aa10d205f8bfc5c33242bf2",
+        "dedupe_key": "6aa10d205f8bfc5c33242bf2:6aa125325f8bfc5c33242f3a:afterEdit:76785346",
+        "tool_id": "SearchReplace",
+        "source_scene": "unknown",
+        "runtime_client": "trae-tob-git-ai",
+        "operation_id": "6aa125325f8bfc5c33242f3a",
+        "external_session_id": "6aa10d205f8bfc5c33242bf2",
+        "client_type": "ide"
+      }
+    }
+  }
+}
