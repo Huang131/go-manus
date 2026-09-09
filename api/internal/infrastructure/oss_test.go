@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	appconfig "github.com/Huang131/go-manus/api/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 func TestGenerateURL(t *testing.T) {
@@ -244,4 +245,13 @@ func TestNewOSS_WithoutCredentials(t *testing.T) {
 		t.Fatalf("GetURL() error = %v", err)
 	}
 	t.Logf("URL without credentials: %s", url)
+}
+
+func TestOSS_IsReady(t *testing.T) {
+	if (&OSS{}).IsReady() {
+		t.Fatal("empty OSS should not be ready")
+	}
+	if !(&OSS{client: &s3.Client{}}).IsReady() {
+		t.Fatal("OSS with client should be ready")
+	}
 }

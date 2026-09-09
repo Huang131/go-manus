@@ -84,30 +84,6 @@ func TestSuccess_HttpResponse(t *testing.T) {
 	}
 }
 
-func TestError_HttpResponse(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-
-	Error(c, "bad request")
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("Error() status = %d, want %d", w.Code, http.StatusBadRequest)
-	}
-
-	var resp Response
-	if err := sonic.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Errorf("Error() response is not valid JSON: %v", err)
-	}
-
-	if resp.Code != 400 {
-		t.Errorf("Error() code = %d, want 400", resp.Code)
-	}
-	if resp.Msg != "bad request" {
-		t.Errorf("Error() msg = %s, want bad request", resp.Msg)
-	}
-}
-
 func TestFromError_MappedBusinessError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
@@ -140,5 +116,16 @@ func TestFromError_GenericError(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("FromError() status = %d, want %d", w.Code, http.StatusInternalServerError)
+	}
+
+	var resp Response
+	if err := sonic.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("FromError() response invalid JSON: %v", err)
+	}
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("FromError() code = %d, want %d", resp.Code, http.StatusInternalServerError)
+	}
+	if resp.Msg != "internal server error" {
+		t.Fatalf("FromError() msg = %q, want %q", resp.Msg, "internal server error")
 	}
 }

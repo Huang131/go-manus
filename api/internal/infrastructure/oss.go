@@ -103,6 +103,11 @@ type OSS struct {
 	endpoint string
 }
 
+// IsReady 表示存储客户端是否已完成可用初始化。
+func (s *OSS) IsReady() bool {
+	return s != nil && s.client != nil
+}
+
 // NewOSS 创建 S3 兼容存储客户端。
 // 支持 AWS S3、腾讯云 COS、火山云 TOS、MinIO 等 S3 兼容存储。
 func NewOSS(cfg *appconfig.ObjectStorageConfig) (*OSS, error) {

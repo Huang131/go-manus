@@ -51,15 +51,6 @@ func SuccessWithTotal(c *gin.Context, data interface{}, total int) {
 	})
 }
 
-// Error 错误响应
-func Error(c *gin.Context, msg string) {
-	c.JSON(http.StatusBadRequest, Response{
-		Code: 400,
-		Msg:  msg,
-		Data: nil,
-	})
-}
-
 // FromError 将业务错误映射为统一响应。
 func FromError(c *gin.Context, err error) {
 	if err == nil {
