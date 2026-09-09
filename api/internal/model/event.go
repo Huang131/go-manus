@@ -103,11 +103,6 @@ func (e *MessageEvent) GetType() EventType {
 // ToJSON 将事件转换为 JSON 字符串
 func (e *MessageEvent) ToJSON() string { return toJSON(e) }
 
-// PlanEvent 计划事件
-type PlanEvent struct {
-	Plan *Plan `json:"plan"`
-}
-
 // Plan 计划
 type Plan struct {
 	ID       string          `json:"id"`
@@ -177,13 +172,6 @@ func (e *DoneEvent) GetType() EventType {
 
 // ToJSON 将事件转换为 JSON 字符串
 func (e *DoneEvent) ToJSON() string { return toJSON(e) }
-
-// StepEvent 步骤事件
-type StepEvent struct {
-	Step     int    `json:"step"`
-	Content  string `json:"content"`
-	Finished bool   `json:"finished"`
-}
 
 // BrowserEvent 浏览器事件
 type BrowserEvent struct {

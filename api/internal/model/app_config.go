@@ -26,9 +26,6 @@ type ServiceStatus struct {
 	Error  string      `json:"error,omitempty"`
 }
 
-// TimeFunc 时间函数，用于测试
-var TimeFunc = time.Now
-
 // LLMConfig LLM 配置
 type LLMConfig struct {
 	BaseURL     string  `json:"base_url"`

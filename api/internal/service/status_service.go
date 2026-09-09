@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
@@ -18,6 +19,7 @@ type DefaultStatusService struct {
 	db    *infrastructure.Postgres
 	redis *infrastructure.Redis
 	oss   *infrastructure.OSS
+	now   func() time.Time
 }
 
 // NewStatusService 创建状态服务
@@ -33,7 +35,7 @@ func NewStatusService(db *infrastructure.Postgres, redis *infrastructure.Redis, 
 func (s *DefaultStatusService) GetHealthStatus(ctx context.Context) (*model.HealthStatus, error) {
 	status := &model.HealthStatus{
 		Status:    model.HealthStateHealthy,
-		Timestamp: model.TimeFunc().Unix(),
+		Timestamp: time.Now().Unix(),
 		Services:  make(map[model.ServiceName]model.ServiceStatus),
 	}
 

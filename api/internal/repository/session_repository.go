@@ -132,7 +132,7 @@ func (r *PostgresSessionRepository) GetByID(ctx context.Context, id string) (*mo
 	var eventsJSON []byte
 	err := q.QueryRow(ctx, query, id).Scan(
 		&s.ID, &s.SandboxID, &s.TaskID, &s.Title, &s.UnreadMessageCount,
-		&s.LatestMessage, &s.LatestMessageAt, &eventsJSON,
+		&s.LatestMessage, &s.LatestMessageAt,
 		&s.Status, &s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
@@ -149,7 +149,7 @@ func (r *PostgresSessionRepository) GetAll(ctx context.Context) ([]*model.Sessio
 	q := r.queryer(ctx)
 	query := `
 		SELECT id, sandbox_id, task_id, title, unread_message_count, latest_message,
-			latest_message_at, events,status, created_at, updated_at
+			latest_message_at, status, created_at, updated_at
 		FROM sessions WHERE deleted_at IS NULL ORDER BY latest_message_at DESC NULLS LAST
 	`
 	rows, err := q.Query(ctx, query)
@@ -161,15 +161,13 @@ func (r *PostgresSessionRepository) GetAll(ctx context.Context) ([]*model.Sessio
 	var sessions []*model.Session
 	for rows.Next() {
 		var s model.Session
-		var eventsJSON []byte
 		if err := rows.Scan(
 			&s.ID, &s.SandboxID, &s.TaskID, &s.Title, &s.UnreadMessageCount,
-			&s.LatestMessage, &s.LatestMessageAt, &eventsJSON,
+			&s.LatestMessage, &s.LatestMessageAt,
 			&s.Status, &s.CreatedAt, &s.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
-		sonic.Unmarshal(eventsJSON, &s.Events)
 		sessions = append(sessions, &s)
 	}
 	return sessions, nil
@@ -186,7 +184,7 @@ func (r *PostgresSessionRepository) List(ctx context.Context, limit, offset int)
 
 	query := `
 		SELECT id, sandbox_id, task_id, title, unread_message_count, latest_message,
-			latest_message_at, events,status, created_at, updated_at
+			latest_message_at, status, created_at, updated_at
 		FROM sessions WHERE deleted_at IS NULL ORDER BY latest_message_at DESC NULLS LAST LIMIT $1 OFFSET $2
 	`
 	rows, err := q.Query(ctx, query, limit, offset)
@@ -198,15 +196,13 @@ func (r *PostgresSessionRepository) List(ctx context.Context, limit, offset int)
 	var sessions []*model.Session
 	for rows.Next() {
 		var s model.Session
-		var eventsJSON []byte
 		if err := rows.Scan(
 			&s.ID, &s.SandboxID, &s.TaskID, &s.Title, &s.UnreadMessageCount,
-			&s.LatestMessage, &s.LatestMessageAt, &eventsJSON,
+			&s.LatestMessage, &s.LatestMessageAt,
 			&s.Status, &s.CreatedAt, &s.UpdatedAt,
 		); err != nil {
 			return nil, 0, err
 		}
-		sonic.Unmarshal(eventsJSON, &s.Events)
 		sessions = append(sessions, &s)
 	}
 	return sessions, total, nil

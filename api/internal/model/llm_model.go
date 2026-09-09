@@ -12,7 +12,7 @@ type LLMModel struct {
 	Name        string    `json:"name"`     // 用户自定义显示名 e.g. "我的 Claude"
 	Provider    string    `json:"provider"` // openai/anthropic/google/deepseek/custom
 	BaseURL     string    `json:"base_url"`
-	APIKey      string    `json:"api_key,omitempty"`
+	APIKey      string    `json:"-"`
 	ModelName   string    `json:"model_name"` // 真实模型名 e.g. claude-3-5-sonnet-20241022
 	Temperature float64   `json:"temperature"`
 	MaxTokens   int       `json:"max_tokens"`
