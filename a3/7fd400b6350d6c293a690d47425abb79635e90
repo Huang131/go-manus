@@ -1,0 +1,46 @@
+api/config/config_files_test.go
+  s_b179bace541cd0::t_32df7f14ca7d39 1-13,17-43
+  s_b179bace541cd0::t_5be5401e2f3084 14-16
+api/config.docker.yaml
+  s_b179bace541cd0::t_452ff208cfcb2b 75-89
+api/internal/bootstrap/app.go
+  s_b179bace541cd0::t_98459e4d6b395a 652-655
+  s_b179bace541cd0::t_ba824cb6192358 151-152,156
+  s_b179bace541cd0::t_b64fe3189a0414 148-150,153-155
+api/config.yaml
+  s_b179bace541cd0::t_169ff3a1d5594b 91-101
+api/config.test.yaml
+  s_b179bace541cd0::t_f650f052f8acc1 81-94
+api/config/config.go
+  s_b179bace541cd0::t_47cd0d79dd9824 21
+  s_b179bace541cd0::t_3d6e41f2336780 14
+  s_b179bace541cd0::t_913badf335ead2 20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "a37fd400b6350d6c293a690d47425abb79635e90",
+  "prompts": {},
+  "sessions": {
+    "s_b179bace541cd0": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa0e5cf5f8bfc5c33242a0c",
+        "model": "minimax-m2.7"
+      },
+      "human_author": "Huang131 <1315970725@qq.com>",
+      "custom_attributes": {
+        "edit_kind": "file_edit",
+        "operation_id": "6aa108875f8bfc5c33242b95",
+        "display_model_name": "minimax-m2.7",
+        "source_scene": "agent",
+        "session_id": "6aa0e5cf5f8bfc5c33242a0c",
+        "runtime_client": "trae-tob-git-ai",
+        "tool_name": "SearchReplace",
+        "client_type": "ide",
+        "external_session_id": "6aa0e5cf5f8bfc5c33242a0c",
+        "tool_use_id": "6aa108875f8bfc5c33242b95"
+      }
+    }
+  }
+}
