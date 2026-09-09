@@ -114,9 +114,10 @@ func DefaultOptions() Options {
 
 // Factories 允许测试或不同启动模式替换底层客户端构造器。
 type Factories struct {
-	NewPostgres func(*config.DatabaseConfig) (*infrastructure.Postgres, error)
-	NewRedis    func(*config.RedisConfig) (*infrastructure.Redis, error)
-	NewOSS      func(*config.ObjectStorageConfig) (*infrastructure.OSS, error)
+	NewPostgres             func(*config.DatabaseConfig) (*infrastructure.Postgres, error)
+	NewRedis                func(*config.RedisConfig) (*infrastructure.Redis, error)
+	NewOSS                  func(*config.ObjectStorageConfig) (*infrastructure.OSS, error)
+	NewFileCleanupScheduler func(service.FileCleanupService, string, int, time.Duration) service.SchedulerRunner
 }
 
 type repositories struct {
@@ -140,6 +141,9 @@ func defaultFactories() Factories {
 		NewPostgres: infrastructure.NewPostgres,
 		NewRedis:    infrastructure.NewRedis,
 		NewOSS:      infrastructure.NewOSS,
+		NewFileCleanupScheduler: func(cleanupService service.FileCleanupService, expireDuration string, batchSize int, interval time.Duration) service.SchedulerRunner {
+			return service.NewFileCleanupScheduler(cleanupService, expireDuration, batchSize, interval)
+		},
 	}
 }
 
@@ -166,11 +170,20 @@ type App struct {
 	repos     repositories      // 私有仓库层
 	lifecycle *lifecycleManager // 生命周期管理器
 	closeOnce sync.Once         // 幂等关闭
+	startOnce sync.Once         // 幂等启动
+	startErr  error
 }
 
-func (a *App) lifecycleHook(fn func()) {
+// stopHook 注册关闭钩子，在应用关闭时逆序执行
+func (a *App) stopHook(fn func()) {
 	if a.lifecycle != nil {
 		a.lifecycle.AppendStopHook(fn)
+	}
+}
+
+func (a *App) startHook(fn func() error) {
+	if a.lifecycle != nil {
+		a.lifecycle.AppendStartHook(fn)
 	}
 }
 
@@ -185,6 +198,21 @@ func (a *App) Close() {
 			a.lifecycle.Stop()
 		}
 	})
+}
+
+// Start 启动应用注册的后台任务。
+// 该方法幂等，便于 Build 完成后直接调用或由测试重复触发。
+func (a *App) Start() error {
+	if a == nil {
+		return nil
+	}
+
+	a.startOnce.Do(func() {
+		if a.lifecycle != nil {
+			a.startErr = a.lifecycle.Start()
+		}
+	})
+	return a.startErr
 }
 
 // Shutdown 先停止 HTTP 服务，再释放应用依赖，统一生产和测试的退出顺序。
@@ -219,6 +247,9 @@ func normalizeFactories(factories Factories) Factories {
 	if factories.NewOSS == nil {
 		factories.NewOSS = defaults.NewOSS
 	}
+	if factories.NewFileCleanupScheduler == nil {
+		factories.NewFileCleanupScheduler = defaults.NewFileCleanupScheduler
+	}
 	return factories
 }
 
@@ -235,7 +266,7 @@ func (a *App) initInfrastructure(cfg *config.Config, opts Options, factories Fac
 		if a.Postgres == nil {
 			return fmt.Errorf("postgres: %w: factory returned nil", ErrInitialize)
 		}
-		a.lifecycleHook(func() {
+		a.stopHook(func() {
 			a.Postgres.Close()
 		})
 	}
@@ -251,7 +282,7 @@ func (a *App) initInfrastructure(cfg *config.Config, opts Options, factories Fac
 		if a.Redis == nil {
 			return fmt.Errorf("redis: %w: factory returned nil", ErrInitialize)
 		}
-		a.lifecycleHook(func() {
+		a.stopHook(func() {
 			_ = a.Redis.Close()
 		})
 	}
@@ -268,7 +299,7 @@ func (a *App) initInfrastructure(cfg *config.Config, opts Options, factories Fac
 			if a.OSS == nil {
 				return fmt.Errorf("storage: %w: factory returned nil", ErrInitialize)
 			}
-			a.lifecycleHook(func() {
+			a.stopHook(func() {
 				_ = a.OSS.Close()
 			})
 		}
@@ -398,10 +429,39 @@ func (a *App) initAgent(opts Options, llm external.LLM, browser external.Browser
 		a.repos.session, a.repos.file, a.repos.appConfig, llm, a.Sandbox,
 		agent.DefaultAgentConfig(), mcpConfig, a2aConfig, browser, search, mq, a.OSS,
 	)
-	a.lifecycleHook(func() {
+	a.stopHook(func() {
 		if a.AgentService != nil {
 			a.AgentService.Shutdown()
 		}
+	})
+	return nil
+}
+
+func (a *App) initSchedulers(cfg *config.Config, opts Options, factories Factories) error {
+	if !opts.EnablePostgres || !opts.EnableStorage {
+		return nil
+	}
+	if a.Postgres == nil || a.OSS == nil || !a.OSS.IsReady() {
+		return nil
+	}
+
+	fileCleanupService := service.NewFileCleanupService(a.repos.file, a.OSS)
+	cleanupScheduler := factories.NewFileCleanupScheduler(
+		fileCleanupService,
+		cfg.FileCleanup.ExpiresAfter,
+		cfg.FileCleanup.BatchSize,
+		time.Duration(cfg.FileCleanup.Interval)*time.Second,
+	)
+	if cleanupScheduler == nil {
+		return fmt.Errorf("file cleanup scheduler: %w", ErrInitialize)
+	}
+
+	a.startHook(func() error {
+		cleanupScheduler.Start()
+		return nil
+	})
+	a.stopHook(func() {
+		cleanupScheduler.Stop()
 	})
 	return nil
 }
@@ -425,7 +485,7 @@ func (a *App) initRoutes(cfg *config.Config, opts Options) {
 			logger.Err(err))
 		_ = engine.SetTrustedProxies([]string{"127.0.0.1", "::1"})
 	}
-	engine.Use(middleware.Recovery(), middleware.Logger(), middleware.CORS(), middleware.RequestID())
+	engine.Use(middleware.Recovery(), middleware.RequestID(), middleware.Logger(), middleware.CORS())
 	sessionHandler := handler.NewSessionHandler(a.SessionService, a.AgentService, a.Sandbox)
 	fileHandler := handler.NewFileHandler(a.FileService, a.SessionService)
 	statusHandler := handler.NewStatusHandler(a.StatusService)
@@ -502,8 +562,16 @@ func BuildWithFactories(cfg *config.Config, opts Options, factories Factories) (
 		app.Close()
 		return nil, err
 	}
+	if err := app.initSchedulers(cfg, opts, factories); err != nil {
+		app.Close()
+		return nil, err
+	}
 	app.initRoutes(cfg, opts)
 	if err := app.healthCheck(opts, cfg); err != nil {
+		app.Close()
+		return nil, err
+	}
+	if err := app.Start(); err != nil {
 		app.Close()
 		return nil, err
 	}

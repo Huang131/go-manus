@@ -6,12 +6,16 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/gin-gonic/gin"
 
 	"github.com/Huang131/go-manus/api/config"
 	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
+	"github.com/Huang131/go-manus/api/internal/service"
 )
 
 func TestAppCloseIsIdempotent(t *testing.T) {
@@ -56,6 +60,27 @@ func TestAppShutdownClosesRegisteredResources(t *testing.T) {
 	}
 	if closeCount != 1 {
 		t.Fatalf("Shutdown() closed resources %d times, want 1", closeCount)
+	}
+}
+
+func TestAppStartRunsRegisteredHooksOnce(t *testing.T) {
+	var startCount int
+	app := &App{
+		lifecycle: &lifecycleManager{},
+	}
+	app.startHook(func() error {
+		startCount++
+		return nil
+	})
+
+	if err := app.Start(); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := app.Start(); err != nil {
+		t.Fatalf("Start() second call error = %v", err)
+	}
+	if startCount != 1 {
+		t.Fatalf("Start() called hooks %d times, want 1", startCount)
 	}
 }
 
@@ -162,6 +187,69 @@ func TestBuildRejectsNilConfigSentinel(t *testing.T) {
 	}
 	if !errors.Is(err, ErrConfigNil) {
 		t.Fatalf("Build(nil) error = %v, want errors.Is(_, ErrConfigNil)", err)
+	}
+}
+
+func TestBuildWithFactoriesInjectsFileCleanupScheduler(t *testing.T) {
+	cfg := &config.Config{
+		FileCleanup: config.FileCleanupConfig{
+			ExpiresAfter: "24h",
+			BatchSize:    100,
+			Interval:     3600,
+		},
+	}
+	var schedulerStartCount int
+	var schedulerStopCount int
+
+	app, err := BuildWithFactories(cfg, Options{
+		EnablePostgres:    true,
+		EnableRedis:       false,
+		EnableStorage:     true,
+		EnableLLM:         false,
+		EnableSandbox:     false,
+		EnableBrowser:     false,
+		EnableSearch:      false,
+		EnableAgent:       false,
+		EnableRoutes:      false,
+		EnableHealthCheck: false,
+	}, Factories{
+		NewPostgres: func(*config.DatabaseConfig) (*infrastructure.Postgres, error) {
+			return &infrastructure.Postgres{}, nil
+		},
+		NewOSS: func(*config.ObjectStorageConfig) (*infrastructure.OSS, error) {
+			return infrastructure.NewOSS(&config.ObjectStorageConfig{
+				Provider:  "custom",
+				Endpoint:  "http://127.0.0.1:9000",
+				SecretID:  "test",
+				SecretKey: "test",
+				Bucket:    "test-bucket",
+			})
+		},
+		NewFileCleanupScheduler: func(service.FileCleanupService, string, int, time.Duration) service.SchedulerRunner {
+			return &mockScheduler{
+				onStart: func() { schedulerStartCount++ },
+				onStop:  func() { schedulerStopCount++ },
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildWithFactories() error = %v", err)
+	}
+	if app == nil {
+		t.Fatal("BuildWithFactories() app is nil")
+	}
+	defer app.Close()
+
+	if schedulerStartCount != 1 {
+		t.Fatalf("scheduler start count = %d, want 1", schedulerStartCount)
+	}
+	if schedulerStopCount != 0 {
+		t.Fatalf("scheduler stop count before Close = %d, want 0", schedulerStopCount)
+	}
+
+	app.Close()
+	if schedulerStopCount != 1 {
+		t.Fatalf("scheduler stop count after Close = %d, want 1", schedulerStopCount)
 	}
 }
 
@@ -293,3 +381,309 @@ func TestBuildTestModeWithRoutesHealthEndpoint(t *testing.T) {
 		}
 	}
 }
+
+type mockScheduler struct {
+	onStart func()
+	onStop  func()
+}
+
+func (m *mockScheduler) Start() {
+	if m.onStart != nil {
+		m.onStart()
+	}
+}
+
+func (m *mockScheduler) Stop() {
+	if m.onStop != nil {
+		m.onStop()
+	}
+}
+
+// ============================================================================
+// initInfrastructure 单元测试
+// ============================================================================
+
+func TestInitInfrastructurePostgresFailure(t *testing.T) {
+	app := &App{lifecycle: newLifecycleManager()}
+	cfg := &config.Config{}
+	opts := Options{EnablePostgres: true}
+	factories := Factories{
+		NewPostgres: func(*config.DatabaseConfig) (*infrastructure.Postgres, error) {
+			return nil, errors.New("connection refused")
+		},
+	}
+
+	err := app.initInfrastructure(cfg, opts, factories)
+	if err == nil {
+		t.Fatal("initInfrastructure() error = nil, want postgres failure error")
+	}
+	if !errors.Is(err, ErrInitialize) {
+		t.Fatalf("error should wrap ErrInitialize, got: %v", err)
+	}
+	// 验证关闭钩子没有被注册（因为初始化失败）
+	app.Close() // 不应 panic
+}
+
+func TestInitInfrastructureRedisFailureWithNilCheck(t *testing.T) {
+	app := &App{lifecycle: newLifecycleManager()}
+	cfg := &config.Config{}
+	opts := Options{EnablePostgres: true, EnableRedis: true}
+	factories := Factories{
+		NewPostgres: func(*config.DatabaseConfig) (*infrastructure.Postgres, error) {
+			return &infrastructure.Postgres{}, nil
+		},
+		NewRedis: func(*config.RedisConfig) (*infrastructure.Redis, error) {
+			return nil, errors.New("redis connection refused")
+		},
+	}
+
+	err := app.initInfrastructure(cfg, opts, factories)
+	if err == nil {
+		t.Fatal("initInfrastructure() error = nil, want redis failure error")
+	}
+	if !errors.Is(err, ErrInitialize) {
+		t.Fatalf("error should wrap ErrInitialize, got: %v", err)
+	}
+	// Postgres 应该已注册关闭钩子
+	app.Close()
+}
+
+func TestInitInfrastructureOSSFailureDoesNotBlockStartup(t *testing.T) {
+	app := &App{lifecycle: newLifecycleManager()}
+	cfg := &config.Config{}
+	opts := Options{EnablePostgres: true, EnableRedis: true, EnableStorage: true}
+	factories := Factories{
+		NewPostgres: func(*config.DatabaseConfig) (*infrastructure.Postgres, error) {
+			return &infrastructure.Postgres{}, nil
+		},
+		NewRedis: func(*config.RedisConfig) (*infrastructure.Redis, error) {
+			return &infrastructure.Redis{}, nil
+		},
+		NewOSS: func(*config.ObjectStorageConfig) (*infrastructure.OSS, error) {
+			return nil, errors.New("oss connection refused")
+		},
+	}
+
+	// OSS 失败不应该返回错误，而是优雅降级
+	err := app.initInfrastructure(cfg, opts, factories)
+	if err != nil {
+		t.Fatalf("initInfrastructure() error = %v, want nil (OSS failure should be graceful)", err)
+	}
+	if app.OSS != nil {
+		t.Fatal("app.OSS should be nil when OSS initialization fails")
+	}
+	// Postgres 和 Redis 应该初始化成功
+	if app.Postgres == nil || app.Redis == nil {
+		t.Fatal("Postgres and Redis should be initialized despite OSS failure")
+	}
+	app.Close()
+}
+
+func TestInitInfrastructureSkipsDisabledComponents(t *testing.T) {
+	app := &App{lifecycle: newLifecycleManager()}
+	cfg := &config.Config{}
+	opts := Options{
+		EnablePostgres: false,
+		EnableRedis:    false,
+		EnableStorage:  false,
+	}
+	factories := Factories{
+		NewPostgres: func(*config.DatabaseConfig) (*infrastructure.Postgres, error) {
+			t.Fatal("NewPostgres should not be called when EnablePostgres is false")
+			return nil, nil
+		},
+	}
+
+	err := app.initInfrastructure(cfg, opts, factories)
+	if err != nil {
+		t.Fatalf("initInfrastructure() error = %v, want nil", err)
+	}
+	if app.Postgres != nil || app.Redis != nil || app.OSS != nil {
+		t.Fatal("no infrastructure should be initialized when all are disabled")
+	}
+	app.Close()
+}
+
+func TestInitInfrastructureNilFactoryReturnsNil(t *testing.T) {
+	app := &App{lifecycle: newLifecycleManager()}
+	cfg := &config.Config{}
+	opts := Options{EnablePostgres: true}
+	// 使用空的 factories，normalizeFactories 会填充默认值
+	factories := normalizeFactories(Factories{
+		NewPostgres: func(*config.DatabaseConfig) (*infrastructure.Postgres, error) {
+			return nil, nil // factory 返回 nil 但没有错误
+		},
+	})
+
+	err := app.initInfrastructure(cfg, opts, factories)
+	if err == nil {
+		t.Fatal("initInfrastructure() should return error when factory returns nil")
+	}
+	if !strings.Contains(err.Error(), "factory returned nil") {
+		t.Fatalf("error should mention 'factory returned nil', got: %v", err)
+	}
+}
+
+// ============================================================================
+// BuildWithFactories 依赖注入单元测试
+// ============================================================================
+
+func TestBuildWithFactoriesPartialInjection(t *testing.T) {
+	cfg := &config.Config{}
+	var postgresCalled bool
+
+	// 只注入 Postgres mock，验证注入的 factory 被保留（normalizeFactories 不覆盖非 nil 字段）。
+	// Redis/Storage 禁用，避免未注入时 normalizeFactories 填充的默认 factory 发起真实连接；
+	// "部分注入 + 默认填充"的语义由 TestNormalizeFactoriesPartialInjection 覆盖。
+	app, err := BuildWithFactories(cfg, Options{
+		EnablePostgres:    true,
+		EnableRedis:       false,
+		EnableStorage:     false,
+		EnableLLM:         false,
+		EnableAgent:       false,
+		EnableRoutes:      false,
+		EnableHealthCheck: false,
+	}, Factories{
+		NewPostgres: func(*config.DatabaseConfig) (*infrastructure.Postgres, error) {
+			postgresCalled = true
+			return &infrastructure.Postgres{}, nil
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("BuildWithFactories() error = %v", err)
+	}
+	if app == nil {
+		t.Fatal("BuildWithFactories() app is nil")
+	}
+	if !postgresCalled {
+		t.Fatal("NewPostgres should be called")
+	}
+	app.Close()
+}
+
+func TestBuildWithFactoriesFactoryErrorCleanedUp(t *testing.T) {
+	cfg := &config.Config{}
+	var postgresInitialized, redisCalled bool
+
+	// Postgres 初始化成功，但 Redis 失败
+	_, err := BuildWithFactories(cfg, Options{
+		EnablePostgres:    true,
+		EnableRedis:       true,
+		EnableStorage:     false,
+		EnableLLM:         false,
+		EnableAgent:       false,
+		EnableRoutes:      false,
+		EnableHealthCheck: false,
+	}, Factories{
+		NewPostgres: func(*config.DatabaseConfig) (*infrastructure.Postgres, error) {
+			postgresInitialized = true
+			return &infrastructure.Postgres{}, nil
+		},
+		NewRedis: func(*config.RedisConfig) (*infrastructure.Redis, error) {
+			redisCalled = true
+			return nil, errors.New("redis error")
+		},
+	})
+
+	if err == nil {
+		t.Fatal("BuildWithFactories() should return error when Redis fails")
+	}
+	if !postgresInitialized {
+		t.Fatal("Postgres should be initialized before Redis fails")
+	}
+	if !redisCalled {
+		t.Fatal("Redis factory should be called")
+	}
+	// 验证错误链包含 ErrInitialize
+	if !errors.Is(err, ErrInitialize) {
+		t.Fatalf("error should wrap ErrInitialize, got: %v", err)
+	}
+}
+
+func TestBuildWithFactoriesProductionModeSetsGinReleaseMode(t *testing.T) {
+	cfg := &config.Config{Env: config.EnvProduction}
+	gin.SetMode(gin.DebugMode) // 先重置为 debug 模式
+
+	app, err := BuildWithFactories(cfg, Options{
+		EnableRoutes:      true,
+		EnableHealthCheck: false,
+	}, Factories{})
+
+	if err != nil {
+		t.Fatalf("BuildWithFactories() error = %v", err)
+	}
+	if app == nil || app.Engine == nil {
+		t.Fatal("Engine should be initialized")
+	}
+
+	// 验证 gin 模式已设置为 release
+	if gin.Mode() != gin.ReleaseMode {
+		t.Errorf("gin.Mode() = %s, want %s", gin.Mode(), gin.ReleaseMode)
+	}
+	app.Close()
+}
+
+// ============================================================================
+// normalizeFactories 单元测试
+// ============================================================================
+
+func TestNormalizeFactoriesPartialInjection(t *testing.T) {
+	// 测试部分注入：只注入 Redis，其他使用默认值
+	factories := Factories{
+		NewRedis: func(*config.RedisConfig) (*infrastructure.Redis, error) {
+			return &infrastructure.Redis{}, nil
+		},
+	}
+
+	normalized := normalizeFactories(factories)
+
+	// NewRedis 应该保持注入的值
+	if normalized.NewRedis == nil {
+		t.Fatal("NewRedis should be set")
+	}
+	// NewPostgres 和 NewOSS 应该使用默认值
+	if normalized.NewPostgres == nil {
+		t.Fatal("NewPostgres should use default")
+	}
+	if normalized.NewOSS == nil {
+		t.Fatal("NewOSS should use default")
+	}
+	if normalized.NewFileCleanupScheduler == nil {
+		t.Fatal("NewFileCleanupScheduler should use default")
+	}
+}
+
+func TestNormalizeFactoriesFullInjection(t *testing.T) {
+	// 用标记变量验证注入的函数是否被调用
+	var customPostgresCalled, customRedisCalled bool
+
+	customFactories := Factories{
+		NewPostgres: func(*config.DatabaseConfig) (*infrastructure.Postgres, error) {
+			customPostgresCalled = true
+			return nil, nil
+		},
+		NewRedis: func(*config.RedisConfig) (*infrastructure.Redis, error) {
+			customRedisCalled = true
+			return nil, nil
+		},
+	}
+
+	// 测试 normalizeFactories 是否保留注入的函数
+	normalized := normalizeFactories(customFactories)
+
+	// 如果 normalizeFactories 正确保留注入的函数，那么调用 normalized 的函数会触发我们的标记
+	normalized.NewPostgres(nil)
+	normalized.NewRedis(nil)
+
+	if !customPostgresCalled {
+		t.Fatal("NewPostgres should call custom function, not default")
+	}
+	if !customRedisCalled {
+		t.Fatal("NewRedis should call custom function, not default")
+	}
+}
+
+// ============================================================================
+// mock 类型补充
+// ============================================================================

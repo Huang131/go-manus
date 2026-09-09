@@ -48,6 +48,9 @@ type Config struct {
 
 	// HTTP 服务配置
 	Server ServerConfig `mapstructure:"server" validate:"required"`
+
+	// 文件清理配置
+	FileCleanup FileCleanupConfig `mapstructure:"file_cleanup"`
 }
 
 // LoggerConfig 日志配置
@@ -176,6 +179,17 @@ type A2AAgent struct {
 	Metadata map[string]string `mapstructure:"metadata"`
 }
 
+// FileCleanupConfig 文件清理配置
+// 清理策略：只清理孤立文件（无关联会话或关联会话已删除）
+// - session_id IS NULL：未关联会话的文件（如临时上传）
+// - session.deleted_at IS NOT NULL：关联的会话已被软删除
+// 不会清理关联活跃会话的文件，保证"会话文件与会话同寿命"
+type FileCleanupConfig struct {
+	ExpiresAfter string `mapstructure:"expires_after"` // 文件过期时间，如 "24h", "7d"
+	BatchSize    int    `mapstructure:"batch_size"`    // 每批清理的文件数量
+	Interval     int    `mapstructure:"interval"`      // 清理间隔（秒）
+}
+
 // LoadWithValidation 从指定路径加载并验证配置。
 //
 // 每次调用都创建独立的 viper 实例，避免全局状态在并发/重载场景下互相覆盖。
@@ -274,6 +288,17 @@ func (c *Config) applyDefaults() {
 	// LLM 配置默认值
 	if c.LLM.ToolCallTimeout == 0 {
 		c.LLM.ToolCallTimeout = 15
+	}
+
+	// 文件清理配置默认值
+	if c.FileCleanup.ExpiresAfter == "" {
+		c.FileCleanup.ExpiresAfter = "168h" // 默认 7 天
+	}
+	if c.FileCleanup.BatchSize == 0 {
+		c.FileCleanup.BatchSize = 100
+	}
+	if c.FileCleanup.Interval == 0 {
+		c.FileCleanup.Interval = 3600 // 默认 1 小时
 	}
 
 	// Server 配置默认值
