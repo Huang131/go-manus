@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,27 @@ import (
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
+
+// contextKey 使用私有类型，避免不同包的 context key 发生碰撞。
+type contextKey struct{}
+
+var requestIDKey contextKey
+
+const requestIDField = "request_id"
+
+// WithRequestID 将请求 ID 写入上下文，供请求链路中的日志使用。
+func WithRequestID(ctx context.Context, requestID string) context.Context {
+	return context.WithValue(ctx, requestIDKey, requestID)
+}
+
+// RequestIDFromContext 从上下文读取请求 ID。
+func RequestIDFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	requestID, _ := ctx.Value(requestIDKey).(string)
+	return requestID
+}
 
 // 日志级别常量。对齐 config.LoggerConfig 的 oneof tag，不可直接用于 struct tag。
 const (
@@ -138,6 +160,15 @@ func Get() *zap.Logger {
 	return tmp
 }
 
+// WithContext 返回携带请求上下文字段的 logger。
+func WithContext(ctx context.Context) *zap.Logger {
+	requestID := RequestIDFromContext(ctx)
+	if requestID == "" {
+		return Get()
+	}
+	return Get().With(zap.String(requestIDField, requestID))
+}
+
 // SetLevel 动态调整日志级别
 // 无需锁：atomicLevel.SetLevel() 本身线程安全，levelMap 是只读 map
 func SetLevel(level string) {
@@ -200,9 +231,19 @@ func Debug(msg string, fields ...zap.Field) {
 	Get().Debug(msg, fields...)
 }
 
+// DebugContext 记录携带上下文的调试日志。
+func DebugContext(ctx context.Context, msg string, fields ...zap.Field) {
+	WithContext(ctx).Debug(msg, fields...)
+}
+
 // Info 信息日志
 func Info(msg string, fields ...zap.Field) {
 	Get().Info(msg, fields...)
+}
+
+// InfoContext 记录携带上下文的普通日志。
+func InfoContext(ctx context.Context, msg string, fields ...zap.Field) {
+	WithContext(ctx).Info(msg, fields...)
 }
 
 // Warn 警告日志
@@ -210,9 +251,19 @@ func Warn(msg string, fields ...zap.Field) {
 	Get().Warn(msg, fields...)
 }
 
+// WarnContext 记录携带上下文的警告日志。
+func WarnContext(ctx context.Context, msg string, fields ...zap.Field) {
+	WithContext(ctx).Warn(msg, fields...)
+}
+
 // Error 错误日志
 func Error(msg string, fields ...zap.Field) {
 	Get().Error(msg, fields...)
+}
+
+// ErrorContext 记录携带上下文的错误日志。
+func ErrorContext(ctx context.Context, msg string, fields ...zap.Field) {
+	WithContext(ctx).Error(msg, fields...)
 }
 
 // Fatal 致命日志

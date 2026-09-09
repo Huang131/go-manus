@@ -704,7 +704,7 @@ func (a *App) initRoutes(cfg *config.Config, opts Options) {
 	}
 
 	// 注册中间件
-	engine.Use(middleware.Recovery(), middleware.RequestID(), middleware.Logger(), middleware.CORS())
+	engine.Use(middleware.RequestID(), middleware.Logger(), middleware.Recovery(), middleware.CORS())
 
 	// 创建并注册路由处理器
 	sessionHandler := handler.NewSessionHandler(a.SessionService, a.AgentService, a.Sandbox)

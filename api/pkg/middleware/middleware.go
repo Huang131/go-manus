@@ -19,7 +19,7 @@ func Recovery() gin.HandlerFunc {
 		defer func() {
 			if err := recover(); err != nil {
 				// 记录堆栈信息
-				logger.Error("panic recovered",
+				logger.ErrorContext(c.Request.Context(), "panic recovered",
 					logger.Any("error", err),
 					logger.String("stack", string(debug.Stack())),
 				)
@@ -38,7 +38,8 @@ func Logger() gin.HandlerFunc {
 		start := time.Now()
 
 		// 请求前
-		logger.Info("request started",
+		log := logger.WithContext(c.Request.Context())
+		log.Info("request started",
 			logger.String("method", c.Request.Method),
 			logger.String("path", c.Request.URL.Path),
 			logger.String("client_ip", c.ClientIP()),
@@ -48,7 +49,7 @@ func Logger() gin.HandlerFunc {
 		c.Next()
 
 		// 请求后
-		logger.Info("request finished",
+		log.Info("request finished",
 			logger.String("method", c.Request.Method),
 			logger.String("path", c.Request.URL.Path),
 			logger.Int("status", c.Writer.Status()),
@@ -78,6 +79,7 @@ func RequestID() gin.HandlerFunc {
 			requestID = generateRequestID()
 		}
 		c.Set("request_id", requestID)
+		c.Request = c.Request.WithContext(logger.WithRequestID(c.Request.Context(), requestID))
 		c.Header("X-Request-ID", requestID)
 		c.Next()
 	}

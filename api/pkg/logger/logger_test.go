@@ -1,8 +1,19 @@
 package logger
 
 import (
+	"context"
 	"testing"
 )
+
+func TestRequestIDContext(t *testing.T) {
+	ctx := WithRequestID(context.Background(), "req-123")
+	if got := RequestIDFromContext(ctx); got != "req-123" {
+		t.Fatalf("RequestIDFromContext() = %q, want req-123", got)
+	}
+	if got := RequestIDFromContext(nil); got != "" {
+		t.Fatalf("RequestIDFromContext(nil) = %q, want empty", got)
+	}
+}
 
 func TestInit(t *testing.T) {
 	if err := Init(LevelDebug); err != nil {

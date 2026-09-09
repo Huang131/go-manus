@@ -211,7 +211,7 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 			// 没有活跃 task：保持长连接空闲等待，每 15s 推一个心跳注释避免前端超时。
 			// 前端 startEmptyStream 不再因立即关闭而 500ms 死循环重连。
 			// 当新 chat 请求创建 task 后再向该 session 推流（见 createTaskNotify 后续扩展）。
-			logger.Info("空流续读: session 无活跃 task，保持长连接心跳",
+			logger.InfoContext(c.Request.Context(), "空流续读: session 无活跃 task，保持长连接心跳",
 				logger.String("session_id", id))
 			heartbeat := time.NewTicker(sessionHeartbeatInterval)
 			defer heartbeat.Stop()
@@ -229,7 +229,7 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 				}
 			}
 		}
-		logger.Info("空流续读: 订阅 session 活跃 task 事件流",
+		logger.InfoContext(c.Request.Context(), "空流续读: 订阅 session 活跃 task 事件流",
 			logger.String("session_id", id),
 			logger.String("task_id", taskID),
 			logger.String("start_event_id", req.EventID))
@@ -244,11 +244,11 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 			// 不再轮询 Redis 也不再写 Flush，避免在 writer 关闭后疯狂刷写日志。
 			// 后端 Agent task 会通过独立 context 继续运行，事件保留在 Redis，
 			// 下次前端连上来时通过 lastEventId 续读即可。
-			logger.Info("HTTP client disconnected, stopping SSE stream", logger.String("task_id", taskID))
+			logger.InfoContext(c.Request.Context(), "HTTP client disconnected, stopping SSE stream", logger.String("task_id", taskID))
 			eventCancel()
 			return
 		case <-eventCtx.Done():
-			logger.Info("SSE stream ended", logger.String("task_id", taskID))
+			logger.InfoContext(c.Request.Context(), "SSE stream ended", logger.String("task_id", taskID))
 			return
 		default:
 			events, err := h.agent.GetTaskEvents(eventCtx, taskID, startID)
