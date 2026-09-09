@@ -20,11 +20,11 @@ func SetupRoutes(engine *gin.Engine, h *Handlers) {
 	// 健康检查
 	engine.GET("/health", h.Status.Health)
 
-	// API 路由组（与原项目 mooc-manus 对齐：不带版本号前缀，对外暴露 /api/*）
+	// API 路由组
 	api := engine.Group("/api")
 	{
 		// 状态模块
-		api.GET("/status", h.Status.GetStatus)
+		api.GET("/status", h.Status.Health)
 
 		// 会话模块
 		sessions := api.Group("/sessions")
@@ -42,8 +42,8 @@ func SetupRoutes(engine *gin.Engine, h *Handlers) {
 			// 对齐原项目：/sessions/:id/file (POST 读沙箱文件) 和 /sessions/:id/shell (POST 读 shell 输出)
 			sessions.POST("/:id/file", h.Session.ReadFile)
 			sessions.POST("/:id/shell", h.Session.ReadShell)
-			// VNC WebSocket 代理（对齐 mooc-manus session_routes.py）
-			sessions.GET("/:id/vnc", handler.VNCProxy(h.Session.Service(), nil))
+			// VNC WebSocket 代理
+			sessions.GET("/:id/vnc", handler.VNCProxy(h.Session.Service()))
 		}
 
 		// 文件模块
@@ -68,7 +68,7 @@ func SetupRoutes(engine *gin.Engine, h *Handlers) {
 			appConfig.POST("/a2a-servers", h.AppConfig.UpdateA2AConfig)
 		}
 
-		// 多模型管理（v1 新增，替代 app-config/llm 的单值模式）
+		// 多模型管理
 		llmModels := api.Group("/llm-models")
 		{
 			llmModels.GET("", h.LLMModel.List)

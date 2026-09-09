@@ -24,7 +24,7 @@ var vncUpgrader = websocket.Upgrader{
 
 // VNCProxy 将前端的 WebSocket 连接代理到 sandbox 的 websockify 端点。
 // 这里使用标准的 WS -> WS 双向转发，而不是把 HTTP body 当成可写通道。
-func VNCProxy(svc service.SessionService, _ *http.Client) gin.HandlerFunc {
+func VNCProxy(svc service.SessionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sessionID := c.Param("id")
 

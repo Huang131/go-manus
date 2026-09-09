@@ -58,7 +58,7 @@ func TestVNCProxy_ServiceError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	engine := gin.New()
-	engine.GET("/api/sessions/:id/vnc", VNCProxy(&stubVNCService{err: errors.New("sandbox 地址未配置")}, nil))
+	engine.GET("/api/sessions/:id/vnc", VNCProxy(&stubVNCService{err: errors.New("sandbox 地址未配置")}))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/sessions/abc/vnc", nil)
 	w := httptest.NewRecorder()
@@ -95,7 +95,7 @@ func TestVNCProxy_ProxyEcho(t *testing.T) {
 
 	wsURL := "ws" + echoServer.URL[len("http"):]
 	engine := gin.New()
-	engine.GET("/api/sessions/:id/vnc", VNCProxy(&stubVNCService{vncURL: wsURL}, nil))
+	engine.GET("/api/sessions/:id/vnc", VNCProxy(&stubVNCService{vncURL: wsURL}))
 
 	server := newLocalTestServer(t, engine)
 	defer server.Close()

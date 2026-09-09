@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -123,6 +124,7 @@ func (h *SessionHandler) Stream(c *gin.Context) {
 		case <-ticker.C:
 			sessions, err := h.service.GetAllSessions(c.Request.Context())
 			if err != nil {
+				logger.Debug("获取会话列表失败，跳过本轮 SSE 推送", logger.Err(err))
 				continue
 			}
 			data, err := sonic.MarshalString(sessions)
@@ -136,7 +138,46 @@ func (h *SessionHandler) Stream(c *gin.Context) {
 	}
 }
 
+// chatRequest Chat 请求体
+type chatRequest struct {
+	Message     *string  `json:"message"`
+	Attachments []string `json:"attachments"`
+	// 兼容两种命名：前端 startEmptyStream 发的 event_id，HTTP 标准 SSE 的 Last-Event-ID
+	EventID string `json:"event_id"`
+	// 本次 chat 要用的模型 ID（可选）。空表示走 default。
+	// 用于"会话中途临时切换模型"，不影响其他 session 也不改 DB 的 default。
+	ModelID string `json:"model_id"`
+}
+
+// maxChatBodyBytes Chat 请求体大小上限，防止超大 body 全量读入内存
+const maxChatBodyBytes = 1 << 20 // 1MB
+
+// parseChatRequest 解析并校验 Chat 请求体。
+// Message 用 *string 区分"未传 message 键"（空流续读）与"传了空串"（参数错误）。
+func parseChatRequest(c *gin.Context) (*chatRequest, error) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxChatBodyBytes)
+	rawBody, err := c.GetRawData()
+	if err != nil {
+		return nil, apperr.BadRequest("读取请求体失败")
+	}
+
+	var req chatRequest
+	if len(rawBody) > 0 {
+		if err := sonic.Unmarshal(rawBody, &req); err != nil {
+			return nil, apperr.BadRequest(err.Error())
+		}
+	}
+	if req.Message != nil && strings.TrimSpace(*req.Message) == "" {
+		return nil, apperr.BadRequest("消息内容不能为空")
+	}
+	return &req, nil
+}
+
 // Chat 聊天 (SSE 流式)
+//
+// 区分两种调用语义（对齐原 mooc-manus Python 版本 agent_service.chat 的 if message 分支）：
+//  1. 发送新消息：body 含 "message" 键（非空字符串），进入 chat 流程
+//  2. 空流续读：body 不含 "message" 键，仅传 event_id 订阅当前 task 的事件流
 func (h *SessionHandler) Chat(c *gin.Context) {
 	id := c.Param("id")
 	if h.agent == nil {
@@ -144,117 +185,38 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 		return
 	}
 
-	// 区分两种调用语义（对齐原 mooc-manus Python 版本 agent_service.chat 的 if message 分支）：
-	//   1. 发送新消息：body 含 "message" 键（非空字符串），进入 chat 流程
-	//   2. 空流续读：body 不含 "message" 键 或 message 为空，仅传 event_id 订阅当前 task 的事件流
-	// 之前所有路径都 h.agent.Chat(...)，导致 startEmptyStream 触发"空消息"被 LLM 误读为合法输入。
-	rawBody, err := c.GetRawData()
+	req, err := parseChatRequest(c)
 	if err != nil {
-		response.FromError(c, apperr.BadRequest("读取请求体失败"))
+		response.FromError(c, err)
 		return
 	}
-
-	var req struct {
-		Message     *string  `json:"message"`
-		Attachments []string `json:"attachments"`
-		// 兼容两种命名：前端 startEmptyStream 发的 event_id，HTTP 标准 SSE 的 Last-Event-ID
-		EventID string `json:"event_id"`
-		// 本次 chat 要用的模型 ID（可选）。空表示走 default。
-		// 用于"会话中途临时切换模型"，不影响其他 session 也不改 DB 的 default。
-		ModelID string `json:"model_id"`
-	}
-	if len(rawBody) > 0 {
-		if err := sonic.Unmarshal(rawBody, &req); err != nil {
-			response.FromError(c, apperr.BadRequest(err.Error()))
-			return
-		}
-	}
-
-	hasMessage := req.Message != nil
-	if hasMessage && strings.TrimSpace(*req.Message) == "" {
-		response.FromError(c, apperr.BadRequest("消息内容不能为空"))
-		return
-	}
-
-	setSSEHeaders(c)
 
 	// 创建独立的 context 用于事件获取，不受 HTTP 请求影响
 	// 这样即使 HTTP 客户端断开，只要 Agent 还在运行，就会继续推送事件
 	eventCtx, eventCancel := context.WithCancel(context.Background())
 	defer eventCancel()
-
-	// 检测 HTTP 连接断开，但使用独立的 timeout
-	clientGone := c.Request.Context().Done()
 	// SSE 流最长持续 30 分钟
 	streamTimeout := time.AfterFunc(sessionStreamTimeout, eventCancel)
+	defer streamTimeout.Stop()
 
 	var taskID string
-
-	// 仅当"显式发送新消息"时才进入 chat 流程；空流续读跳过此步。
-	if hasMessage && strings.TrimSpace(*req.Message) != "" {
-		// 创建消息对象
-		msg := &llmcore.Message{
-			Role:        llmcore.RoleUser,
-			ContentText: *req.Message,
-			Attachments: req.Attachments,
-		}
-
-		// 调用 AgentService 处理聊天消息（异步执行）
-		// 注意：AgentService.Chat 内部会创建自己的 context，不受 HTTP 请求影响
-		var err error
-		chatCtx := external.WithModelID(c.Request.Context(), req.ModelID)
-		taskID, err = h.agent.Chat(chatCtx, id, msg)
+	if req.Message != nil {
+		// 显式发送新消息
+		taskID, err = h.sendMessage(c, id, req)
 		if err != nil {
+			// 此时响应尚未切换为 SSE（未 Flush），仍可正常返回 JSON 错误
 			response.FromError(c, err)
 			return
 		}
-
-		// 先推送用户消息事件（让前端能立即展示用户发送的内容）
-		userPayload, err := sonic.Marshal(&model.MessageEvent{
-			Type:    model.EventTypeMessage,
-			Role:    string(msg.Role),
-			Message: msg.ContentText,
-		})
-		if err != nil {
-			logger.Error("序列化用户消息 SSE 数据失败", logger.Err(err))
-			return
-		}
-		c.SSEvent(sseEventMessage, string(userPayload))
-		c.Writer.Flush()
-
-		// 再推送 task_id 事件（单独业务类型，前端可识别）
-		taskIDData, err := sonic.Marshal(map[string]interface{}{"task_id": taskID})
-		if err != nil {
-			logger.Error("序列化 task_id SSE 数据失败", logger.Err(err))
-			return
-		}
-		c.SSEvent(sseEventTaskID, string(taskIDData))
-		c.Writer.Flush()
 	} else {
 		// 空流续读：从 session 当前活跃 task 续接事件流
-		var err error
+		setSSEHeaders(c)
 		taskID, err = h.agent.GetActiveTaskID(c.Request.Context(), id)
 		if err != nil || taskID == "" {
 			// 没有活跃 task：保持长连接空闲等待，每 15s 推一个心跳注释避免前端超时。
 			// 前端 startEmptyStream 不再因立即关闭而 500ms 死循环重连。
-			// 当新 chat 请求创建 task 后再向该 session 推流（见 createTaskNotify 后续扩展）。
-			logger.InfoContext(c.Request.Context(), "空流续读: session 无活跃 task，保持长连接心跳",
-				logger.String("session_id", id))
-			heartbeat := time.NewTicker(sessionHeartbeatInterval)
-			defer heartbeat.Stop()
-			for {
-				select {
-				case <-clientGone:
-					return
-				case <-eventCtx.Done():
-					return
-				case <-heartbeat.C:
-					if _, err := c.Writer.WriteString(": heartbeat\n\n"); err != nil {
-						return
-					}
-					c.Writer.Flush()
-				}
-			}
+			h.idleHeartbeat(c, eventCtx, id)
+			return
 		}
 		logger.InfoContext(c.Request.Context(), "空流续读: 订阅 session 活跃 task 事件流",
 			logger.String("session_id", id),
@@ -262,8 +224,109 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 			logger.String("start_event_id", req.EventID))
 	}
 
-	startID := req.EventID // 从前端 lastEventIdRef 续读；空字符串表示从头开始
+	h.streamTaskEvents(c, eventCtx, taskID, req.EventID)
+}
 
+// sendMessage 发送新消息：调用 agent.Chat，成功后切换为 SSE 响应，
+// 并推送用户消息回显（让前端立即展示）与 task_id 事件。
+func (h *SessionHandler) sendMessage(c *gin.Context, sessionID string, req *chatRequest) (string, error) {
+	msg := &llmcore.Message{
+		Role:        llmcore.RoleUser,
+		ContentText: *req.Message,
+		Attachments: req.Attachments,
+	}
+
+	// AgentService.Chat 内部会创建自己的 context，不受 HTTP 请求影响
+	taskID, err := h.agent.Chat(external.WithModelID(c.Request.Context(), req.ModelID), sessionID, msg)
+	if err != nil {
+		return "", err
+	}
+
+	// agent.Chat 成功后才切换为 SSE 响应：失败路径仍可正常返回 JSON 错误
+	setSSEHeaders(c)
+
+	userPayload, err := sonic.Marshal(&model.MessageEvent{
+		Type:    model.EventTypeMessage,
+		Role:    string(msg.Role),
+		Message: msg.ContentText,
+	})
+	if err != nil {
+		logger.Error("序列化用户消息 SSE 数据失败", logger.Err(err))
+		return taskID, nil
+	}
+	c.SSEvent(sseEventMessage, string(userPayload))
+	c.Writer.Flush()
+
+	// 再推送 task_id 事件（单独业务类型，前端可识别）
+	taskIDData, err := sonic.Marshal(map[string]interface{}{"task_id": taskID})
+	if err != nil {
+		logger.Error("序列化 task_id SSE 数据失败", logger.Err(err))
+		return taskID, nil
+	}
+	c.SSEvent(sseEventTaskID, string(taskIDData))
+	c.Writer.Flush()
+
+	return taskID, nil
+}
+
+// idleHeartbeat 空流续读但无活跃 task：保持长连接，定期推送 SSE 心跳注释
+// 防止前端超时断连。客户端断开或流超时（eventCtx 结束）时返回。
+func (h *SessionHandler) idleHeartbeat(c *gin.Context, eventCtx context.Context, sessionID string) {
+	logger.InfoContext(c.Request.Context(), "空流续读: session 无活跃 task，保持长连接心跳",
+		logger.String("session_id", sessionID))
+
+	heartbeat := time.NewTicker(sessionHeartbeatInterval)
+	defer heartbeat.Stop()
+
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case <-eventCtx.Done():
+			return
+		case <-heartbeat.C:
+			if _, err := c.Writer.WriteString(": heartbeat\n\n"); err != nil {
+				return
+			}
+			c.Writer.Flush()
+		}
+	}
+}
+
+// streamTaskEvents 轮询 task 事件流并推送给前端，
+// 直到客户端断开、流超时（eventCtx 结束）或收到 done/error 终态事件。
+func (h *SessionHandler) streamTaskEvents(c *gin.Context, eventCtx context.Context, taskID, startID string) {
+	clientGone := c.Request.Context().Done()
+	ticker := time.NewTicker(sessionEventPollInterval)
+	defer ticker.Stop()
+
+	// 轮询并推送一批事件；返回 true 表示流应终止（终态事件或 eventCtx 结束）
+	pollAndPush := func() bool {
+		events, err := h.agent.GetTaskEvents(eventCtx, taskID, startID)
+		if err != nil {
+			return eventCtx.Err() != nil
+		}
+		for _, event := range events {
+			startID = event.ID
+
+			// 对齐 Python 版本：event 字段为业务类型，data 字段平铺业务 payload。
+			payload := mergeEventMetadata(event)
+			c.SSEvent(string(event.Type), string(payload))
+			c.Writer.Flush()
+
+			// done / error 都视为终态：结束 SSE 流，避免前端 0/N 计数永远卡在等待态。
+			// 后端 task 已结束，下一次连入会通过 lastEventId 续读到 done/error。
+			if event.Type == model.EventTypeDone || event.Type == model.EventTypeError {
+				return true
+			}
+		}
+		return false
+	}
+
+	// 先立即拉一次，及时吐出已缓冲的事件（空流续读场景）
+	if pollAndPush() {
+		return
+	}
 	for {
 		select {
 		case <-clientGone:
@@ -272,38 +335,14 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 			// 后端 Agent task 会通过独立 context 继续运行，事件保留在 Redis，
 			// 下次前端连上来时通过 lastEventId 续读即可。
 			logger.InfoContext(c.Request.Context(), "HTTP client disconnected, stopping SSE stream", logger.String("task_id", taskID))
-			eventCancel()
 			return
 		case <-eventCtx.Done():
 			logger.InfoContext(c.Request.Context(), "SSE stream ended", logger.String("task_id", taskID))
 			return
-		default:
-			events, err := h.agent.GetTaskEvents(eventCtx, taskID, startID)
-			if err != nil {
-				if eventCtx.Err() != nil {
-					return
-				}
-				time.Sleep(sessionEventPollInterval)
-				continue
+		case <-ticker.C:
+			if pollAndPush() {
+				return
 			}
-
-			for _, event := range events {
-				startID = event.ID
-
-				// 对齐 Python 版本：event 字段为业务类型，data 字段平铺业务 payload。
-				payload := mergeEventMetadata(event)
-				c.SSEvent(string(event.Type), string(payload))
-				c.Writer.Flush()
-
-				// done / error 都视为终态：结束 SSE 流，避免前端 0/N 计数永远卡在等待态。
-				// 后端 task 已结束，下一次连入会通过 lastEventId 续读到 done/error。
-				if event.Type == model.EventTypeDone || event.Type == model.EventTypeError {
-					streamTimeout.Stop()
-					eventCancel()
-					return
-				}
-			}
-			time.Sleep(sessionEventPollInterval)
 		}
 	}
 }
@@ -319,9 +358,32 @@ func (h *SessionHandler) GetFiles(c *gin.Context) {
 	response.Success(c, files)
 }
 
+// callSandbox 校验 session 存在与沙箱可用性后执行沙箱调用，统一错误映射。
+// ReadFile / ReadShell 共用。
+func (h *SessionHandler) callSandbox(c *gin.Context, sessionID, action string, call func(ctx context.Context) (*model.ToolResult, error)) {
+	// 校验 session 存在，避免对任意 session id / 路径的越权读取
+	if _, err := h.service.GetSession(c.Request.Context(), sessionID); err != nil {
+		response.FromError(c, apperr.NotFound("session not found: "+sessionID))
+		return
+	}
+	if h.sandbox == nil {
+		response.FromError(c, apperr.FailedPrecondition("沙箱服务未配置"))
+		return
+	}
+	result, err := call(c.Request.Context())
+	if err != nil {
+		response.FromError(c, apperr.Internal(action+": "+err.Error()))
+		return
+	}
+	if !result.Success {
+		response.FromError(c, apperr.Internal(result.Message))
+		return
+	}
+	response.Success(c, result.Data)
+}
+
 // ReadFile 查看沙箱文件内容（对齐原项目 POST /sessions/:id/file）
 func (h *SessionHandler) ReadFile(c *gin.Context) {
-	_ = c.Param("id")
 	var req struct {
 		Filepath string `json:"filepath"`
 	}
@@ -333,25 +395,13 @@ func (h *SessionHandler) ReadFile(c *gin.Context) {
 		response.FromError(c, apperr.BadRequest("filepath 不能为空"))
 		return
 	}
-	if h.sandbox == nil {
-		response.FromError(c, apperr.FailedPrecondition("沙箱服务未配置"))
-		return
-	}
-	result, err := h.sandbox.ReadFile(c.Request.Context(), req.Filepath, nil, nil, false, 0)
-	if err != nil {
-		response.FromError(c, apperr.Internal("读取文件失败: "+err.Error()))
-		return
-	}
-	if !result.Success {
-		response.FromError(c, apperr.Internal(result.Message))
-		return
-	}
-	response.Success(c, result.Data)
+	h.callSandbox(c, c.Param("id"), "读取文件失败", func(ctx context.Context) (*model.ToolResult, error) {
+		return h.sandbox.ReadFile(ctx, req.Filepath, nil, nil, false, 0)
+	})
 }
 
 // ReadShell 查看 Shell 输出（对齐原项目 POST /sessions/:id/shell）
 func (h *SessionHandler) ReadShell(c *gin.Context) {
-	_ = c.Param("id")
 	var req struct {
 		ShellSessionID string `json:"shell_session_id"`
 	}
@@ -363,20 +413,9 @@ func (h *SessionHandler) ReadShell(c *gin.Context) {
 		response.FromError(c, apperr.BadRequest("shell_session_id 不能为空"))
 		return
 	}
-	if h.sandbox == nil {
-		response.FromError(c, apperr.FailedPrecondition("沙箱服务未配置"))
-		return
-	}
-	result, err := h.sandbox.ReadShellOutput(c.Request.Context(), req.ShellSessionID, true)
-	if err != nil {
-		response.FromError(c, apperr.Internal("读取 Shell 输出失败: "+err.Error()))
-		return
-	}
-	if !result.Success {
-		response.FromError(c, apperr.Internal(result.Message))
-		return
-	}
-	response.Success(c, result.Data)
+	h.callSandbox(c, c.Param("id"), "读取 Shell 输出失败", func(ctx context.Context) (*model.ToolResult, error) {
+		return h.sandbox.ReadShellOutput(ctx, req.ShellSessionID, true)
+	})
 }
 
 // Stop 停止会话
