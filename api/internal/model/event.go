@@ -79,11 +79,12 @@ const (
 )
 
 // Event 事件模型
+// 每个事件代表 Agent 执行过程中的一个原子动作或状态变化。
 type Event struct {
-	ID        string          `json:"id"`
-	Type      EventType       `json:"type"`
-	CreatedAt time.Time       `json:"created_at"`
-	Data      json.RawMessage `json:"data"`
+	ID        string          `json:"id"`         // 事件唯一 ID，UUID 格式
+	Type      EventType       `json:"type"`       // 事件类型，标识事件种类
+	CreatedAt time.Time       `json:"created_at"` // 创建时间
+	Data      json.RawMessage `json:"data"`       // 事件负载，类型由 Type 决定
 }
 
 // ToJSON 将事件转换为 JSON 字符串
@@ -105,16 +106,16 @@ func (e *MessageEvent) GetType() EventType {
 // ToJSON 将事件转换为 JSON 字符串
 func (e *MessageEvent) ToJSON() string { return toJSON(e) }
 
-// Plan 计划
+// Plan 执行计划，Agent 接收用户任务后生成的分解步骤。
 type Plan struct {
-	ID       string          `json:"id"`
-	Title    string          `json:"title"`
-	Goal     string          `json:"goal"`
-	Language string          `json:"language"`
-	Steps    []PlanStep      `json:"steps"`
-	Message  string          `json:"message"`
-	Status   ExecutionStatus `json:"status"`
-	Error    string          `json:"error,omitempty"`
+	ID       string          `json:"id"`              // 计划唯一 ID
+	Title    string          `json:"title"`           // 计划标题
+	Goal     string          `json:"goal"`            // 用户原始需求描述
+	Language string          `json:"language"`        // 计划生成语言，可能与用户输入语言不同（如中文问题生成英文计划）
+	Steps    []PlanStep      `json:"steps"`           // 分解后的执行步骤
+	Message  string          `json:"message"`         // LLM 生成计划时的原始输出
+	Status   ExecutionStatus `json:"status"`          // 计划整体状态
+	Error    string          `json:"error,omitempty"` // 计划执行失败时的错误信息
 }
 
 // Done 是否完成
@@ -132,16 +133,16 @@ func (p *Plan) GetNextStep() *PlanStep {
 	return nil
 }
 
-// PlanStep 计划步骤
+// PlanStep 计划中的单个执行步骤
 type PlanStep struct {
-	ID           string          `json:"id"`
-	Description  string          `json:"description"`
-	Status       ExecutionStatus `json:"status"`
-	Result       string          `json:"result,omitempty"`
-	Error        string          `json:"error,omitempty"`
-	Success      bool            `json:"success"`
-	Attachments  []string        `json:"attachments,omitempty"`
-	UserQuestion string          `json:"user_question,omitempty"` // 等待用户输入时的问题
+	ID           string          `json:"id"`                      // 步骤唯一 ID
+	Description  string          `json:"description"`             // 步骤描述，说明该步骤要做什么
+	Status       ExecutionStatus `json:"status"`                  // 步骤执行状态
+	Result       string          `json:"result,omitempty"`        // 步骤执行结果/输出
+	Error        string          `json:"error,omitempty"`         // 步骤执行失败时的错误信息
+	Success      bool            `json:"success"`                 // 步骤是否成功完成
+	Attachments  []string        `json:"attachments,omitempty"`   // 步骤产生附件（如生成的图片、文件路径）
+	UserQuestion string          `json:"user_question,omitempty"` // 等待用户输入时的问题，如 "请确认是否继续？"
 }
 
 // Done 步骤是否完成
@@ -175,34 +176,34 @@ func (e *DoneEvent) GetType() EventType {
 // ToJSON 将事件转换为 JSON 字符串
 func (e *DoneEvent) ToJSON() string { return toJSON(e) }
 
-// BrowserEvent 浏览器事件
+// BrowserEvent 浏览器自动化事件，记录 Agent 操作浏览器时的状态。
 type BrowserEvent struct {
-	URL        string `json:"url"`
-	Action     string `json:"action"`  // navigate/click/input/screenshot
-	Content    string `json:"content"` // 页面内容或截图
-	Screenshot string `json:"screenshot,omitempty"`
+	URL        string `json:"url"`                  // 当前页面 URL
+	Action     string `json:"action"`               // 动作类型：navigate（导航）、click（点击）、input（输入）、screenshot（截图）
+	Content    string `json:"content"`              // 页面内容或用户输入的文本
+	Screenshot string `json:"screenshot,omitempty"` // Base64 编码的截图数据
 }
 
-// SearchEvent 搜索事件
+// SearchEvent 搜索事件，记录 Agent 调用搜索工具的结果。
 type SearchEvent struct {
-	Query  string         `json:"query"`
-	Result *SearchResults `json:"result,omitempty"`
+	Query  string         `json:"query"`            // 搜索关键词
+	Result *SearchResults `json:"result,omitempty"` // 搜索结果，为空表示搜索失败
 }
 
-// ShellEvent Shell 执行事件
+// ShellEvent Shell 命令执行事件
 type ShellEvent struct {
-	Command  string `json:"command"`
-	Output   string `json:"output,omitempty"`
-	Error    string `json:"error,omitempty"`
-	ExitCode int    `json:"exit_code"`
+	Command  string `json:"command"`          // 执行的命令
+	Output   string `json:"output,omitempty"` // 标准输出
+	Error    string `json:"error,omitempty"`  // 标准错误输出
+	ExitCode int    `json:"exit_code"`        // 进程退出码，0 表示成功
 }
 
-// FileEvent 文件操作事件
+// FileEvent 文件操作事件，记录 Agent 读写文件的行为。
 type FileEvent struct {
-	Path    string `json:"path"`
-	Action  string `json:"action"` // read/write/delete
-	Content string `json:"content,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Path    string `json:"path"`              // 文件路径
+	Action  string `json:"action"`            // 操作类型：read（读取）、write（写入）、delete（删除）
+	Content string `json:"content,omitempty"` // 文件内容（读操作返回内容，写操作记录写入内容）
+	Error   string `json:"error,omitempty"`   // 操作失败时的错误信息
 }
 
 // TitleEvent 标题事件
@@ -329,12 +330,12 @@ func NewWaitEvent() *WaitEvent {
 	return &WaitEvent{}
 }
 
-// ToolCallingEvent 工具调用中事件
+// ToolCallingEvent 工具调用中事件，Agent 开始调用工具时产生。
 type ToolCallingEvent struct {
-	Name         string                 `json:"name"`
-	ToolCallID   string                 `json:"tool_call_id"`
-	FunctionName string                 `json:"function_name"`
-	Arguments    map[string]interface{} `json:"arguments"`
+	Name         string                 `json:"name"`          // 事件标识符，固定为 "tool_calling"
+	ToolCallID   string                 `json:"tool_call_id"`  // LLM 返回的 tool_use block ID，用于关联调用和结果
+	FunctionName string                 `json:"function_name"` // 工具函数名，如 "bash", "read_file", "search"
+	Arguments    map[string]interface{} `json:"arguments"`     // 工具参数，JSON 对象格式
 }
 
 // GetType 返回事件类型
@@ -345,13 +346,13 @@ func (e *ToolCallingEvent) GetType() EventType {
 // ToJSON 将事件转换为 JSON 字符串
 func (e *ToolCallingEvent) ToJSON() string { return toJSON(e) }
 
-// ToolCalledEvent 工具调用完成事件
+// ToolCalledEvent 工具调用完成事件，工具执行完成后产生。
 type ToolCalledEvent struct {
-	Name         string                 `json:"name"`
-	ToolCallID   string                 `json:"tool_call_id"`
-	FunctionName string                 `json:"function_name"`
-	Arguments    map[string]interface{} `json:"arguments"`
-	Result       *ToolResult            `json:"result"`
+	Name         string                 `json:"name"`          // 事件标识符，固定为 "tool_called"
+	ToolCallID   string                 `json:"tool_call_id"`  // 与 ToolCallingEvent 的 ToolCallID 对应
+	FunctionName string                 `json:"function_name"` // 工具函数名
+	Arguments    map[string]interface{} `json:"arguments"`     // 调用时的参数（可能与 ToolCallingEvent 不同，如敏感信息被脱敏）
+	Result       *ToolResult            `json:"result"`        // 工具执行结果
 }
 
 // GetType 返回事件类型

@@ -2,12 +2,12 @@ package model
 
 import "github.com/bytedance/sonic"
 
-// ToolResult 工具执行结果
-// Generic 类型用于承载不同工具的返回数据
+// ToolResult 工具执行结果的统一封装。
+// 用于解耦工具实现与事件系统，所有工具返回都统一为此格式。
 type ToolResult struct {
-	Success bool        `json:"success"` // 是否成功调用
-	Message string      `json:"message"` // 额外的信息提示
-	Data    interface{} `json:"data"`    // 工具的执行结果/数据
+	Success bool        `json:"success"` // 工具是否执行成功
+	Message string      `json:"message"` // 状态描述或错误信息
+	Data    interface{} `json:"data"`    // 工具返回的原始数据，格式由具体工具决定
 }
 
 // NewToolResult 创建成功结果

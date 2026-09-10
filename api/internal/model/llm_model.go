@@ -7,30 +7,30 @@ import (
 	"github.com/bytedance/sonic"
 )
 
-// LLMModel 一个 LLM 模型条目
-// 支持多模型并存，agent 启动读取 is_default=true 的那一个
+// LLMModel LLM 模型配置条目
+// 支持多模型并存，Agent 启动时读取 is_default=true 的模型
 type LLMModel struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`     // 用户自定义显示名 e.g. "我的 Claude"
-	Provider    string    `json:"provider"` // openai/anthropic/google/deepseek/custom
-	BaseURL     string    `json:"base_url"`
-	APIKey      string    `json:"-"`
-	ModelName   string    `json:"model_name"` // 真实模型名 e.g. claude-3-5-sonnet-20241022
-	Temperature float64   `json:"temperature"`
-	MaxTokens   int       `json:"max_tokens"`
-	Tags        []string  `json:"tags"` // 能力标签: vision/tools/long_ctx/...
-	IsDefault   bool      `json:"is_default"`
-	IsEnabled   bool      `json:"is_enabled"`
-	SortOrder   int       `json:"sort_order"`
+	ID          string    `json:"id"`          // 唯一标识
+	Name        string    `json:"name"`        // 用户自定义显示名，如 "我的 Claude"
+	Provider    string    `json:"provider"`    // 模型提供商：openai/anthropic/google/deepseek/custom
+	BaseURL     string    `json:"base_url"`    // API 端点地址
+	APIKey      string    `json:"-"`           // API 密钥，json:"-" 确保不会意外序列化到响应中
+	ModelName   string    `json:"model_name"`  // 实际模型名，如 claude-3-5-sonnet-20241022
+	Temperature float64   `json:"temperature"` // 生成随机性，0-2 之间，越高越随机
+	MaxTokens   int       `json:"max_tokens"`  // 单次生成的最大 token 数
+	Tags        []string  `json:"tags"`        // 能力标签：vision/tools/long_ctx，用于模型选型
+	IsDefault   bool      `json:"is_default"`  // 是否为默认模型，多个时只有一个为 true
+	IsEnabled   bool      `json:"is_enabled"`  // 是否启用，未启用不会被调度使用
+	SortOrder   int       `json:"sort_order"`  // 模型排序权重，数字越小越优先
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 
-	// ===== 阶段 0 新增：能力画像 / 请求策略 / 成本策略 =====
+	// ===== 能力画像 / 请求策略 / 成本策略 =====
 	// 用 JSON 字段透传到 DB，repository 层负责序列化
-	Capabilities  ModelCapabilities `json:"capabilities"`
-	RequestPolicy RequestPolicy     `json:"request_policy"`
-	CostPolicy    CostPolicy        `json:"cost_policy"`
-	RuntimeHealth RuntimeHealth     `json:"runtime_health"`
+	Capabilities  ModelCapabilities `json:"capabilities"`   // 模型能力画像，用于智能路由
+	RequestPolicy RequestPolicy     `json:"request_policy"` // 请求侧参数策略
+	CostPolicy    CostPolicy        `json:"cost_policy"`    // 调用成本统计
+	RuntimeHealth RuntimeHealth     `json:"runtime_health"` // 运行时健康状态
 }
 
 // LLMModelRequest is the HTTP input shape. APIKey is accepted here and is
