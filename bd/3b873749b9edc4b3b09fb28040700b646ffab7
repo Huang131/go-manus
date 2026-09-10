@@ -1,0 +1,61 @@
+api/pkg/logger/logger.go
+  s_31f27eced9dde7::t_f200e7aa2cf917 59,68-86,151-153,155,236-240
+  s_31f27eced9dde7::t_62d3b4741f9117 250
+api/tests/llm_model_repository_integration_test.go
+  s_31f27eced9dde7::t_cf85873abcf24f 38
+  s_31f27eced9dde7::t_ee31c37738ec47 1-37,39-54,56-313,315-348,350-403
+  s_31f27eced9dde7::t_efdb067456b018 314
+  s_31f27eced9dde7::t_6bc4898b679139 349
+  s_31f27eced9dde7::t_58c4fdf184ee6d 55
+api/internal/handler/vnc_handler_test.go
+  s_31f27eced9dde7::t_301d28dd63ffac 34-35
+api/internal/service/llm_model_service_test.go
+  s_31f27eced9dde7::t_e015b2000f9564 373-456
+api/internal/handler/session_handler_test.go
+  h_ec777d6650665b 10
+api/internal/service/session_service_test.go
+  s_31f27eced9dde7::t_ded954fde16b1d 446-447
+  s_31f27eced9dde7::t_8120b629ee3feb 445
+api/pkg/middleware/middleware_test.go
+  s_31f27eced9dde7::t_9e5c4742b406e0 72-73,94,102-119
+  s_31f27eced9dde7::t_06dc1f4777c3a0 129
+  s_31f27eced9dde7::t_19140c073226f0 1-71,74-93,95-101,120-128,130-151,153-175
+  s_31f27eced9dde7::t_625e3f37c9dc90 152
+api/internal/service/file_service_test.go
+  s_31f27eced9dde7::t_a11ae9b01f52c4 5-7,37-73,78-127,142-312
+  s_31f27eced9dde7::t_1d92efc95e0ef0 74-77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "bd3b873749b9edc4b3b09fb28040700b646ffab7",
+  "prompts": {},
+  "humans": {
+    "h_ec777d6650665b": {
+      "author": "Huang131 <1315970725@qq.com>"
+    }
+  },
+  "sessions": {
+    "s_31f27eced9dde7": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa126775f8bfc5c33242f61",
+        "model": "minimax-m2.7"
+      },
+      "human_author": "Huang131 <1315970725@qq.com>",
+      "custom_attributes": {
+        "runtime_client": "trae-tob-git-ai",
+        "source_scene": "unknown",
+        "edit_kind": "file_edit",
+        "tool_id": "Write",
+        "operation_id": "6aa22bf55f8bfc5c332434f2",
+        "session_id": "6aa126775f8bfc5c33242f61",
+        "tool_use_id": "6aa22bf55f8bfc5c332434f2",
+        "external_session_id": "6aa126775f8bfc5c33242f61",
+        "dedupe_key": "6aa126775f8bfc5c33242f61:6aa22bf55f8bfc5c332434f2:afterEdit:9cbc7b6b",
+        "client_type": "ide",
+        "tool_type": "agent"
+      }
+    }
+  }
+}
