@@ -1,0 +1,37 @@
+api/pkg/logger/logger_test.go
+  s_31f27eced9dde7::t_9cab40f450f20a 228-230,235,237-238
+  s_31f27eced9dde7::t_beb1b32d00a6fa 5,13-14,25-37,39-44,48,51-52,54-55,57-58,64-67,69-70,90,112-113,115,121-125,131-136,153-155,160,168,182,184,192,202,204,207,214-227,231-234,236,239-327
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "824ea4a0d4922df188900035347c8a0705cc0b89",
+  "prompts": {},
+  "humans": {
+    "h_ec777d6650665b": {
+      "author": "Huang131 <1315970725@qq.com>"
+    }
+  },
+  "sessions": {
+    "s_31f27eced9dde7": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa126775f8bfc5c33242f61",
+        "model": "kimi-k3__dev"
+      },
+      "human_author": "Huang131 <1315970725@qq.com>",
+      "custom_attributes": {
+        "runtime_client": "trae-tob-git-ai",
+        "display_model_name": "Kimi-K3",
+        "external_session_id": "6aa126775f8bfc5c33242f61",
+        "session_id": "6aa126775f8bfc5c33242f61",
+        "tool_name": "RunCommand",
+        "client_type": "ide",
+        "operation_id": "6aa292555f8bfc5c332437df",
+        "edit_kind": "bash",
+        "tool_use_id": "6aa292555f8bfc5c332437df",
+        "source_scene": "agent"
+      }
+    }
+  }
+}
