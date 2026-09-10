@@ -98,7 +98,7 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *llmc
 
 	// 更新最新消息
 	if err := s.sessionRep.UpdateLatestMessage(ctx, sessionID, message.ContentText); err != nil {
-		logger.Warn("更新最新消息失败", logger.String("session_id", sessionID), logger.Err(err))
+		logger.WarnContext(ctx, "更新最新消息失败", logger.String("session_id", sessionID), logger.Err(err))
 	}
 
 	// 创建独立的 task context，不受 HTTP 请求取消影响，但保留请求中的 trace 等 values。
@@ -118,7 +118,7 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *llmc
 	// 添加用户消息事件到数据库
 	userEventData, err := sonic.Marshal(msgEvent)
 	if err != nil {
-		logger.Error("序列化用户消息事件失败",
+		logger.ErrorContext(ctx, "序列化用户消息事件失败",
 			logger.String("session_id", sessionID),
 			logger.Err(err))
 		return "", fmt.Errorf("序列化用户消息事件失败: %w", err)
@@ -129,7 +129,7 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *llmc
 		Data: userEventData,
 	}
 	if err := s.sessionRep.AppendEvent(ctx, sessionID, userEvent); err != nil {
-		logger.Warn("添加用户消息事件失败", logger.String("session_id", sessionID), logger.Err(err))
+		logger.WarnContext(ctx, "添加用户消息事件失败", logger.String("session_id", sessionID), logger.Err(err))
 	}
 
 	// 获取或创建 RedisStreamTask
@@ -141,16 +141,16 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *llmc
 	// 启动任务执行（后台 goroutine）
 	if err := task.Invoke(taskCtx); err != nil {
 		// 如果任务已经在运行，不是错误，只记录日志
-		logger.Debug("任务已启动或已完成", logger.String("task_id", task.ID()), logger.Err(err))
+		logger.DebugContext(ctx, "任务已启动或已完成", logger.String("task_id", task.ID()), logger.Err(err))
 	}
 
 	// 将消息放入 input_stream
 	if _, err := task.PutInput(taskCtx, msgEvent); err != nil {
-		logger.Error("放入消息失败", logger.String("session_id", sessionID), logger.Err(err))
+		logger.ErrorContext(ctx, "放入消息失败", logger.String("session_id", sessionID), logger.Err(err))
 		return task.ID(), fmt.Errorf("放入消息失败: %w", err)
 	}
 
-	logger.Info("Chat 处理消息",
+	logger.InfoContext(ctx, "Chat 处理消息",
 		logger.String("session_id", sessionID),
 		logger.String("task_id", task.ID()))
 
@@ -173,7 +173,7 @@ func (s *AgentService) resolveMessageAttachments(ctx context.Context, sessionID 
 
 		file, err := s.fileRep.GetByID(ctx, fileID)
 		if err != nil {
-			logger.Warn("获取聊天附件失败",
+			logger.WarnContext(ctx, "获取聊天附件失败",
 				logger.String("session_id", sessionID),
 				logger.String("file_id", fileID),
 				logger.Err(err))
@@ -308,17 +308,17 @@ func (s *AgentService) getOrCreateTask(ctx context.Context, session *model.Sessi
 func (s *AgentService) GetTaskEvents(ctx context.Context, taskID string, startID string) ([]*model.Event, error) {
 	task := defaultTaskRegistry.Get(taskID)
 	if task == nil {
-		logger.Warn("GetTaskEvents: task not found", logger.String("task_id", taskID))
+		logger.WarnContext(ctx, "GetTaskEvents: task not found", logger.String("task_id", taskID))
 		return nil, fmt.Errorf("task not found: %s", taskID)
 	}
 
-	logger.Debug("GetTaskEvents 获取事件",
+	logger.DebugContext(ctx, "GetTaskEvents 获取事件",
 		logger.String("task_id", taskID),
 		logger.String("start_id", startID))
 
 	events, err := task.GetOutput(ctx, startID)
 	if err != nil {
-		logger.Error("GetTaskEvents 获取事件失败",
+		logger.ErrorContext(ctx, "GetTaskEvents 获取事件失败",
 			logger.String("task_id", taskID),
 			logger.Err(err))
 		return nil, fmt.Errorf("get task events failed: %w", err)
@@ -333,7 +333,7 @@ func (s *AgentService) GetTaskEvents(ctx context.Context, taskID string, startID
 		result = append(result, event)
 	}
 
-	logger.Debug("GetTaskEvents 返回事件",
+	logger.DebugContext(ctx, "GetTaskEvents 返回事件",
 		logger.String("task_id", taskID),
 		logger.Int("event_count", len(result)))
 

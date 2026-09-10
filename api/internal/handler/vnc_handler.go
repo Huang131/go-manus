@@ -47,8 +47,10 @@ func VNCProxy(svc service.SessionService) gin.HandlerFunc {
 			logger.Warn("VNC 连接 sandbox 失败",
 				logger.String("vnc_url", vncURL),
 				logger.Err(err))
-			_ = clientConn.WriteMessage(websocket.CloseMessage,
-				websocket.FormatCloseMessage(websocket.CloseInternalServerErr, err.Error()))
+			if writeErr := clientConn.WriteMessage(websocket.CloseMessage,
+				websocket.FormatCloseMessage(websocket.CloseInternalServerErr, err.Error())); writeErr != nil {
+				logger.DebugContext(c.Request.Context(), "VNC close frame 发送失败", logger.Err(writeErr))
+			}
 			return
 		}
 		defer serverConn.Close()

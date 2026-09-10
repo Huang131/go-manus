@@ -325,6 +325,65 @@ func TestMessageQueue_SubscribeWithCancel(t *testing.T) {
 	}
 }
 
+func TestDeliverMessage_WaitsWhenBufferIsFull(t *testing.T) {
+	msgChan := make(chan *Message, 1)
+	first := &Message{ID: "first"}
+	second := &Message{ID: "second"}
+	msgChan <- first
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	delivered := make(chan bool, 1)
+	go func() {
+		delivered <- deliverMessage(ctx, msgChan, second)
+	}()
+
+	select {
+	case got := <-delivered:
+		t.Fatalf("deliverMessage returned before buffer was available: %v", got)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	if got := <-msgChan; got != first {
+		t.Fatalf("first buffered message = %v, want %v", got, first)
+	}
+
+	select {
+	case got := <-delivered:
+		if !got {
+			t.Fatal("deliverMessage returned false after buffer became available")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("deliverMessage did not deliver after buffer became available")
+	}
+
+	if got := <-msgChan; got != second {
+		t.Fatalf("delivered message = %v, want %v", got, second)
+	}
+}
+
+func TestDeliverMessage_StopsWhenContextCanceled(t *testing.T) {
+	msgChan := make(chan *Message)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	delivered := make(chan bool, 1)
+	go func() {
+		delivered <- deliverMessage(ctx, msgChan, &Message{ID: "blocked"})
+	}()
+
+	cancel()
+
+	select {
+	case got := <-delivered:
+		if got {
+			t.Fatal("deliverMessage returned true after context cancellation")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("deliverMessage did not stop after context cancellation")
+	}
+}
+
 // TestGetBlocking_Basic 测试 GetBlocking 基本功能
 func TestGetBlocking_Basic(t *testing.T) {
 	mq := &mockMQ{}

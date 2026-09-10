@@ -65,13 +65,17 @@ var (
 	muLevel sync.Mutex
 )
 
-// neverCloseSyncer 包装一个 WriteSyncer，将其 Close() 方法变成无操作。
+// neverCloseSyncer 包装一个 WriteSyncer，将其 Close() 和 Sync() 方法变成无操作。
 //
 // 设计意图：保护进程级共享资源（如 os.Stdout、os.Stderr），避免被
-// MultiWriteSyncer.Close() 递归关闭。MultiWriteSyncer 在 Close 时会遍历
-// 所有子 syncer 调用 Close()，而 lumberjack 等组件的 MultiWriteSyncer
-// 里通常也包含 stdout 包装——如果不屏蔽，文件模式切回 stdout 模式时
-// 会把 os.Stdout 的 fd 关闭，导致进程 stdout 永久失效。
+// MultiWriteSyncer.Close() 递归关闭。同时抑制 Sync() 错误，防止 zap
+// 在 Sync() 失败时尝试记录内部错误日志导致无限递归。
+//
+// 为什么也要覆盖 Sync()？
+// os.Stdout.Sync() 在 fd 已关闭时返回 EBADF。zap 的 Sync() 失败后会调用
+// internalDriverError 记录到自己的内部 logger，内部 logger 又尝试写 stdout，
+// 再触发 Sync() 失败 → 无限递归。用 neverCloseSyncer 包装后，Sync() 的
+// 错误被吞掉（stdout 本来就无缓冲可刷，fd 关闭后无意义），从而切断递归链。
 //
 // 这种模式也适用于其他场景：
 //   - 数据库连接池（连接由连接池管理， Close() 只归还不关闭 fd）
@@ -83,6 +87,12 @@ type neverCloseSyncer struct {
 }
 
 func (n neverCloseSyncer) Close() error { return nil }
+
+// Sync 总是返回 nil，抑制底层 syncer 的同步错误。
+// 理由：os.Stdout 是无缓冲的终端 fd，关闭后无同步意义，且 Sync 错误会触发
+// zap 内部错误日志的无限递归（见 above）。对于日志优雅关闭场景，
+// os.Stdout 的最后几条日志丢失可接受。
+func (n neverCloseSyncer) Sync() error { return nil }
 
 // Config 日志配置
 type Config struct {
@@ -150,13 +160,16 @@ func InitWithConfig(cfg Config) error {
 		}
 		// 同时输出到文件和控制台。
 		// 用 neverCloseSyncer 包装 os.Stdout，确保 MultiWriteSyncer.Close()
-		// 递归关闭子 syncer 时不会关闭 stdout fd。
+		// 递归关闭子 syncer 时不会关闭 stdout fd，且 Sync() 错误被抑制。
 		writeSyncer = zapcore.NewMultiWriteSyncer(
 			neverCloseSyncer{zapcore.AddSync(os.Stdout)},
 			zapcore.AddSync(lumberjackLogger),
 		)
 	} else {
-		writeSyncer = zapcore.AddSync(os.Stdout)
+		// 纯 stdout 模式：也必须用 neverCloseSyncer 包装 os.Stdout。
+		// 否则 shutdownCurrent 中的 Close() 会直接关闭 os.Stdout 的 fd，
+		// 导致后续所有 stdout 写操作失败（fd 已关闭，EBADF）。
+		writeSyncer = neverCloseSyncer{zapcore.AddSync(os.Stdout)}
 	}
 
 	// 创建 Core
@@ -238,6 +251,7 @@ func Sync() error {
 // 关闭后无法恢复。这通过 InitWithConfig 中使用 neverCloseSyncer 包装 stdout 来保证。
 // 对于 file 模式，writeSyncer 通常是 MultiWriteSyncer，其 Close() 会同时关闭子 syncer，
 // 但因为 stdout 已被 neverCloseSyncer 包装，Close() 调用变成无操作，不会伤及 stdout fd。
+// 同时 neverCloseSyncer.Sync() 返回 nil，抑制同步错误，防止 zap 内部日志递归。
 func shutdownCurrent() {
 	if oldLog := log.Swap(nil); oldLog != nil {
 		_ = oldLog.Sync()

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -124,12 +125,12 @@ func (h *SessionHandler) Stream(c *gin.Context) {
 		case <-ticker.C:
 			sessions, err := h.service.GetAllSessions(c.Request.Context())
 			if err != nil {
-				logger.Debug("获取会话列表失败，跳过本轮 SSE 推送", logger.Err(err))
+				logger.DebugContext(c.Request.Context(), "获取会话列表失败，跳过本轮 SSE 推送", logger.Err(err))
 				continue
 			}
 			data, err := sonic.MarshalString(sessions)
 			if err != nil {
-				logger.Error("序列化会话 SSE 数据失败", logger.Err(err))
+				logger.ErrorContext(c.Request.Context(), "序列化会话 SSE 数据失败", logger.Err(err))
 				continue
 			}
 			c.SSEvent(sseEventSessions, data)
@@ -173,6 +174,12 @@ func parseChatRequest(c *gin.Context) (*chatRequest, error) {
 	return &req, nil
 }
 
+// newSSEContext keeps request-scoped values such as request_id while
+// decoupling the event stream from the HTTP request cancellation.
+func newSSEContext(requestCtx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithCancel(context.WithoutCancel(requestCtx))
+}
+
 // Chat 聊天 (SSE 流式)
 //
 // 区分两种调用语义（对齐原 mooc-manus Python 版本 agent_service.chat 的 if message 分支）：
@@ -191,9 +198,9 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 		return
 	}
 
-	// 创建独立的 context 用于事件获取，不受 HTTP 请求影响
-	// 这样即使 HTTP 客户端断开，只要 Agent 还在运行，就会继续推送事件
-	eventCtx, eventCancel := context.WithCancel(context.Background())
+	// 创建独立的 context 用于事件获取，保留 request_id 等 context value，
+	// 但不受 HTTP 请求取消影响。
+	eventCtx, eventCancel := newSSEContext(c.Request.Context())
 	defer eventCancel()
 	// SSE 流最长持续 30 分钟
 	streamTimeout := time.AfterFunc(sessionStreamTimeout, eventCancel)
@@ -242,27 +249,25 @@ func (h *SessionHandler) sendMessage(c *gin.Context, sessionID string, req *chat
 		return "", err
 	}
 
-	// agent.Chat 成功后才切换为 SSE 响应：失败路径仍可正常返回 JSON 错误
-	setSSEHeaders(c)
-
 	userPayload, err := sonic.Marshal(&model.MessageEvent{
 		Type:    model.EventTypeMessage,
 		Role:    string(msg.Role),
 		Message: msg.ContentText,
 	})
 	if err != nil {
-		logger.Error("序列化用户消息 SSE 数据失败", logger.Err(err))
-		return taskID, nil
+		return "", fmt.Errorf("序列化用户消息 SSE 数据失败: %w", err)
 	}
-	c.SSEvent(sseEventMessage, string(userPayload))
-	c.Writer.Flush()
 
 	// 再推送 task_id 事件（单独业务类型，前端可识别）
 	taskIDData, err := sonic.Marshal(map[string]interface{}{"task_id": taskID})
 	if err != nil {
-		logger.Error("序列化 task_id SSE 数据失败", logger.Err(err))
-		return taskID, nil
+		return "", fmt.Errorf("序列化 task_id SSE 数据失败: %w", err)
 	}
+
+	// 所有可能失败的序列化操作完成后才切换为 SSE 响应。
+	setSSEHeaders(c)
+	c.SSEvent(sseEventMessage, string(userPayload))
+	c.Writer.Flush()
 	c.SSEvent(sseEventTaskID, string(taskIDData))
 	c.Writer.Flush()
 
@@ -310,7 +315,7 @@ func (h *SessionHandler) streamTaskEvents(c *gin.Context, eventCtx context.Conte
 			startID = event.ID
 
 			// 对齐 Python 版本：event 字段为业务类型，data 字段平铺业务 payload。
-			payload := mergeEventMetadata(event)
+			payload := mergeEventMetadata(c.Request.Context(), event)
 			c.SSEvent(string(event.Type), string(payload))
 			c.Writer.Flush()
 
@@ -434,7 +439,7 @@ func (h *SessionHandler) Stop(c *gin.Context) {
 // task_runner 创建事件时已把元数据平铺进 payload 并填充 Event.ID，
 // 此处对这类事件零序列化直传；仅对旧格式/其他生产方（payload 无元数据）
 // 的事件退化为解析重组。Data 解析失败时直接返回原始 Data，保证前端不卡死。
-func mergeEventMetadata(event *model.Event) []byte {
+func mergeEventMetadata(ctx context.Context, event *model.Event) []byte {
 	// 新格式：元数据已在 payload 内（以 Event.ID 是否回填为判据）
 	if event.ID != "" && len(event.Data) > 0 {
 		return event.Data
@@ -452,7 +457,7 @@ func mergeEventMetadata(event *model.Event) []byte {
 			"created_at": createdAt.Unix(),
 		})
 		if err != nil {
-			logger.Error("序列化空事件元数据失败", logger.Err(err))
+			logger.ErrorContext(ctx, "序列化空事件元数据失败", logger.Err(err))
 			return []byte(`{}`)
 		}
 		return out
@@ -467,7 +472,7 @@ func mergeEventMetadata(event *model.Event) []byte {
 	payload["created_at"] = createdAt.Unix()
 	out, err := sonic.Marshal(payload)
 	if err != nil {
-		logger.Error("序列化事件元数据失败", logger.Err(err))
+		logger.ErrorContext(ctx, "序列化事件元数据失败", logger.Err(err))
 		return event.Data
 	}
 	return out

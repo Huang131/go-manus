@@ -431,20 +431,23 @@ func (r *PostgresSessionRepository) WithTx(ctx context.Context, fn func(repo Ses
 
 	// 确保事务回滚
 	var committed bool
+	var rolledBack bool
 	defer func() {
-		if !committed {
+		if !committed && !rolledBack {
 			if p := recover(); p != nil {
-				tx.Rollback(ctx)
+				logRollbackFailure(ctx, rollbackTx(ctx, tx))
 				panic(p) // 重新抛出 panic
 			}
-			tx.Rollback(ctx) // 失败时回滚
+			logRollbackFailure(ctx, rollbackTx(ctx, tx))
 		}
 	}()
 
 	// 执行操作
 	err = fn(&PostgresSessionRepository{db: r.db, tx: tx})
 	if err != nil {
-		return err // 错误时 defer 会处理回滚
+		rollbackErr := rollbackTx(ctx, tx)
+		rolledBack = true
+		return joinRollbackError(err, rollbackErr)
 	}
 
 	// 提交事务

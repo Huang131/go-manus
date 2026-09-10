@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 
 	"github.com/bytedance/sonic"
 
@@ -231,13 +232,15 @@ func (r *PostgresAppConfigRepository) WithTx(ctx context.Context, fn func(repo A
 	}
 	defer func() {
 		if p := recover(); p != nil {
-			tx.Rollback(ctx)
+			logRollbackFailure(ctx, rollbackTx(ctx, tx))
 			panic(p)
 		}
 	}()
 	if err := fn(&PostgresAppConfigRepository{db: r.db, tx: tx}); err != nil {
-		tx.Rollback(ctx)
-		return err
+		return joinRollbackError(err, rollbackTx(ctx, tx))
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+	return nil
 }

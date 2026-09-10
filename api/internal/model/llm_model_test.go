@@ -106,6 +106,29 @@ func TestLLMModelAPIKey_InputOnly(t *testing.T) {
 	}
 }
 
+func TestLLMModelDTOs_SeparateAPIKeyInputAndOutput(t *testing.T) {
+	var req LLMModelRequest
+	if err := sonic.Unmarshal([]byte(`{"name":"demo","api_key":"secret","provider":"openai","base_url":"https://example.com","model_name":"gpt"}`), &req); err != nil {
+		t.Fatalf("unmarshal request: %v", err)
+	}
+	if req.APIKey != "secret" {
+		t.Fatalf("request APIKey = %q, want secret", req.APIKey)
+	}
+
+	internal := req.ToModel()
+	if internal.APIKey != "secret" || internal.Name != "demo" {
+		t.Fatalf("request conversion lost fields: %+v", internal)
+	}
+
+	out, err := sonic.Marshal(NewLLMModelResponse(internal))
+	if err != nil {
+		t.Fatalf("marshal response: %v", err)
+	}
+	if strings.Contains(string(out), "secret") || strings.Contains(string(out), "api_key") {
+		t.Fatalf("API key leaked in response DTO: %s", out)
+	}
+}
+
 func TestLLMModelCapabilitiesApplyDefaultsWithoutOverwritingExplicitFalse(t *testing.T) {
 	var m LLMModel
 	input := []byte(`{"capabilities":{"supports_text":false,"supports_vision":true,"max_context_tokens":100000}}`)

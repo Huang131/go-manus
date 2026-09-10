@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -33,7 +34,7 @@ func TestSetSSEHeaders(t *testing.T) {
 
 func TestMergeEventMetadata(t *testing.T) {
 	createdAt := time.Unix(123, 0).UTC()
-	got := mergeEventMetadata(&model.Event{
+	got := mergeEventMetadata(context.Background(), &model.Event{
 		CreatedAt: createdAt,
 		Data:      json.RawMessage(`{"message":"hello"}`),
 	})

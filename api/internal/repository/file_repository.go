@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -205,15 +206,17 @@ func (r *PostgresFileRepository) WithTx(ctx context.Context, fn func(repo FileRe
 	}
 	defer func() {
 		if p := recover(); p != nil {
-			tx.Rollback(ctx)
+			logRollbackFailure(ctx, rollbackTx(ctx, tx))
 			panic(p)
 		}
 	}()
 	if err := fn(&PostgresFileRepository{db: r.db, tx: tx}); err != nil {
-		tx.Rollback(ctx)
-		return err
+		return joinRollbackError(err, rollbackTx(ctx, tx))
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+	return nil
 }
 
 // GetExpiredFiles 获取过期文件列表

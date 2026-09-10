@@ -14,7 +14,10 @@ func TestRuntimeHealthJSONRoundTrip(t *testing.T) {
 		AverageLatencyMS: 876,
 	}
 
-	b := runtimeHealthToJSON(src)
+	b, err := runtimeHealthToJSON(src)
+	if err != nil {
+		t.Fatalf("marshal runtime health: %v", err)
+	}
 	if len(b) == 0 {
 		t.Fatal("runtime health json should not be empty")
 	}

@@ -5,6 +5,7 @@ import (
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/service"
+	"github.com/Huang131/go-manus/api/pkg/logger"
 	"github.com/Huang131/go-manus/api/pkg/response"
 	"github.com/gin-gonic/gin"
 )
@@ -48,7 +49,11 @@ func (h *FileHandler) Upload(c *gin.Context) {
 		response.FromError(c, apperr.Internal(err.Error()))
 		return
 	}
-	defer src.Close()
+	defer func() {
+		if err := src.Close(); err != nil {
+			logger.WarnContext(c.Request.Context(), "关闭上传文件失败", logger.Err(err))
+		}
+	}()
 
 	result, err := h.service.UploadFile(
 		c.Request.Context(),
@@ -84,7 +89,17 @@ func (h *FileHandler) Download(c *gin.Context) {
 		response.FromError(c, err)
 		return
 	}
-	defer reader.Close()
+	if reader == nil {
+		response.FromError(c, service.ErrStorageUnavailable)
+		return
+	}
+	defer func() {
+		if err := reader.Close(); err != nil {
+			logger.WarnContext(c.Request.Context(), "关闭下载文件失败",
+				logger.String("file_id", id),
+				logger.Err(err))
+		}
+	}()
 
 	c.Header("Content-Disposition", "attachment; filename="+file.Filename)
 	c.DataFromReader(http.StatusOK, file.Size, file.MimeType, reader, nil)

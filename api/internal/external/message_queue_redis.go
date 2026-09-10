@@ -320,7 +320,7 @@ func (q *RedisStreamMessageQueue) Subscribe(ctx context.Context, streamName stri
 			select {
 			case <-ctx.Done():
 				// context 被取消，正常退出
-				logger.Debug("订阅已取消", logger.String("stream", streamName))
+				logger.DebugContext(ctx, "订阅已取消", logger.String("stream", streamName))
 				return
 			case <-ticker.C:
 				// 获取新消息（非阻塞）
@@ -331,7 +331,7 @@ func (q *RedisStreamMessageQueue) Subscribe(ctx context.Context, streamName stri
 					case <-ctx.Done():
 						return
 					default:
-						logger.Warn("订阅获取消息失败",
+						logger.WarnContext(ctx, "订阅获取消息失败",
 							logger.String("stream", streamName),
 							logger.Err(err))
 						continue
@@ -349,20 +349,27 @@ func (q *RedisStreamMessageQueue) Subscribe(ctx context.Context, streamName stri
 					Stream: streamName,
 				}
 
-				select {
-				case msgChan <- msg:
+				if deliverMessage(ctx, msgChan, msg) {
 					lastID = id // 更新起始位置
-				default:
-					// channel 满了，跳过这条消息
-					logger.Warn("消息 channel 已满，跳过消息",
-						logger.String("stream", streamName),
-						logger.String("message_id", id))
+				} else {
+					return
 				}
 			}
 		}
 	}()
 
 	return msgChan, cleanup
+}
+
+// deliverMessage applies backpressure while preserving cancellation semantics.
+// The stream cursor must advance only after the consumer accepts the message.
+func deliverMessage(ctx context.Context, msgChan chan<- *Message, msg *Message) bool {
+	select {
+	case msgChan <- msg:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // acquireLock 获取分布式锁

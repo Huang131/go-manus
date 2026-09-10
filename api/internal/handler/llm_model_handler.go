@@ -28,7 +28,11 @@ func (h *LLMModelHandler) List(c *gin.Context) {
 	if items == nil {
 		items = []*model.LLMModel{}
 	}
-	response.Success(c, &model.LLMModelListResponse{Models: items})
+	models := make([]*model.LLMModelResponse, 0, len(items))
+	for _, item := range items {
+		models = append(models, model.NewLLMModelResponse(item))
+	}
+	response.Success(c, &model.LLMModelListResponse{Models: models})
 }
 
 // Get 单个
@@ -39,7 +43,7 @@ func (h *LLMModelHandler) Get(c *gin.Context) {
 		response.FromError(c, err)
 		return
 	}
-	response.Success(c, m)
+	response.Success(c, model.NewLLMModelResponse(m))
 }
 
 // GetDefault 取当前默认（agent 启动用）
@@ -49,39 +53,39 @@ func (h *LLMModelHandler) GetDefault(c *gin.Context) {
 		response.FromError(c, err)
 		return
 	}
-	response.Success(c, m)
+	response.Success(c, model.NewLLMModelResponse(m))
 }
 
 // Create 新增
 func (h *LLMModelHandler) Create(c *gin.Context) {
-	var req model.LLMModel
+	var req model.LLMModelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.FromError(c, err)
 		return
 	}
-	m, err := h.svc.Create(c.Request.Context(), &req)
+	m, err := h.svc.Create(c.Request.Context(), req.ToModel())
 	if err != nil {
 		response.FromError(c, err)
 		return
 	}
-	response.Success(c, m)
+	response.Success(c, model.NewLLMModelResponse(m))
 }
 
 // Update 更新
 func (h *LLMModelHandler) Update(c *gin.Context) {
 	id := c.Param("id")
-	var req model.LLMModel
+	var req model.LLMModelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.FromError(c, err)
 		return
 	}
 	req.ID = id
-	m, err := h.svc.Update(c.Request.Context(), &req)
+	m, err := h.svc.Update(c.Request.Context(), req.ToModel())
 	if err != nil {
 		response.FromError(c, err)
 		return
 	}
-	response.Success(c, m)
+	response.Success(c, model.NewLLMModelResponse(m))
 }
 
 // Delete 删除

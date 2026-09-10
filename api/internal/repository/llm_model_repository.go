@@ -4,12 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/bytedance/sonic"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -118,12 +117,8 @@ func modelJSON(field string, value any) ([]byte, error) {
 }
 
 // runtimeHealthToJSON 保留仓储内部测试和已有调用的便捷封装。
-func runtimeHealthToJSON(h model.RuntimeHealth) []byte {
-	b, err := modelJSON("runtime health", h)
-	if err != nil {
-		return []byte("{}")
-	}
-	return b
+func runtimeHealthToJSON(h model.RuntimeHealth) ([]byte, error) {
+	return modelJSON("runtime health", h)
 }
 
 func modelJSONFields(m *model.LLMModel) ([][]byte, error) {
@@ -311,16 +306,15 @@ func (r *PostgresLLMModelRepository) WithTx(ctx context.Context, fn func(repo LL
 	}
 	defer func() {
 		if p := recover(); p != nil {
-			_ = tx.Rollback(ctx)
+			logRollbackFailure(ctx, rollbackTx(ctx, tx))
 			panic(p)
 		}
 	}()
 	if err := fn(&PostgresLLMModelRepository{db: r.db, tx: tx}); err != nil {
-		_ = tx.Rollback(ctx)
-		return err
+		return joinRollbackError(err, rollbackTx(ctx, tx))
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+	return nil
 }
-
-// 防止 pgxpool 未使用
-var _ = pgxpool.Pool{}

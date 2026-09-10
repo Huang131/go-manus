@@ -33,6 +33,96 @@ type LLMModel struct {
 	RuntimeHealth RuntimeHealth     `json:"runtime_health"`
 }
 
+// LLMModelRequest is the HTTP input shape. APIKey is accepted here and is
+// converted into the internal model before calling the service layer.
+type LLMModelRequest struct {
+	ID            string            `json:"id,omitempty"`
+	Name          string            `json:"name"`
+	Provider      string            `json:"provider"`
+	BaseURL       string            `json:"base_url"`
+	APIKey        string            `json:"api_key"`
+	ModelName     string            `json:"model_name"`
+	Temperature   float64           `json:"temperature"`
+	MaxTokens     int               `json:"max_tokens"`
+	Tags          []string          `json:"tags"`
+	IsDefault     bool              `json:"is_default"`
+	IsEnabled     bool              `json:"is_enabled"`
+	SortOrder     int               `json:"sort_order"`
+	Capabilities  ModelCapabilities `json:"capabilities"`
+	RequestPolicy RequestPolicy     `json:"request_policy"`
+	CostPolicy    CostPolicy        `json:"cost_policy"`
+	RuntimeHealth RuntimeHealth     `json:"runtime_health"`
+}
+
+// ToModel converts the HTTP request into the internal persistence model.
+func (r LLMModelRequest) ToModel() *LLMModel {
+	return &LLMModel{
+		ID:            r.ID,
+		Name:          r.Name,
+		Provider:      r.Provider,
+		BaseURL:       r.BaseURL,
+		APIKey:        r.APIKey,
+		ModelName:     r.ModelName,
+		Temperature:   r.Temperature,
+		MaxTokens:     r.MaxTokens,
+		Tags:          r.Tags,
+		IsDefault:     r.IsDefault,
+		IsEnabled:     r.IsEnabled,
+		SortOrder:     r.SortOrder,
+		Capabilities:  r.Capabilities,
+		RequestPolicy: r.RequestPolicy,
+		CostPolicy:    r.CostPolicy,
+		RuntimeHealth: r.RuntimeHealth,
+	}
+}
+
+// LLMModelResponse is the HTTP output shape and deliberately excludes APIKey.
+type LLMModelResponse struct {
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`
+	Provider      string            `json:"provider"`
+	BaseURL       string            `json:"base_url"`
+	ModelName     string            `json:"model_name"`
+	Temperature   float64           `json:"temperature"`
+	MaxTokens     int               `json:"max_tokens"`
+	Tags          []string          `json:"tags"`
+	IsDefault     bool              `json:"is_default"`
+	IsEnabled     bool              `json:"is_enabled"`
+	SortOrder     int               `json:"sort_order"`
+	CreatedAt     time.Time         `json:"created_at"`
+	UpdatedAt     time.Time         `json:"updated_at"`
+	Capabilities  ModelCapabilities `json:"capabilities"`
+	RequestPolicy RequestPolicy     `json:"request_policy"`
+	CostPolicy    CostPolicy        `json:"cost_policy"`
+	RuntimeHealth RuntimeHealth     `json:"runtime_health"`
+}
+
+// NewLLMModelResponse creates a redacted HTTP response model.
+func NewLLMModelResponse(m *LLMModel) *LLMModelResponse {
+	if m == nil {
+		return nil
+	}
+	return &LLMModelResponse{
+		ID:            m.ID,
+		Name:          m.Name,
+		Provider:      m.Provider,
+		BaseURL:       m.BaseURL,
+		ModelName:     m.ModelName,
+		Temperature:   m.Temperature,
+		MaxTokens:     m.MaxTokens,
+		Tags:          m.Tags,
+		IsDefault:     m.IsDefault,
+		IsEnabled:     m.IsEnabled,
+		SortOrder:     m.SortOrder,
+		CreatedAt:     m.CreatedAt,
+		UpdatedAt:     m.UpdatedAt,
+		Capabilities:  m.Capabilities,
+		RequestPolicy: m.RequestPolicy,
+		CostPolicy:    m.CostPolicy,
+		RuntimeHealth: m.RuntimeHealth,
+	}
+}
+
 // UnmarshalJSON 允许接收 API key，但 APIKey 仍不会被响应序列化。
 func (m *LLMModel) UnmarshalJSON(data []byte) error {
 	type alias LLMModel
@@ -119,7 +209,7 @@ func (c CostPolicy) EstimateCostUSD(promptTokens, completionTokens int) float64 
 
 // LLMModelListResponse 列表接口返回
 type LLMModelListResponse struct {
-	Models []*LLMModel `json:"models"`
+	Models []*LLMModelResponse `json:"models"`
 }
 
 // DefaultCapabilities 新建模型时的能力画像兜底

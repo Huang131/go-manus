@@ -321,3 +321,20 @@ func TestSessionHandler_Chat(t *testing.T) {
 		t.Errorf("Chat() status = %d, want %d", w.Code, http.StatusOK)
 	}
 }
+
+func TestNewSSEContext_PreservesRequestValuesWithoutCancellation(t *testing.T) {
+	type contextKey string
+	key := contextKey("request_id")
+	requestCtx, requestCancel := context.WithCancel(context.WithValue(context.Background(), key, "req-123"))
+	requestCancel()
+
+	eventCtx, cancel := newSSEContext(requestCtx)
+	defer cancel()
+
+	if got := eventCtx.Value(key); got != "req-123" {
+		t.Fatalf("request_id value = %v, want req-123", got)
+	}
+	if err := eventCtx.Err(); err != nil {
+		t.Fatalf("event context unexpectedly canceled: %v", err)
+	}
+}
