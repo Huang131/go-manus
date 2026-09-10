@@ -1,13 +1,15 @@
 package external
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/bytedance/sonic"
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/bytedance/sonic"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/pkg/logger"
@@ -25,6 +27,8 @@ type AnthropicClient struct {
 	httpClient    *http.Client
 	version       string // API 版本
 }
+
+var _ StreamingLLM = (*AnthropicClient)(nil)
 
 // AnthropicClientConfig Anthropic 客户端配置
 type AnthropicClientConfig struct {
@@ -47,6 +51,7 @@ type AnthropicRequest struct {
 	MaxTokens   int                      `json:"max_tokens"`
 	Temperature float64                  `json:"temperature,omitempty"`
 	Thinking    map[string]interface{}   `json:"thinking,omitempty"`
+	Stream      bool                     `json:"stream,omitempty"`
 }
 
 // AnthropicMessage Anthropic 消息格式（wire）。
@@ -231,6 +236,133 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 	result.CostUSD = estimateCostUSD(c.costPolicy, result.Usage)
 
 	return result, nil
+}
+
+// anthropicStreamEvent 是 Anthropic SSE 事件的通用载体。
+type anthropicStreamEvent struct {
+	Type  string `json:"type"`
+	Index int    `json:"index"`
+	Delta struct {
+		Type        string `json:"type"`
+		Text        string `json:"text"`
+		Thinking    string `json:"thinking"`
+		PartialJSON string `json:"partial_json"`
+		StopReason  string `json:"stop_reason"`
+	} `json:"delta"`
+	ContentBlock struct {
+		Type string `json:"type"`
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"content_block"`
+	Usage *struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	} `json:"usage,omitempty"`
+}
+
+// Stream 调用 Anthropic SSE 接口，统一输出 llmcore 增量。
+func (c *AnthropicClient) Stream(ctx context.Context, req *LLMRequest) (<-chan llmcore.LLMDelta, error) {
+	if req == nil {
+		return nil, fmt.Errorf("llm request is nil")
+	}
+	messages, systemMessage := c.toAnthropicMessages(req.Messages)
+	tools := make([]map[string]interface{}, 0, len(req.Tools))
+	for _, tool := range req.Tools {
+		tools = append(tools, map[string]interface{}{
+			"name": tool.Function.Name, "description": tool.Function.Description,
+			"input_schema": tool.Function.Parameters,
+		})
+	}
+	requestBody, err := sonic.Marshal(AnthropicRequest{
+		Model: c.modelName, Messages: messages, System: systemMessage, Tools: tools,
+		MaxTokens: c.effectiveMaxTokens(), Temperature: c.effectiveTemperature(),
+		Thinking: c.effectiveThinking(), Stream: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal stream request: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+anthropicMessagesPath, bytes.NewReader(requestBody))
+	if err != nil {
+		return nil, fmt.Errorf("create stream request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
+	httpReq.Header.Set("x-api-key", c.apiKey)
+	httpReq.Header.Set("anthropic-version", c.version)
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send stream request: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("read stream error response: %w", readErr)
+		}
+		return nil, fmt.Errorf("Anthropic API error: status=%d, body=%s", resp.StatusCode, truncateBody(body))
+	}
+	deltas := make(chan llmcore.LLMDelta)
+	go c.readAnthropicStream(ctx, resp.Body, deltas)
+	return deltas, nil
+}
+
+func (c *AnthropicClient) readAnthropicStream(ctx context.Context, body io.ReadCloser, deltas chan<- llmcore.LLMDelta) {
+	defer close(deltas)
+	defer body.Close()
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 4096), 1024*1024)
+	eventType := ""
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "event:") {
+			eventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+			continue
+		}
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		var event anthropicStreamEvent
+		if err := sonic.UnmarshalString(strings.TrimSpace(strings.TrimPrefix(line, "data:")), &event); err != nil {
+			sendStreamDelta(ctx, deltas, llmcore.LLMDelta{Error: fmt.Sprintf("decode anthropic stream: %v", err)})
+			return
+		}
+		currentEventType := eventType
+		eventType = ""
+		delta := llmcore.LLMDelta{}
+		switch currentEventType {
+		case "content_block_start":
+			if event.ContentBlock.Type == anthropicContentTypeToolUse {
+				delta.ToolCalls = []llmcore.ToolCallDelta{{Index: event.Index, ID: event.ContentBlock.ID, Type: llmcore.ToolTypeFunction, Name: event.ContentBlock.Name}}
+			}
+		case "content_block_delta":
+			switch event.Delta.Type {
+			case "text_delta":
+				delta.ContentText = event.Delta.Text
+			case "thinking_delta":
+				delta.Reasoning = event.Delta.Thinking
+			case "input_json_delta":
+				delta.ToolCalls = []llmcore.ToolCallDelta{{Index: event.Index, ArgumentsDelta: event.Delta.PartialJSON}}
+			}
+		case "message_delta":
+			delta.FinishReason = event.Delta.StopReason
+			if event.Usage != nil {
+				delta.Usage = &llmcore.Usage{
+					PromptTokens:     event.Usage.InputTokens,
+					CompletionTokens: event.Usage.OutputTokens,
+					TotalTokens:      event.Usage.InputTokens + event.Usage.OutputTokens,
+				}
+			}
+		}
+		if delta.ContentText == "" && delta.Reasoning == "" && len(delta.ToolCalls) == 0 && delta.FinishReason == "" && delta.Usage == nil {
+			continue
+		}
+		if !sendStreamDelta(ctx, deltas, delta) {
+			return
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		sendStreamDelta(ctx, deltas, llmcore.LLMDelta{Error: fmt.Sprintf("read anthropic stream: %v", err)})
+	}
 }
 
 // toAnthropicMessages 将 llmcore 消息列表转为 Anthropic wire 格式。

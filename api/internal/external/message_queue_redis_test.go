@@ -21,4 +21,8 @@ func TestRedisMessageQueueStreamRetentionPolicy(t *testing.T) {
 	if streamRetention <= 0 {
 		t.Fatalf("stream retention = %s, want positive", streamRetention)
 	}
+	if CompletedStreamRetention() <= 0 || CompletedStreamRetention() >= streamRetention {
+		t.Fatalf("completed stream retention = %s, want positive and shorter than running retention %s",
+			CompletedStreamRetention(), streamRetention)
+	}
 }

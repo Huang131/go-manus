@@ -39,6 +39,72 @@ func TestNewAnthropicClient_DoesNotApplyGlobalTimeout(t *testing.T) {
 	}
 }
 
+func TestAnthropicClient_StreamProducesDeltas(t *testing.T) {
+	c := newAnthropicTestClient(t, nil, http.StatusOK, nil)
+	c.httpClient.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, err
+		}
+		var request map[string]interface{}
+		if err := sonic.Unmarshal(body, &request); err != nil {
+			return nil, err
+		}
+		if request["stream"] != true {
+			t.Errorf("request stream = %v, want true", request["stream"])
+		}
+		streamBody := strings.Join([]string{
+			"event: content_block_delta",
+			"data: {\"delta\":{\"type\":\"text_delta\",\"text\":\"你好\"}}",
+			"",
+			"event: content_block_delta",
+			"data: {\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"思考\"}}",
+			"",
+			"event: content_block_start",
+			"data: {\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tool-1\",\"name\":\"search\"}}",
+			"",
+			"event: content_block_delta",
+			"data: {\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"q\\\":\\\"go\\\"}\"}}",
+			"",
+			"event: message_delta",
+			"data: {\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":3}}",
+			"",
+			"event: message_stop",
+			"data: {}",
+			"",
+		}, "\n")
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(streamBody)),
+		}, nil
+	})
+
+	deltas, err := c.Stream(context.Background(), &LLMRequest{})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	var got []llmcore.LLMDelta
+	for delta := range deltas {
+		got = append(got, delta)
+	}
+	if len(got) != 5 {
+		t.Fatalf("delta count = %d, want 5", len(got))
+	}
+	if got[0].ContentText != "你好" || got[1].Reasoning != "思考" {
+		t.Fatalf("text/reasoning deltas = %+v", got[:2])
+	}
+	if len(got[2].ToolCalls) != 1 || got[2].ToolCalls[0].Name != "search" {
+		t.Fatalf("tool start delta = %+v", got[2])
+	}
+	if got[3].ToolCalls[0].ArgumentsDelta != "{\"q\":\"go\"}" {
+		t.Fatalf("tool args delta = %+v", got[3])
+	}
+	if got[4].FinishReason != "tool_use" || got[4].Usage == nil || got[4].Usage.CompletionTokens != 3 {
+		t.Fatalf("finish delta = %+v", got[4])
+	}
+}
+
 // === 请求侧：tool_use / tool_result / system / tools 转换 ===
 
 func TestAnthropicClient_ToolUseRequestWire(t *testing.T) {

@@ -276,6 +276,9 @@ func (m *mockMessageQueue) GetBlocking(ctx context.Context, streamName string, s
 func (m *mockMessageQueue) Clear(ctx context.Context, streamName string) error {
 	return nil
 }
+func (m *mockMessageQueue) SetRetention(ctx context.Context, streamName string, retention time.Duration) error {
+	return nil
+}
 func (m *mockMessageQueue) IsEmpty(ctx context.Context, streamName string) (bool, error) {
 	return true, nil
 }

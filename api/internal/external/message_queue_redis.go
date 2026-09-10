@@ -3,9 +3,9 @@ package external
 import (
 	"context"
 	"fmt"
-	"github.com/bytedance/sonic"
 	"time"
 
+	"github.com/bytedance/sonic"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/Huang131/go-manus/api/pkg/logger"
@@ -13,11 +13,17 @@ import (
 
 // 消息队列相关常量
 const (
-	defaultBlockTimeout = 3 * time.Second
-	maxBlockTimeout     = 5 * time.Second
-	streamMaxLen        = 1000
-	streamRetention     = 24 * time.Hour
+	defaultBlockTimeout      = 3 * time.Second
+	maxBlockTimeout          = 5 * time.Second
+	streamMaxLen             = 1000
+	streamRetention          = 24 * time.Hour
+	completedStreamRetention = 30 * time.Minute
 )
+
+// CompletedStreamRetention 返回任务完成后 SSE 续读所需的保留窗口。
+func CompletedStreamRetention() time.Duration {
+	return completedStreamRetention
+}
 
 // RedisStreamMessageQueue 基于 Redis Stream 的消息队列
 type RedisStreamMessageQueue struct {
@@ -52,8 +58,8 @@ func (q *RedisStreamMessageQueue) Put(ctx context.Context, streamName string, me
 			logger.Err(err))
 		return "", fmt.Errorf("failed to add message: %w", err)
 	}
-	// 流在最后一次写入后保留一段时间，给 SSE 续读留出窗口，避免历史任务流永久占用 Redis。
-	if err := q.client.Expire(ctx, streamName, streamRetention).Err(); err != nil {
+	// 只在流首次创建时设置运行期 TTL，避免每次写入都把过期时间向后刷新。
+	if err := q.client.ExpireNX(ctx, streamName, streamRetention).Err(); err != nil {
 		logger.WarnContext(ctx, "设置消息流过期时间失败",
 			logger.String("stream", streamName),
 			logger.Err(err))
@@ -64,6 +70,20 @@ func (q *RedisStreamMessageQueue) Put(ctx context.Context, streamName string, me
 		logger.String("message_id", result))
 
 	return result, nil
+}
+
+// SetRetention 设置消息流保留时间，由任务生命周期在完成或取消时调用。
+func (q *RedisStreamMessageQueue) SetRetention(ctx context.Context, streamName string, retention time.Duration) error {
+	if retention <= 0 {
+		return fmt.Errorf("stream retention must be positive")
+	}
+	if err := q.client.Expire(ctx, streamName, retention).Err(); err != nil {
+		logger.WarnContext(ctx, "设置消息流保留时间失败",
+			logger.String("stream", streamName),
+			logger.Err(err))
+		return fmt.Errorf("set stream retention: %w", err)
+	}
+	return nil
 }
 
 // GetBlocking 阻塞获取消息，支持 context 取消和超时

@@ -156,6 +156,7 @@ type RedisStreamTask struct {
 	outputStream external.TaskMessageQueue
 	cancelFunc   context.CancelFunc
 	done         atomic.Bool
+	finished     atomic.Bool
 	invoked      atomic.Bool
 	doneChan     chan struct{}
 	doneOnce     sync.Once
@@ -314,6 +315,11 @@ func (t *RedisStreamTask) Done() bool {
 	return t.done.Load()
 }
 
+// Finished 表示任务 runner 已退出且资源清理完成。
+func (t *RedisStreamTask) Finished() bool {
+	return t.finished.Load()
+}
+
 // DoneChan 返回任务完成的通知 channel
 func (t *RedisStreamTask) DoneChan() <-chan struct{} {
 	return t.doneChan
@@ -433,35 +439,55 @@ func (t *RedisStreamTask) finish(logMessage string) {
 	t.finishOnce.Do(func() {
 		t.done.Store(true)
 		t.doneOnce.Do(func() { close(t.doneChan) })
+		logger.Info(logMessage, logger.String("task_id", t.id))
+	})
+}
 
+// setStreamRetention 为已结束任务设置较短保留窗口，给 SSE 断线续读留出时间。
+// 使用独立 context，避免取消任务时原始请求 context 已经失效。
+func (t *RedisStreamTask) setStreamRetention() {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	streams := []struct {
+		queue      external.TaskMessageQueue
+		streamName string
+	}{
+		{queue: t.inputStream, streamName: t.inputStreamName()},
+		{queue: t.outputStream, streamName: t.outputStreamName()},
+	}
+	for _, stream := range streams {
+		if err := stream.queue.SetRetention(ctx, stream.streamName, external.CompletedStreamRetention()); err != nil {
+			logger.Warn("设置任务流完成保留时间失败",
+				logger.String("task_id", t.id),
+				logger.String("stream", stream.streamName),
+				logger.Err(err))
+		}
+	}
+}
+
+func (t *RedisStreamTask) destroyRunner() {
+	t.destroyOnce.Do(func() {
 		if t.runner != nil {
 			t.runner.OnDone(t)
+			if err := t.runner.Destroy(); err != nil {
+				logger.Warn("销毁任务运行器失败",
+					logger.String("task_id", t.id),
+					logger.Err(err))
+			}
 		}
 		if t.registry != nil {
 			t.registry.Unregister(t.id)
 		}
-
 		t.mu.RLock()
 		callback := t.onFinished
 		t.mu.RUnlock()
 		if callback != nil {
 			callback()
 		}
-
-		logger.Info(logMessage, logger.String("task_id", t.id))
-	})
-}
-
-func (t *RedisStreamTask) destroyRunner() {
-	t.destroyOnce.Do(func() {
-		if t.runner == nil {
-			return
-		}
-		if err := t.runner.Destroy(); err != nil {
-			logger.Warn("销毁任务运行器失败",
-				logger.String("task_id", t.id),
-				logger.Err(err))
-		}
+		// runner 已退出后再设置短 TTL，避免其尾部写入把完成窗口重新延长。
+		t.setStreamRetention()
+		t.finished.Store(true)
 	})
 }
 

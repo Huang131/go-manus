@@ -10,6 +10,7 @@ import (
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
 // RuntimeHealthStore 持久化运行时健康快照的最小接口。
@@ -31,6 +32,8 @@ type RoutedLLM struct {
 	health   map[string]LLMRuntimeHealth
 	store    RuntimeHealthStore
 }
+
+var _ StreamingLLM = (*RoutedLLM)(nil)
 
 // NewRoutedLLM 创建带 fallback 能力的路由器。
 func NewRoutedLLM(catalog ModelCatalogProvider, fallback *LLMRuntimeConfig, factory LLMClientFactory) *RoutedLLM {
@@ -101,6 +104,41 @@ func (r *RoutedLLM) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMRe
 		return nil, errors.New("no llm model available")
 	}
 	return nil, lastErr
+}
+
+// Stream 选择支持流式能力的模型并透传增量。
+// 流式请求暂不做中途 fallback，因为响应可能已经部分发送给调用方。
+func (r *RoutedLLM) Stream(ctx context.Context, req *LLMRequest) (<-chan llmcore.LLMDelta, error) {
+	plan := r.plan(ctx, req)
+	for _, cfg := range plan {
+		if cfg == nil {
+			continue
+		}
+		client := r.factory(cfg)
+		if client == nil {
+			continue
+		}
+		streaming, ok := client.(StreamingLLM)
+		if !ok {
+			continue
+		}
+		// 旧配置可能没有能力画像；此时以适配器是否真正实现 streaming 为准。
+		if !cfg.Profile.Capabilities.SupportsStreaming && hasCapabilityProfile(cfg) {
+			continue
+		}
+		return streaming.Stream(ctx, req)
+	}
+	return nil, errors.New("no streaming llm model available")
+}
+
+func hasCapabilityProfile(cfg *LLMRuntimeConfig) bool {
+	if cfg == nil {
+		return false
+	}
+	caps := cfg.Profile.Capabilities
+	return caps.SupportsText || caps.SupportsToolCalls || caps.SupportsStructuredOutput ||
+		caps.SupportsJSONMode || caps.SupportsStrictStructuredOutput || caps.SupportsStreaming ||
+		caps.SupportsVision || caps.SupportsReasoning || caps.MaxContextTokens > 0 || caps.MaxOutputTokens > 0
 }
 
 func (r *RoutedLLM) plan(ctx context.Context, req *LLMRequest) []*LLMRuntimeConfig {
@@ -226,7 +264,11 @@ func (r *RoutedLLM) persistHealth(ctx context.Context, cfg *LLMRuntimeConfig) {
 		return
 	}
 
-	_ = store.UpdateRuntimeHealth(ctx, cfg.Profile.ID, runtimeHealthToModel(health))
+	if err := store.UpdateRuntimeHealth(ctx, cfg.Profile.ID, runtimeHealthToModel(health)); err != nil {
+		logger.WarnContext(ctx, "persist llm runtime health failed",
+			logger.String("model_id", cfg.Profile.ID),
+			logger.Err(err))
+	}
 }
 
 func (r *RoutedLLM) applyStoredHealth(catalog []*LLMRuntimeConfig) {

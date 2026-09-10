@@ -261,6 +261,16 @@ func TestA2ATool_Invoke_CallAgentRejectsInvalidRequiredTypes(t *testing.T) {
 	})
 }
 
+func TestA2ATool_MarshalResponseTextHandlesUnsupportedData(t *testing.T) {
+	got := marshalResponseText(func() {})
+	if got == "" {
+		t.Fatal("marshalResponseText() returned empty string for unsupported data")
+	}
+	if got == "null" {
+		t.Fatalf("marshalResponseText() silently returned null: %q", got)
+	}
+}
+
 func TestToolValidationRejectsMissingRequiredParameters(t *testing.T) {
 	t.Run("shell command", func(t *testing.T) {
 		result, err := NewShellTool(nil).Invoke(context.Background(), map[string]interface{}{

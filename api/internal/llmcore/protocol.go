@@ -188,6 +188,10 @@ type LLMDelta struct {
 
 	// Usage 流结束时可能附带
 	Usage *Usage `json:"usage,omitempty"`
+
+	// Error 表示流式读取阶段发生的协议或网络错误。
+	// 发送后 channel 会关闭，调用方应把它视为本次流失败。
+	Error string `json:"error,omitempty"`
 }
 
 type ToolCallDelta struct {

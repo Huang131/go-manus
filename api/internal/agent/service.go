@@ -195,10 +195,10 @@ func (s *AgentService) resolveMessageAttachments(ctx context.Context, sessionID 
 func (s *AgentService) StopSession(ctx context.Context, sessionID string) error {
 	s.mu.Lock()
 	task := s.taskBySession[sessionID]
-	delete(s.taskBySession, sessionID)
 	s.mu.Unlock()
 
-	// 先移除映射，再取消任务，避免完成回调重入同一把锁。
+	// 保留映射直到任务 runner 真正退出，由 onFinished 回调完成清理，
+	// 避免停止旧任务后立即创建第二个 runner 并交错写入同一会话。
 	if task != nil {
 		task.Cancel()
 	}
@@ -284,8 +284,13 @@ func (s *AgentService) getOrCreateTask(ctx context.Context, session *model.Sessi
 	defer s.mu.Unlock()
 
 	// 检查是否已有 task
-	if task, ok := s.taskBySession[session.ID]; ok && !task.Done() {
-		return task, nil
+	if task, ok := s.taskBySession[session.ID]; ok {
+		if !task.Done() {
+			return task, nil
+		}
+		if !task.Finished() {
+			return nil, fmt.Errorf("session task is stopping")
+		}
 	}
 
 	// 创建新的 task

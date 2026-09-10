@@ -13,6 +13,20 @@ type mockRuntimeHealthStore struct {
 	updates map[string]modelRuntimeHealthSnapshot
 }
 
+type streamingStubLLM struct {
+	*stubLLM
+	deltas []llmcore.LLMDelta
+}
+
+func (s *streamingStubLLM) Stream(context.Context, *LLMRequest) (<-chan llmcore.LLMDelta, error) {
+	ch := make(chan llmcore.LLMDelta, len(s.deltas))
+	for _, delta := range s.deltas {
+		ch <- delta
+	}
+	close(ch)
+	return ch, nil
+}
+
 type modelRuntimeHealthSnapshot struct {
 	status           model.HealthState
 	recentFailures   int
@@ -91,6 +105,39 @@ func TestRoutedLLM_FallbackOnRateLimit(t *testing.T) {
 	}
 	if len(attempts) != 2 {
 		t.Fatalf("attempts = %v, want 2 attempts", attempts)
+	}
+}
+
+func TestRoutedLLM_StreamUsesStreamingCandidate(t *testing.T) {
+	router := NewRoutedLLM(
+		func(context.Context) ([]*LLMRuntimeConfig, error) {
+			return []*LLMRuntimeConfig{
+				{Profile: openAITextProfile(), ModelName: "streaming"},
+			}, nil
+		},
+		nil,
+		func(cfg *LLMRuntimeConfig) LLM {
+			return &streamingStubLLM{
+				stubLLM: &stubLLM{name: cfg.ModelName},
+				deltas:  []llmcore.LLMDelta{{ContentText: "token"}},
+			}
+		},
+	)
+
+	streaming, ok := interface{}(router).(StreamingLLM)
+	if !ok {
+		t.Fatal("RoutedLLM should implement StreamingLLM")
+	}
+	deltas, err := streaming.Stream(context.Background(), &LLMRequest{})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	var got []llmcore.LLMDelta
+	for delta := range deltas {
+		got = append(got, delta)
+	}
+	if len(got) != 1 || got[0].ContentText != "token" {
+		t.Fatalf("deltas = %+v, want one token delta", got)
 	}
 }
 

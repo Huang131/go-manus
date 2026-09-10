@@ -214,13 +214,19 @@ func (t *A2ATool) extractResponseText(data interface{}) string {
 			}
 		}
 
-		// 尝试直接返回 JSON
-		jsonBytes, _ := sonic.Marshal(data)
-		return string(jsonBytes)
+		// 尝试直接返回 JSON；序列化失败时返回明确的可读结果，避免静默空字符串。
+		return marshalResponseText(data)
 	}
 
 	// 其他类型尝试 JSON 序列化
-	jsonBytes, _ := sonic.Marshal(data)
+	return marshalResponseText(data)
+}
+
+func marshalResponseText(data interface{}) string {
+	jsonBytes, err := sonic.Marshal(data)
+	if err != nil {
+		return fmt.Sprintf("远程 Agent 返回了不可序列化的数据: %v", err)
+	}
 	return string(jsonBytes)
 }
 

@@ -1,14 +1,17 @@
 package external
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"github.com/bytedance/sonic"
 	"io"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/bytedance/sonic"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 )
@@ -25,6 +28,8 @@ type OpenAIClient struct {
 	costPolicy      llmcore.CostPolicy
 	httpClient      *http.Client
 }
+
+var _ StreamingLLM = (*OpenAIClient)(nil)
 
 // OpenAIClientConfig OpenAI 客户端配置
 type OpenAIClientConfig struct {
@@ -303,6 +308,188 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LL
 	}
 	out.CostUSD = estimateCostUSD(c.costPolicy, out.Usage)
 	return out, nil
+}
+
+// openAIStreamChunk 是 OpenAI 兼容 SSE 的单个 data JSON。
+type openAIStreamChunk struct {
+	Choices []struct {
+		Delta struct {
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+			Reasoning        string `json:"reasoning"`
+			ToolCalls        []struct {
+				Index    int    `json:"index"`
+				ID       string `json:"id"`
+				Type     string `json:"type"`
+				Function struct {
+					Name      string `json:"name"`
+					Arguments string `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
+		} `json:"delta"`
+		FinishReason string `json:"finish_reason"`
+	} `json:"choices"`
+	Usage *struct {
+		PromptTokens     int `json:"prompt_tokens"`
+		CompletionTokens int `json:"completion_tokens"`
+		TotalTokens      int `json:"total_tokens"`
+	} `json:"usage,omitempty"`
+}
+
+// Stream 调用 OpenAI 兼容 API 的 SSE 接口，逐个返回 token 增量。
+// HTTP 建连错误在返回前同步返回；响应体解析错误通过最后一个 Error delta 传递。
+func (c *OpenAIClient) Stream(ctx context.Context, req *LLMRequest) (<-chan llmcore.LLMDelta, error) {
+	if req == nil {
+		return nil, fmt.Errorf("llm request is nil")
+	}
+
+	temp := c.effectiveTemperature()
+	maxTok := c.effectiveMaxTokens()
+	chatReq := openAIChatRequest{
+		Model:          c.modelName,
+		Messages:       toOpenAIMessages(req.Messages),
+		Tools:          toOpenAITools(req.Tools),
+		Temperature:    &temp,
+		MaxTokens:      &maxTok,
+		Stream:         true,
+		ResponseFormat: req.ResponseFormat,
+	}
+	chatReq.ReasoningEffort = c.effectiveReasoningEffort()
+	if req.ToolChoice != "" {
+		chatReq.ToolChoice = req.ToolChoice
+	}
+
+	reqBody, err := sonic.Marshal(chatReq)
+	if err != nil {
+		return nil, fmt.Errorf("marshal stream request: %w", err)
+	}
+	streamCtx := ctx
+	var cancelStream context.CancelFunc
+	if len(req.Tools) > 0 {
+		streamCtx, cancelStream = context.WithTimeout(ctx, c.toolCallTimeout)
+	}
+	httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, c.baseURL+openAIChatCompletionsPath, bytes.NewReader(reqBody))
+	if err != nil {
+		if cancelStream != nil {
+			cancelStream()
+		}
+		return nil, fmt.Errorf("create stream request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "text/event-stream")
+	if c.apiKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		if cancelStream != nil {
+			cancelStream()
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			pe := llmcore.NewProviderError(llmcore.KindTimeout, "openai_compat", c.modelName, "stream request timeout")
+			pe.StatusCode = http.StatusGatewayTimeout
+			pe.Cause = err
+			return nil, pe
+		}
+		pe := llmcore.NewProviderError(llmcore.KindNetwork, "openai_compat", c.modelName, "stream network error")
+		pe.Cause = err
+		return nil, pe
+	}
+	if resp.StatusCode != http.StatusOK {
+		if cancelStream != nil {
+			cancelStream()
+		}
+		defer resp.Body.Close()
+		body, readErr := io.ReadAll(resp.Body)
+		if readErr != nil {
+			return nil, fmt.Errorf("read stream error response: %w", readErr)
+		}
+		return nil, c.classifyHTTPError(resp.StatusCode, body)
+	}
+
+	deltas := make(chan llmcore.LLMDelta)
+	go c.readOpenAIStream(streamCtx, resp.Body, deltas, cancelStream)
+	return deltas, nil
+}
+
+func (c *OpenAIClient) readOpenAIStream(ctx context.Context, body io.ReadCloser, deltas chan<- llmcore.LLMDelta, cancel context.CancelFunc) {
+	defer close(deltas)
+	defer body.Close()
+	if cancel != nil {
+		defer cancel()
+	}
+
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 4096), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "[DONE]" {
+			return
+		}
+
+		var chunk openAIStreamChunk
+		if err := sonic.UnmarshalString(payload, &chunk); err != nil {
+			sendStreamDelta(ctx, deltas, llmcore.LLMDelta{Error: fmt.Sprintf("decode stream chunk: %v", err)})
+			return
+		}
+		var usage *llmcore.Usage
+		if chunk.Usage != nil {
+			usage = &llmcore.Usage{
+				PromptTokens:     chunk.Usage.PromptTokens,
+				CompletionTokens: chunk.Usage.CompletionTokens,
+				TotalTokens:      chunk.Usage.TotalTokens,
+			}
+		}
+		if len(chunk.Choices) == 0 && usage != nil {
+			if !sendStreamDelta(ctx, deltas, llmcore.LLMDelta{Usage: usage}) {
+				return
+			}
+		}
+		for _, choice := range chunk.Choices {
+			reasoning := choice.Delta.ReasoningContent
+			if reasoning == "" {
+				reasoning = choice.Delta.Reasoning
+			}
+			delta := llmcore.LLMDelta{
+				ContentText:  choice.Delta.Content,
+				Reasoning:    reasoning,
+				FinishReason: choice.FinishReason,
+				Usage:        usage,
+			}
+			for _, toolCall := range choice.Delta.ToolCalls {
+				delta.ToolCalls = append(delta.ToolCalls, llmcore.ToolCallDelta{
+					Index:          toolCall.Index,
+					ID:             toolCall.ID,
+					Type:           toolCall.Type,
+					Name:           toolCall.Function.Name,
+					ArgumentsDelta: toolCall.Function.Arguments,
+				})
+			}
+			if delta.ContentText == "" && delta.Reasoning == "" && len(delta.ToolCalls) == 0 && delta.FinishReason == "" {
+				continue
+			}
+			if !sendStreamDelta(ctx, deltas, delta) {
+				return
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		sendStreamDelta(ctx, deltas, llmcore.LLMDelta{Error: fmt.Sprintf("read stream: %v", err)})
+	}
+}
+
+func sendStreamDelta(ctx context.Context, deltas chan<- llmcore.LLMDelta, delta llmcore.LLMDelta) bool {
+	select {
+	case deltas <- delta:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 func (c *OpenAIClient) effectiveTemperature() float64 {

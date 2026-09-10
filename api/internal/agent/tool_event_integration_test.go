@@ -133,6 +133,10 @@ func (q *inMemoryMessageQueue) Clear(ctx context.Context, streamName string) err
 	return nil
 }
 
+func (q *inMemoryMessageQueue) SetRetention(context.Context, string, time.Duration) error {
+	return nil
+}
+
 // IsEmpty 判断队列是否为空
 func (q *inMemoryMessageQueue) IsEmpty(ctx context.Context, streamName string) (bool, error) {
 	size, err := q.Size(ctx, streamName)

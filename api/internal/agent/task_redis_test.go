@@ -37,6 +37,24 @@ func (panicTaskRunner) Invoke(context.Context, *RedisStreamTask) error {
 func (panicTaskRunner) Destroy() error          { return nil }
 func (panicTaskRunner) OnDone(*RedisStreamTask) {}
 
+type blockingTaskRunner struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (r *blockingTaskRunner) Invoke(ctx context.Context, _ *RedisStreamTask) error {
+	close(r.started)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-r.release:
+		return nil
+	}
+}
+
+func (r *blockingTaskRunner) Destroy() error          { return nil }
+func (r *blockingTaskRunner) OnDone(*RedisStreamTask) {}
+
 func (m *mockTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) error {
 	m.mu.Lock()
 	m.invokeCalled = true
@@ -248,7 +266,14 @@ func TestTaskRegistry_Clear(t *testing.T) {
 // mockMQWrapper 用于测试的 Mock MessageQueue 包装器
 // 由于 RedisStreamMessageQueue 需要实际的 Redis 连接，我们使用一个简化的包装器
 type mockMQWrapper struct {
-	mq *external.RedisStreamMessageQueue
+	mq             *external.RedisStreamMessageQueue
+	mu             sync.Mutex
+	retentionCalls []retentionCall
+}
+
+type retentionCall struct {
+	streamName string
+	retention  time.Duration
 }
 
 func (w *mockMQWrapper) Put(ctx context.Context, streamName string, message interface{}) (string, error) {
@@ -276,6 +301,22 @@ func (w *mockMQWrapper) IsEmpty(ctx context.Context, streamName string) (bool, e
 
 func (w *mockMQWrapper) Size(ctx context.Context, streamName string) (int64, error) {
 	return 0, nil
+}
+
+func (w *mockMQWrapper) SetRetention(ctx context.Context, streamName string, retention time.Duration) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.retentionCalls = append(w.retentionCalls, retentionCall{
+		streamName: streamName,
+		retention:  retention,
+	})
+	return nil
+}
+
+func (w *mockMQWrapper) getRetentionCalls() []retentionCall {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]retentionCall(nil), w.retentionCalls...)
 }
 
 // TestRedisStreamTask_DoneChan 测试 DoneChan 通道
@@ -381,6 +422,25 @@ func TestRedisStreamTask_FinishDestroysRunner(t *testing.T) {
 	}
 }
 
+func TestRedisStreamTask_FinishSetsStreamRetention(t *testing.T) {
+	defaultTaskRegistry.Clear()
+	mq := &mockMQWrapper{}
+	task := NewRedisStreamTask(mq, &mockTaskRunner{})
+
+	task.Cancel()
+
+	calls := mq.getRetentionCalls()
+	if len(calls) != 2 {
+		t.Fatalf("retention calls = %d, want 2", len(calls))
+	}
+	wantRetention := external.CompletedStreamRetention()
+	for _, call := range calls {
+		if call.retention != wantRetention {
+			t.Fatalf("retention for %s = %s, want %s", call.streamName, call.retention, wantRetention)
+		}
+	}
+}
+
 func TestRedisStreamTask_InvokeAfterCancelReturnsError(t *testing.T) {
 	defaultTaskRegistry.Clear()
 	runner := &mockTaskRunner{}
@@ -393,6 +453,67 @@ func TestRedisStreamTask_InvokeAfterCancelReturnsError(t *testing.T) {
 	if runner.wasInvokeCalled() {
 		t.Fatal("TaskRunner.Invoke() was called after task cancellation")
 	}
+}
+
+func TestRedisStreamTask_CancelKeepsRegistryUntilRunnerExits(t *testing.T) {
+	registry := NewDefaultTaskRegistry()
+	runner := &blockingTaskRunner{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	task := NewRedisStreamTask(&mockMQWrapper{}, runner, registry)
+	if err := task.Invoke(context.Background()); err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	<-runner.started
+
+	task.Cancel()
+	if registry.Get(task.ID()) == nil {
+		t.Fatal("task was unregistered before runner exited")
+	}
+
+	close(runner.release)
+	select {
+	case <-task.DoneChan():
+	case <-time.After(time.Second):
+		t.Fatal("task did not finish")
+	}
+	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
+		if registry.Get(task.ID()) == nil {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("task remained registered after runner exited")
+}
+
+func TestRedisStreamTask_FinishedChangesAfterRunnerExit(t *testing.T) {
+	runner := &blockingTaskRunner{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	task := NewRedisStreamTask(&mockMQWrapper{}, runner)
+	if err := task.Invoke(context.Background()); err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	<-runner.started
+	task.Cancel()
+	if task.Finished() {
+		t.Fatal("Finished() = true before runner exit")
+	}
+	close(runner.release)
+	select {
+	case <-task.DoneChan():
+	case <-time.After(time.Second):
+		t.Fatal("task did not finish")
+	}
+	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
+		if task.Finished() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("Finished() remained false after runner exit")
 }
 
 func TestRedisStreamTask_GetOutputReadsBufferedEventsWhenStartIDEmpty(t *testing.T) {

@@ -35,6 +35,99 @@ func TestNewOpenAIClient_DoesNotApplyGlobalTimeout(t *testing.T) {
 	}
 }
 
+func TestOpenAIClient_StreamProducesDeltas(t *testing.T) {
+	var requestBody map[string]interface{}
+	c := newTransportClient(t, func(r *http.Request) (*http.Response, error) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			return nil, err
+		}
+		if err := sonic.Unmarshal(body, &requestBody); err != nil {
+			return nil, err
+		}
+		streamBody := strings.Join([]string{
+			"data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"你好\",\"reasoning_content\":\"思考\"}}]}",
+			"",
+			"data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"search\",\"arguments\":\"{\\\"q\\\":\"}}]}}]}",
+			"",
+			"data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"go\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3,\"total_tokens\":5}}",
+			"",
+			"data: [DONE]",
+			"",
+		}, "\n")
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(streamBody)),
+		}, nil
+	})
+
+	deltas, err := c.Stream(context.Background(), &LLMRequest{
+		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	var got []llmcore.LLMDelta
+	for delta := range deltas {
+		got = append(got, delta)
+	}
+	if requestBody["stream"] != true {
+		t.Fatalf("request stream = %v, want true", requestBody["stream"])
+	}
+	if len(got) != 3 {
+		t.Fatalf("delta count = %d, want 3", len(got))
+	}
+	if got[0].ContentText != "你好" || got[0].Reasoning != "思考" {
+		t.Fatalf("first delta = %+v", got[0])
+	}
+	if len(got[1].ToolCalls) != 1 || got[1].ToolCalls[0].Name != "search" {
+		t.Fatalf("tool start delta = %+v", got[1])
+	}
+	if got[2].ToolCalls[0].ArgumentsDelta != "\"go\"}" || got[2].FinishReason != "tool_calls" {
+		t.Fatalf("tool finish delta = %+v", got[2])
+	}
+	if got[2].Usage == nil || got[2].Usage.TotalTokens != 5 {
+		t.Fatalf("usage delta = %+v", got[2].Usage)
+	}
+}
+
+func TestOpenAIClient_StreamStopsWhenContextCanceled(t *testing.T) {
+	started := make(chan struct{})
+	c := newTransportClient(t, func(r *http.Request) (*http.Response, error) {
+		close(started)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       &contextBlockingReader{ctx: r.Context()},
+		}, nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	deltas, err := c.Stream(ctx, &LLMRequest{})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	<-started
+	cancel()
+
+	for range deltas {
+	}
+}
+
+type contextBlockingReader struct {
+	ctx context.Context
+}
+
+func (r *contextBlockingReader) Read([]byte) (int, error) {
+	<-r.ctx.Done()
+	return 0, r.ctx.Err()
+}
+
+func (r *contextBlockingReader) Close() error {
+	return nil
+}
+
 // rawOK 把任意 JSON 写入 200 响应
 func rawOK(w http.ResponseWriter, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")

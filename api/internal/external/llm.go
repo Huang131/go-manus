@@ -2,6 +2,7 @@ package external
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 )
@@ -52,6 +53,13 @@ type LLM interface {
 	MaxTokens() int
 }
 
+// StreamingLLM 是可选的 token 流式能力。
+// 保持为独立接口，避免要求所有已有 LLM mock 和非流式适配器同步实现。
+type StreamingLLM interface {
+	LLM
+	Stream(ctx context.Context, req *LLMRequest) (<-chan llmcore.LLMDelta, error)
+}
+
 // LLMConfigProvider 每次调用前获取最新 LLM 配置。
 // 返回 (nil, nil) 表示当前无 DB 配置，DynamicLLM 应回退到 fallback。
 // 返回 error 表示读取失败，DynamicLLM 同样回退到 fallback。
@@ -69,6 +77,8 @@ type DynamicLLM struct {
 	factory  LLMClientFactory
 	fallback *LLMRuntimeConfig
 }
+
+var _ StreamingLLM = (*DynamicLLM)(nil)
 
 // LLMClientFactory 根据运行时配置创建具体 LLM 客户端。
 type LLMClientFactory func(cfg *LLMRuntimeConfig) LLM
@@ -121,6 +131,29 @@ func (d *DynamicLLM) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMR
 		return d.factory(cfg).Invoke(ctx, req)
 	}
 	return NewOpenAIClient(runtimeConfigToOpenAIClientConfig(cfg)).Invoke(ctx, req)
+}
+
+// Stream 使用当前动态配置执行流式请求。
+func (d *DynamicLLM) Stream(ctx context.Context, req *LLMRequest) (<-chan llmcore.LLMDelta, error) {
+	cfg := d.fallback
+	if d.provider != nil {
+		if c, err := d.provider(ctx); err == nil && c != nil && c.BaseURL != "" {
+			cfg = c
+		}
+	}
+	factory := d.factory
+	if factory == nil {
+		factory = defaultLLMClientFactory
+	}
+	client := factory(cfg)
+	if client == nil {
+		return nil, fmt.Errorf("llm client factory returned nil")
+	}
+	streaming, ok := client.(StreamingLLM)
+	if !ok {
+		return nil, fmt.Errorf("llm client %q does not support streaming", client.ModelName())
+	}
+	return streaming.Stream(ctx, req)
 }
 
 // ModelName 返回模型名称（fallback）。
