@@ -85,11 +85,11 @@ func TestAppStartRunsRegisteredHooksOnce(t *testing.T) {
 
 func TestInitExternalClientsDoesNotCreateBrowserWithoutSandboxAddress(t *testing.T) {
 	app := &App{}
-	_, browser, _, _, _, _ := app.initExternalClients(&config.Config{}, Options{
+	clients := app.initExternalClients(&config.Config{}, Options{
 		EnableSandbox: true,
 		EnableBrowser: true,
 	})
-	if browser != nil {
+	if clients.browser != nil {
 		t.Fatal("browser should be nil when sandbox address is empty")
 	}
 }
@@ -255,12 +255,12 @@ func TestBuildWithFactoriesInjectsFileCleanupScheduler(t *testing.T) {
 func TestInitAgentReturnsSentinelErrors(t *testing.T) {
 	app := &App{lifecycle: newLifecycleManager()}
 
-	if err := app.initAgent(Options{EnableAgent: true}, nil, nil, nil, nil, nil, nil); !errors.Is(err, ErrAgentRequiresDependencies) {
+	if err := app.initAgent(Options{EnableAgent: true}, &externalClients{}); !errors.Is(err, ErrAgentRequiresDependencies) {
 		t.Fatalf("initAgent() error = %v, want ErrAgentRequiresDependencies", err)
 	}
 
 	app.Postgres = &infrastructure.Postgres{}
-	if err := app.initAgent(Options{EnableAgent: true}, nil, nil, nil, &mockMessageQueue{}, nil, nil); !errors.Is(err, ErrAgentRequiresLLM) {
+	if err := app.initAgent(Options{EnableAgent: true}, &externalClients{mq: &mockMessageQueue{}}); !errors.Is(err, ErrAgentRequiresLLM) {
 		t.Fatalf("initAgent() error = %v, want ErrAgentRequiresLLM", err)
 	}
 }

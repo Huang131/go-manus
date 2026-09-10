@@ -278,24 +278,7 @@ func (r *PostgresLLMModelRepository) SetDefault(ctx context.Context, id string) 
 
 // WithTx 事务
 func (r *PostgresLLMModelRepository) WithTx(ctx context.Context, fn func(repo LLMModelRepository) error) error {
-	if r.tx != nil {
-		return fn(r)
-	}
-	tx, err := r.db.Pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if p := recover(); p != nil {
-			logRollbackFailure(ctx, rollbackTx(ctx, tx))
-			panic(p)
-		}
-	}()
-	if err := fn(&PostgresLLMModelRepository{db: r.db, tx: tx}); err != nil {
-		return joinRollbackError(err, rollbackTx(ctx, tx))
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
-	return nil
+	return runInTx(ctx, r.db, r.tx, func(tx pgx.Tx) LLMModelRepository {
+		return &PostgresLLMModelRepository{db: r.db, tx: tx}
+	}, fn)
 }

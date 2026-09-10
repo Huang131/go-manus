@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -53,6 +52,18 @@ func (r *PostgresFileRepository) queryer() queryer {
 	return newQueryer(r.db, r.tx)
 }
 
+// fileColumns 是 files 表的标准查询列，集中定义避免各方法重复列举。
+const fileColumns = `id, session_id, filename, filepath, key, extension, mime_type, size, created_at`
+
+// scanFile 把一行结果映射为 *model.File，供 QueryRow 与 Query 行迭代共用。
+func scanFile(s rowScanner) (*model.File, error) {
+	var f model.File
+	if err := s.Scan(&f.ID, &f.SessionID, &f.Filename, &f.Filepath, &f.Key, &f.Extension, &f.MimeType, &f.Size, &f.CreatedAt); err != nil {
+		return nil, err
+	}
+	return &f, nil
+}
+
 // Create 创建文件记录
 func (r *PostgresFileRepository) Create(ctx context.Context, file *model.File) error {
 	q := r.queryer()
@@ -70,43 +81,29 @@ func (r *PostgresFileRepository) Create(ctx context.Context, file *model.File) e
 // GetBySessionAndFilepath 根据 session_id + filepath 查重（替代旧 sessions.files JSONB 的 GetFileByPath）
 func (r *PostgresFileRepository) GetBySessionAndFilepath(ctx context.Context, sessionID, filepath string) (*model.File, error) {
 	q := r.queryer()
-	query := `
-		SELECT id, session_id, filename, filepath, key, extension, mime_type, size, created_at
-		FROM files WHERE session_id = $1 AND filepath = $2 LIMIT 1
-	`
-	var file model.File
-	err := q.QueryRow(ctx, query, sessionID, filepath).Scan(
-		&file.ID, &file.SessionID, &file.Filename, &file.Filepath,
-		&file.Key, &file.Extension, &file.MimeType, &file.Size, &file.CreatedAt,
-	)
+	query := `SELECT ` + fileColumns + ` FROM files WHERE session_id = $1 AND filepath = $2 LIMIT 1`
+	file, err := scanFile(q.QueryRow(ctx, query, sessionID, filepath))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	return &file, nil
+	return file, nil
 }
 
 // GetByID 根据ID获取文件
 func (r *PostgresFileRepository) GetByID(ctx context.Context, id string) (*model.File, error) {
 	q := r.queryer()
-	query := `
-		SELECT id, session_id, filename, filepath, key, extension, mime_type, size, created_at
-		FROM files WHERE id = $1
-	`
-	var file model.File
-	err := q.QueryRow(ctx, query, id).Scan(
-		&file.ID, &file.SessionID, &file.Filename, &file.Filepath,
-		&file.Key, &file.Extension, &file.MimeType, &file.Size, &file.CreatedAt,
-	)
+	query := `SELECT ` + fileColumns + ` FROM files WHERE id = $1`
+	file, err := scanFile(q.QueryRow(ctx, query, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	return &file, nil
+	return file, nil
 }
 
 // Update 更新文件记录
@@ -138,52 +135,19 @@ func (r *PostgresFileRepository) DeleteBySessionID(ctx context.Context, sessionI
 // ListBySessionID 根据会话ID获取文件列表
 func (r *PostgresFileRepository) ListBySessionID(ctx context.Context, sessionID string) ([]*model.File, error) {
 	q := r.queryer()
-	query := `
-		SELECT id, session_id, filename, filepath, key, extension, mime_type, size, created_at
-		FROM files WHERE session_id = $1 ORDER BY created_at DESC
-	`
+	query := `SELECT ` + fileColumns + ` FROM files WHERE session_id = $1 ORDER BY created_at DESC`
 	rows, err := q.Query(ctx, query, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var files []*model.File
-	for rows.Next() {
-		var f model.File
-		if err := rows.Scan(&f.ID, &f.SessionID, &f.Filename, &f.Filepath, &f.Key, &f.Extension, &f.MimeType, &f.Size, &f.CreatedAt); err != nil {
-			return nil, err
-		}
-		files = append(files, &f)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return files, nil
+	return collectRows(rows, scanFile)
 }
 
 // WithTx 在事务中执行操作
 func (r *PostgresFileRepository) WithTx(ctx context.Context, fn func(repo FileRepository) error) error {
-	if r.tx != nil {
-		return fn(r)
-	}
-	tx, err := r.db.Pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if p := recover(); p != nil {
-			logRollbackFailure(ctx, rollbackTx(ctx, tx))
-			panic(p)
-		}
-	}()
-	if err := fn(&PostgresFileRepository{db: r.db, tx: tx}); err != nil {
-		return joinRollbackError(err, rollbackTx(ctx, tx))
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
-	return nil
+	return runInTx(ctx, r.db, r.tx, func(tx pgx.Tx) FileRepository {
+		return &PostgresFileRepository{db: r.db, tx: tx}
+	}, fn)
 }
 
 // GetExpiredFiles 获取过期文件列表
@@ -208,20 +172,7 @@ func (r *PostgresFileRepository) GetExpiredFiles(ctx context.Context, expireDura
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var files []*model.File
-	for rows.Next() {
-		var f model.File
-		if err := rows.Scan(&f.ID, &f.SessionID, &f.Filename, &f.Filepath, &f.Key, &f.Extension, &f.MimeType, &f.Size, &f.CreatedAt); err != nil {
-			return nil, err
-		}
-		files = append(files, &f)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return files, nil
+	return collectRows(rows, scanFile)
 }
 
 // GetFilesBySessionIDs 根据会话ID列表获取文件
@@ -231,31 +182,12 @@ func (r *PostgresFileRepository) GetFilesBySessionIDs(ctx context.Context, sessi
 	}
 
 	q := r.queryer()
-	query := `
-		SELECT id, session_id, filename, filepath, key, extension, mime_type, size, created_at
-		FROM files
-		WHERE session_id = ANY($1)
-		ORDER BY created_at DESC
-	`
-
+	query := `SELECT ` + fileColumns + ` FROM files WHERE session_id = ANY($1) ORDER BY created_at DESC`
 	rows, err := q.Query(ctx, query, sessionIDs)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var files []*model.File
-	for rows.Next() {
-		var f model.File
-		if err := rows.Scan(&f.ID, &f.SessionID, &f.Filename, &f.Filepath, &f.Key, &f.Extension, &f.MimeType, &f.Size, &f.CreatedAt); err != nil {
-			return nil, err
-		}
-		files = append(files, &f)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return files, nil
+	return collectRows(rows, scanFile)
 }
 
 // CountExpiredFiles 统计可清理的过期文件数量

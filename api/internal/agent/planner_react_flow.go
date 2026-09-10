@@ -121,209 +121,251 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 			logger.String("session_id", f.sessionID),
 			logger.String("message", input.Message.ContentText))
 
-		// 状态机循环
+		// 状态机循环：主循环只做调度，每个状态的处理逻辑在对应的 handleXxx 方法中
 		for {
-			f.mu.Lock()
-			status := f.status
-			f.mu.Unlock()
-
+			status := f.currentStatus()
+			var stop bool
 			switch status {
 			case FlowStatusIdle:
-				// 空闲状态 -> 规划状态
-				f.setStatus(FlowStatusPlanning)
-
+				stop = f.handleIdle()
 			case FlowStatusPlanning:
-				// 规划状态 -> 调用 Planner 创建计划
-				plan, planMsg, err := f.planner.CreatePlan(ctx, input)
-				if err != nil {
-					logger.ErrorContext(ctx, "Planner 创建计划失败", logger.Err(err))
-					if !f.emitEvent(ctx, ch, model.NewErrorEvent(err.Error())) {
-						return
-					}
-					f.setStatus(FlowStatusCompleted)
-					break
-				}
-
-				f.setPlan(plan)
-
-				// 发送计划事件
-				if !f.emitEvent(ctx, ch, model.NewTitleEvent(plan.Title)) {
-					return
-				}
-				// 与原项目对齐：把 plan.message 作为 assistant 消息发出。
-				// 配合 json_object 模式 + 中文 prompt，planner 输出的 planMsg 已经是结构化中文，
-				// 不会再泄露英文 CoT。
-				if !f.emitEvent(ctx, ch, model.NewMessageEvent("assistant", planMsg)) ||
-					!f.emitEvent(ctx, ch, model.NewPlanEvent(*plan, model.PlanEventStatusCreated)) {
-					return
-				}
-
-				logger.InfoContext(ctx, "Planner 创建计划成功",
-					logger.String("session_id", f.sessionID),
-					logger.Int("steps", len(plan.Steps)))
-
-				f.setStatus(FlowStatusExecuting)
-
+				stop = f.handlePlanning(ctx, input, ch)
 			case FlowStatusExecuting:
-				// 执行状态 -> 获取下一个步骤并执行
-				plan := f.planSnapshot()
-				if plan == nil || len(plan.Steps) == 0 {
-					logger.WarnContext(ctx, "计划为空，无法进入执行阶段",
-						logger.String("session_id", f.sessionID))
-					if !f.emitEvent(ctx, ch, model.NewErrorEvent("计划为空，无法执行")) {
-						return
-					}
-					f.setStatus(FlowStatusCompleted)
-					break
-				}
-
-				step := plan.GetNextStep()
-				if step == nil {
-					logger.InfoContext(ctx, "所有步骤已执行完毕，进入总结阶段")
-					f.setStatus(FlowStatusSummarizing)
-					break
-				}
-
-				// 更新计划状态
-				plan.Status = model.ExecutionStatusRunning
-				if !f.emitEvent(ctx, ch, model.NewStepEvent(*step, model.StepEventStatusStarted)) {
-					return
-				}
-
-				// 执行步骤
-				logger.InfoContext(ctx, "ReActAgent 开始执行步骤",
-					logger.String("step_id", step.ID),
-					logger.String("description", step.Description))
-
-				if err := f.react.ExecuteStep(ctx, plan, step, input); err != nil {
-					if err == ErrWaitForUser {
-						// 需要等待用户输入
-						logger.InfoContext(ctx, "ReActAgent 等待用户输入",
-							logger.String("question", step.UserQuestion))
-						if !f.emitEvent(ctx, ch, model.NewMessageEvent("assistant", step.UserQuestion)) ||
-							!f.emitEvent(ctx, ch, model.NewWaitEvent()) {
-							return
-						}
-						f.setStatus(FlowStatusWaiting)
-						// 不压缩记忆，保留上下文
-						continue
-					}
-					logger.ErrorContext(ctx, "ReActAgent 执行步骤失败", logger.Err(err))
-					if !f.emitEvent(ctx, ch, model.NewStepEvent(*step, model.StepEventStatusFailed)) {
-						return
-					}
-					step.Status = model.ExecutionStatusFailed
-					step.Error = err.Error()
-				} else {
-					if !f.emitEvent(ctx, ch, model.NewStepEvent(*step, model.StepEventStatusCompleted)) {
-						return
-					}
-
-					// 发送步骤结果消息
-					if step.Result != "" {
-						if !f.emitEvent(ctx, ch, model.NewMessageEvent("assistant", step.Result)) {
-							return
-						}
-					}
-				}
-				// ExecuteStep 操作的是本轮快照，执行结果需要写回 flow，供后续更新计划和外部查询使用。
-				f.setPlan(plan)
-
-				// 压缩记忆
-				if err := f.react.CompactMemory(); err != nil {
-					logger.WarnContext(ctx, "压缩 Agent 记忆失败",
-						logger.String("session_id", f.sessionID),
-						logger.Err(err))
-				}
-
-				f.setStatus(FlowStatusUpdating)
-
+				stop = f.handleExecuting(ctx, input, ch)
 			case FlowStatusWaiting:
-				// 等待状态 -> 等待用户输入后继续执行
-				// 用户输入新消息后会再次触发 Invoke，继续执行当前计划
-				f.setStatus(FlowStatusExecuting)
-				// 继续到 FlowStatusExecuting 状态
-
+				stop = f.handleWaiting()
 			case FlowStatusUpdating:
-				// 更新状态 -> 调用 Planner 更新计划
-				plan := f.planSnapshot()
-				if plan == nil {
-					f.setStatus(FlowStatusCompleted)
-					break
-				}
-				step := plan.GetNextStep()
-				if step == nil {
-					// 没有未完成的步骤，进入总结阶段
-					f.setStatus(FlowStatusSummarizing)
-					break
-				}
-
-				// 找到最近完成的步骤
-				var completedStep *model.PlanStep
-				for i := len(plan.Steps) - 1; i >= 0; i-- {
-					if plan.Steps[i].Done() {
-						completedStep = &plan.Steps[i]
-						break
-					}
-				}
-
-				if completedStep != nil {
-					updatedPlan, err := f.planner.UpdatePlan(ctx, plan, completedStep)
-					if err != nil {
-						logger.WarnContext(ctx, "Planner 更新计划失败", logger.Err(err))
-					} else {
-						f.setPlan(updatedPlan)
-						if !f.emitEvent(ctx, ch, model.NewPlanEvent(*updatedPlan, model.PlanEventStatusUpdated)) {
-							return
-						}
-					}
-				}
-
-				f.setStatus(FlowStatusExecuting)
-
+				stop = f.handleUpdating(ctx, ch)
 			case FlowStatusSummarizing:
-				// 只有真正执行过步骤的计划才进入总结。
-				// 空步骤计划如果流转到这里，说明上游已经出了结构化输出问题。
-				plan := f.planSnapshot()
-				if plan != nil && len(plan.Steps) > 0 {
-					summary, attachments, err := f.react.Summarize(ctx)
-					if err != nil {
-						logger.WarnContext(ctx, "ReActAgent 总结任务失败", logger.Err(err))
-					} else {
-						if !f.emitEvent(ctx, ch, model.NewMessageEvent("assistant", summary)) {
-							return
-						}
-						for _, att := range attachments {
-							logger.InfoContext(ctx, "任务生成附件", logger.String("filepath", att))
-						}
-					}
-				} else {
-					logger.WarnContext(ctx, "跳过空步骤计划的总结阶段",
-						logger.String("session_id", f.sessionID))
-				}
-
-				f.setStatus(FlowStatusCompleted)
-
+				stop = f.handleSummarizing(ctx, ch)
 			case FlowStatusCompleted:
-				// 完成状态 -> 发送完成事件
-				if plan := f.planSnapshot(); plan != nil {
-					plan.Status = model.ExecutionStatusCompleted
-					f.setPlan(plan)
-					if !f.emitEvent(ctx, ch, model.NewPlanEvent(*plan, model.PlanEventStatusCompleted)) {
-						return
-					}
-				}
-				if !f.emitEvent(ctx, ch, model.NewDoneEvent()) {
-					return
-				}
-				logger.InfoContext(ctx, "PlannerReActFlow 执行完成",
-					logger.String("session_id", f.sessionID))
+				stop = f.handleCompleted(ctx, ch)
+			default:
+				logger.ErrorContext(ctx, "PlannerReActFlow 遇到未知状态，终止执行",
+					logger.String("status", string(status)))
+				_ = f.emitEvent(ctx, ch, model.NewErrorEvent("内部错误: 未知流状态"))
+				return
+			}
+			if stop {
 				return
 			}
 		}
 	}()
 
 	return ch
+}
+
+// currentStatus 在加锁状态下读取流状态
+func (f *PlannerReActFlow) currentStatus() FlowStatus {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.status
+}
+
+// 各状态处理器返回 true 表示流应终止（goroutine 退出）。
+
+// handleIdle 空闲 -> 规划
+func (f *PlannerReActFlow) handleIdle() bool {
+	f.setStatus(FlowStatusPlanning)
+	return false
+}
+
+// handlePlanning 调用 Planner 创建计划并发出 title/message/plan 事件 -> 执行
+func (f *PlannerReActFlow) handlePlanning(ctx context.Context, input *TaskInput, ch chan<- model.BaseEvent) bool {
+	plan, planMsg, err := f.planner.CreatePlan(ctx, input)
+	if err != nil {
+		logger.ErrorContext(ctx, "Planner 创建计划失败", logger.Err(err))
+		if !f.emitEvent(ctx, ch, model.NewErrorEvent(err.Error())) {
+			return true
+		}
+		f.setStatus(FlowStatusCompleted)
+		return false
+	}
+
+	f.setPlan(plan)
+
+	// 发送计划事件
+	if !f.emitEvent(ctx, ch, model.NewTitleEvent(plan.Title)) {
+		return true
+	}
+	// 与原项目对齐：把 plan.message 作为 assistant 消息发出。
+	// 配合 json_object 模式 + 中文 prompt，planner 输出的 planMsg 已经是结构化中文，
+	// 不会再泄露英文 CoT。
+	if !f.emitEvent(ctx, ch, model.NewMessageEvent("assistant", planMsg)) ||
+		!f.emitEvent(ctx, ch, model.NewPlanEvent(*plan, model.PlanEventStatusCreated)) {
+		return true
+	}
+
+	logger.InfoContext(ctx, "Planner 创建计划成功",
+		logger.String("session_id", f.sessionID),
+		logger.Int("steps", len(plan.Steps)))
+
+	f.setStatus(FlowStatusExecuting)
+	return false
+}
+
+// handleExecuting 取出下一个步骤交给 ReActAgent 执行 -> 更新（或等待用户输入）
+func (f *PlannerReActFlow) handleExecuting(ctx context.Context, input *TaskInput, ch chan<- model.BaseEvent) bool {
+	plan := f.planSnapshot()
+	if plan == nil || len(plan.Steps) == 0 {
+		logger.WarnContext(ctx, "计划为空，无法进入执行阶段",
+			logger.String("session_id", f.sessionID))
+		if !f.emitEvent(ctx, ch, model.NewErrorEvent("计划为空，无法执行")) {
+			return true
+		}
+		f.setStatus(FlowStatusCompleted)
+		return false
+	}
+
+	step := plan.GetNextStep()
+	if step == nil {
+		logger.InfoContext(ctx, "所有步骤已执行完毕，进入总结阶段")
+		f.setStatus(FlowStatusSummarizing)
+		return false
+	}
+
+	// 更新计划状态
+	plan.Status = model.ExecutionStatusRunning
+	if !f.emitEvent(ctx, ch, model.NewStepEvent(*step, model.StepEventStatusStarted)) {
+		return true
+	}
+
+	// 执行步骤
+	logger.InfoContext(ctx, "ReActAgent 开始执行步骤",
+		logger.String("step_id", step.ID),
+		logger.String("description", step.Description))
+
+	if err := f.react.ExecuteStep(ctx, plan, step, input); err != nil {
+		if err == ErrWaitForUser {
+			// 需要等待用户输入：下一轮 Invoke 会从 waiting -> executing 继续当前计划
+			logger.InfoContext(ctx, "ReActAgent 等待用户输入",
+				logger.String("question", step.UserQuestion))
+			if !f.emitEvent(ctx, ch, model.NewMessageEvent("assistant", step.UserQuestion)) ||
+				!f.emitEvent(ctx, ch, model.NewWaitEvent()) {
+				return true
+			}
+			f.setStatus(FlowStatusWaiting)
+			// 不压缩记忆，保留上下文
+			return false
+		}
+		logger.ErrorContext(ctx, "ReActAgent 执行步骤失败", logger.Err(err))
+		if !f.emitEvent(ctx, ch, model.NewStepEvent(*step, model.StepEventStatusFailed)) {
+			return true
+		}
+		step.Status = model.ExecutionStatusFailed
+		step.Error = err.Error()
+	} else {
+		if !f.emitEvent(ctx, ch, model.NewStepEvent(*step, model.StepEventStatusCompleted)) {
+			return true
+		}
+
+		// 发送步骤结果消息
+		if step.Result != "" {
+			if !f.emitEvent(ctx, ch, model.NewMessageEvent("assistant", step.Result)) {
+				return true
+			}
+		}
+	}
+	// ExecuteStep 操作的是本轮快照，执行结果需要写回 flow，供后续更新计划和外部查询使用。
+	f.setPlan(plan)
+
+	// 压缩记忆
+	if err := f.react.CompactMemory(); err != nil {
+		logger.WarnContext(ctx, "压缩 Agent 记忆失败",
+			logger.String("session_id", f.sessionID),
+			logger.Err(err))
+	}
+
+	f.setStatus(FlowStatusUpdating)
+	return false
+}
+
+// handleWaiting 用户新消息触发下一轮 Invoke 后，等待 -> 继续执行
+func (f *PlannerReActFlow) handleWaiting() bool {
+	f.setStatus(FlowStatusExecuting)
+	return false
+}
+
+// handleUpdating 调用 Planner 根据最近完成的步骤更新计划 -> 执行
+func (f *PlannerReActFlow) handleUpdating(ctx context.Context, ch chan<- model.BaseEvent) bool {
+	plan := f.planSnapshot()
+	if plan == nil {
+		f.setStatus(FlowStatusCompleted)
+		return false
+	}
+	step := plan.GetNextStep()
+	if step == nil {
+		// 没有未完成的步骤，进入总结阶段
+		f.setStatus(FlowStatusSummarizing)
+		return false
+	}
+
+	// 找到最近完成的步骤
+	var completedStep *model.PlanStep
+	for i := len(plan.Steps) - 1; i >= 0; i-- {
+		if plan.Steps[i].Done() {
+			completedStep = &plan.Steps[i]
+			break
+		}
+	}
+
+	if completedStep != nil {
+		updatedPlan, err := f.planner.UpdatePlan(ctx, plan, completedStep)
+		if err != nil {
+			logger.WarnContext(ctx, "Planner 更新计划失败", logger.Err(err))
+		} else {
+			f.setPlan(updatedPlan)
+			if !f.emitEvent(ctx, ch, model.NewPlanEvent(*updatedPlan, model.PlanEventStatusUpdated)) {
+				return true
+			}
+		}
+	}
+
+	f.setStatus(FlowStatusExecuting)
+	return false
+}
+
+// handleSummarizing 所有步骤完成后由 ReActAgent 产出总结 -> 完成
+func (f *PlannerReActFlow) handleSummarizing(ctx context.Context, ch chan<- model.BaseEvent) bool {
+	// 只有真正执行过步骤的计划才进入总结。
+	// 空步骤计划如果流转到这里，说明上游已经出了结构化输出问题。
+	plan := f.planSnapshot()
+	if plan != nil && len(plan.Steps) > 0 {
+		summary, attachments, err := f.react.Summarize(ctx)
+		if err != nil {
+			logger.WarnContext(ctx, "ReActAgent 总结任务失败", logger.Err(err))
+		} else {
+			if !f.emitEvent(ctx, ch, model.NewMessageEvent("assistant", summary)) {
+				return true
+			}
+			for _, att := range attachments {
+				logger.InfoContext(ctx, "任务生成附件", logger.String("filepath", att))
+			}
+		}
+	} else {
+		logger.WarnContext(ctx, "跳过空步骤计划的总结阶段",
+			logger.String("session_id", f.sessionID))
+	}
+
+	f.setStatus(FlowStatusCompleted)
+	return false
+}
+
+// handleCompleted 标记计划完成并发出终态事件；该状态必定终止流
+func (f *PlannerReActFlow) handleCompleted(ctx context.Context, ch chan<- model.BaseEvent) bool {
+	if plan := f.planSnapshot(); plan != nil {
+		plan.Status = model.ExecutionStatusCompleted
+		f.setPlan(plan)
+		if !f.emitEvent(ctx, ch, model.NewPlanEvent(*plan, model.PlanEventStatusCompleted)) {
+			return true
+		}
+	}
+	if !f.emitEvent(ctx, ch, model.NewDoneEvent()) {
+		return true
+	}
+	logger.InfoContext(ctx, "PlannerReActFlow 执行完成",
+		logger.String("session_id", f.sessionID))
+	return true
 }
 
 // Done 返回流是否结束

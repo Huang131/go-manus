@@ -171,24 +171,7 @@ func (r *PostgresAppConfigRepository) ListAllConfigs(ctx context.Context) ([]*mo
 
 // WithTx 在事务中执行操作
 func (r *PostgresAppConfigRepository) WithTx(ctx context.Context, fn func(repo AppConfigRepository) error) error {
-	if r.tx != nil {
-		return fn(r)
-	}
-	tx, err := r.db.Pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if p := recover(); p != nil {
-			logRollbackFailure(ctx, rollbackTx(ctx, tx))
-			panic(p)
-		}
-	}()
-	if err := fn(&PostgresAppConfigRepository{db: r.db, tx: tx}); err != nil {
-		return joinRollbackError(err, rollbackTx(ctx, tx))
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
-	return nil
+	return runInTx(ctx, r.db, r.tx, func(tx pgx.Tx) AppConfigRepository {
+		return &PostgresAppConfigRepository{db: r.db, tx: tx}
+	}, fn)
 }

@@ -2,10 +2,12 @@ package external
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bytedance/sonic"
 
@@ -274,5 +276,181 @@ func TestAnthropicClient_TextOnlyWire(t *testing.T) {
 	}
 	if resp.Message.ContentText != "你好" {
 		t.Errorf("ContentText = %q, want 你好", resp.Message.ContentText)
+	}
+}
+
+// === 错误分类：所有上游错误必须归一化为 *ProviderError，
+// routed_llm 的 fallback 类型断言才能对 Anthropic 模型生效 ===
+
+// newAnthropicErrorClient 构造自定义 transport 的客户端用于错误路径测试
+func newAnthropicErrorClient(t *testing.T, roundTrip roundTripperFunc) *AnthropicClient {
+	t.Helper()
+	c := NewAnthropicClient(&AnthropicClientConfig{
+		BaseURL:   "https://example.invalid",
+		APIKey:    "test-key",
+		ModelName: "claude-test",
+		MaxTokens: 1024,
+	})
+	c.httpClient.Transport = roundTrip
+	return c
+}
+
+func anthropicErrorResponse(status int) *http.Response {
+	resp, _ := responseJSON(status, map[string]interface{}{
+		"error": map[string]interface{}{
+			"type":    "error",
+			"message": "upstream failure",
+		},
+	})
+	return resp
+}
+
+// errKind 提取错误的 ProviderError.Kind，非 ProviderError 返回固定标记，便于断言失败时定位
+func errKind(err error) llmcore.ErrorKind {
+	if pe, ok := err.(*llmcore.ProviderError); ok {
+		return pe.Kind
+	}
+	return "non-provider-error"
+}
+
+func TestAnthropicClient_HTTPErrorClassification(t *testing.T) {
+	tests := []struct {
+		name          string
+		status        int
+		wantKind      llmcore.ErrorKind
+		wantRetryable bool
+		wantFallback  bool
+	}{
+		{name: "401 auth", status: http.StatusUnauthorized, wantKind: llmcore.KindAuth},
+		{name: "403 auth", status: http.StatusForbidden, wantKind: llmcore.KindAuth},
+		{name: "404 not_found", status: http.StatusNotFound, wantKind: llmcore.KindNotFound},
+		{name: "400 bad_request", status: http.StatusBadRequest, wantKind: llmcore.KindBadRequest},
+		{name: "429 rate_limit", status: http.StatusTooManyRequests, wantKind: llmcore.KindRateLimit, wantRetryable: true, wantFallback: true},
+		{name: "408 timeout", status: http.StatusRequestTimeout, wantKind: llmcore.KindTimeout, wantRetryable: true, wantFallback: true},
+		{name: "500 server", status: http.StatusInternalServerError, wantKind: llmcore.KindServer, wantRetryable: true, wantFallback: true},
+		{name: "502 server", status: http.StatusBadGateway, wantKind: llmcore.KindServer, wantRetryable: true, wantFallback: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newAnthropicErrorClient(t, roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+				return anthropicErrorResponse(tt.status), nil
+			}))
+			_, err := c.Invoke(context.Background(), &LLMRequest{
+				Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hi"}},
+			})
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !llmcore.IsKind(err, tt.wantKind) {
+				t.Fatalf("error kind = %v, want %v (err=%v)", errKind(err), tt.wantKind, err)
+			}
+			pe := err.(*llmcore.ProviderError)
+			if pe.StatusCode != tt.status {
+				t.Errorf("StatusCode = %d, want %d", pe.StatusCode, tt.status)
+			}
+			if pe.Provider != anthropicProvider || pe.Model != "claude-test" {
+				t.Errorf("Provider/Model = %s/%s", pe.Provider, pe.Model)
+			}
+			if pe.Retryable != tt.wantRetryable {
+				t.Errorf("Retryable = %v, want %v", pe.Retryable, tt.wantRetryable)
+			}
+			if pe.Fallbackable != tt.wantFallback {
+				t.Errorf("Fallbackable = %v, want %v", pe.Fallbackable, tt.wantFallback)
+			}
+			if !strings.Contains(pe.Error(), "upstream failure") {
+				t.Errorf("error message 应包含上游 message, got %q", pe.Error())
+			}
+		})
+	}
+}
+
+func TestAnthropicClient_NetworkError(t *testing.T) {
+	c := newAnthropicErrorClient(t, roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		return nil, errors.New("dial tcp: connection refused")
+	}))
+	_, err := c.Invoke(context.Background(), &LLMRequest{
+		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hi"}},
+	})
+	if !llmcore.IsKind(err, llmcore.KindNetwork) {
+		t.Fatalf("error kind = %v, want KindNetwork", errKind(err))
+	}
+	pe := err.(*llmcore.ProviderError)
+	if !pe.Retryable || !pe.Fallbackable {
+		t.Errorf("network error should be retryable/fallbackable, got %+v", pe)
+	}
+}
+
+// 不支持 tool calling 的模型会在 toolCallTimeout 内无响应 → KindTimeout 且可 fallback
+func TestAnthropicClient_ToolCallTimeout(t *testing.T) {
+	c := NewAnthropicClient(&AnthropicClientConfig{
+		BaseURL:         "https://example.invalid",
+		APIKey:          "test-key",
+		ModelName:       "claude-no-tools",
+		MaxTokens:       1024,
+		ToolCallTimeout: 1,
+	})
+	c.httpClient.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		<-r.Context().Done()
+		return nil, r.Context().Err()
+	})
+
+	_, err := c.Invoke(context.Background(), &LLMRequest{
+		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hi"}},
+		Tools: []llmcore.ToolSpec{{
+			Type:     llmcore.ToolTypeFunction,
+			Function: llmcore.ToolSpecFunction{Name: "search"},
+		}},
+	})
+	if !llmcore.IsKind(err, llmcore.KindTimeout) {
+		t.Fatalf("error kind = %v, want KindTimeout (err=%v)", errKind(err), err)
+	}
+	if !err.(*llmcore.ProviderError).Fallbackable {
+		t.Error("tool-call 超时应可 fallback 到其他模型")
+	}
+}
+
+// 200 + 非法 JSON 属于协议错误：不重试、不 fallback（避免对坏模型反复熔断/切换）
+func TestAnthropicClient_ProtocolError_NotFallbackable(t *testing.T) {
+	c := newAnthropicErrorClient(t, roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader("not json at all")),
+		}, nil
+	}))
+	_, err := c.Invoke(context.Background(), &LLMRequest{
+		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hi"}},
+	})
+	pe, ok := err.(*llmcore.ProviderError)
+	if !ok {
+		t.Fatalf("err is not *ProviderError: %T", err)
+	}
+	if pe.Retryable || pe.Fallbackable {
+		t.Errorf("protocol error should NOT be retryable/fallbackable, got %+v", pe)
+	}
+}
+
+// Stream 路径的非 2xx 响应同样必须归一化为 ProviderError
+func TestAnthropicClient_StreamHTTPError(t *testing.T) {
+	c := newAnthropicErrorClient(t, roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		return anthropicErrorResponse(http.StatusTooManyRequests), nil
+	}))
+	_, err := c.Stream(context.Background(), &LLMRequest{
+		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hi"}},
+	})
+	if !llmcore.IsKind(err, llmcore.KindRateLimit) {
+		t.Fatalf("error kind = %v, want KindRateLimit", errKind(err))
+	}
+	if !err.(*llmcore.ProviderError).Fallbackable {
+		t.Error("429 should be fallbackable")
+	}
+}
+
+// ToolCallTimeout 默认值兜底
+func TestNewAnthropicClient_DefaultToolCallTimeout(t *testing.T) {
+	c := NewAnthropicClient(&AnthropicClientConfig{})
+	if c.toolCallTimeout != 15*time.Second {
+		t.Fatalf("toolCallTimeout = %v, want 15s", c.toolCallTimeout)
 	}
 }

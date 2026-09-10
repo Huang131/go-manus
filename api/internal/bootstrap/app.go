@@ -502,6 +502,17 @@ func (a *App) initLLM(cfg *config.Config, opts Options) external.LLM {
 	return routed
 }
 
+// externalClients 收拢 initExternalClients 产出的外部客户端，
+// 避免 6 值返回与 initAgent 的长参数列表（Long Parameter List）。
+type externalClients struct {
+	llm       external.LLM
+	browser   external.Browser
+	search    external.SearchEngine
+	mq        external.TaskMessageQueue
+	mcpConfig *agent.MCPConfig
+	a2aConfig *agent.A2AConfig
+}
+
 // initExternalClients 初始化外部客户端组件。
 //
 // 外部客户端包括：
@@ -514,9 +525,11 @@ func (a *App) initLLM(cfg *config.Config, opts Options) external.LLM {
 //   - A2A：Agent-to-Agent 通信配置
 //
 // 这些组件被传递给 Agent 服务，供 Agent 调用外部能力。
-func (a *App) initExternalClients(cfg *config.Config, opts Options) (external.LLM, external.Browser, external.SearchEngine, external.TaskMessageQueue, *agent.MCPConfig, *agent.A2AConfig) {
+func (a *App) initExternalClients(cfg *config.Config, opts Options) *externalClients {
+	clients := &externalClients{}
+
 	// LLM 路由器
-	llm := a.initLLM(cfg, opts)
+	clients.llm = a.initLLM(cfg, opts)
 
 	// Sandbox 沙箱
 	if opts.EnableSandbox {
@@ -524,15 +537,13 @@ func (a *App) initExternalClients(cfg *config.Config, opts Options) (external.LL
 	}
 
 	// Browser 浏览器（依赖 Sandbox）
-	var browser external.Browser
 	if opts.EnableBrowser && a.Sandbox != nil && cfg.Sandbox.Address != "" {
-		browser = external.NewBrowserClient(a.Sandbox)
+		clients.browser = external.NewBrowserClient(a.Sandbox)
 	}
 
 	// Search 搜索引擎（可选，需要配置 API Key）
-	var search external.SearchEngine
 	if opts.EnableSearch && (cfg.Search.BingAPIKey != "" || cfg.Search.GoogleAPIKey != "") {
-		search = external.NewSearchEngine(&external.SearchConfig{
+		clients.search = external.NewSearchEngine(&external.SearchConfig{
 			Provider:       cfg.Search.Provider,
 			BingAPIKey:     cfg.Search.BingAPIKey,
 			GoogleAPIKey:   cfg.Search.GoogleAPIKey,
@@ -542,12 +553,13 @@ func (a *App) initExternalClients(cfg *config.Config, opts Options) (external.LL
 	}
 
 	// MessageQueue 消息队列（使用 Redis Streams）
-	var mq external.TaskMessageQueue
 	if a.Redis != nil {
-		mq = external.NewRedisStreamMessageQueue(a.Redis.Client)
+		clients.mq = external.NewRedisStreamMessageQueue(a.Redis.Client)
 	}
 
-	return llm, browser, search, mq, newMCPConfig(cfg), newA2AConfig(cfg)
+	clients.mcpConfig = newMCPConfig(cfg)
+	clients.a2aConfig = newA2AConfig(cfg)
+	return clients
 }
 
 // newMCPConfig 从配置创建 MCP（Model Context Protocol）配置。
@@ -598,23 +610,23 @@ func newA2AConfig(cfg *config.Config) *agent.A2AConfig {
 //   - 必须有 PostgreSQL（存储会话）
 //   - 必须有 MessageQueue（异步任务队列）
 //   - 必须有 LLM（核心能力）
-func (a *App) initAgent(opts Options, llm external.LLM, browser external.Browser, search external.SearchEngine, mq external.TaskMessageQueue, mcpConfig *agent.MCPConfig, a2aConfig *agent.A2AConfig) error {
+func (a *App) initAgent(opts Options, clients *externalClients) error {
 	if !opts.EnableAgent {
 		return nil
 	}
 	// 依赖检查
-	if a.Postgres == nil || mq == nil {
+	if a.Postgres == nil || clients.mq == nil {
 		return ErrAgentRequiresDependencies
 	}
-	if llm == nil {
+	if clients.llm == nil {
 		return ErrAgentRequiresLLM
 	}
 
 	// 创建 Agent 服务
 	a.AgentService = agent.NewAgentService(
 		context.Background(),
-		a.repos.session, a.repos.file, a.repos.appConfig, llm, a.Sandbox,
-		agent.DefaultAgentConfig(), mcpConfig, a2aConfig, browser, search, mq, a.OSS,
+		a.repos.session, a.repos.file, a.repos.appConfig, clients.llm, a.Sandbox,
+		agent.DefaultAgentConfig(), clients.mcpConfig, clients.a2aConfig, clients.browser, clients.search, clients.mq, a.OSS,
 	)
 	a.stopHook(func() {
 		if a.AgentService != nil {
@@ -828,10 +840,10 @@ func BuildWithFactories(cfg *config.Config, opts Options, factories Factories) (
 	app.initServices(cfg)
 
 	// 初始化外部客户端
-	llm, browser, search, mq, mcpConfig, a2aConfig := app.initExternalClients(cfg, opts)
+	clients := app.initExternalClients(cfg, opts)
 
 	// 初始化 Agent 服务
-	if err := app.initAgent(opts, llm, browser, search, mq, mcpConfig, a2aConfig); err != nil {
+	if err := app.initAgent(opts, clients); err != nil {
 		app.Close()
 		return nil, err
 	}

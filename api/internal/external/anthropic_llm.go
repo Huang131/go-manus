@@ -4,10 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/bytedance/sonic"
 
@@ -15,31 +17,36 @@ import (
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
+// anthropicProvider 是 ProviderError 的 provider 标识。
+const anthropicProvider = "anthropic"
+
 // AnthropicClient Anthropic API 客户端
 type AnthropicClient struct {
-	baseURL       string
-	apiKey        string
-	modelName     string
-	temperature   float64
-	maxTokens     int
-	requestPolicy llmcore.RequestPolicy
-	costPolicy    llmcore.CostPolicy
-	httpClient    *http.Client
-	version       string // API 版本
+	baseURL         string
+	apiKey          string
+	modelName       string
+	temperature     float64
+	maxTokens       int
+	requestPolicy   llmcore.RequestPolicy
+	costPolicy      llmcore.CostPolicy
+	httpClient      *http.Client
+	version         string        // API 版本
+	toolCallTimeout time.Duration // tool calling 请求超时
 }
 
 var _ StreamingLLM = (*AnthropicClient)(nil)
 
 // AnthropicClientConfig Anthropic 客户端配置
 type AnthropicClientConfig struct {
-	BaseURL       string                `mapstructure:"base_url"`
-	APIKey        string                `mapstructure:"api_key"`
-	ModelName     string                `mapstructure:"model_name"`
-	Temperature   float64               `mapstructure:"temperature"`
-	MaxTokens     int                   `mapstructure:"max_tokens"`
-	RequestPolicy llmcore.RequestPolicy `mapstructure:"request_policy"`
-	CostPolicy    llmcore.CostPolicy    `mapstructure:"cost_policy"`
-	Version       string                `mapstructure:"version"` // API 版本，默认 "2023-06-01"
+	BaseURL         string                `mapstructure:"base_url"`
+	APIKey          string                `mapstructure:"api_key"`
+	ModelName       string                `mapstructure:"model_name"`
+	Temperature     float64               `mapstructure:"temperature"`
+	MaxTokens       int                   `mapstructure:"max_tokens"`
+	RequestPolicy   llmcore.RequestPolicy `mapstructure:"request_policy"`
+	CostPolicy      llmcore.CostPolicy    `mapstructure:"cost_policy"`
+	Version         string                `mapstructure:"version"`           // API 版本，默认 "2023-06-01"
+	ToolCallTimeout int                   `mapstructure:"tool_call_timeout"` // tool calling 请求超时秒数，默认 15
 }
 
 // AnthropicRequest Anthropic API 请求（wire format）
@@ -114,16 +121,22 @@ func NewAnthropicClient(cfg *AnthropicClientConfig) *AnthropicClient {
 		baseURL = defaultAnthropicBaseURL
 	}
 
+	toolCallTimeout := cfg.ToolCallTimeout
+	if toolCallTimeout == 0 {
+		toolCallTimeout = 15
+	}
+
 	return &AnthropicClient{
-		baseURL:       baseURL,
-		apiKey:        cfg.APIKey,
-		modelName:     cfg.ModelName,
-		temperature:   cfg.Temperature,
-		maxTokens:     cfg.MaxTokens,
-		requestPolicy: cfg.RequestPolicy,
-		costPolicy:    cfg.CostPolicy,
-		httpClient:    &http.Client{},
-		version:       version,
+		baseURL:         baseURL,
+		apiKey:          cfg.APIKey,
+		modelName:       cfg.ModelName,
+		temperature:     cfg.Temperature,
+		maxTokens:       cfg.MaxTokens,
+		requestPolicy:   cfg.RequestPolicy,
+		costPolicy:      cfg.CostPolicy,
+		httpClient:      &http.Client{},
+		version:         version,
+		toolCallTimeout: time.Duration(toolCallTimeout) * time.Second,
 	}
 }
 
@@ -163,8 +176,17 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
+	// tool calling 请求使用独立超时（默认 15s），任何不支持 tool calling 的模型
+	// 都会在此时超时失败，而不是等到全局超时才暴露。
+	httpCtx := ctx
+	if len(req.Tools) > 0 {
+		var cancel context.CancelFunc
+		httpCtx, cancel = context.WithTimeout(ctx, c.toolCallTimeout)
+		defer cancel()
+	}
+
 	url := c.baseURL + anthropicMessagesPath
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqBody))
+	httpReq, err := http.NewRequestWithContext(httpCtx, http.MethodPost, url, bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -175,13 +197,16 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
+		return nil, c.classifySendError(err, len(req.Tools) > 0)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
+		pe := llmcore.NewProviderError(llmcore.KindNetwork, anthropicProvider, c.modelName, "read response body")
+		pe.StatusCode = resp.StatusCode
+		pe.Cause = fmt.Errorf("read response: %w", err)
+		return nil, pe
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -189,12 +214,19 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 			logger.Int("status", resp.StatusCode),
 			logger.String("body", string(respBody)),
 		)
-		return nil, fmt.Errorf("Anthropic API error: status=%d, body=%s", resp.StatusCode, string(respBody))
+		return nil, c.classifyHTTPError(resp.StatusCode, respBody)
 	}
 
 	var anthropicResp AnthropicResponse
 	if err := sonic.Unmarshal(respBody, &anthropicResp); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
+		// 协议错误：熔断该模型（不重试不 fallback）
+		pe := llmcore.NewProviderError(llmcore.KindUnknown, anthropicProvider, c.modelName,
+			fmt.Sprintf("unmarshal response: %v", err))
+		pe.StatusCode = resp.StatusCode
+		pe.Cause = err
+		pe.Retryable = false
+		pe.Fallbackable = false
+		return nil, pe
 	}
 
 	result := &llmcore.LLMResponse{
@@ -281,8 +313,16 @@ func (c *AnthropicClient) Stream(ctx context.Context, req *LLMRequest) (<-chan l
 	if err != nil {
 		return nil, fmt.Errorf("marshal stream request: %w", err)
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+anthropicMessagesPath, bytes.NewReader(requestBody))
+	streamCtx := ctx
+	var cancelStream context.CancelFunc
+	if len(req.Tools) > 0 {
+		streamCtx, cancelStream = context.WithTimeout(ctx, c.toolCallTimeout)
+	}
+	httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, c.baseURL+anthropicMessagesPath, bytes.NewReader(requestBody))
 	if err != nil {
+		if cancelStream != nil {
+			cancelStream()
+		}
 		return nil, fmt.Errorf("create stream request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
@@ -291,24 +331,36 @@ func (c *AnthropicClient) Stream(ctx context.Context, req *LLMRequest) (<-chan l
 	httpReq.Header.Set("anthropic-version", c.version)
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("send stream request: %w", err)
+		if cancelStream != nil {
+			cancelStream()
+		}
+		return nil, c.classifySendError(err, len(req.Tools) > 0)
 	}
 	if resp.StatusCode != http.StatusOK {
+		if cancelStream != nil {
+			cancelStream()
+		}
 		defer resp.Body.Close()
 		body, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
-			return nil, fmt.Errorf("read stream error response: %w", readErr)
+			pe := llmcore.NewProviderError(llmcore.KindNetwork, anthropicProvider, c.modelName, "read stream error response")
+			pe.StatusCode = resp.StatusCode
+			pe.Cause = readErr
+			return nil, pe
 		}
-		return nil, fmt.Errorf("Anthropic API error: status=%d, body=%s", resp.StatusCode, truncateBody(body))
+		return nil, c.classifyHTTPError(resp.StatusCode, body)
 	}
 	deltas := make(chan llmcore.LLMDelta)
-	go c.readAnthropicStream(ctx, resp.Body, deltas)
+	go c.readAnthropicStream(streamCtx, resp.Body, deltas, cancelStream)
 	return deltas, nil
 }
 
-func (c *AnthropicClient) readAnthropicStream(ctx context.Context, body io.ReadCloser, deltas chan<- llmcore.LLMDelta) {
+func (c *AnthropicClient) readAnthropicStream(ctx context.Context, body io.ReadCloser, deltas chan<- llmcore.LLMDelta, cancel context.CancelFunc) {
 	defer close(deltas)
 	defer body.Close()
+	if cancel != nil {
+		defer cancel()
+	}
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 4096), 1024*1024)
 	eventType := ""
@@ -501,6 +553,69 @@ func mustMarshalMap(input map[string]interface{}) []byte {
 		return []byte("{}")
 	}
 	return data
+}
+
+// classifyHTTPError 把 HTTP 状态码归一化为 llmcore.ProviderError，
+// 与 OpenAIClient.classifyHTTPError 行为对齐，使 routed_llm 的 fallback 判定生效。
+//   - 401/403 → auth         不重试不 fallback
+//   - 429     → rate_limit   退避后必要时 fallback
+//   - 5xx     → server       有限重试，失败后 fallback
+//   - 4xx     → bad_request  不重试
+//   - 其他    → unknown
+func (c *AnthropicClient) classifyHTTPError(status int, body []byte) error {
+	kind := llmcore.KindUnknown
+	switch {
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		kind = llmcore.KindAuth
+	case status == http.StatusTooManyRequests:
+		kind = llmcore.KindRateLimit
+	case status == http.StatusRequestTimeout:
+		kind = llmcore.KindTimeout
+	case status == http.StatusNotFound:
+		kind = llmcore.KindNotFound
+	case status >= 500:
+		kind = llmcore.KindServer
+	case status >= 400:
+		kind = llmcore.KindBadRequest
+	}
+
+	// 尝试从 body 提取上游 error.message
+	var probe struct {
+		Error *struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+		} `json:"error"`
+	}
+	_ = sonic.Unmarshal(body, &probe)
+	upstreamMsg := ""
+	if probe.Error != nil {
+		upstreamMsg = probe.Error.Message
+	}
+	if upstreamMsg == "" {
+		upstreamMsg = truncateBody(body)
+	}
+
+	pe := llmcore.NewProviderError(kind, anthropicProvider, c.modelName,
+		fmt.Sprintf("status=%d: %s", status, upstreamMsg))
+	pe.StatusCode = status
+	return pe
+}
+
+// classifySendError 把 httpClient.Do 返回的网络/超时错误归一化为 ProviderError。
+func (c *AnthropicClient) classifySendError(err error, hasTools bool) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		msg := "request timeout"
+		if hasTools {
+			msg = fmt.Sprintf("tool calling 请求超时（%v），模型 %q 可能不支持 tool calling", c.toolCallTimeout, c.modelName)
+		}
+		pe := llmcore.NewProviderError(llmcore.KindTimeout, anthropicProvider, c.modelName, msg)
+		pe.StatusCode = http.StatusGatewayTimeout
+		pe.Cause = err
+		return pe
+	}
+	pe := llmcore.NewProviderError(llmcore.KindNetwork, anthropicProvider, c.modelName, "network error")
+	pe.Cause = err
+	return pe
 }
 
 func (c *AnthropicClient) effectiveTemperature() float64 {
