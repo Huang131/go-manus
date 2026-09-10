@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/bytedance/sonic"
@@ -68,10 +69,16 @@ func (s *DefaultAppConfigService) GetLLMConfig(ctx context.Context) (*model.LLMC
 
 // UpdateLLMConfig 更新 LLM 配置 (如果 api_key 为空则保留旧值)
 func (s *DefaultAppConfigService) UpdateLLMConfig(ctx context.Context, cfg *model.LLMConfig) error {
+	if cfg == nil {
+		return apperr.BadRequest("LLM配置不能为空")
+	}
 	// 如果 api_key 为空，保留旧值
 	if cfg.APIKey == "" {
 		oldCfg, err := s.GetLLMConfig(ctx)
-		if err == nil && oldCfg != nil {
+		if err != nil {
+			return fmt.Errorf("读取现有 LLM 配置失败: %w", err)
+		}
+		if oldCfg != nil {
 			cfg.APIKey = oldCfg.APIKey
 		}
 	}
@@ -134,9 +141,15 @@ func (s *DefaultAppConfigService) GetMCPConfig(ctx context.Context) (*model.MCPC
 
 // UpdateMCPConfig 更新 MCP 配置 (合并服务器列表)
 func (s *DefaultAppConfigService) UpdateMCPConfig(ctx context.Context, cfg *model.MCPConfig) error {
+	if cfg == nil {
+		return apperr.BadRequest("MCP配置不能为空")
+	}
 	// 获取现有配置
 	oldCfg, err := s.GetMCPConfig(ctx)
-	if err == nil && oldCfg != nil {
+	if err != nil {
+		return fmt.Errorf("读取现有 MCP 配置失败: %w", err)
+	}
+	if oldCfg != nil {
 		// 合并服务器配置
 		existingServers := make(map[string]model.MCPServer)
 		for _, server := range oldCfg.Servers {
@@ -167,6 +180,9 @@ func (s *DefaultAppConfigService) DeleteMCPServer(ctx context.Context, serverNam
 	cfg, err := s.GetMCPConfig(ctx)
 	if err != nil {
 		return err
+	}
+	if cfg == nil {
+		return apperr.NotFound("MCP服务器不存在")
 	}
 
 	// 查找并删除服务器
@@ -213,9 +229,15 @@ func (s *DefaultAppConfigService) GetA2AConfig(ctx context.Context) (*model.A2AC
 
 // UpdateA2AConfig 更新 A2A 配置
 func (s *DefaultAppConfigService) UpdateA2AConfig(ctx context.Context, cfg *model.A2AConfig) error {
+	if cfg == nil {
+		return apperr.BadRequest("A2A配置不能为空")
+	}
 	// 获取现有配置
 	oldCfg, err := s.GetA2AConfig(ctx)
-	if err == nil && oldCfg != nil {
+	if err != nil {
+		return fmt.Errorf("读取现有 A2A 配置失败: %w", err)
+	}
+	if oldCfg != nil {
 		// 合并服务器配置
 		existingServers := make(map[string]model.A2AServer)
 		for _, server := range oldCfg.Servers {

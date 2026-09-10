@@ -98,6 +98,10 @@ func (s *DefaultFileCleanupService) CleanExpiredFiles(ctx context.Context, expir
 		logger.Info("清理文件批次完成",
 			logger.Int("batch_count", cleaned),
 			logger.Int64("batch_size", size))
+		if cleaned == 0 {
+			// 对象存储删除全部失败时保留数据库记录，结束本轮并等待下次重试。
+			break
+		}
 	}
 
 	s.updateCleanupStats(totalCleaned, totalSize, startTime)
@@ -116,25 +120,22 @@ func (s *DefaultFileCleanupService) cleanFiles(ctx context.Context, files []*mod
 		return 0, 0, nil
 	}
 
-	// 收集文件 ID 和总大小
-	fileIDs := make([]string, len(files))
+	// 只有对象存储删除成功的文件才允许删除数据库记录。
+	fileIDs := make([]string, 0, len(files))
 	var totalSize int64
 
-	for i, file := range files {
-		fileIDs[i] = file.ID
-		totalSize += file.Size
-	}
-
-	// 从对象存储中删除文件
-	if s.storage != nil {
-		for _, file := range files {
+	for _, file := range files {
+		if s.storage != nil {
 			if err := s.storage.Delete(ctx, file.Key); err != nil {
 				logger.Warn("从对象存储删除文件失败",
 					logger.String("file_id", file.ID),
 					logger.String("key", file.Key),
 					logger.Err(err))
+				continue
 			}
 		}
+		fileIDs = append(fileIDs, file.ID)
+		totalSize += file.Size
 	}
 
 	// 从数据库中删除文件记录

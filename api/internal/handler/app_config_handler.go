@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
+	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/service"
 	"github.com/Huang131/go-manus/api/pkg/response"
 	"github.com/gin-gonic/gin"
@@ -48,12 +49,26 @@ func updateConfig[T any](c *gin.Context, fn func(ctx context.Context, cfg *T) er
 
 // GetLLMConfig 获取 LLM 配置
 func (h *AppConfigHandler) GetLLMConfig(c *gin.Context) {
-	getConfig(c, h.service.GetLLMConfig)
+	cfg, err := h.service.GetLLMConfig(c.Request.Context())
+	if err != nil {
+		response.FromError(c, err)
+		return
+	}
+	response.Success(c, model.NewLLMConfigResponse(cfg))
 }
 
 // UpdateLLMConfig 更新 LLM 配置
 func (h *AppConfigHandler) UpdateLLMConfig(c *gin.Context) {
-	updateConfig(c, h.service.UpdateLLMConfig)
+	var request model.LLMConfigRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		response.FromError(c, apperr.BadRequest(err.Error()))
+		return
+	}
+	if err := h.service.UpdateLLMConfig(c.Request.Context(), request.NewLLMConfig()); err != nil {
+		response.FromError(c, err)
+		return
+	}
+	response.Success(c, nil)
 }
 
 // GetAgentConfig 获取 Agent 配置

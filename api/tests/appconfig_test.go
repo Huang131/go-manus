@@ -42,6 +42,9 @@ func TestAppConfigAPI_LLMConfig_Lifecycle(t *testing.T) {
 	assert.Equal(t, "https://api.test.com/v1", data["base_url"])
 	assert.Equal(t, "test-model", data["model_name"])
 	assert.Equal(t, float64(0.9), data["temperature"])
+	assert.Equal(t, true, data["api_key_configured"])
+	_, hasAPIKey := data["api_key"]
+	assert.False(t, hasAPIKey, "LLM API response must not expose api_key")
 }
 
 // TestAppConfigAPI_AgentConfig_Lifecycle 测试 Agent 配置完整生命周期

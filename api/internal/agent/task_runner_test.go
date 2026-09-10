@@ -66,6 +66,25 @@ func TestAgentService_ResolveMessageAttachments(t *testing.T) {
 	}
 }
 
+func TestAgentService_GetActiveTaskIDClearsCompletedTask(t *testing.T) {
+	agentService := &AgentService{
+		taskBySession: make(map[string]*RedisStreamTask),
+	}
+	session := &model.Session{ID: "session-1"}
+
+	task := NewRedisStreamTask(&mockMQWrapper{}, &mockTaskRunner{})
+	agentService.taskBySession[session.ID] = task
+	task.Cancel()
+
+	taskID, err := agentService.GetActiveTaskID(context.Background(), session.ID)
+	if err != nil {
+		t.Fatalf("GetActiveTaskID() error = %v", err)
+	}
+	if taskID != "" {
+		t.Fatalf("GetActiveTaskID() = %q, want empty after task completion", taskID)
+	}
+}
+
 func TestMessageTool_NotifyUserSchema(t *testing.T) {
 	tool := NewMessageTool()
 	functions := tool.GetTools()

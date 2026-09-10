@@ -93,26 +93,32 @@ func (t *BrowserTool) ReadOnly() bool {
 
 // Invoke 调用工具
 func (t *BrowserTool) Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
-	action, _ := params["action"].(string)
-	sessionID, _ := params["session_id"].(string)
+	action, toolErr := requiredToolString(params, "action")
+	if toolErr != nil {
+		return toolErr, nil
+	}
+	sessionID, toolErr := requiredToolString(params, "session_id")
+	if toolErr != nil {
+		return toolErr, nil
+	}
 
 	switch action {
 	case BrowserActionNavigate:
-		url := ""
-		if v, ok := params["url"].(string); ok {
-			url = v
+		url, toolErr := requiredToolString(params, "url")
+		if toolErr != nil {
+			return toolErr, nil
 		}
-		return t.browser.Navigate(sessionID, url)
+		return t.browser.Navigate(ctx, sessionID, url)
 
 	case BrowserActionView:
-		return t.browser.ViewPage(sessionID)
+		return t.browser.ViewPage(ctx, sessionID)
 
 	case BrowserActionScreenshot:
 		var fullPage *bool
 		if v, ok := params["full_page"].(bool); ok {
 			fullPage = &v
 		}
-		data, err := t.browser.Screenshot(sessionID, fullPage)
+		data, err := t.browser.Screenshot(ctx, sessionID, fullPage)
 		if err != nil {
 			return model.NewToolError(err.Error()), err
 		}
@@ -133,12 +139,12 @@ func (t *BrowserTool) Invoke(ctx context.Context, params map[string]interface{})
 		if v, ok := params["coordinate_y"].(float64); ok {
 			coordY = &v
 		}
-		return t.browser.Click(sessionID, index, coordX, coordY)
+		return t.browser.Click(ctx, sessionID, index, coordX, coordY)
 
 	case BrowserActionInput:
-		text := ""
-		if v, ok := params["text"].(string); ok {
-			text = v
+		text, toolErr := requiredToolString(params, "text")
+		if toolErr != nil {
+			return toolErr, nil
 		}
 		pressEnter := false
 		if v, ok := params["press_enter"].(bool); ok {
@@ -156,28 +162,28 @@ func (t *BrowserTool) Invoke(ctx context.Context, params map[string]interface{})
 		if v, ok := params["coordinate_y"].(float64); ok {
 			coordY = &v
 		}
-		return t.browser.Input(sessionID, text, pressEnter, index, coordX, coordY)
+		return t.browser.Input(ctx, sessionID, text, pressEnter, index, coordX, coordY)
 
 	case BrowserActionScrollUp:
 		var toTop *bool
 		if v, ok := params["to_top"].(bool); ok {
 			toTop = &v
 		}
-		return t.browser.ScrollUp(sessionID, toTop)
+		return t.browser.ScrollUp(ctx, sessionID, toTop)
 
 	case BrowserActionScrollDown:
 		var toDown *bool
 		if v, ok := params["to_down"].(bool); ok {
 			toDown = &v
 		}
-		return t.browser.ScrollDown(sessionID, toDown)
+		return t.browser.ScrollDown(ctx, sessionID, toDown)
 
 	case BrowserActionPressKey:
-		key := ""
-		if v, ok := params["key"].(string); ok {
-			key = v
+		key, toolErr := requiredToolString(params, "key")
+		if toolErr != nil {
+			return toolErr, nil
 		}
-		return t.browser.PressKey(sessionID, key)
+		return t.browser.PressKey(ctx, sessionID, key)
 
 	default:
 		return model.NewToolError("unknown action: " + action), nil

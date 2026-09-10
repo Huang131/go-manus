@@ -392,6 +392,36 @@ func TestRedisStreamTask_Cancel(t *testing.T) {
 	task.Cancel()
 }
 
+func TestRedisStreamTask_SubscribeOutputCancelIsIdempotent(t *testing.T) {
+	defaultTaskRegistry.Clear()
+
+	task := NewRedisStreamTask(&mockMQWrapper{}, &mockTaskRunner{})
+	events, cancel := task.SubscribeOutput(context.Background(), 1)
+
+	cancel()
+	cancel()
+
+	select {
+	case _, ok := <-events:
+		if ok {
+			for range events {
+			}
+		}
+	case <-time.After(time.Second):
+		t.Fatal("SubscribeOutput channel was not closed after cancellation")
+	}
+}
+
+func TestStreamDataStringMarshalsNonStringData(t *testing.T) {
+	got, err := streamDataString(map[string]string{"message": "hello"})
+	if err != nil {
+		t.Fatalf("streamDataString() error = %v", err)
+	}
+	if got != `{"message":"hello"}` {
+		t.Fatalf("streamDataString() = %q, want JSON object", got)
+	}
+}
+
 // TestRedisStreamTask_PutInput_GetOutput 测试消息传递
 func TestRedisStreamTask_PutInput_GetOutput(t *testing.T) {
 	// 清理注册表

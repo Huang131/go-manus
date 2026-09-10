@@ -77,18 +77,27 @@ func (t *ShellTool) ReadOnly() bool {
 
 // Invoke 调用工具
 func (t *ShellTool) Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
-	action, _ := params["action"].(string)
-	sessionID, _ := params["session_id"].(string)
+	action, toolErr := requiredToolString(params, "action")
+	if toolErr != nil {
+		return toolErr, nil
+	}
+	sessionID, toolErr := requiredToolString(params, "session_id")
+	if toolErr != nil {
+		return toolErr, nil
+	}
 
 	switch action {
 	case ShellActionExec:
+		command := ""
+		var ok bool
+		if value, exists := params["command"]; !exists {
+			return model.NewToolError("command 不能为空"), nil
+		} else if command, ok = value.(string); !ok || command == "" {
+			return model.NewToolError("command 必须是非空字符串"), nil
+		}
 		execDir := ""
 		if v, ok := params["exec_dir"].(string); ok {
 			execDir = v
-		}
-		command := ""
-		if v, ok := params["command"].(string); ok {
-			command = v
 		}
 		return t.sandbox.ExecCommand(ctx, sessionID, execDir, command)
 

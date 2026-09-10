@@ -156,8 +156,10 @@ type RedisStreamTask struct {
 	done         atomic.Bool
 	doneChan     chan struct{}
 	doneOnce     sync.Once
+	finishOnce   sync.Once
 	mu           sync.RWMutex
 	registry     TaskRegistryInterface // 任务注册表（用于注销）
+	onFinished   func()
 
 	// 缓存的流适配器实例，确保游标状态跨调用保持（避免每次新建导致重复消费）
 	inputStreamInstance  *TaskStream
@@ -214,20 +216,30 @@ func (s *TaskStream) Pop(ctx context.Context) (string, string, error) {
 	}
 
 	// 推进游标：记录本次读取到的消息 ID，避免重复消费
+	dataStr, err := streamDataString(data)
+	if err != nil {
+		return "", "", fmt.Errorf("marshal stream data: %w", err)
+	}
 	if id != "" {
 		s.mu.Lock()
 		s.lastID = id
 		s.mu.Unlock()
 	}
 
-	// 将 data 转换为字符串
-	dataStr, ok := data.(string)
-	if !ok {
-		// 如果是其他类型，序列化为 JSON
-		bytes, _ := sonic.Marshal(data)
-		dataStr = string(bytes)
-	}
 	return id, dataStr, nil
+}
+
+// streamDataString 将消息队列返回的数据统一转换为 JSON 文本。
+// 队列实现可能直接返回字符串，也可能返回已解析的 map，不能通过断言失败静默变成空数据。
+func streamDataString(data interface{}) (string, error) {
+	if value, ok := data.(string); ok {
+		return value, nil
+	}
+	encoded, err := sonic.Marshal(data)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
 }
 
 // IsEmpty 检查是否为空
@@ -303,6 +315,14 @@ func (t *RedisStreamTask) DoneChan() <-chan struct{} {
 	return t.doneChan
 }
 
+// SetOnFinished 设置任务完成后的回调。
+// 回调只会执行一次，用于让上层清理 session 到 task 的索引。
+func (t *RedisStreamTask) SetOnFinished(callback func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.onFinished = callback
+}
+
 // InputStream 返回输入流（惰性创建并缓存实例，保证游标状态跨调用保持）
 func (t *RedisStreamTask) InputStream() Stream {
 	t.mu.Lock()
@@ -365,23 +385,7 @@ func (t *RedisStreamTask) execute(ctx context.Context) {
 
 // onDone 任务完成时的回调
 func (t *RedisStreamTask) onDone() {
-	t.done.Store(true)
-
-	// 关闭完成通知 channel
-	t.doneOnce.Do(func() { close(t.doneChan) })
-
-	// 调用 runner 的 OnDone 回调
-	if t.runner != nil {
-		t.runner.OnDone(t)
-	}
-
-	// 从注册表移除
-	if t.registry != nil {
-		t.registry.Unregister(t.id)
-	}
-
-	logger.Info("RedisStreamTask 执行完成",
-		logger.String("task_id", t.id))
+	t.finish("RedisStreamTask 执行完成")
 }
 
 // Cancel 取消任务
@@ -396,19 +400,33 @@ func (t *RedisStreamTask) Cancel() bool {
 	}
 	t.mu.Unlock()
 
-	// 立即设置 done 标志，确保 Done() 返回 true
-	t.done.Store(true)
-
-	// 关闭完成通知 channel
-	t.doneOnce.Do(func() { close(t.doneChan) })
-
-	if t.registry != nil {
-		t.registry.Unregister(t.id)
-	}
-	logger.Info("RedisStreamTask 已取消",
-		logger.String("task_id", t.id))
+	t.finish("RedisStreamTask 已取消")
 
 	return true
+}
+
+// finish 统一处理任务终结，避免 Cancel 和 execute 并发时重复清理。
+func (t *RedisStreamTask) finish(logMessage string) {
+	t.finishOnce.Do(func() {
+		t.done.Store(true)
+		t.doneOnce.Do(func() { close(t.doneChan) })
+
+		if t.runner != nil {
+			t.runner.OnDone(t)
+		}
+		if t.registry != nil {
+			t.registry.Unregister(t.id)
+		}
+
+		t.mu.RLock()
+		callback := t.onFinished
+		t.mu.RUnlock()
+		if callback != nil {
+			callback()
+		}
+
+		logger.Info(logMessage, logger.String("task_id", t.id))
+	})
 }
 
 // PutInput 往输入流放入消息
@@ -459,27 +477,26 @@ func (t *RedisStreamTask) SubscribeOutput(ctx context.Context, bufferSize int) (
 	}
 
 	eventChan := make(chan *model.Event, bufferSize)
-	stopChan := make(chan struct{})
-
+	subCtx, cancelContext := context.WithCancel(ctx)
+	var cancelOnce sync.Once
 	cancel := func() {
-		close(stopChan)
+		cancelOnce.Do(cancelContext)
 	}
 
 	go func() {
 		defer close(eventChan)
+		defer cancelContext()
 
 		lastID := ""
 		for {
 			select {
-			case <-ctx.Done():
-				return
-			case <-stopChan:
+			case <-subCtx.Done():
 				return
 			default:
 				// 获取下一条消息
-				id, data, err := t.outputStream.GetBlocking(ctx, t.outputStreamName(), lastID, DefaultBlockTimeout)
+				id, data, err := t.outputStream.GetBlocking(subCtx, t.outputStreamName(), lastID, DefaultBlockTimeout)
 				if err != nil {
-					if ctx.Err() != nil {
+					if subCtx.Err() != nil {
 						return
 					}
 					logger.Warn("获取输出消息失败",
@@ -494,7 +511,13 @@ func (t *RedisStreamTask) SubscribeOutput(ctx context.Context, bufferSize int) (
 
 				// 解析事件
 				var event model.Event
-				dataStr, _ := data.(string)
+				dataStr, err := streamDataString(data)
+				if err != nil {
+					logger.Warn("序列化输出消息失败",
+						logger.String("task_id", t.id),
+						logger.Err(err))
+					continue
+				}
 				if err := sonic.Unmarshal([]byte(dataStr), &event); err != nil {
 					logger.Warn("解析事件失败",
 						logger.String("task_id", t.id),
@@ -507,9 +530,7 @@ func (t *RedisStreamTask) SubscribeOutput(ctx context.Context, bufferSize int) (
 				// 发送到 channel
 				select {
 				case eventChan <- &event:
-				case <-ctx.Done():
-					return
-				case <-stopChan:
+				case <-subCtx.Done():
 					return
 				}
 			}

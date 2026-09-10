@@ -189,12 +189,13 @@ func (s *AgentService) resolveMessageAttachments(ctx context.Context, sessionID 
 // StopSession 停止会话
 func (s *AgentService) StopSession(ctx context.Context, sessionID string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	task := s.taskBySession[sessionID]
+	delete(s.taskBySession, sessionID)
+	s.mu.Unlock()
 
-	// 清理 Task
-	if task, ok := s.taskBySession[sessionID]; ok {
+	// 先移除映射，再取消任务，避免完成回调重入同一把锁。
+	if task != nil {
 		task.Cancel()
-		delete(s.taskBySession, sessionID)
 	}
 
 	// 更新会话状态
@@ -206,14 +207,20 @@ func (s *AgentService) StopSession(ctx context.Context, sessionID string) error 
 // Shutdown 关闭服务
 func (s *AgentService) Shutdown() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	logger.Info("Agent 服务关闭中...")
 
-	// 取消所有 Task
+	// 先摘除全部映射，再在锁外取消任务，避免完成回调重入同一把锁。
+	tasks := make([]*RedisStreamTask, 0, len(s.taskBySession))
 	for sessionID, task := range s.taskBySession {
-		task.Cancel()
+		tasks = append(tasks, task)
 		delete(s.taskBySession, sessionID)
+	}
+	s.mu.Unlock()
+
+	for _, task := range tasks {
+		if task != nil {
+			task.Cancel()
+		}
 	}
 
 	logger.Info("Agent 服务已关闭")
@@ -287,6 +294,13 @@ func (s *AgentService) getOrCreateTask(ctx context.Context, session *model.Sessi
 	})
 
 	task := NewRedisStreamTask(s.mq, runner)
+	task.SetOnFinished(func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if current, ok := s.taskBySession[session.ID]; ok && current == task {
+			delete(s.taskBySession, session.ID)
+		}
+	})
 	s.taskBySession[session.ID] = task
 
 	logger.Info("创建新的 RedisStreamTask",
@@ -353,11 +367,14 @@ func (s *AgentService) getToolNames(tools []Tool) []string {
 // 对齐原 mooc-manus Python 版本的 _get_task 逻辑：返回该 session 最近关联的 task。
 // 如果 task 已结束（不在 taskBySession 中），返回空字符串，调用方应关闭 SSE 流。
 func (s *AgentService) GetActiveTaskID(ctx context.Context, sessionID string) (string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	task, ok := s.taskBySession[sessionID]
-	if !ok || task == nil {
+	if !ok || task == nil || task.Done() {
+		if ok {
+			delete(s.taskBySession, sessionID)
+		}
 		return "", nil
 	}
 	return task.ID(), nil

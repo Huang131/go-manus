@@ -306,88 +306,88 @@ func TestBrowserInterface(t *testing.T) {
 // MockBrowser 用于测试的 Browser Mock 实现
 type MockBrowser struct{}
 
-func (m *MockBrowser) ViewPage(sessionID string) (*model.ToolResult, error) {
+func (m *MockBrowser) ViewPage(ctx context.Context, sessionID string) (*model.ToolResult, error) {
 	return &model.ToolResult{
 		Success: true,
 		Message: "Page viewed",
 	}, nil
 }
 
-func (m *MockBrowser) Navigate(sessionID, url string) (*model.ToolResult, error) {
+func (m *MockBrowser) Navigate(ctx context.Context, sessionID, url string) (*model.ToolResult, error) {
 	return &model.ToolResult{
 		Success: true,
 		Message: "Navigated to " + url,
 	}, nil
 }
 
-func (m *MockBrowser) Restart(sessionID, url string) (*model.ToolResult, error) {
+func (m *MockBrowser) Restart(ctx context.Context, sessionID, url string) (*model.ToolResult, error) {
 	return &model.ToolResult{
 		Success: true,
 		Message: "Browser restarted at " + url,
 	}, nil
 }
 
-func (m *MockBrowser) Click(sessionID string, index *int, coordinateX, coordinateY *float64) (*model.ToolResult, error) {
+func (m *MockBrowser) Click(ctx context.Context, sessionID string, index *int, coordinateX, coordinateY *float64) (*model.ToolResult, error) {
 	return &model.ToolResult{
 		Success: true,
 		Message: "Clicked element",
 	}, nil
 }
 
-func (m *MockBrowser) Input(sessionID, text string, pressEnter bool, index *int, coordinateX, coordinateY *float64) (*model.ToolResult, error) {
+func (m *MockBrowser) Input(ctx context.Context, sessionID, text string, pressEnter bool, index *int, coordinateX, coordinateY *float64) (*model.ToolResult, error) {
 	return &model.ToolResult{
 		Success: true,
 		Message: "Input text",
 	}, nil
 }
 
-func (m *MockBrowser) MoveMouse(sessionID string, coordinateX, coordinateY float64) (*model.ToolResult, error) {
+func (m *MockBrowser) MoveMouse(ctx context.Context, sessionID string, coordinateX, coordinateY float64) (*model.ToolResult, error) {
 	return &model.ToolResult{
 		Success: true,
 		Message: "Mouse moved",
 	}, nil
 }
 
-func (m *MockBrowser) PressKey(sessionID, key string) (*model.ToolResult, error) {
+func (m *MockBrowser) PressKey(ctx context.Context, sessionID, key string) (*model.ToolResult, error) {
 	return &model.ToolResult{
 		Success: true,
 		Message: "Key pressed: " + key,
 	}, nil
 }
 
-func (m *MockBrowser) SelectOption(sessionID string, index, option int) (*model.ToolResult, error) {
+func (m *MockBrowser) SelectOption(ctx context.Context, sessionID string, index, option int) (*model.ToolResult, error) {
 	return &model.ToolResult{
 		Success: true,
 		Message: "Option selected",
 	}, nil
 }
 
-func (m *MockBrowser) ScrollUp(sessionID string, toTop *bool) (*model.ToolResult, error) {
+func (m *MockBrowser) ScrollUp(ctx context.Context, sessionID string, toTop *bool) (*model.ToolResult, error) {
 	return &model.ToolResult{
 		Success: true,
 		Message: "Scrolled up",
 	}, nil
 }
 
-func (m *MockBrowser) ScrollDown(sessionID string, toDown *bool) (*model.ToolResult, error) {
+func (m *MockBrowser) ScrollDown(ctx context.Context, sessionID string, toDown *bool) (*model.ToolResult, error) {
 	return &model.ToolResult{
 		Success: true,
 		Message: "Scrolled down",
 	}, nil
 }
 
-func (m *MockBrowser) Screenshot(sessionID string, fullPage *bool) ([]byte, error) {
+func (m *MockBrowser) Screenshot(ctx context.Context, sessionID string, fullPage *bool) ([]byte, error) {
 	return []byte("screenshot data"), nil
 }
 
-func (m *MockBrowser) ConsoleExec(sessionID, javascript string) (*model.ToolResult, error) {
+func (m *MockBrowser) ConsoleExec(ctx context.Context, sessionID, javascript string) (*model.ToolResult, error) {
 	return &model.ToolResult{
 		Success: true,
 		Message: "Console executed",
 	}, nil
 }
 
-func (m *MockBrowser) ConsoleView(sessionID string, maxLines *int) (*model.ToolResult, error) {
+func (m *MockBrowser) ConsoleView(ctx context.Context, sessionID string, maxLines *int) (*model.ToolResult, error) {
 	return &model.ToolResult{
 		Success: true,
 		Message: "Console output",
@@ -398,7 +398,7 @@ func (m *MockBrowser) ConsoleView(sessionID string, maxLines *int) (*model.ToolR
 func TestBrowser_Navigate(t *testing.T) {
 	browser := &MockBrowser{}
 
-	result, err := browser.Navigate("session-1", "https://example.com")
+	result, err := browser.Navigate(context.Background(), "session-1", "https://example.com")
 	if err != nil {
 		t.Errorf("Navigate() error = %v", err)
 	}
@@ -416,7 +416,7 @@ func TestBrowser_Navigate(t *testing.T) {
 func TestBrowser_Screenshot(t *testing.T) {
 	browser := &MockBrowser{}
 
-	data, err := browser.Screenshot("session-1", nil)
+	data, err := browser.Screenshot(context.Background(), "session-1", nil)
 	if err != nil {
 		t.Errorf("Screenshot() error = %v", err)
 	}

@@ -97,8 +97,14 @@ func (t *FileTool) ReadOnly() bool {
 
 // Invoke 调用工具
 func (t *FileTool) Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
-	action, _ := params["action"].(string)
-	filepath, _ := params["filepath"].(string)
+	action, toolErr := requiredToolString(params, "action")
+	if toolErr != nil {
+		return toolErr, nil
+	}
+	filepath, toolErr := requiredToolString(params, "filepath")
+	if toolErr != nil {
+		return toolErr, nil
+	}
 
 	switch action {
 	case FileActionRead:
@@ -122,7 +128,10 @@ func (t *FileTool) Invoke(ctx context.Context, params map[string]interface{}) (*
 		return t.sandbox.ReadFile(ctx, filepath, startLine, endLine, sudo, maxLength)
 
 	case FileActionWrite:
-		content, _ := params["content"].(string)
+		content, toolErr := requiredToolString(params, "content")
+		if toolErr != nil {
+			return toolErr, nil
+		}
 		append := false
 		if v, ok := params["append"].(bool); ok {
 			append = v
@@ -147,7 +156,10 @@ func (t *FileTool) Invoke(ctx context.Context, params map[string]interface{}) (*
 		return t.sandbox.ListFiles(ctx, dirPath)
 
 	case FileActionSearch:
-		regex, _ := params["regex"].(string)
+		regex, toolErr := requiredToolString(params, "regex")
+		if toolErr != nil {
+			return toolErr, nil
+		}
 		sudo := false
 		if v, ok := params["sudo"].(bool); ok {
 			sudo = v
@@ -155,8 +167,14 @@ func (t *FileTool) Invoke(ctx context.Context, params map[string]interface{}) (*
 		return t.sandbox.SearchInFile(ctx, filepath, regex, sudo)
 
 	case FileActionReplace:
-		oldStr, _ := params["old_str"].(string)
-		newStr, _ := params["new_str"].(string)
+		oldStr, toolErr := requiredToolString(params, "old_str")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		newStr, toolErr := requiredToolString(params, "new_str")
+		if toolErr != nil {
+			return toolErr, nil
+		}
 		sudo := false
 		if v, ok := params["sudo"].(bool); ok {
 			sudo = v

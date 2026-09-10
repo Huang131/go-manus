@@ -231,6 +231,47 @@ func TestA2ATool_Invoke_CallAgentWithoutTask(t *testing.T) {
 	}
 }
 
+func TestToolValidationRejectsMissingRequiredParameters(t *testing.T) {
+	t.Run("shell command", func(t *testing.T) {
+		result, err := NewShellTool(nil).Invoke(context.Background(), map[string]interface{}{
+			"action":     ShellActionExec,
+			"session_id": "session-1",
+		})
+		if err != nil {
+			t.Fatalf("Invoke() error = %v", err)
+		}
+		if result.Success || result.Message == "" {
+			t.Fatalf("Invoke() = %+v, want parameter error", result)
+		}
+	})
+
+	t.Run("file content", func(t *testing.T) {
+		result, err := NewFileTool(nil).Invoke(context.Background(), map[string]interface{}{
+			"action":   FileActionWrite,
+			"filepath": "/tmp/a.txt",
+		})
+		if err != nil {
+			t.Fatalf("Invoke() error = %v", err)
+		}
+		if result.Success || result.Message == "" {
+			t.Fatalf("Invoke() = %+v, want parameter error", result)
+		}
+	})
+
+	t.Run("browser key", func(t *testing.T) {
+		result, err := NewBrowserTool(nil).Invoke(context.Background(), map[string]interface{}{
+			"action":     BrowserActionPressKey,
+			"session_id": "session-1",
+		})
+		if err != nil {
+			t.Fatalf("Invoke() error = %v", err)
+		}
+		if result.Success || result.Message == "" {
+			t.Fatalf("Invoke() = %+v, want parameter error", result)
+		}
+	})
+}
+
 func TestA2ATool_Initialize(t *testing.T) {
 	tool := NewA2ATool()
 

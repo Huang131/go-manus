@@ -3,8 +3,10 @@ package service
 import (
 	"context"
 	"errors"
-	"github.com/bytedance/sonic"
+	"strings"
 	"testing"
+
+	"github.com/bytedance/sonic"
 
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
@@ -434,5 +436,28 @@ func TestAppConfigService_GetConfig_RepositoryError(t *testing.T) {
 	_, err := svc.GetLLMConfig(context.Background())
 	if err == nil {
 		t.Error("GetLLMConfig() should return error when repository fails")
+	}
+}
+
+func TestAppConfigService_UpdateLLMConfig_ReturnsExistingConfigError(t *testing.T) {
+	repo := NewMockAppConfigRepository()
+	repo.getErr = errors.New("database unavailable")
+	svc := NewAppConfigService(repo)
+
+	err := svc.UpdateLLMConfig(context.Background(), &model.LLMConfig{
+		BaseURL:   "https://example.test",
+		ModelName: "model",
+	})
+	if err == nil || !strings.Contains(err.Error(), "database unavailable") {
+		t.Fatalf("UpdateLLMConfig() error = %v, want existing config error", err)
+	}
+}
+
+func TestAppConfigService_DeleteMCPServer_NotFoundWithoutConfig(t *testing.T) {
+	svc := NewAppConfigService(NewMockAppConfigRepository())
+
+	err := svc.DeleteMCPServer(context.Background(), "missing")
+	if err == nil {
+		t.Fatal("DeleteMCPServer() error = nil, want not found")
 	}
 }

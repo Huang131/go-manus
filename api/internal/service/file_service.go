@@ -11,6 +11,7 @@ import (
 	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
+	"github.com/Huang131/go-manus/api/pkg/logger"
 	"github.com/google/uuid"
 )
 
@@ -74,6 +75,11 @@ func (s *DefaultFileService) UploadFile(ctx context.Context, sessionID, filename
 	}
 
 	if err := s.repo.Create(ctx, file); err != nil {
+		if cleanupErr := s.storage.Delete(ctx, key); cleanupErr != nil {
+			logger.Warn("清理文件上传孤儿对象失败",
+				logger.String("key", key),
+				logger.Err(cleanupErr))
+		}
 		return nil, err
 	}
 	return file, nil

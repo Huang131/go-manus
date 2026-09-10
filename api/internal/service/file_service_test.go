@@ -203,12 +203,16 @@ func TestFileServiceUploadFileStorageError(t *testing.T) {
 
 func TestFileServiceUploadFileRepoCreateError(t *testing.T) {
 	repo := &stubFileRepo{createErr: errors.New("db write failed")}
-	svc := NewFileService(repo, &stubStorage{})
+	storage := &stubStorage{}
+	svc := NewFileService(repo, storage)
 
 	_, err := svc.UploadFile(context.Background(), "session-1", "doc.txt",
 		strings.NewReader("hello"), 5, "text/plain")
 	if err == nil || err.Error() != "db write failed" {
 		t.Fatalf("UploadFile() error = %v, want repository error", err)
+	}
+	if storage.deletedKey == "" {
+		t.Fatal("UploadFile() should compensate by deleting uploaded object")
 	}
 }
 

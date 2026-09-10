@@ -298,9 +298,9 @@ func TestLLMModelAPI_SetDefault_Concurrent(t *testing.T) {
 		go func(modelID string) {
 			defer wg.Done()
 			w := postJSON(t, "/api/llm-models/"+modelID+"/default", nil)
-			// 并发下可能有个别因唯一约束竞争返回错误，属预期，不断言单次结果
+			// 竞争失败只能映射为业务冲突，不能把数据库错误暴露成 500。
 			if w.Code != http.StatusOK && w.Code != http.StatusConflict {
-				t.Logf("unexpected response for id=%s: status=%d", modelID, w.Code)
+				t.Errorf("unexpected response for id=%s: status=%d, body=%s", modelID, w.Code, w.Body.String())
 			}
 		}(id)
 	}

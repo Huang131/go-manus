@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,7 +33,8 @@ type LLMModelService interface {
 
 // DefaultLLMModelService 默认实现
 type DefaultLLMModelService struct {
-	repo repository.LLMModelRepository
+	repo      repository.LLMModelRepository
+	defaultMu sync.Mutex
 }
 
 // NewLLMModelService 创建多模型服务
@@ -235,11 +237,18 @@ func (s *DefaultLLMModelService) SetDefault(ctx context.Context, id string) erro
 		return ErrModelDisabled
 	}
 
+	// 单进程内串行切换，避免并发请求同时清空并设置默认模型。
+	s.defaultMu.Lock()
+	defer s.defaultMu.Unlock()
+
 	return s.repo.WithTx(ctx, func(r repository.LLMModelRepository) error {
 		if err := r.ClearDefault(ctx, nil); err != nil {
 			return err
 		}
 		if err := r.SetDefault(ctx, nil, id); err != nil {
+			if isUniqueViolation(err) {
+				return ErrModelConflict
+			}
 			return err
 		}
 		// 触发部分 unique 索引兜底

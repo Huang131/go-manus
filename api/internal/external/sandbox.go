@@ -458,29 +458,29 @@ func NewBrowserClient(sandbox Sandbox) *BrowserClient {
 }
 
 // ViewPage 获取当前浏览器的页面内容
-func (c *BrowserClient) ViewPage(sessionID string) (*model.ToolResult, error) {
-	return c.sandbox.ExecCommand(context.Background(), sessionID, "", "cat /tmp/browser/page.html")
+func (c *BrowserClient) ViewPage(ctx context.Context, sessionID string) (*model.ToolResult, error) {
+	return c.sandbox.ExecCommand(ctx, sessionID, "", "cat /tmp/browser/page.html")
 }
 
 // Navigate 使用浏览器导航到指定 URL
-func (c *BrowserClient) Navigate(sessionID, url string) (*model.ToolResult, error) {
+func (c *BrowserClient) Navigate(ctx context.Context, sessionID, url string) (*model.ToolResult, error) {
 	// 通过执行 Playwright 脚本实现导航
 	script := fmt.Sprintf(`const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.goto('%s'); await browser.close(); })();`, url)
-	return c.sandbox.ExecCommand(context.Background(), sessionID, "", script)
+	return c.sandbox.ExecCommand(ctx, sessionID, "", script)
 }
 
 // Restart 重启浏览器并访问指定 URL
-func (c *BrowserClient) Restart(sessionID, url string) (*model.ToolResult, error) {
+func (c *BrowserClient) Restart(ctx context.Context, sessionID, url string) (*model.ToolResult, error) {
 	// 先关闭现有浏览器，再启动新的
 	killScript := `pkill -f chromium || true`
-	if _, err := c.sandbox.ExecCommand(context.Background(), sessionID, "", killScript); err != nil {
+	if _, err := c.sandbox.ExecCommand(ctx, sessionID, "", killScript); err != nil {
 		logger.Warn("failed to kill existing browser", logger.Err(err))
 	}
-	return c.Navigate(sessionID, url)
+	return c.Navigate(ctx, sessionID, url)
 }
 
 // Click 通过索引或坐标点击元素
-func (c *BrowserClient) Click(sessionID string, index *int, coordinateX, coordinateY *float64) (*model.ToolResult, error) {
+func (c *BrowserClient) Click(ctx context.Context, sessionID string, index *int, coordinateX, coordinateY *float64) (*model.ToolResult, error) {
 	var script string
 	if index != nil {
 		script = fmt.Sprintf(`const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.locator('a').nth(%d).click(); await browser.close(); })();`, *index)
@@ -489,11 +489,11 @@ func (c *BrowserClient) Click(sessionID string, index *int, coordinateX, coordin
 	} else {
 		return model.NewToolError("either index or coordinates required"), fmt.Errorf("either index or coordinates required")
 	}
-	return c.sandbox.ExecCommand(context.Background(), sessionID, "", script)
+	return c.sandbox.ExecCommand(ctx, sessionID, "", script)
 }
 
 // Input 在输入框中输入文本
-func (c *BrowserClient) Input(sessionID, text string, pressEnter bool, index *int, coordinateX, coordinateY *float64) (*model.ToolResult, error) {
+func (c *BrowserClient) Input(ctx context.Context, sessionID, text string, pressEnter bool, index *int, coordinateX, coordinateY *float64) (*model.ToolResult, error) {
 	var script string
 	if index != nil {
 		if pressEnter {
@@ -510,58 +510,58 @@ func (c *BrowserClient) Input(sessionID, text string, pressEnter bool, index *in
 	} else {
 		return model.NewToolError("either index or coordinates required"), fmt.Errorf("either index or coordinates required")
 	}
-	return c.sandbox.ExecCommand(context.Background(), sessionID, "", script)
+	return c.sandbox.ExecCommand(ctx, sessionID, "", script)
 }
 
 // MoveMouse 移动鼠标到指定坐标
-func (c *BrowserClient) MoveMouse(sessionID string, coordinateX, coordinateY float64) (*model.ToolResult, error) {
+func (c *BrowserClient) MoveMouse(ctx context.Context, sessionID string, coordinateX, coordinateY float64) (*model.ToolResult, error) {
 	script := fmt.Sprintf(`const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.mouse.move(%f, %f); await browser.close(); })();`, coordinateX, coordinateY)
-	return c.sandbox.ExecCommand(context.Background(), sessionID, "", script)
+	return c.sandbox.ExecCommand(ctx, sessionID, "", script)
 }
 
 // PressKey 模拟按键
-func (c *BrowserClient) PressKey(sessionID, key string) (*model.ToolResult, error) {
+func (c *BrowserClient) PressKey(ctx context.Context, sessionID, key string) (*model.ToolResult, error) {
 	script := fmt.Sprintf(`const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.keyboard.press('%s'); await browser.close(); })();`, key)
-	return c.sandbox.ExecCommand(context.Background(), sessionID, "", script)
+	return c.sandbox.ExecCommand(ctx, sessionID, "", script)
 }
 
 // SelectOption 在下拉菜单中选择选项
-func (c *BrowserClient) SelectOption(sessionID string, index, option int) (*model.ToolResult, error) {
+func (c *BrowserClient) SelectOption(ctx context.Context, sessionID string, index, option int) (*model.ToolResult, error) {
 	script := fmt.Sprintf(`const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.locator('select').nth(%d).selectOption({ index: %d }); await browser.close(); })();`, index, option)
-	return c.sandbox.ExecCommand(context.Background(), sessionID, "", script)
+	return c.sandbox.ExecCommand(ctx, sessionID, "", script)
 }
 
 // ScrollUp 向上滚动浏览器
-func (c *BrowserClient) ScrollUp(sessionID string, toTop *bool) (*model.ToolResult, error) {
+func (c *BrowserClient) ScrollUp(ctx context.Context, sessionID string, toTop *bool) (*model.ToolResult, error) {
 	var script string
 	if toTop != nil && *toTop {
 		script = `const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.evaluate(() => window.scrollTo(0, 0)); await browser.close(); })();`
 	} else {
 		script = `const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.evaluate(() => window.scrollBy(0, -window.innerHeight)); await browser.close(); })();`
 	}
-	return c.sandbox.ExecCommand(context.Background(), sessionID, "", script)
+	return c.sandbox.ExecCommand(ctx, sessionID, "", script)
 }
 
 // ScrollDown 向下滚动浏览器
-func (c *BrowserClient) ScrollDown(sessionID string, toDown *bool) (*model.ToolResult, error) {
+func (c *BrowserClient) ScrollDown(ctx context.Context, sessionID string, toDown *bool) (*model.ToolResult, error) {
 	var script string
 	if toDown != nil && *toDown {
 		script = `const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)); await browser.close(); })();`
 	} else {
 		script = `const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.evaluate(() => window.scrollBy(0, window.innerHeight)); await browser.close(); })();`
 	}
-	return c.sandbox.ExecCommand(context.Background(), sessionID, "", script)
+	return c.sandbox.ExecCommand(ctx, sessionID, "", script)
 }
 
 // Screenshot 对当前页面截图
-func (c *BrowserClient) Screenshot(sessionID string, fullPage *bool) ([]byte, error) {
+func (c *BrowserClient) Screenshot(ctx context.Context, sessionID string, fullPage *bool) ([]byte, error) {
 	var script string
 	if fullPage != nil && *fullPage {
 		script = `const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); const screenshot = await page.screenshot({ fullPage: true }); console.log(Buffer.from(screenshot).toString('base64')); await browser.close(); })();`
 	} else {
 		script = `const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); const screenshot = await page.screenshot(); console.log(Buffer.from(screenshot).toString('base64')); await browser.close(); })();`
 	}
-	result, err := c.sandbox.ExecCommand(context.Background(), sessionID, "", script)
+	result, err := c.sandbox.ExecCommand(ctx, sessionID, "", script)
 	if err != nil {
 		return nil, err
 	}
@@ -572,17 +572,17 @@ func (c *BrowserClient) Screenshot(sessionID string, fullPage *bool) ([]byte, er
 }
 
 // ConsoleExec 在浏览器控制台执行 JavaScript
-func (c *BrowserClient) ConsoleExec(sessionID, javascript string) (*model.ToolResult, error) {
+func (c *BrowserClient) ConsoleExec(ctx context.Context, sessionID, javascript string) (*model.ToolResult, error) {
 	script := fmt.Sprintf(`const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.evaluate(() => { %s }); await browser.close(); })();`, javascript)
-	return c.sandbox.ExecCommand(context.Background(), sessionID, "", script)
+	return c.sandbox.ExecCommand(ctx, sessionID, "", script)
 }
 
 // ConsoleView 获取控制台输出
-func (c *BrowserClient) ConsoleView(sessionID string, maxLines *int) (*model.ToolResult, error) {
+func (c *BrowserClient) ConsoleView(ctx context.Context, sessionID string, maxLines *int) (*model.ToolResult, error) {
 	// 通过读取 console 日志文件实现
 	cmd := "cat /tmp/browser/console.log"
 	if maxLines != nil {
 		cmd = fmt.Sprintf("head -n %d /tmp/browser/console.log", *maxLines)
 	}
-	return c.sandbox.ExecCommand(context.Background(), sessionID, "", cmd)
+	return c.sandbox.ExecCommand(ctx, sessionID, "", cmd)
 }

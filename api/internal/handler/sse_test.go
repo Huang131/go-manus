@@ -46,3 +46,15 @@ func TestMergeEventMetadata(t *testing.T) {
 		t.Fatalf("mergeEventMetadata() = %v, want event metadata", payload)
 	}
 }
+
+func TestMergeEventMetadata_NullPayloadReturnsOriginalData(t *testing.T) {
+	input := []byte("null")
+	got := mergeEventMetadata(context.Background(), &model.Event{
+		ID:        "event-1",
+		CreatedAt: time.Unix(123, 0).UTC(),
+		Data:      input,
+	})
+	if string(got) != string(input) {
+		t.Fatalf("mergeEventMetadata() = %s, want original null payload", got)
+	}
+}

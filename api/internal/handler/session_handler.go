@@ -468,6 +468,9 @@ func mergeEventMetadata(ctx context.Context, event *model.Event) []byte {
 		// 业务 payload 不是对象，无法平铺。直接返回原始 Data，由前端按 type 自行解析。
 		return event.Data
 	}
+	if payload == nil {
+		return event.Data
+	}
 	payload["event_id"] = event.ID
 	payload["created_at"] = createdAt.Unix()
 	out, err := sonic.Marshal(payload)

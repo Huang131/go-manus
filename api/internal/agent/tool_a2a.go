@@ -71,7 +71,10 @@ func (t *A2ATool) ReadOnly() bool {
 // Invoke 调用工具
 // 参考 Python 版本的 call_remote_agent 工具
 func (t *A2ATool) Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
-	action, _ := params["action"].(string)
+	action, toolErr := requiredToolString(params, "action")
+	if toolErr != nil {
+		return toolErr, nil
+	}
 
 	switch action {
 	case A2AActionListAgents:
