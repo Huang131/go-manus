@@ -8,7 +8,6 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -24,8 +23,8 @@ type LLMModelRepository interface {
 	GetDefault(ctx context.Context) (*model.LLMModel, error)
 	GetFirstEnabled(ctx context.Context) (*model.LLMModel, error)
 	List(ctx context.Context) ([]*model.LLMModel, error)
-	ClearDefault(ctx context.Context, tx pgx.Tx) error
-	SetDefault(ctx context.Context, tx pgx.Tx, id string) error
+	ClearDefault(ctx context.Context) error
+	SetDefault(ctx context.Context, id string) error
 	WithTx(ctx context.Context, fn func(repo LLMModelRepository) error) error
 }
 
@@ -45,18 +44,8 @@ func NewLLMModelRepositoryWithTx(tx pgx.Tx) LLMModelRepository {
 	return &PostgresLLMModelRepository{tx: tx}
 }
 
-// llmModelQueryer 统一 tx / pool
-type llmModelQueryer interface {
-	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
-	Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error)
-	Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error)
-}
-
-func (r *PostgresLLMModelRepository) queryer() llmModelQueryer {
-	if r.tx != nil {
-		return r.tx
-	}
-	return r.db.Pool
+func (r *PostgresLLMModelRepository) queryer() queryer {
+	return newQueryer(r.db, r.tx)
 }
 
 // 阶段 0 新增：capabilities/request_policy/cost_policy/runtime_health 四个 JSONB 列
@@ -275,23 +264,15 @@ func (r *PostgresLLMModelRepository) List(ctx context.Context) ([]*model.LLMMode
 	return out, nil
 }
 
-// ClearDefault 清空所有 default（事务内调用，tx 可传 nil 用 pool）
-func (r *PostgresLLMModelRepository) ClearDefault(ctx context.Context, tx pgx.Tx) error {
-	q := llmModelQueryer(tx)
-	if q == nil {
-		q = r.queryer()
-	}
-	_, err := q.Exec(ctx, `UPDATE llm_models SET is_default = FALSE, updated_at = $1 WHERE is_default = TRUE`, time.Now())
+// ClearDefault 清空所有 default。
+func (r *PostgresLLMModelRepository) ClearDefault(ctx context.Context) error {
+	_, err := r.queryer().Exec(ctx, `UPDATE llm_models SET is_default = FALSE, updated_at = $1 WHERE is_default = TRUE`, time.Now())
 	return err
 }
 
-// SetDefault 把指定 id 设为 default（事务内调用，tx 可传 nil 用 pool）
-func (r *PostgresLLMModelRepository) SetDefault(ctx context.Context, tx pgx.Tx, id string) error {
-	q := llmModelQueryer(tx)
-	if q == nil {
-		q = r.queryer()
-	}
-	_, err := q.Exec(ctx, `UPDATE llm_models SET is_default = TRUE, updated_at = $1 WHERE id = $2`, time.Now(), id)
+// SetDefault 把指定 id 设为 default。
+func (r *PostgresLLMModelRepository) SetDefault(ctx context.Context, id string) error {
+	_, err := r.queryer().Exec(ctx, `UPDATE llm_models SET is_default = TRUE, updated_at = $1 WHERE id = $2`, time.Now(), id)
 	return err
 }
 

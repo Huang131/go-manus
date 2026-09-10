@@ -84,7 +84,7 @@ func (a *PlannerAgent) CreatePlan(ctx context.Context, input *TaskInput) (*model
 	if err := a.jsonParser.Parse(resp.Message.ContentText, &result); err != nil {
 		// 这里不再把解析失败伪装成成功计划。
 		// 计划阶段必须给出结构化 JSON；如果模型没做到，说明当前模型能力或 prompt 契约不满足。
-		logger.Warn("计划 JSON 解析失败",
+		logger.WarnContext(ctx, "计划 JSON 解析失败",
 			logger.String("session_id", a.sessionID),
 			logger.Int("content_len", len(resp.Message.ContentText)),
 			logger.Err(err))

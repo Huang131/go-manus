@@ -611,6 +611,7 @@ func (a *App) initAgent(opts Options, llm external.LLM, browser external.Browser
 
 	// 创建 Agent 服务
 	a.AgentService = agent.NewAgentService(
+		context.Background(),
 		a.repos.session, a.repos.file, a.repos.appConfig, llm, a.Sandbox,
 		agent.DefaultAgentConfig(), mcpConfig, a2aConfig, browser, search, mq, a.OSS,
 	)

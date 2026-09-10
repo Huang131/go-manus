@@ -14,8 +14,6 @@ import (
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // SessionRepository 会话仓储接口
@@ -62,52 +60,13 @@ func NewSessionRepositoryWithTx(tx pgx.Tx) SessionRepository {
 	return &PostgresSessionRepository{tx: tx}
 }
 
-func (r *PostgresSessionRepository) queryer(ctx context.Context) QueryContext {
-	if r.tx != nil {
-		return &txQueryContext{tx: r.tx, ctx: ctx}
-	}
-	return &poolQueryContext{pool: r.db.Pool}
-}
-
-// QueryContext 统一的查询接口
-type QueryContext interface {
-	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
-	Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error)
-	Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error)
-}
-
-type poolQueryContext struct {
-	pool *pgxpool.Pool
-}
-
-func (p *poolQueryContext) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
-	return p.pool.QueryRow(ctx, sql, args...)
-}
-func (p *poolQueryContext) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
-	return p.pool.Query(ctx, sql, args...)
-}
-func (p *poolQueryContext) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
-	return p.pool.Exec(ctx, sql, args...)
-}
-
-type txQueryContext struct {
-	tx  pgx.Tx
-	ctx context.Context
-}
-
-func (t *txQueryContext) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
-	return t.tx.QueryRow(ctx, sql, args...)
-}
-func (t *txQueryContext) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
-	return t.tx.Query(ctx, sql, args...)
-}
-func (t *txQueryContext) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
-	return t.tx.Exec(ctx, sql, args...)
+func (r *PostgresSessionRepository) queryer() queryer {
+	return newQueryer(r.db, r.tx)
 }
 
 // Create 创建会话
 func (r *PostgresSessionRepository) Create(ctx context.Context, session *model.Session) error {
-	q := r.queryer(ctx)
+	q := r.queryer()
 	query := `
 		INSERT INTO sessions (id, sandbox_id, task_id, title, unread_message_count, latest_message,
 			latest_message_at, events, memories, status, created_at, updated_at)
@@ -127,7 +86,7 @@ func (r *PostgresSessionRepository) Create(ctx context.Context, session *model.S
 
 // GetByID 根据ID获取会话 (全字段)
 func (r *PostgresSessionRepository) GetByID(ctx context.Context, id string) (*model.Session, error) {
-	q := r.queryer(ctx)
+	q := r.queryer()
 	query := `
 		SELECT id, COALESCE(sandbox_id, ''), COALESCE(task_id, ''), title, unread_message_count, COALESCE(latest_message, ''),
 			latest_message_at, events, status, created_at, updated_at
@@ -158,7 +117,7 @@ func (r *PostgresSessionRepository) GetByID(ctx context.Context, id string) (*mo
 
 // GetAll 获取所有会话 (按最新消息时间排序，排除已删除)
 func (r *PostgresSessionRepository) GetAll(ctx context.Context) ([]*model.Session, error) {
-	q := r.queryer(ctx)
+	q := r.queryer()
 	query := `
 		SELECT id, COALESCE(sandbox_id, ''), COALESCE(task_id, ''), title, unread_message_count, COALESCE(latest_message, ''),
 			latest_message_at, status, created_at, updated_at
@@ -195,7 +154,7 @@ func (r *PostgresSessionRepository) GetAll(ctx context.Context) ([]*model.Sessio
 
 // List 获取会话列表 (按最新消息时间排序，排除已删除)
 func (r *PostgresSessionRepository) List(ctx context.Context, limit, offset int) ([]*model.Session, int, error) {
-	q := r.queryer(ctx)
+	q := r.queryer()
 	countQuery := `SELECT COUNT(*) FROM sessions WHERE deleted_at IS NULL`
 	var total int
 	if err := q.QueryRow(ctx, countQuery).Scan(&total); err != nil {
@@ -239,7 +198,7 @@ func (r *PostgresSessionRepository) List(ctx context.Context, limit, offset int)
 
 // Update 更新会话 (全字段，memories 列由 SaveMemory 独立管理，此处不触碰)
 func (r *PostgresSessionRepository) Update(ctx context.Context, session *model.Session) error {
-	q := r.queryer(ctx)
+	q := r.queryer()
 	query := `
 		UPDATE sessions SET
 			sandbox_id = $2, task_id = $3, title = $4, unread_message_count = $5,
@@ -271,7 +230,7 @@ func marshalSessionEvents(events []model.Event) ([]byte, error) {
 // Delete 删除会话（软删除）
 // 设置 deleted_at 时间戳，会话关联的文件在过期后会被自动清理
 func (r *PostgresSessionRepository) Delete(ctx context.Context, id string) error {
-	q := r.queryer(ctx)
+	q := r.queryer()
 	query := `UPDATE sessions SET deleted_at = NOW() WHERE id = $1`
 	_, err := q.Exec(ctx, query, id)
 	return err
@@ -279,7 +238,7 @@ func (r *PostgresSessionRepository) Delete(ctx context.Context, id string) error
 
 // AppendEvent 追加事件并同步最新消息
 func (r *PostgresSessionRepository) AppendEvent(ctx context.Context, id string, event *model.Event) error {
-	q := r.queryer(ctx)
+	q := r.queryer()
 
 	// 回填事件 ID 和时间戳，确保存储到数据库的事件信息完整
 	// （上游调用点只设置 Type/Data，之前导致 id 为空、created_at 为零值）
@@ -325,7 +284,7 @@ func (r *PostgresSessionRepository) AppendEvent(ctx context.Context, id string, 
 
 // GetMemory 获取指定 Agent 的记忆
 func (r *PostgresSessionRepository) GetMemory(ctx context.Context, id string, agentName string) ([]llmcore.Message, error) {
-	q := r.queryer(ctx)
+	q := r.queryer()
 	query := `SELECT memories->>$2 FROM sessions WHERE id = $1`
 	var memoryJSON []byte
 	err := q.QueryRow(ctx, query, id, agentName).Scan(&memoryJSON)
@@ -347,7 +306,7 @@ func (r *PostgresSessionRepository) GetMemory(ctx context.Context, id string, ag
 
 // SaveMemory 保存指定 Agent 的记忆
 func (r *PostgresSessionRepository) SaveMemory(ctx context.Context, id string, agentName string, messages []llmcore.Message) error {
-	q := r.queryer(ctx)
+	q := r.queryer()
 	if messages == nil {
 		messages = []llmcore.Message{}
 	}
@@ -367,7 +326,7 @@ func (r *PostgresSessionRepository) SaveMemory(ctx context.Context, id string, a
 
 // UpdateTitle 更新会话标题
 func (r *PostgresSessionRepository) UpdateTitle(ctx context.Context, id string, title string) error {
-	q := r.queryer(ctx)
+	q := r.queryer()
 	query := `UPDATE sessions SET title = $2, updated_at = NOW() WHERE id = $1`
 	_, err := q.Exec(ctx, query, id, title)
 	return err
@@ -375,7 +334,7 @@ func (r *PostgresSessionRepository) UpdateTitle(ctx context.Context, id string, 
 
 // UpdateLatestMessage 更新最新消息
 func (r *PostgresSessionRepository) UpdateLatestMessage(ctx context.Context, id string, message string) error {
-	q := r.queryer(ctx)
+	q := r.queryer()
 	query := `UPDATE sessions SET latest_message = $2, latest_message_at = NOW(), updated_at = NOW() WHERE id = $1`
 	_, err := q.Exec(ctx, query, id, message)
 	return err
@@ -383,7 +342,7 @@ func (r *PostgresSessionRepository) UpdateLatestMessage(ctx context.Context, id 
 
 // UpdateStatus 更新会话状态
 func (r *PostgresSessionRepository) UpdateStatus(ctx context.Context, id string, status model.SessionStatus) error {
-	q := r.queryer(ctx)
+	q := r.queryer()
 	query := `UPDATE sessions SET status = $2, updated_at = NOW() WHERE id = $1`
 	_, err := q.Exec(ctx, query, id, status)
 	return err
@@ -391,7 +350,7 @@ func (r *PostgresSessionRepository) UpdateStatus(ctx context.Context, id string,
 
 // IncrementUnreadCount 原子增加未读数
 func (r *PostgresSessionRepository) IncrementUnreadCount(ctx context.Context, id string) error {
-	q := r.queryer(ctx)
+	q := r.queryer()
 	query := `UPDATE sessions SET unread_message_count = unread_message_count + 1, updated_at = NOW() WHERE id = $1`
 	_, err := q.Exec(ctx, query, id)
 	return err
@@ -399,7 +358,7 @@ func (r *PostgresSessionRepository) IncrementUnreadCount(ctx context.Context, id
 
 // DecrementUnreadCount 原子减少未读数 (最低为0)
 func (r *PostgresSessionRepository) DecrementUnreadCount(ctx context.Context, id string) error {
-	q := r.queryer(ctx)
+	q := r.queryer()
 	query := `
 		UPDATE sessions SET unread_message_count = GREATEST(unread_message_count - 1, 0), updated_at = NOW()
 		WHERE id = $1
@@ -410,7 +369,7 @@ func (r *PostgresSessionRepository) DecrementUnreadCount(ctx context.Context, id
 
 // SetUnreadCount 设置未读数
 func (r *PostgresSessionRepository) SetUnreadCount(ctx context.Context, id string, count int) error {
-	q := r.queryer(ctx)
+	q := r.queryer()
 	query := `UPDATE sessions SET unread_message_count = $2, updated_at = NOW() WHERE id = $1`
 	_, err := q.Exec(ctx, query, id, count)
 	return err

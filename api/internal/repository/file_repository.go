@@ -8,8 +8,6 @@ import (
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // FileRepository 文件仓储接口
@@ -51,39 +49,8 @@ func NewFileRepositoryWithTx(tx pgx.Tx) FileRepository {
 	return &PostgresFileRepository{tx: tx}
 }
 
-func (r *PostgresFileRepository) queryer() QueryContext {
-	if r.tx != nil {
-		return &fileTxQueryContext{tx: r.tx}
-	}
-	return &filePoolQueryContext{pool: r.db.Pool}
-}
-
-type filePoolQueryContext struct {
-	pool *pgxpool.Pool
-}
-
-func (p *filePoolQueryContext) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
-	return p.pool.QueryRow(ctx, sql, args...)
-}
-func (p *filePoolQueryContext) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
-	return p.pool.Query(ctx, sql, args...)
-}
-func (p *filePoolQueryContext) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
-	return p.pool.Exec(ctx, sql, args...)
-}
-
-type fileTxQueryContext struct {
-	tx pgx.Tx
-}
-
-func (t *fileTxQueryContext) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
-	return t.tx.QueryRow(ctx, sql, args...)
-}
-func (t *fileTxQueryContext) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
-	return t.tx.Query(ctx, sql, args...)
-}
-func (t *fileTxQueryContext) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
-	return t.tx.Exec(ctx, sql, args...)
+func (r *PostgresFileRepository) queryer() queryer {
+	return newQueryer(r.db, r.tx)
 }
 
 // Create 创建文件记录

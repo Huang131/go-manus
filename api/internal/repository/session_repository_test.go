@@ -1,7 +1,6 @@
 package repository
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
@@ -24,17 +23,6 @@ func TestMarshalSessionEventsRejectsInvalidJSON(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "encode session events") {
 		t.Fatalf("marshalSessionEvents() error = %q, want context", err)
-	}
-}
-
-// MockQueryContext 用于测试的 QueryContext Mock
-type MockQueryContext struct {
-	sessions map[string]*model.Session
-}
-
-func NewMockQueryContext() *MockQueryContext {
-	return &MockQueryContext{
-		sessions: make(map[string]*model.Session),
 	}
 }
 
@@ -298,28 +286,4 @@ func TestSessionRepository_JSONSerialization(t *testing.T) {
 	// 注意：由于 Session.MarshalJSON 自定义实现将时间转为 Unix 时间戳，
 	// 而 UnmarshalJSON 不支持该格式，所以这里不测试反序列化。
 	// 如果需要完整的序列化/反序列化支持，应在 Session 模型中添加 UnmarshalJSON 方法。
-}
-
-// TestSessionRepository_QueryContext 测试查询上下文
-func TestSessionRepository_QueryContext(t *testing.T) {
-	ctx := context.Background()
-
-	// 模拟使用上下文
-	select {
-	case <-ctx.Done():
-		t.Error("上下文不应该被取消")
-	default:
-		// 正常
-	}
-
-	// 创建取消的上下文
-	canceledCtx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	select {
-	case <-canceledCtx.Done():
-		// 预期取消
-	default:
-		t.Error("上下文应该被取消")
-	}
 }

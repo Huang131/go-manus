@@ -71,7 +71,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 		// 兜底 recover：任何 panic 不能杀死整个进程，转为 error 事件让前端正常结束
 		defer func() {
 			if r := recover(); r != nil {
-				logger.Error("PlannerReActFlow panic，已恢复",
+				logger.ErrorContext(ctx, "PlannerReActFlow panic，已恢复",
 					logger.String("session_id", f.sessionID),
 					logger.Any("panic", r),
 					logger.String("stack", string(debug.Stack())))
@@ -82,7 +82,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 
 		f.setStatus(FlowStatusPlanning)
 
-		logger.Info("PlannerReActFlow 开始执行",
+		logger.InfoContext(ctx, "PlannerReActFlow 开始执行",
 			logger.String("session_id", f.sessionID),
 			logger.String("message", input.Message.ContentText))
 
@@ -101,7 +101,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 				// 规划状态 -> 调用 Planner 创建计划
 				plan, planMsg, err := f.planner.CreatePlan(ctx, input)
 				if err != nil {
-					logger.Error("Planner 创建计划失败", logger.Err(err))
+					logger.ErrorContext(ctx, "Planner 创建计划失败", logger.Err(err))
 					ch <- model.NewErrorEvent(err.Error())
 					f.setStatus(FlowStatusCompleted)
 					break
@@ -117,7 +117,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 				ch <- model.NewMessageEvent("assistant", planMsg)
 				ch <- model.NewPlanEvent(*plan, model.PlanEventStatusCreated)
 
-				logger.Info("Planner 创建计划成功",
+				logger.InfoContext(ctx, "Planner 创建计划成功",
 					logger.String("session_id", f.sessionID),
 					logger.Int("steps", len(plan.Steps)))
 
@@ -126,7 +126,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 			case FlowStatusExecuting:
 				// 执行状态 -> 获取下一个步骤并执行
 				if f.plan == nil || len(f.plan.Steps) == 0 {
-					logger.Warn("计划为空，无法进入执行阶段",
+					logger.WarnContext(ctx, "计划为空，无法进入执行阶段",
 						logger.String("session_id", f.sessionID))
 					ch <- model.NewErrorEvent("计划为空，无法执行")
 					f.setStatus(FlowStatusCompleted)
@@ -135,7 +135,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 
 				step := f.plan.GetNextStep()
 				if step == nil {
-					logger.Info("所有步骤已执行完毕，进入总结阶段")
+					logger.InfoContext(ctx, "所有步骤已执行完毕，进入总结阶段")
 					f.setStatus(FlowStatusSummarizing)
 					break
 				}
@@ -145,14 +145,14 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 				ch <- model.NewStepEvent(*step, model.StepEventStatusStarted)
 
 				// 执行步骤
-				logger.Info("ReActAgent 开始执行步骤",
+				logger.InfoContext(ctx, "ReActAgent 开始执行步骤",
 					logger.String("step_id", step.ID),
 					logger.String("description", step.Description))
 
 				if err := f.react.ExecuteStep(ctx, f.plan, step, input); err != nil {
 					if err == ErrWaitForUser {
 						// 需要等待用户输入
-						logger.Info("ReActAgent 等待用户输入",
+						logger.InfoContext(ctx, "ReActAgent 等待用户输入",
 							logger.String("question", step.UserQuestion))
 						ch <- model.NewMessageEvent("assistant", step.UserQuestion)
 						ch <- model.NewWaitEvent()
@@ -160,7 +160,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 						// 不压缩记忆，保留上下文
 						continue
 					}
-					logger.Error("ReActAgent 执行步骤失败", logger.Err(err))
+					logger.ErrorContext(ctx, "ReActAgent 执行步骤失败", logger.Err(err))
 					ch <- model.NewStepEvent(*step, model.StepEventStatusFailed)
 					step.Status = model.ExecutionStatusFailed
 					step.Error = err.Error()
@@ -205,7 +205,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 				if completedStep != nil {
 					updatedPlan, err := f.planner.UpdatePlan(ctx, f.plan, completedStep)
 					if err != nil {
-						logger.Warn("Planner 更新计划失败", logger.Err(err))
+						logger.WarnContext(ctx, "Planner 更新计划失败", logger.Err(err))
 					} else {
 						f.plan = updatedPlan
 						ch <- model.NewPlanEvent(*updatedPlan, model.PlanEventStatusUpdated)
@@ -220,15 +220,15 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 				if len(f.plan.Steps) > 0 {
 					summary, attachments, err := f.react.Summarize(ctx)
 					if err != nil {
-						logger.Warn("ReActAgent 总结任务失败", logger.Err(err))
+						logger.WarnContext(ctx, "ReActAgent 总结任务失败", logger.Err(err))
 					} else {
 						ch <- model.NewMessageEvent("assistant", summary)
 						for _, att := range attachments {
-							logger.Info("任务生成附件", logger.String("filepath", att))
+							logger.InfoContext(ctx, "任务生成附件", logger.String("filepath", att))
 						}
 					}
 				} else {
-					logger.Warn("跳过空步骤计划的总结阶段",
+					logger.WarnContext(ctx, "跳过空步骤计划的总结阶段",
 						logger.String("session_id", f.sessionID))
 				}
 
@@ -241,7 +241,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 					ch <- model.NewPlanEvent(*f.plan, model.PlanEventStatusCompleted)
 				}
 				ch <- model.NewDoneEvent()
-				logger.Info("PlannerReActFlow 执行完成",
+				logger.InfoContext(ctx, "PlannerReActFlow 执行完成",
 					logger.String("session_id", f.sessionID))
 				return
 			}

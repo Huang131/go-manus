@@ -231,6 +231,36 @@ func TestA2ATool_Invoke_CallAgentWithoutTask(t *testing.T) {
 	}
 }
 
+func TestA2ATool_Invoke_CallAgentRejectsInvalidRequiredTypes(t *testing.T) {
+	t.Run("agent id type", func(t *testing.T) {
+		result, err := NewA2ATool().Invoke(context.Background(), map[string]interface{}{
+			"action":   A2AActionCallAgent,
+			"agent_id": 123,
+			"task":     "test task",
+		})
+		if err != nil {
+			t.Fatalf("Invoke() error = %v, want nil", err)
+		}
+		if result.Success || result.Message != "agent_id 必须是非空字符串" {
+			t.Fatalf("unexpected result: %+v", result)
+		}
+	})
+
+	t.Run("task type", func(t *testing.T) {
+		result, err := NewA2ATool().Invoke(context.Background(), map[string]interface{}{
+			"action":   A2AActionCallAgent,
+			"agent_id": "agent-1",
+			"task":     true,
+		})
+		if err != nil {
+			t.Fatalf("Invoke() error = %v, want nil", err)
+		}
+		if result.Success || result.Message != "task 必须是非空字符串" {
+			t.Fatalf("unexpected result: %+v", result)
+		}
+	})
+}
+
 func TestToolValidationRejectsMissingRequiredParameters(t *testing.T) {
 	t.Run("shell command", func(t *testing.T) {
 		result, err := NewShellTool(nil).Invoke(context.Background(), map[string]interface{}{
@@ -276,13 +306,13 @@ func TestA2ATool_Initialize(t *testing.T) {
 	tool := NewA2ATool()
 
 	// 初始化空的配置
-	err := tool.Initialize(nil)
+	err := tool.Initialize(context.Background(), nil)
 	if err != nil {
 		t.Errorf("Initialize(nil) error = %v, want nil", err)
 	}
 
 	// 初始化空数组配置
-	err = tool.Initialize(&A2AConfig{Agents: []A2AAgent{}})
+	err = tool.Initialize(context.Background(), &A2AConfig{Agents: []A2AAgent{}})
 	if err != nil {
 		t.Errorf("Initialize(empty config) error = %v, want nil", err)
 	}
@@ -292,7 +322,7 @@ func TestA2ATool_Cleanup(t *testing.T) {
 	tool := NewA2ATool()
 
 	// 初始化
-	err := tool.Initialize(nil)
+	err := tool.Initialize(context.Background(), nil)
 	if err != nil {
 		t.Errorf("Initialize() error = %v, want nil", err)
 	}

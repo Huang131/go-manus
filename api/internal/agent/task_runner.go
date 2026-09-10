@@ -98,7 +98,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 		_ = r.sessionRep.UpdateStatus(ctx, r.sessionID, model.SessionStatusRunning)
 	}
 
-	logger.Info("AgentTaskRunner 开始执行",
+	logger.InfoContext(ctx, "AgentTaskRunner 开始执行",
 		logger.String("session_id", r.sessionID),
 		logger.String("task_id", task.ID()))
 
@@ -111,11 +111,11 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 		// 检查任务是否已取消或完成
 		select {
 		case <-ctx.Done():
-			logger.Info("AgentTaskRunner 上下文取消，退出执行",
+			logger.InfoContext(ctx, "AgentTaskRunner 上下文取消，退出执行",
 				logger.String("task_id", task.ID()))
 			return ctx.Err()
 		case <-task.DoneChan():
-			logger.Info("AgentTaskRunner 任务完成，退出执行",
+			logger.InfoContext(ctx, "AgentTaskRunner 任务完成，退出执行",
 				logger.String("task_id", task.ID()))
 			return nil
 		default:
@@ -126,13 +126,13 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 		if err != nil {
 			// 检查是否是 context 取消
 			if ctx.Err() != nil {
-				logger.Info("AgentTaskRunner 上下文取消，退出执行",
+				logger.InfoContext(ctx, "AgentTaskRunner 上下文取消，退出执行",
 					logger.String("task_id", task.ID()))
 				return ctx.Err()
 			}
 			// 检查是否是任务完成信号
 			if task.Done() {
-				logger.Info("AgentTaskRunner 任务完成，退出执行",
+				logger.InfoContext(ctx, "AgentTaskRunner 任务完成，退出执行",
 					logger.String("task_id", task.ID()))
 				return nil
 			}
@@ -140,7 +140,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 			// 死循环修复：累计错误次数，超过阈值则退出
 			popRetryCount++
 			if popRetryCount >= popRetryMaxCount {
-				logger.Error("获取输入消息连续失败次数过多，退出执行",
+				logger.ErrorContext(ctx, "获取输入消息连续失败次数过多，退出执行",
 					logger.String("task_id", task.ID()),
 					logger.Int("retry_count", popRetryCount),
 					logger.Err(err))
@@ -148,7 +148,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 			}
 
 			// 指数退避延迟
-			logger.Warn("获取输入消息失败，等待重试",
+			logger.WarnContext(ctx, "获取输入消息失败，等待重试",
 				logger.String("task_id", task.ID()),
 				logger.Int("retry_count", popRetryCount),
 				logger.Dur("retry_delay", popRetryDelay),
@@ -179,7 +179,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 		// 解析事件
 		var inputEvent model.MessageEvent
 		if err := sonic.UnmarshalString(data, &inputEvent); err != nil {
-			logger.Warn("解析输入事件失败",
+			logger.WarnContext(ctx, "解析输入事件失败",
 				logger.String("data", data),
 				logger.Err(err))
 			continue
@@ -187,7 +187,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 
 		attachments, err := r.syncUserAttachmentsToSandbox(ctx, inputEvent.Attachments)
 		if err != nil {
-			logger.Warn("同步用户附件失败",
+			logger.WarnContext(ctx, "同步用户附件失败",
 				logger.String("session_id", r.sessionID),
 				logger.Err(err))
 		}
@@ -198,7 +198,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 			contexts := r.attLoader.Load(ctx, inputEvent.Attachments, inputEvent.Message)
 			attachmentContexts = contexts
 			if len(contexts) > 0 {
-				logger.Info("已加载附件内容到 LLM 上下文",
+				logger.InfoContext(ctx, "已加载附件内容到 LLM 上下文",
 					logger.String("session_id", r.sessionID),
 					logger.Int("count", len(contexts)))
 			}
@@ -222,7 +222,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 			// 业务事件先序列化为 payload
 			eventJSON, err := sonic.Marshal(event)
 			if err != nil {
-				logger.Error("序列化事件失败",
+				logger.ErrorContext(ctx, "序列化事件失败",
 					logger.String("task_id", task.ID()),
 					logger.Err(err))
 				continue
@@ -241,7 +241,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 				payload["created_at"] = eventCreatedAt.Unix()
 				eventJSON, err = sonic.Marshal(payload)
 				if err != nil {
-					logger.Error("序列化事件 payload 失败",
+					logger.ErrorContext(ctx, "序列化事件 payload 失败",
 						logger.String("task_id", task.ID()),
 						logger.Err(err))
 					continue
@@ -260,7 +260,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 			}
 			wrappedJSON, err := sonic.Marshal(baseEvent)
 			if err != nil {
-				logger.Error("序列化 model.Event 失败",
+				logger.ErrorContext(ctx, "序列化 model.Event 失败",
 					logger.String("task_id", task.ID()),
 					logger.Err(err))
 				continue
@@ -268,14 +268,14 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 
 			outputID, err := task.OutputStream().Put(ctx, string(wrappedJSON))
 			if err != nil {
-				logger.Warn("写入 output_stream 失败",
+				logger.WarnContext(ctx, "写入 output_stream 失败",
 					logger.String("task_id", task.ID()),
 					logger.Err(err))
 			}
 
 			// 同步到会话数据库
 			if err := r.sessionRep.AppendEvent(ctx, r.sessionID, baseEvent); err != nil {
-				logger.Warn("添加事件到会话失败",
+				logger.WarnContext(ctx, "添加事件到会话失败",
 					logger.String("session_id", r.sessionID),
 					logger.Err(err))
 			}
@@ -288,7 +288,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 					_ = r.sessionRep.UpdateStatus(ctx, r.sessionID, model.SessionStatusCompleted)
 				}
 			case *model.ErrorEvent:
-				logger.Error("Agent 运行出错", logger.String("error", e.Message))
+				logger.ErrorContext(ctx, "Agent 运行出错", logger.String("error", e.Message))
 			case *model.StepEvent:
 				if e.Status == model.StepEventStatusCompleted && e.Step.Success {
 					// 步骤完成，同步附件文件
@@ -298,7 +298,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 				}
 			}
 
-			logger.Debug("AgentTaskRunner 输出事件",
+			logger.DebugContext(ctx, "AgentTaskRunner 输出事件",
 				logger.String("task_id", task.ID()),
 				logger.String("event_id", outputID),
 				logger.String("event_type", string(event.GetType())))
@@ -368,11 +368,11 @@ func (r *AgentTaskRunner) syncFileToStorage(ctx context.Context, filePath string
 	// 从沙箱读取文件
 	result, err := r.sandbox.ReadFile(ctx, filePath, nil, nil, false, 0)
 	if err != nil {
-		logger.Warn("从沙箱读取文件失败", logger.String("filepath", filePath), logger.Err(err))
+		logger.WarnContext(ctx, "从沙箱读取文件失败", logger.String("filepath", filePath), logger.Err(err))
 		return nil
 	}
 	if !result.Success {
-		logger.Warn("从沙箱读取文件失败", logger.String("filepath", filePath), logger.String("message", result.Message))
+		logger.WarnContext(ctx, "从沙箱读取文件失败", logger.String("filepath", filePath), logger.String("message", result.Message))
 		return nil
 	}
 
@@ -388,7 +388,7 @@ func (r *AgentTaskRunner) syncFileToStorage(ctx context.Context, filePath string
 	key := "agent/" + r.sessionID + "/" + filePath
 	err = r.fileStorage.Upload(ctx, key, &readerWrapper{data: []byte(content)}, int64(len(content)), "text/plain")
 	if err != nil {
-		logger.Warn("同步文件到存储失败", logger.String("filepath", filePath), logger.Err(err))
+		logger.WarnContext(ctx, "同步文件到存储失败", logger.String("filepath", filePath), logger.Err(err))
 		return nil
 	}
 
@@ -399,7 +399,7 @@ func (r *AgentTaskRunner) syncFileToStorage(ctx context.Context, filePath string
 		Key:      key,
 	}
 	if err := r.fileRep.Create(ctx, file); err != nil {
-		logger.Warn("创建文件记录失败", logger.String("filepath", filePath), logger.Err(err))
+		logger.WarnContext(ctx, "创建文件记录失败", logger.String("filepath", filePath), logger.Err(err))
 	}
 
 	return nil
@@ -429,7 +429,7 @@ func (r *AgentTaskRunner) syncUserAttachmentsToSandbox(ctx context.Context, atta
 
 		reader, err := r.fileStorage.Download(ctx, file.Key)
 		if err != nil {
-			logger.Warn("下载用户附件失败",
+			logger.WarnContext(ctx, "下载用户附件失败",
 				logger.String("session_id", r.sessionID),
 				logger.String("file_id", file.ID),
 				logger.Err(err))
@@ -439,14 +439,14 @@ func (r *AgentTaskRunner) syncUserAttachmentsToSandbox(ctx context.Context, atta
 		data, err := io.ReadAll(reader)
 		closeErr := reader.Close()
 		if err != nil {
-			logger.Warn("读取用户附件失败",
+			logger.WarnContext(ctx, "读取用户附件失败",
 				logger.String("session_id", r.sessionID),
 				logger.String("file_id", file.ID),
 				logger.Err(err))
 			continue
 		}
 		if closeErr != nil {
-			logger.Warn("关闭用户附件失败",
+			logger.WarnContext(ctx, "关闭用户附件失败",
 				logger.String("session_id", r.sessionID),
 				logger.String("file_id", file.ID),
 				logger.Err(closeErr))
@@ -458,7 +458,7 @@ func (r *AgentTaskRunner) syncUserAttachmentsToSandbox(ctx context.Context, atta
 		}
 		sandboxPath := filepath.Join("/home/ubuntu/upload", r.sessionID, filename)
 		if _, err := r.sandbox.UploadFile(ctx, data, sandboxPath, filename); err != nil {
-			logger.Warn("上传用户附件到沙箱失败",
+			logger.WarnContext(ctx, "上传用户附件到沙箱失败",
 				logger.String("session_id", r.sessionID),
 				logger.String("file_id", file.ID),
 				logger.String("sandbox_path", sandboxPath),

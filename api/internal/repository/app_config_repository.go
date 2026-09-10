@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 
@@ -11,8 +10,6 @@ import (
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // AppConfigRepository 应用配置仓储接口
@@ -43,46 +40,8 @@ func NewAppConfigRepositoryWithTx(tx pgx.Tx) AppConfigRepository {
 	return &PostgresAppConfigRepository{tx: tx}
 }
 
-// ConfigQueryContext 配置查询接口
-type ConfigQueryContext interface {
-	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
-	Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error)
-	Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error)
-}
-
-func (r *PostgresAppConfigRepository) queryer() ConfigQueryContext {
-	if r.tx != nil {
-		return &configTxQueryContext{tx: r.tx}
-	}
-	return &configPoolQueryContext{pool: r.db.Pool}
-}
-
-type configPoolQueryContext struct {
-	pool *pgxpool.Pool
-}
-
-func (p *configPoolQueryContext) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
-	return p.pool.QueryRow(ctx, sql, args...)
-}
-func (p *configPoolQueryContext) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
-	return p.pool.Query(ctx, sql, args...)
-}
-func (p *configPoolQueryContext) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
-	return p.pool.Exec(ctx, sql, args...)
-}
-
-type configTxQueryContext struct {
-	tx pgx.Tx
-}
-
-func (t *configTxQueryContext) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
-	return t.tx.QueryRow(ctx, sql, args...)
-}
-func (t *configTxQueryContext) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
-	return t.tx.Query(ctx, sql, args...)
-}
-func (t *configTxQueryContext) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
-	return t.tx.Exec(ctx, sql, args...)
+func (r *PostgresAppConfigRepository) queryer() queryer {
+	return newQueryer(r.db, r.tx)
 }
 
 // GetConfig 获取配置
@@ -105,35 +64,15 @@ func (r *PostgresAppConfigRepository) GetConfig(ctx context.Context, configType 
 		return nil, err
 	}
 
-	// 统一规范化为实际 JSON 字节，兼容历史遗留的 base64 编码与多重序列化数据
-	config.ConfigValue = normalizeConfigValue(configValueJSON)
+	// JSONB 驱动直接返回原始 JSON，服务层统一负责反序列化为具体配置类型。
+	config.ConfigValue = configValueJSON
 	return &config, nil
-}
-
-// normalizeConfigValue 将存储的 config_value 规范化为实际 JSON 字节。
-// 兼容两种历史数据格式：
-//   - 直接存 JSON 对象：{"key":"value"} => 原样返回
-//   - 存 base64 编码的 JSON 字符串："eyJi..." => 解码后返回 JSON 字节
-func normalizeConfigValue(raw []byte) []byte {
-	var v interface{}
-	if err := sonic.Unmarshal(raw, &v); err != nil {
-		return raw // 非 JSON，原样返回
-	}
-
-	if str, ok := v.(string); ok {
-		if decoded, err := base64.StdEncoding.DecodeString(str); err == nil && sonic.Valid(decoded) {
-			return decoded
-		}
-		return []byte(str)
-	}
-
-	return raw
 }
 
 // SaveConfig 保存配置
 func (r *PostgresAppConfigRepository) SaveConfig(ctx context.Context, config *model.AppConfig) error {
 	q := r.queryer()
-	configValueJSON, err := sonic.Marshal(config.ConfigValue)
+	configValueJSON, err := marshalConfigValue(config.ConfigValue)
 	if err != nil {
 		return err
 	}
@@ -149,6 +88,19 @@ func (r *PostgresAppConfigRepository) SaveConfig(ctx context.Context, config *mo
 		configValueJSON, config.CreatedAt, config.UpdatedAt,
 	)
 	return err
+}
+
+// marshalConfigValue 保持 JSON 字节的原始语义，避免 sonic 将 []byte 编码成 base64 字符串。
+// 服务层传入的结构体仍由 sonic 负责序列化。
+func marshalConfigValue(value any) ([]byte, error) {
+	if raw, ok := value.([]byte); ok {
+		return raw, nil
+	}
+	data, err := sonic.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("encode config value: %w", err)
+	}
+	return data, nil
 }
 
 // DeleteConfig 删除配置
@@ -179,9 +131,7 @@ func (r *PostgresAppConfigRepository) ListConfigs(ctx context.Context, configTyp
 		if err := rows.Scan(&c.ID, &c.ConfigType, &c.ConfigKey, &configValueJSON, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
-		if err := sonic.Unmarshal(configValueJSON, &c.ConfigValue); err != nil {
-			return nil, err
-		}
+		c.ConfigValue = configValueJSON
 		configs = append(configs, &c)
 	}
 	if err := rows.Err(); err != nil {
@@ -210,9 +160,7 @@ func (r *PostgresAppConfigRepository) ListAllConfigs(ctx context.Context) ([]*mo
 		if err := rows.Scan(&c.ID, &c.ConfigType, &c.ConfigKey, &configValueJSON, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, err
 		}
-		if err := sonic.Unmarshal(configValueJSON, &c.ConfigValue); err != nil {
-			return nil, err
-		}
+		c.ConfigValue = configValueJSON
 		configs = append(configs, &c)
 	}
 	if err := rows.Err(); err != nil {

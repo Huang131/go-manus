@@ -14,12 +14,25 @@ import (
 )
 
 // vncUpgrader 接受浏览器 noVNC 客户端的 WebSocket 升级请求。
-// VNC 连接由 nginx / 内网鉴权层控制，这里允许任意 Origin。
+// 非浏览器客户端可能不带 Origin；带 Origin 时只允许与当前请求 Host 一致，
+// 避免公开接口被第三方页面跨站利用。
 var vncUpgrader = websocket.Upgrader{
-	CheckOrigin:     func(r *http.Request) bool { return true },
+	CheckOrigin:     sameOrigin,
 	Subprotocols:    []string{"binary", "base64"},
 	ReadBufferSize:  32 * 1024,
 	WriteBufferSize: 32 * 1024,
+}
+
+func sameOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	return strings.EqualFold(u.Host, r.Host)
 }
 
 // VNCProxy 将前端的 WebSocket 连接代理到 sandbox 的 websockify 端点。

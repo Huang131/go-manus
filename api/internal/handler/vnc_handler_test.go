@@ -115,6 +115,27 @@ func TestVNCProxy_ProxyEcho(t *testing.T) {
 	}
 }
 
+func TestVNCProxy_RejectsCrossOrigin(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://api.example/api/sessions/abc/vnc", nil)
+	req.Header.Set("Origin", "http://evil.example")
+	if sameOrigin(req) {
+		t.Fatal("sameOrigin() accepted a cross-origin request")
+	}
+}
+
+func TestVNCProxy_AllowsSameOriginAndNonBrowserClient(t *testing.T) {
+	sameOriginRequest := httptest.NewRequest(http.MethodGet, "http://api.example/api/sessions/abc/vnc", nil)
+	sameOriginRequest.Header.Set("Origin", "http://api.example")
+	if !sameOrigin(sameOriginRequest) {
+		t.Fatal("sameOrigin() rejected a same-origin request")
+	}
+
+	nonBrowserRequest := httptest.NewRequest(http.MethodGet, "http://api.example/api/sessions/abc/vnc", nil)
+	if !sameOrigin(nonBrowserRequest) {
+		t.Fatal("sameOrigin() rejected a request without Origin")
+	}
+}
+
 func newLocalTestServer(t *testing.T, handler http.Handler) *httptest.Server {
 	t.Helper()
 

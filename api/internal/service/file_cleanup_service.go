@@ -210,8 +210,11 @@ type FileCleanupScheduler struct {
 	expireDuration string
 	batchSize      int
 	interval       time.Duration
+	ctx            context.Context
+	cancel         context.CancelFunc
 	stopChan       chan struct{}
 	stopOnce       sync.Once
+	startOnce      sync.Once
 	wg             sync.WaitGroup
 }
 
@@ -222,19 +225,24 @@ func NewFileCleanupScheduler(
 	batchSize int,
 	interval time.Duration,
 ) *FileCleanupScheduler {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &FileCleanupScheduler{
 		cleanupService: cleanupService,
 		expireDuration: expireDuration,
 		batchSize:      batchSize,
 		interval:       interval,
+		ctx:            ctx,
+		cancel:         cancel,
 		stopChan:       make(chan struct{}),
 	}
 }
 
 // Start 启动清理调度器
 func (s *FileCleanupScheduler) Start() {
-	s.wg.Add(1)
-	go s.run()
+	s.startOnce.Do(func() {
+		s.wg.Add(1)
+		go s.run()
+	})
 	logger.Info("文件清理调度器已启动",
 		logger.String("expire_duration", s.expireDuration),
 		logger.Int("batch_size", s.batchSize),
@@ -245,6 +253,7 @@ func (s *FileCleanupScheduler) Start() {
 func (s *FileCleanupScheduler) Stop() {
 	s.stopOnce.Do(func() {
 		close(s.stopChan)
+		s.cancel()
 	})
 	s.wg.Wait()
 	logger.Info("文件清理调度器已停止")
@@ -271,7 +280,7 @@ func (s *FileCleanupScheduler) run() {
 
 // cleanup 执行清理
 func (s *FileCleanupScheduler) cleanup() {
-	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+	ctx, cancel := context.WithTimeout(s.ctx, cleanupTimeout)
 	defer cancel()
 
 	cleaned, err := s.cleanupService.CleanExpiredFiles(ctx, s.expireDuration, s.batchSize)

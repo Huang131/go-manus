@@ -46,7 +46,7 @@ func (l *Loader) Load(ctx context.Context, files []model.File, userMessage strin
 }
 
 func (l *Loader) loadOne(ctx context.Context, f model.File, userMessage string, budget *int) FileContext {
-	logger.Info("加载附件",
+	logger.InfoContext(ctx, "加载附件",
 		logger.String("file_id", f.ID),
 		logger.String("filename", f.Filename),
 		logger.Int64("size", f.Size),
@@ -74,7 +74,7 @@ func (l *Loader) loadOne(ctx context.Context, f model.File, userMessage string, 
 
 	reader, err := l.storage.Download(ctx, f.Key)
 	if err != nil {
-		logger.Warn("下载附件失败",
+		logger.WarnContext(ctx, "下载附件失败",
 			logger.String("file_id", f.ID),
 			logger.Err(err))
 		return FileContext{
@@ -89,7 +89,7 @@ func (l *Loader) loadOne(ctx context.Context, f model.File, userMessage string, 
 
 	data, err := io.ReadAll(reader)
 	if err != nil {
-		logger.Warn("读取附件内容失败",
+		logger.WarnContext(ctx, "读取附件内容失败",
 			logger.String("file_id", f.ID),
 			logger.Err(err))
 		return FileContext{

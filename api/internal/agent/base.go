@@ -125,7 +125,7 @@ func (a *BaseAgent) mergeMemory(ctx context.Context, msgs []llmcore.Message) {
 		return
 	}
 	if err := a.memory.MergeMessages(msgs); err != nil {
-		logger.Error("记忆合并失败", logger.Err(err))
+		logger.ErrorContext(ctx, "记忆合并失败", logger.Err(err))
 	}
 }
 
@@ -196,7 +196,7 @@ func (a *BaseAgent) invokeWithEmptyRetry(ctx context.Context, req *external.LLMR
 			return resp, attempt, nil
 		}
 		lastErr = nil
-		logger.Warn("LLM 返回空内容，执行重试",
+		logger.WarnContext(ctx, "LLM 返回空内容，执行重试",
 			logger.String("session_id", a.sessionID),
 			logger.String("agent", a.name),
 			logger.Int("attempt", attempt))
@@ -255,7 +255,7 @@ func (a *BaseAgent) Invoke(ctx context.Context, systemPrompt, query string) (*In
 		if err != nil {
 			// LLM 调用失败，尝试重试
 			for retry := 0; retry < a.config.MaxRetries; retry++ {
-				logger.Warn("LLM 调用失败，执行重试",
+				logger.WarnContext(ctx, "LLM 调用失败，执行重试",
 					logger.Int("retry", retry+1),
 					logger.Err(err))
 
@@ -294,7 +294,7 @@ func (a *BaseAgent) Invoke(ctx context.Context, systemPrompt, query string) (*In
 			// 限制只处理第一个工具调用（避免并发问题）
 			toolCalls := resp.Message.ToolCalls
 			if len(toolCalls) > 1 {
-				logger.Warn("LLM 返回多个工具调用，只处理第一个",
+				logger.WarnContext(ctx, "LLM 返回多个工具调用，只处理第一个",
 					logger.Int("total", len(toolCalls)))
 				toolCalls = toolCalls[:1]
 			}
@@ -303,7 +303,7 @@ func (a *BaseAgent) Invoke(ctx context.Context, systemPrompt, query string) (*In
 			for _, tc := range toolCalls {
 				result, err := a.handleToolCall(ctx, tc, messages)
 				if err != nil {
-					logger.Error("工具调用失败",
+					logger.ErrorContext(ctx, "工具调用失败",
 						logger.String("function", tc.Function.Name),
 						logger.String("tool_call_id", tc.ID),
 						logger.Err(err))
@@ -357,7 +357,7 @@ func (a *BaseAgent) Invoke(ctx context.Context, systemPrompt, query string) (*In
 
 		// 5. 如果没有工具调用，检查是否有有效内容
 		if resp.Message.ContentText == "" {
-			logger.Warn("LLM 返回空内容，执行重试")
+			logger.WarnContext(ctx, "LLM 返回空内容，执行重试")
 
 			// 添加空回复到历史
 			messages = append(messages,
@@ -423,7 +423,7 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 		}
 	}
 
-	logger.Info("执行工具调用",
+	logger.InfoContext(ctx, "执行工具调用",
 		logger.String("tool", tool.Name()),
 		logger.String("function", functionName),
 		logger.Any("arguments", arguments))
@@ -458,7 +458,7 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 		if err == nil {
 			break
 		}
-		logger.Warn("工具调用失败，执行重试",
+		logger.WarnContext(ctx, "工具调用失败，执行重试",
 			logger.String("function", functionName),
 			logger.Int("retry", retry+1),
 			logger.Err(err))

@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
@@ -165,7 +164,7 @@ func (m *MockLLMModelRepository) List(ctx context.Context) ([]*model.LLMModel, e
 	return out, nil
 }
 
-func (m *MockLLMModelRepository) ClearDefault(ctx context.Context, tx pgx.Tx) error {
+func (m *MockLLMModelRepository) ClearDefault(ctx context.Context) error {
 	for _, mm := range m.models {
 		mm.IsDefault = false
 	}
@@ -173,7 +172,7 @@ func (m *MockLLMModelRepository) ClearDefault(ctx context.Context, tx pgx.Tx) er
 	return nil
 }
 
-func (m *MockLLMModelRepository) SetDefault(ctx context.Context, tx pgx.Tx, id string) error {
+func (m *MockLLMModelRepository) SetDefault(ctx context.Context, id string) error {
 	if mm, ok := m.models[id]; ok {
 		mm.IsDefault = true
 		m.defaultID = id

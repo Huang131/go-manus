@@ -82,7 +82,7 @@ func (a *ReActAgent) ExecuteStep(ctx context.Context, plan *model.Plan, step *mo
 
 	if err := a.jsonParser.Parse(result.Content, &stepResult); err != nil {
 		// 如果 JSON 解析失败，将整个响应作为结果
-		logger.Warn("JSON 解析失败，尝试直接提取结果",
+		logger.WarnContext(ctx, "JSON 解析失败，尝试直接提取结果",
 			logger.String("content", result.Content),
 			logger.Err(err))
 		step.Success = false
@@ -103,7 +103,7 @@ func (a *ReActAgent) ExecuteStep(ctx context.Context, plan *model.Plan, step *mo
 		step.Error = stepResult.Result
 	}
 
-	logger.Info("ReActAgent 执行步骤完成",
+	logger.InfoContext(ctx, "ReActAgent 执行步骤完成",
 		logger.String("step_id", step.ID),
 		logger.Bool("success", step.Success),
 		logger.String("result", step.Result))
@@ -141,6 +141,6 @@ func (a *ReActAgent) Summarize(ctx context.Context) (string, []string, error) {
 		return resp.Message.ContentText, nil, nil
 	}
 
-	logger.Info("ReActAgent 任务总结完成")
+	logger.InfoContext(ctx, "ReActAgent 任务总结完成")
 	return result.Message, result.Attachments, nil
 }

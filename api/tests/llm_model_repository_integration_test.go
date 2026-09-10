@@ -311,10 +311,10 @@ func TestLLMModelRepo_SetDefault_RoundTrip(t *testing.T) {
 
 	// 设置 default
 	err = repo.WithTx(context.Background(), func(txRepo repository.LLMModelRepository) error {
-		if err := txRepo.ClearDefault(context.Background(), nil); err != nil {
+		if err := txRepo.ClearDefault(context.Background()); err != nil {
 			return err
 		}
-		return txRepo.SetDefault(context.Background(), nil, m.ID)
+		return txRepo.SetDefault(context.Background(), m.ID)
 	})
 	require.NoError(t, err)
 
@@ -346,10 +346,10 @@ func TestLLMModelRepo_SetDefault_ClearExisting(t *testing.T) {
 	t.Cleanup(func() { cleanupLLMModel(t, m2.ID) })
 
 	err = repo.WithTx(context.Background(), func(txRepo repository.LLMModelRepository) error {
-		if err := txRepo.ClearDefault(context.Background(), nil); err != nil {
+		if err := txRepo.ClearDefault(context.Background()); err != nil {
 			return err
 		}
-		return txRepo.SetDefault(context.Background(), nil, m2.ID)
+		return txRepo.SetDefault(context.Background(), m2.ID)
 	})
 	require.NoError(t, err)
 

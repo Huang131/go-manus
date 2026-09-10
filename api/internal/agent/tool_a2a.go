@@ -143,15 +143,13 @@ func (t *A2ATool) listAgents(ctx context.Context, params map[string]interface{})
 // callAgent 调用远程 Agent
 // 对应 Python 版本的 call_remote_agent 工具
 func (t *A2ATool) callAgent(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
-	agentID, _ := params["agent_id"].(string)
-	task, _ := params["task"].(string)
-
-	if agentID == "" {
-		return model.NewToolError("agent_id 不能为空"), nil
+	agentID, toolErr := requiredToolString(params, "agent_id")
+	if toolErr != nil {
+		return toolErr, nil
 	}
-
-	if task == "" {
-		return model.NewToolError("task 不能为空"), nil
+	task, toolErr := requiredToolString(params, "task")
+	if toolErr != nil {
+		return toolErr, nil
 	}
 
 	t.mu.RLock()
@@ -162,14 +160,14 @@ func (t *A2ATool) callAgent(ctx context.Context, params map[string]interface{}) 
 		return model.NewToolError("A2A 客户端管理器未初始化"), nil
 	}
 
-	logger.Info("调用远程 Agent",
+	logger.InfoContext(ctx, "调用远程 Agent",
 		logger.String("agent_id", agentID),
 		logger.String("task", task))
 
 	// 调用远程 Agent
 	result, err := manager.Invoke(ctx, agentID, task)
 	if err != nil {
-		logger.Error("调用远程 Agent 失败",
+		logger.ErrorContext(ctx, "调用远程 Agent 失败",
 			logger.String("agent_id", agentID),
 			logger.Err(err))
 		return model.NewToolError(err.Error()), nil
@@ -228,7 +226,7 @@ func (t *A2ATool) extractResponseText(data interface{}) string {
 
 // Initialize 初始化 A2A 工具
 // 参考 Python 版本的 A2ATool.initialize()
-func (t *A2ATool) Initialize(cfg *A2AConfig) error {
+func (t *A2ATool) Initialize(ctx context.Context, cfg *A2AConfig) error {
 	if cfg == nil {
 		return nil
 	}
@@ -260,9 +258,8 @@ func (t *A2ATool) Initialize(cfg *A2AConfig) error {
 	}
 
 	// 初始化客户端管理器
-	ctx := context.Background()
 	if err := t.manager.Initialize(ctx, config); err != nil {
-		logger.Error("A2A 客户端管理器初始化失败", logger.Err(err))
+		logger.ErrorContext(ctx, "A2A 客户端管理器初始化失败", logger.Err(err))
 		return err
 	}
 

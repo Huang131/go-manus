@@ -395,7 +395,7 @@ func TestMCPTool(t *testing.T) {
 	}
 
 	// 测试无配置初始化
-	err := tool.Initialize(nil)
+	err := tool.Initialize(context.Background(), nil)
 	if err != nil {
 		t.Errorf("Initialize(nil) error = %v", err)
 	}
@@ -422,7 +422,7 @@ func TestMCPTool_WithConfig(t *testing.T) {
 		Timeout: 30,
 	}
 
-	err := tool.Initialize(config)
+	err := tool.Initialize(context.Background(), config)
 	if err != nil {
 		t.Errorf("Initialize(config) error = %v", err)
 	}
@@ -446,7 +446,7 @@ func TestA2ATool(t *testing.T) {
 	}
 
 	// 测试无配置初始化
-	err := tool.Initialize(nil)
+	err := tool.Initialize(context.Background(), nil)
 	if err != nil {
 		t.Errorf("Initialize(nil) error = %v", err)
 	}

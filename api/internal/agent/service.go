@@ -40,6 +40,7 @@ type AgentService struct {
 
 // NewAgentService 创建 Agent 服务
 func NewAgentService(
+	ctx context.Context,
 	sessionRep repository.SessionRepository,
 	fileRep repository.FileRepository,
 	configRep repository.AppConfigRepository,
@@ -56,13 +57,17 @@ func NewAgentService(
 	// 初始化 MCP 工具
 	mcpTool := NewMCPTool()
 	if mcpConfig != nil {
-		_ = mcpTool.Initialize(mcpConfig)
+		if err := mcpTool.Initialize(ctx, mcpConfig); err != nil {
+			logger.Warn("MCP 工具初始化失败，继续启动 Agent 服务", logger.Err(err))
+		}
 	}
 
 	// 初始化 A2A 工具
 	a2aTool := NewA2ATool()
 	if a2aConfig != nil {
-		_ = a2aTool.Initialize(a2aConfig)
+		if err := a2aTool.Initialize(ctx, a2aConfig); err != nil {
+			logger.Warn("A2A 工具初始化失败，继续启动 Agent 服务", logger.Err(err))
+		}
 	}
 
 	return &AgentService{

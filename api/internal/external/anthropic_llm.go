@@ -182,7 +182,7 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		logger.Error("Anthropic API error",
+		logger.ErrorContext(ctx, "Anthropic API error",
 			logger.Int("status", resp.StatusCode),
 			logger.String("body", string(respBody)),
 		)
@@ -221,7 +221,7 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 			})
 		default:
 			// redacted_thinking 等未知块：无法还原内容，跳过
-			logger.Debug("Anthropic 响应包含未处理的内容块", logger.String("type", block.Type))
+			logger.DebugContext(ctx, "Anthropic 响应包含未处理的内容块", logger.String("type", block.Type))
 		}
 	}
 

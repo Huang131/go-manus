@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
@@ -119,10 +118,10 @@ func (s *DefaultLLMModelService) Create(ctx context.Context, m *model.LLMModel) 
 				return err
 			}
 			if cur == nil {
-				if err := r.ClearDefault(ctx, nil); err != nil {
+				if err := r.ClearDefault(ctx); err != nil {
 					return err
 				}
-				if err := r.SetDefault(ctx, nil, m.ID); err != nil {
+				if err := r.SetDefault(ctx, m.ID); err != nil {
 					return err
 				}
 				m.IsDefault = true
@@ -160,7 +159,7 @@ func (s *DefaultLLMModelService) Update(ctx context.Context, m *model.LLMModel) 
 
 	err = s.repo.WithTx(ctx, func(r repository.LLMModelRepository) error {
 		if m.IsDefault && !old.IsDefault {
-			if err := r.ClearDefault(ctx, nil); err != nil {
+			if err := r.ClearDefault(ctx); err != nil {
 				return err
 			}
 		}
@@ -171,7 +170,7 @@ func (s *DefaultLLMModelService) Update(ctx context.Context, m *model.LLMModel) 
 			return err
 		}
 		if m.IsDefault && !old.IsDefault {
-			if err := r.SetDefault(ctx, nil, m.ID); err != nil {
+			if err := r.SetDefault(ctx, m.ID); err != nil {
 				return err
 			}
 		}
@@ -213,7 +212,7 @@ func (s *DefaultLLMModelService) Delete(ctx context.Context, id string) error {
 	return s.repo.WithTx(ctx, func(r repository.LLMModelRepository) error {
 		// 如果是 default，先清掉 default 标记（事务内原子）
 		if m.IsDefault {
-			if err := r.ClearDefault(ctx, nil); err != nil {
+			if err := r.ClearDefault(ctx); err != nil {
 				return err
 			}
 		}
@@ -242,10 +241,10 @@ func (s *DefaultLLMModelService) SetDefault(ctx context.Context, id string) erro
 	defer s.defaultMu.Unlock()
 
 	return s.repo.WithTx(ctx, func(r repository.LLMModelRepository) error {
-		if err := r.ClearDefault(ctx, nil); err != nil {
+		if err := r.ClearDefault(ctx); err != nil {
 			return err
 		}
-		if err := r.SetDefault(ctx, nil, id); err != nil {
+		if err := r.SetDefault(ctx, id); err != nil {
 			if isUniqueViolation(err) {
 				return ErrModelConflict
 			}
@@ -258,7 +257,7 @@ func (s *DefaultLLMModelService) SetDefault(ctx context.Context, id string) erro
 
 // UnsetDefault 取消默认模型（清空 default 标记，agent 启动时会降级到第一个 enabled）
 func (s *DefaultLLMModelService) UnsetDefault(ctx context.Context) error {
-	return s.repo.ClearDefault(ctx, nil)
+	return s.repo.ClearDefault(ctx)
 }
 
 // GetDefaultForAgent agent 启动读默认模型。
@@ -277,6 +276,3 @@ func (s *DefaultLLMModelService) GetDefaultForAgent(ctx context.Context) (*model
 	}
 	return nil, apperr.Unavailable("no LLM model available: please add and enable at least one model in settings")
 }
-
-// 防止 pgx 未使用
-var _ pgx.Tx

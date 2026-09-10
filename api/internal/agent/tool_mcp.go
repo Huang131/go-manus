@@ -84,14 +84,14 @@ func (t *MCPTool) Invoke(ctx context.Context, params map[string]interface{}) (*m
 		return model.NewToolError("MCP server not found: " + serverName), nil
 	}
 
-	logger.Info("调用 MCP 工具",
+	logger.InfoContext(ctx, "调用 MCP 工具",
 		logger.String("server", serverName),
 		logger.String("tool", toolName))
 
 	// 调用 MCP 工具
 	result, err := client.CallTool(ctx, toolName, paramsRaw)
 	if err != nil {
-		logger.Error("MCP 工具调用失败",
+		logger.ErrorContext(ctx, "MCP 工具调用失败",
 			logger.String("server", serverName),
 			logger.String("tool", toolName),
 			logger.Err(err))
@@ -144,7 +144,7 @@ func parseMCPInvokeParams(params map[string]interface{}) (string, string, map[st
 }
 
 // Initialize 初始化 MCP 工具
-func (t *MCPTool) Initialize(cfg *MCPConfig) error {
+func (t *MCPTool) Initialize(ctx context.Context, cfg *MCPConfig) error {
 	if cfg == nil {
 		return nil
 	}
@@ -171,7 +171,6 @@ func (t *MCPTool) Initialize(cfg *MCPConfig) error {
 	t.manager = external.NewMCPClientManager(externalConfig)
 
 	// 初始化所有 MCP 客户端
-	ctx := context.Background()
 	if err := t.manager.Initialize(ctx); err != nil {
 		logger.Warn("MCP 客户端管理器初始化失败", logger.Err(err))
 		// 不返回错误，继续运行

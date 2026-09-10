@@ -168,3 +168,22 @@ func TestFileCleanupStopsWhenWholeBatchStorageDeleteFails(t *testing.T) {
 		t.Fatal("CleanExpiredFiles() kept retrying a failed batch indefinitely")
 	}
 }
+
+func TestFileCleanupSchedulerStopCancelsCleanupContext(t *testing.T) {
+	scheduler := NewFileCleanupScheduler(nil, "24h", 10, time.Hour)
+	scheduler.Start()
+	scheduler.Stop()
+
+	select {
+	case <-scheduler.ctx.Done():
+	default:
+		t.Fatal("scheduler context should be canceled after Stop")
+	}
+}
+
+func TestFileCleanupSchedulerStartIsIdempotent(t *testing.T) {
+	scheduler := NewFileCleanupScheduler(nil, "24h", 10, time.Hour)
+	scheduler.Start()
+	scheduler.Start()
+	scheduler.Stop()
+}
