@@ -1,0 +1,58 @@
+api/internal/model/constants.go
+  s_51b8fc99ab5db1::t_58bdd8146fa8d4 13,19-22
+api/internal/model/session.go
+  s_51b8fc99ab5db1::t_b185dc51be8a0b 19
+api/internal/model/tool_result.go
+  s_51b8fc99ab5db1::t_a1129f14e181c0 5-6,8-10
+api/internal/model/event.go
+  s_51b8fc99ab5db1::t_4914208bc6a5a1 109,111-118
+  s_51b8fc99ab5db1::t_8e68cdcad36b14 136
+  s_51b8fc99ab5db1::t_281bcb1c2ee905 179,181-184,187,189-190,193,195-198,201
+  s_51b8fc99ab5db1::t_28f8a35e6af710 333,335-338,349
+  s_51b8fc99ab5db1::t_330e44270d0d5e 82,84-86
+  s_51b8fc99ab5db1::t_7954474d4d72e1 87
+api/internal/model/app_config_test.go
+  s_51b8fc99ab5db1::t_3d4a9e8316dbb8 4,6-7,10,17,21-24,26-28,32-33,37-38,44-119
+api/internal/model/app_config.go
+  s_51b8fc99ab5db1::t_20c7bb5cfd6d5a 5-6,16,18-20
+  s_51b8fc99ab5db1::t_38b7c0a1038f28 8-11
+  s_51b8fc99ab5db1::t_9d0f2292c49220 85,87-89,97-98,100-103
+  s_51b8fc99ab5db1::t_dde96e36f96097 111-112,114-121
+api/internal/model/llm_model.go
+  s_51b8fc99ab5db1::t_2f2026b2b2a9f7 10-11,13-24,28,30-33
+api/internal/model/search.go
+  s_51b8fc99ab5db1::t_eb0363f4b9613f 3,7,10,12-15
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "27875ba5c9c723339dc7ffc438fe7896bb5fa961",
+  "prompts": {},
+  "humans": {
+    "h_ec777d6650665b": {
+      "author": "Huang131 <1315970725@qq.com>"
+    }
+  },
+  "sessions": {
+    "s_51b8fc99ab5db1": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa292bf5f8bfc5c332437e6",
+        "model": "minimax-m2.7"
+      },
+      "human_author": "Huang131 <1315970725@qq.com>",
+      "custom_attributes": {
+        "client_type": "ide",
+        "tool_name": "RunCommand",
+        "external_session_id": "6aa292bf5f8bfc5c332437e6",
+        "edit_kind": "bash",
+        "tool_use_id": "6aa299a85f8bfc5c3324389c",
+        "display_model_name": "minimax-m2.7",
+        "operation_id": "6aa299a85f8bfc5c3324389c",
+        "session_id": "6aa292bf5f8bfc5c332437e6",
+        "runtime_client": "trae-tob-git-ai",
+        "source_scene": "agent"
+      }
+    }
+  }
+}
