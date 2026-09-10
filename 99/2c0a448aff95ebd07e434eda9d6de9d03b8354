@@ -1,0 +1,111 @@
+api/internal/external/openai_llm_test.go
+  s_31f27eced9dde7::t_bf69023e53724c 38-52,54-91,115,129-130
+  s_31f27eced9dde7::t_245b97b22fbae2 102,116-128
+  s_31f27eced9dde7::t_a86a72d2d49557 53,92-101,103-114
+api/internal/external/fallback_llm_test.go
+  s_51b8fc99ab5db1::t_147c16d6269a42 16-29,111-142
+  s_51b8fc99ab5db1::t_b3758496ac733f 143
+api/internal/external/llm.go
+  s_51b8fc99ab5db1::t_147c16d6269a42 144-151
+  s_31f27eced9dde7::t_a86a72d2d49557 5,56-62,136-143,152-157
+  s_31f27eced9dde7::t_bf66ea04efa707 81-82
+  s_31f27eced9dde7::t_de3e1605f2b8ef 158
+api/internal/agent/tools_test.go
+  s_51b8fc99ab5db1::t_147c16d6269a42 264-273
+api/internal/external/routed_llm.go
+  s_51b8fc99ab5db1::t_147c16d6269a42 13,36-37,109-143,267-271
+api/internal/bootstrap/app_test.go
+  s_31f27eced9dde7::t_592191705f813e 279
+  s_31f27eced9dde7::t_3827dfb7c34000 280-281
+api/internal/agent/task_redis.go
+  s_31f27eced9dde7::t_592191705f813e 320,444-450,461-462,464-466
+  s_51b8fc99ab5db1::t_147c16d6269a42 473-477,488-489
+  s_31f27eced9dde7::t_a86a72d2d49557 452-460,463
+  s_31f27eced9dde7::t_ed7f0b78a0d176 318-319
+  s_31f27eced9dde7::t_475d615347a52e 321-322
+  s_31f27eced9dde7::t_a5893de4432a14 442-443
+  s_31f27eced9dde7::t_330a42af7e66e7 467-469
+  s_51b8fc99ab5db1::t_c37e586f3a4d1d 490
+api/internal/external/message_queue_redis.go
+  s_31f27eced9dde7::t_592191705f813e 20,23-27,61-62,75-87
+  s_31f27eced9dde7::t_a86a72d2d49557 16-19
+  s_31f27eced9dde7::t_60ebe4001071aa 88
+api/internal/external/anthropic_llm.go
+  s_51b8fc99ab5db1::t_147c16d6269a42 4,12-13,31-32,54,241-366
+  s_51b8fc99ab5db1::t_8623364a980cff 367
+api/internal/agent/task_redis_test.go
+  s_31f27eced9dde7::t_a86a72d2d49557 269,436
+  s_31f27eced9dde7::t_bf69023e53724c 270-276,306-321,425-435,437-440,442,488,492,499,514
+  s_51b8fc99ab5db1::t_147c16d6269a42 40-57,441,458-487,502,505,510,513
+  s_31f27eced9dde7::t_1b24b78d4a6be8 443
+  s_31f27eced9dde7::t_3ac8d4cb559c4a 489-491
+  s_31f27eced9dde7::t_0281a5843debe9 493-498
+  s_51b8fc99ab5db1::t_43d547fee533d1 503-504
+  s_51b8fc99ab5db1::t_3efe469bbd17b6 506-509
+  s_51b8fc99ab5db1::t_07b06b7419b4a8 511-512
+  s_31f27eced9dde7::t_feadfa7cff2cb0 515-517
+api/internal/external/message_queue_redis_test.go
+  s_51b8fc99ab5db1::t_147c16d6269a42 24-27
+api/internal/external/message_queue.go
+  s_31f27eced9dde7::t_592191705f813e 13
+api/internal/external/openai_llm.go
+  s_51b8fc99ab5db1::t_147c16d6269a42 14-15,32-33,366-367,369,371,373-375,386-388,400-402,412,416,419-421
+  s_31f27eced9dde7::t_a86a72d2d49557 4,11,313-365,368,370,372,376-385,389-399,403-411,413-415,417-418,422-493
+  s_31f27eced9dde7::t_db9c33e52af32f 494
+api/internal/agent/tool_a2a.go
+  s_51b8fc99ab5db1::t_147c16d6269a42 217-218,222-229
+api/internal/llmcore/protocol.go
+  s_31f27eced9dde7::t_a86a72d2d49557 191-194
+api/internal/agent/tool_event_integration_test.go
+  s_31f27eced9dde7::t_592191705f813e 136-139
+api/internal/external/anthropic_llm_test.go
+  s_51b8fc99ab5db1::t_147c16d6269a42 42-107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "992c0a448aff95ebd07e434eda9d6de9d03b8354",
+  "prompts": {},
+  "sessions": {
+    "s_31f27eced9dde7": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa126775f8bfc5c33242f61",
+        "model": "kimi-k3__dev"
+      },
+      "human_author": "Huang131 <1315970725@qq.com>",
+      "custom_attributes": {
+        "operation_id": "6aa292555f8bfc5c332437df",
+        "tool_name": "RunCommand",
+        "runtime_client": "trae-tob-git-ai",
+        "session_id": "6aa126775f8bfc5c33242f61",
+        "client_type": "ide",
+        "source_scene": "agent",
+        "edit_kind": "bash",
+        "external_session_id": "6aa126775f8bfc5c33242f61",
+        "tool_use_id": "6aa292555f8bfc5c332437df",
+        "display_model_name": "Kimi-K3"
+      }
+    },
+    "s_51b8fc99ab5db1": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa292bf5f8bfc5c332437e6",
+        "model": "minimax-m2.7"
+      },
+      "human_author": "Huang131 <1315970725@qq.com>",
+      "custom_attributes": {
+        "source_scene": "agent",
+        "client_type": "ide",
+        "runtime_client": "trae-tob-git-ai",
+        "session_id": "6aa292bf5f8bfc5c332437e6",
+        "operation_id": "6aa299a85f8bfc5c3324389c",
+        "tool_use_id": "6aa299a85f8bfc5c3324389c",
+        "display_model_name": "minimax-m2.7",
+        "edit_kind": "bash",
+        "external_session_id": "6aa292bf5f8bfc5c332437e6",
+        "tool_name": "RunCommand"
+      }
+    }
+  }
+}
