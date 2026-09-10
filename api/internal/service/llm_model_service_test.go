@@ -370,3 +370,87 @@ func TestLLMModelService_Update_KeepAPIKey(t *testing.T) {
 		t.Errorf("APIKey should be preserved, got %s", updated.APIKey)
 	}
 }
+
+func TestLLMModelService_List_ReturnsModels(t *testing.T) {
+	repo := NewMockLLMModelRepository()
+	svc := NewLLMModelService(repo)
+
+	_, err := svc.Create(context.Background(), &model.LLMModel{
+		Name: "m1", Provider: "p", BaseURL: "u", ModelName: "mn1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	models, err := svc.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("List() returned %d models, want 1", len(models))
+	}
+	if models[0].Name != "m1" {
+		t.Errorf("List()[0].Name = %q, want m1", models[0].Name)
+	}
+}
+
+func TestLLMModelService_List_Empty(t *testing.T) {
+	svc := NewLLMModelService(NewMockLLMModelRepository())
+
+	models, err := svc.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 0 {
+		t.Fatalf("List() returned %d models, want 0", len(models))
+	}
+}
+
+func TestLLMModelService_List_RepositoryError(t *testing.T) {
+	repo := NewMockLLMModelRepository()
+	repo.listErr = errors.New("database unavailable")
+	svc := NewLLMModelService(repo)
+
+	_, err := svc.List(context.Background())
+	if err == nil || err.Error() != "database unavailable" {
+		t.Fatalf("List() error = %v, want repository error", err)
+	}
+}
+
+func TestLLMModelService_GetByID_NotFound(t *testing.T) {
+	svc := NewLLMModelService(NewMockLLMModelRepository())
+
+	_, err := svc.GetByID(context.Background(), "missing-id")
+	if !errors.Is(err, ErrModelNotFound) {
+		t.Fatalf("GetByID() error = %v, want ErrModelNotFound", err)
+	}
+}
+
+func TestLLMModelService_UnsetDefault_ClearsDefaultFlag(t *testing.T) {
+	repo := NewMockLLMModelRepository()
+	svc := NewLLMModelService(repo)
+
+	// 创建一个 default 模型
+	m, err := svc.Create(context.Background(), &model.LLMModel{
+		Name: "d", Provider: "p", BaseURL: "u", ModelName: "mn",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.IsDefault {
+		t.Fatal("first created model should be default (mock defaultID set by service?)")
+	}
+
+	if err := svc.UnsetDefault(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// GetDefault 应回到 nil（defaultID 被清空）
+	def, err := repo.GetDefault(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if def != nil {
+		t.Fatalf("GetDefault() after UnsetDefault() = %v, want nil", def)
+	}
+}

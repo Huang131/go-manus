@@ -56,6 +56,7 @@ var (
 	encoder zapcore.Encoder
 	// writeSyncer 输出目标
 	writeSyncer zapcore.WriteSyncer
+
 	// 原子级别，SetLevel/GetLevel 线程安全，无需全局锁
 	atomicLevel zap.AtomicLevel
 	// 日志实例（使用原子操作，Get/Sync 无需锁）
@@ -63,6 +64,25 @@ var (
 	// 原子级别写入保护（在 InitWithConfig 中使用写锁）
 	muLevel sync.Mutex
 )
+
+// neverCloseSyncer 包装一个 WriteSyncer，将其 Close() 方法变成无操作。
+//
+// 设计意图：保护进程级共享资源（如 os.Stdout、os.Stderr），避免被
+// MultiWriteSyncer.Close() 递归关闭。MultiWriteSyncer 在 Close 时会遍历
+// 所有子 syncer 调用 Close()，而 lumberjack 等组件的 MultiWriteSyncer
+// 里通常也包含 stdout 包装——如果不屏蔽，文件模式切回 stdout 模式时
+// 会把 os.Stdout 的 fd 关闭，导致进程 stdout 永久失效。
+//
+// 这种模式也适用于其他场景：
+//   - 数据库连接池（连接由连接池管理， Close() 只归还不关闭 fd）
+//   - 共享的 HTTP 客户端（Close() 不关闭底层 TCP 连接）
+//   - 包装既有资源的 ReadCloser/WriteCloser（如 json.Decoder 包装
+//     os.Stdin，不应关闭 stdin）
+type neverCloseSyncer struct {
+	zapcore.WriteSyncer
+}
+
+func (n neverCloseSyncer) Close() error { return nil }
 
 // Config 日志配置
 type Config struct {
@@ -128,9 +148,11 @@ func InitWithConfig(cfg Config) error {
 			MaxAge:     cfg.MaxAge,
 			Compress:   cfg.Compress,
 		}
-		// 同时输出到文件和控制台
+		// 同时输出到文件和控制台。
+		// 用 neverCloseSyncer 包装 os.Stdout，确保 MultiWriteSyncer.Close()
+		// 递归关闭子 syncer 时不会关闭 stdout fd。
 		writeSyncer = zapcore.NewMultiWriteSyncer(
-			zapcore.AddSync(os.Stdout),
+			neverCloseSyncer{zapcore.AddSync(os.Stdout)},
 			zapcore.AddSync(lumberjackLogger),
 		)
 	} else {
@@ -211,6 +233,11 @@ func Sync() error {
 //
 // 职责：1) Swap 旧 logger 并 Flush；2) 关闭底层 WriteSyncer（如 lumberjack）以避免 fd 泄露。
 // 使用 atomic.Pointer.Swap() 原子交换，同时获取旧值并置 nil。
+//
+// 注意：stdout 对应的 WriteSyncer 永远不会被关闭——os.Stdout 是进程级共享资源，
+// 关闭后无法恢复。这通过 InitWithConfig 中使用 neverCloseSyncer 包装 stdout 来保证。
+// 对于 file 模式，writeSyncer 通常是 MultiWriteSyncer，其 Close() 会同时关闭子 syncer，
+// 但因为 stdout 已被 neverCloseSyncer 包装，Close() 调用变成无操作，不会伤及 stdout fd。
 func shutdownCurrent() {
 	if oldLog := log.Swap(nil); oldLog != nil {
 		_ = oldLog.Sync()
@@ -219,8 +246,8 @@ func shutdownCurrent() {
 		if closer, ok := writeSyncer.(io.Closer); ok {
 			_ = closer.Close()
 		}
-		writeSyncer = nil
 	}
+	writeSyncer = nil
 	encoder = nil
 }
 

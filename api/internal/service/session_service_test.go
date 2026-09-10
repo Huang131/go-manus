@@ -442,3 +442,6 @@ func TestSessionService_CreateSession_RepositoryError(t *testing.T) {
 		t.Error("CreateSession() should return error when repository fails")
 	}
 }
+
+// GetVNCURL 测试已由 vnc_test.go 覆盖（TestSessionService_GetVNCURL_Success, HTTPS, NotFound, EmptyAddress）
+// 本文件不再重复

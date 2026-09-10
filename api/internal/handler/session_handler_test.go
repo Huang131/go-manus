@@ -3,10 +3,11 @@ package handler
 import (
 	"bytes"
 	"context"
-	"github.com/bytedance/sonic"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/bytedance/sonic"
 
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/pkg/response"
@@ -77,33 +78,11 @@ func (m *MockSessionServiceForHandler) ClearUnreadCount(ctx context.Context, id 
 	return nil
 }
 
-func (m *MockSessionServiceForHandler) IncrementUnreadCount(ctx context.Context, id string) error {
-	if session, ok := m.sessions[id]; ok {
-		session.UnreadMessageCount++
-	}
-	return nil
-}
-
-func (m *MockSessionServiceForHandler) DecrementUnreadCount(ctx context.Context, id string) error {
-	if session, ok := m.sessions[id]; ok && session.UnreadMessageCount > 0 {
-		session.UnreadMessageCount--
-	}
-	return nil
-}
-
 func (m *MockSessionServiceForHandler) GetSessionFiles(ctx context.Context, id string) ([]*model.File, error) {
 	return []*model.File{}, nil
 }
 
 func (m *MockSessionServiceForHandler) AppendEvent(ctx context.Context, sessionID string, event *model.Event) error {
-	return nil
-}
-
-func (m *MockSessionServiceForHandler) StreamSession(ctx context.Context, id string) (*model.Session, error) {
-	return nil, nil
-}
-
-func (m *MockSessionServiceForHandler) Chat(ctx context.Context, sessionID string, message string) error {
 	return nil
 }
 

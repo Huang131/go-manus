@@ -31,20 +31,12 @@ func (s *stubVNCService) GetAllSessions(ctx context.Context) ([]*model.Session, 
 func (s *stubVNCService) ListSessions(ctx context.Context, limit, offset int) ([]*model.Session, int, error) {
 	return nil, 0, nil
 }
-func (s *stubVNCService) DeleteSession(ctx context.Context, id string) error        { return nil }
-func (s *stubVNCService) IncrementUnreadCount(ctx context.Context, id string) error { return nil }
-func (s *stubVNCService) DecrementUnreadCount(ctx context.Context, id string) error { return nil }
-func (s *stubVNCService) ClearUnreadCount(ctx context.Context, id string) error     { return nil }
+func (s *stubVNCService) DeleteSession(ctx context.Context, id string) error    { return nil }
+func (s *stubVNCService) ClearUnreadCount(ctx context.Context, id string) error { return nil }
 func (s *stubVNCService) GetSessionFiles(ctx context.Context, id string) ([]*model.File, error) {
 	return nil, nil
 }
 func (s *stubVNCService) AppendEvent(ctx context.Context, sessionID string, event *model.Event) error {
-	return nil
-}
-func (s *stubVNCService) StreamSession(ctx context.Context, id string) (*model.Session, error) {
-	return nil, nil
-}
-func (s *stubVNCService) Chat(ctx context.Context, sessionID string, message string) error {
 	return nil
 }
 func (s *stubVNCService) GetVNCURL(ctx context.Context, sessionID string) (string, error) {
