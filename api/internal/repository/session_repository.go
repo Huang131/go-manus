@@ -329,7 +329,7 @@ func (r *PostgresSessionRepository) GetMemory(ctx context.Context, id string, ag
 	query := `SELECT memories->>$2 FROM sessions WHERE id = $1`
 	var memoryJSON []byte
 	err := q.QueryRow(ctx, query, id, agentName).Scan(&memoryJSON)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return []llmcore.Message{}, nil
 	}
 	if err != nil {

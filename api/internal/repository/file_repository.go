@@ -228,7 +228,7 @@ func (r *PostgresFileRepository) GetExpiredFiles(ctx context.Context, expireDura
 		SELECT f.id, f.session_id, f.filename, f.filepath, f.key, f.extension, f.mime_type, f.size, f.created_at
 		FROM files f
 		LEFT JOIN sessions s ON f.session_id = s.id
-		WHERE f.created_at < NOW() - INTERVAL $1
+		WHERE f.created_at < NOW() - $1::interval
 		  AND (f.session_id IS NULL OR s.deleted_at IS NOT NULL)
 		ORDER BY f.created_at ASC
 		LIMIT $2
@@ -295,7 +295,7 @@ func (r *PostgresFileRepository) CountExpiredFiles(ctx context.Context, expireDu
 	query := `
 		SELECT COUNT(*) FROM files f
 		LEFT JOIN sessions s ON f.session_id = s.id
-		WHERE f.created_at < NOW() - INTERVAL $1
+		WHERE f.created_at < NOW() - $1::interval
 		  AND (f.session_id IS NULL OR s.deleted_at IS NOT NULL)
 	`
 
