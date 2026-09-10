@@ -1,0 +1,55 @@
+api/internal/agent/task_redis.go
+  s_37556f462159f8::t_f03efbe2085d62 159,162,219-222,232-244,318-325,388,403,405-406,408-412,414-429,480-481,483,488,493,497,499,514-520,533
+api/internal/service/llm_model_service.go
+  s_37556f462159f8::t_f03efbe2085d62 7,36-37,240-243,249-251
+api/internal/service/file_service.go
+  s_37556f462159f8::t_f03efbe2085d62 14,78-82
+api/internal/model/app_config_test.go
+  s_37556f462159f8::t_f03efbe2085d62 1-45
+api/internal/handler/session_handler.go
+  s_37556f462159f8::t_f03efbe2085d62 471-473
+api/internal/model/app_config.go
+  s_37556f462159f8::t_f03efbe2085d62 29-30,39-82
+  s_37556f462159f8::t_e1119a5a73c8fb 83
+api/internal/agent/service.go
+  s_37556f462159f8::t_f03efbe2085d62 220,297-303,370-371,374-377
+  s_37556f462159f8::t_44c286eacfa662 218-219
+  s_37556f462159f8::t_e44a03cb7a4bb1 221-223
+api/internal/handler/app_config_handler.go
+  s_37556f462159f8::t_f03efbe2085d62 7,52-57,62-71
+api/internal/service/app_config_service.go
+  s_37556f462159f8::t_f03efbe2085d62 5,72-74,78-81,144-146,149-152,184-186,232-234,237-240
+api/tests/appconfig_test.go
+  s_37556f462159f8::t_f03efbe2085d62 45-47
+api/internal/service/file_cleanup_service.go
+  s_37556f462159f8::t_f03efbe2085d62 123-124,127-128,134,137-138
+api/internal/service/app_config_service_test.go
+  s_37556f462159f8::t_f03efbe2085d62 6,9-10,441-463
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "653e392b269f308a1ce442c9caf54936b1cff41a",
+  "prompts": {},
+  "sessions": {
+    "s_37556f462159f8": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa24f465f8bfc5c33243566",
+        "model": "glm-5.3__dev"
+      },
+      "human_author": "Huang131 <1315970725@qq.com>",
+      "custom_attributes": {
+        "client_type": "ide",
+        "session_id": "6aa24f465f8bfc5c33243566",
+        "runtime_client": "trae-tob-git-ai",
+        "source_scene": "agent",
+        "operation_id": "6aa251ae5f8bfc5c33243606",
+        "tool_name": "RunCommand",
+        "external_session_id": "6aa24f465f8bfc5c33243566",
+        "tool_use_id": "6aa251ae5f8bfc5c33243606",
+        "edit_kind": "bash"
+      }
+    }
+  }
+}
