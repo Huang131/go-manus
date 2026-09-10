@@ -83,10 +83,14 @@ type SandboxClient struct {
 
 // NewSandboxClient 创建沙箱客户端
 func NewSandboxClient(cfg *config.SandboxConfig) *SandboxClient {
+	timeout := time.Duration(cfg.HTTPTimeout) * time.Second
+	if timeout <= 0 {
+		timeout = time.Duration(config.DefaultSandboxHTTPTimeoutSec) * time.Second
+	}
 	return &SandboxClient{
 		address: cfg.Address,
 		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: timeout,
 		},
 	}
 }
@@ -443,17 +447,13 @@ func (c *SandboxClient) HealthCheck(ctx context.Context) error {
 
 // BrowserClient 浏览器客户端 (基于 Sandbox 实现)
 type BrowserClient struct {
-	sandbox    Sandbox
-	httpClient *http.Client
+	sandbox Sandbox
 }
 
 // NewBrowserClient 创建浏览器客户端
 func NewBrowserClient(sandbox Sandbox) *BrowserClient {
 	return &BrowserClient{
 		sandbox: sandbox,
-		httpClient: &http.Client{
-			Timeout: 60 * time.Second,
-		},
 	}
 }
 

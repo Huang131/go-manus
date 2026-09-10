@@ -108,15 +108,16 @@ type ObjectStorageConfig struct {
 
 // SandboxConfig 沙箱配置
 type SandboxConfig struct {
-	Address    string `mapstructure:"address"`
-	Image      string `mapstructure:"image"`
-	NamePrefix string `mapstructure:"name_prefix"`
-	TTLMinutes int    `mapstructure:"ttl_minutes"`
-	Network    string `mapstructure:"network"`
-	ChromeArgs string `mapstructure:"chrome_args"`
-	HTTPSProxy string `mapstructure:"https_proxy"`
-	HTTPProxy  string `mapstructure:"http_proxy"`
-	NoProxy    string `mapstructure:"no_proxy"`
+	Address     string `mapstructure:"address"`
+	HTTPTimeout int    `mapstructure:"http_timeout" validate:"gte=0"` // 沙箱 HTTP 请求超时（秒）
+	Image       string `mapstructure:"image"`
+	NamePrefix  string `mapstructure:"name_prefix"`
+	TTLMinutes  int    `mapstructure:"ttl_minutes"`
+	Network     string `mapstructure:"network"`
+	ChromeArgs  string `mapstructure:"chrome_args"`
+	HTTPSProxy  string `mapstructure:"https_proxy"`
+	HTTPProxy   string `mapstructure:"http_proxy"`
+	NoProxy     string `mapstructure:"no_proxy"`
 }
 
 // ServerConfig HTTP 服务配置
@@ -150,7 +151,8 @@ type SearchConfig struct {
 	Provider       string `mapstructure:"provider"` // "bing" or "google"
 	BingAPIKey     string `mapstructure:"bing_api_key"`
 	GoogleAPIKey   string `mapstructure:"google_api_key"`
-	SearchEngineID string `mapstructure:"search_engine_id"` // Google Custom Search Engine ID
+	SearchEngineID string `mapstructure:"search_engine_id"`              // Google Custom Search Engine ID
+	HTTPTimeout    int    `mapstructure:"http_timeout" validate:"gte=0"` // 搜索 HTTP 请求超时（秒）
 }
 
 // MCPConfig MCP 配置
@@ -286,6 +288,12 @@ func (c *Config) Validate() error {
 
 // applyDefaults 补充配置字段的默认值
 func (c *Config) applyDefaults() {
+	if c.Sandbox.HTTPTimeout == 0 {
+		c.Sandbox.HTTPTimeout = DefaultSandboxHTTPTimeoutSec
+	}
+	if c.Search.HTTPTimeout == 0 {
+		c.Search.HTTPTimeout = DefaultSearchHTTPTimeoutSec
+	}
 	// LLM 配置默认值
 	if c.LLM.ToolCallTimeout == 0 {
 		c.LLM.ToolCallTimeout = DefaultLLMToolCallTimeoutSec

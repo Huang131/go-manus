@@ -1,12 +1,12 @@
 package middleware
 
 import (
-	"fmt"
 	"runtime/debug"
 	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/pkg/logger"
@@ -87,5 +87,5 @@ func RequestID() gin.HandlerFunc {
 
 // generateRequestID 生成请求 ID
 func generateRequestID() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
+	return uuid.NewString()
 }

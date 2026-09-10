@@ -97,7 +97,11 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 
 	// 首次运行，更新会话状态为运行中
 	if r.flow.GetPlan() == nil {
-		_ = r.sessionRep.UpdateStatus(ctx, r.sessionID, model.SessionStatusRunning)
+		if err := r.sessionRep.UpdateStatus(ctx, r.sessionID, model.SessionStatusRunning); err != nil {
+			logger.WarnContext(ctx, "更新会话运行状态失败",
+				logger.String("session_id", r.sessionID),
+				logger.Err(err))
+		}
 	}
 
 	logger.InfoContext(ctx, "AgentTaskRunner 开始执行",
@@ -287,7 +291,11 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 			case *model.PlanEvent:
 				if e.Status == model.PlanEventStatusCompleted {
 					// 计划完成，更新会话状态
-					_ = r.sessionRep.UpdateStatus(ctx, r.sessionID, model.SessionStatusCompleted)
+					if err := r.sessionRep.UpdateStatus(ctx, r.sessionID, model.SessionStatusCompleted); err != nil {
+						logger.WarnContext(ctx, "更新会话完成状态失败",
+							logger.String("session_id", r.sessionID),
+							logger.Err(err))
+					}
 				}
 			case *model.ErrorEvent:
 				logger.ErrorContext(ctx, "Agent 运行出错", logger.String("error", e.Message))

@@ -537,6 +537,7 @@ func (a *App) initExternalClients(cfg *config.Config, opts Options) (external.LL
 			BingAPIKey:     cfg.Search.BingAPIKey,
 			GoogleAPIKey:   cfg.Search.GoogleAPIKey,
 			SearchEngineID: cfg.Search.SearchEngineID,
+			HTTPTimeout:    cfg.Search.HTTPTimeout,
 		})
 	}
 

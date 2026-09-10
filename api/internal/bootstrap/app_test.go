@@ -13,7 +13,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Huang131/go-manus/api/config"
-	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
 	"github.com/Huang131/go-manus/api/internal/service"
 )
@@ -271,19 +270,7 @@ type mockMessageQueue struct{}
 func (m *mockMessageQueue) Put(ctx context.Context, streamName string, message interface{}) (string, error) {
 	return "", nil
 }
-func (m *mockMessageQueue) Get(ctx context.Context, streamName string, startID string, blockMs *int) (string, interface{}, error) {
-	return "", nil, nil
-}
 func (m *mockMessageQueue) GetBlocking(ctx context.Context, streamName string, startID string, timeout ...time.Duration) (string, interface{}, error) {
-	return "", nil, nil
-}
-func (m *mockMessageQueue) GetRange(ctx context.Context, streamName string, startID, endID string, limit int64) ([]*external.Message, error) {
-	return nil, nil
-}
-func (m *mockMessageQueue) GetLatestID(ctx context.Context, streamName string) (string, error) {
-	return "", nil
-}
-func (m *mockMessageQueue) Pop(ctx context.Context, streamName string) (string, interface{}, error) {
 	return "", nil, nil
 }
 func (m *mockMessageQueue) Clear(ctx context.Context, streamName string) error {
@@ -295,14 +282,6 @@ func (m *mockMessageQueue) IsEmpty(ctx context.Context, streamName string) (bool
 func (m *mockMessageQueue) Size(ctx context.Context, streamName string) (int64, error) {
 	return 0, nil
 }
-func (m *mockMessageQueue) DeleteMessage(ctx context.Context, streamName string, messageID string) error {
-	return nil
-}
-func (m *mockMessageQueue) Subscribe(ctx context.Context, streamName string, bufferSize int) (<-chan *external.Message, func()) {
-	ch := make(chan *external.Message)
-	return ch, func() { close(ch) }
-}
-func (m *mockMessageQueue) Close() error { return nil }
 
 func TestBuildTestModeWithRoutesHealthEndpoint(t *testing.T) {
 	cfg := &config.Config{

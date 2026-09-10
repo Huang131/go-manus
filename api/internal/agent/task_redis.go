@@ -156,9 +156,11 @@ type RedisStreamTask struct {
 	outputStream external.TaskMessageQueue
 	cancelFunc   context.CancelFunc
 	done         atomic.Bool
+	invoked      atomic.Bool
 	doneChan     chan struct{}
 	doneOnce     sync.Once
 	finishOnce   sync.Once
+	destroyOnce  sync.Once
 	mu           sync.RWMutex
 	registry     TaskRegistryInterface // 任务注册表（用于注销）
 	onFinished   func()
@@ -348,11 +350,11 @@ func (t *RedisStreamTask) OutputStream() Stream {
 // Invoke 启动任务执行（后台 goroutine）
 // 对齐 Python: await task.invoke() -> asyncio.create_task(self._execute_task())
 func (t *RedisStreamTask) Invoke(ctx context.Context) error {
+	t.mu.Lock()
 	if t.Done() {
+		t.mu.Unlock()
 		return fmt.Errorf("task already done")
 	}
-
-	t.mu.Lock()
 	if t.cancelFunc != nil {
 		t.mu.Unlock()
 		return fmt.Errorf("task already invoked")
@@ -360,6 +362,7 @@ func (t *RedisStreamTask) Invoke(ctx context.Context) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	t.cancelFunc = cancel
+	t.invoked.Store(true)
 	t.mu.Unlock()
 
 	// 启动后台 goroutine 执行任务
@@ -381,6 +384,7 @@ func (t *RedisStreamTask) execute(ctx context.Context) {
 				logger.String("stack", string(debug.Stack())))
 		}
 		t.onDone()
+		t.destroyRunner()
 	}()
 
 	// 调用 TaskRunner 执行任务
@@ -417,6 +421,9 @@ func (t *RedisStreamTask) Cancel() bool {
 	t.mu.Unlock()
 
 	t.finish("RedisStreamTask 已取消")
+	if !t.invoked.Load() {
+		t.destroyRunner()
+	}
 
 	return true
 }
@@ -445,6 +452,19 @@ func (t *RedisStreamTask) finish(logMessage string) {
 	})
 }
 
+func (t *RedisStreamTask) destroyRunner() {
+	t.destroyOnce.Do(func() {
+		if t.runner == nil {
+			return
+		}
+		if err := t.runner.Destroy(); err != nil {
+			logger.Warn("销毁任务运行器失败",
+				logger.String("task_id", t.id),
+				logger.Err(err))
+		}
+	})
+}
+
 // PutInput 往输入流放入消息
 func (t *RedisStreamTask) PutInput(ctx context.Context, event interface{}) (string, error) {
 	data, err := sonic.Marshal(event)
@@ -468,6 +488,9 @@ func (t *RedisStreamTask) GetOutput(ctx context.Context, startID string, blockTi
 		timeout = DefaultBlockTimeout
 	}
 
+	if startID == "" {
+		startID = "0"
+	}
 	id, data, err := t.outputStream.GetBlocking(ctx, t.outputStreamName(), startID, timeout)
 	if err != nil {
 		return nil, err

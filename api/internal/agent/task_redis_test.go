@@ -2,11 +2,13 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 // mockTaskRunner 用于测试的 Mock TaskRunner
@@ -78,6 +80,12 @@ func (m *mockTaskRunner) getInvokeTask() *RedisStreamTask {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.invokeTask
+}
+
+func (m *mockTaskRunner) wasDestroyCalled() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.destroyCalled
 }
 
 // TestTaskRegistry_Register 测试任务注册
@@ -248,10 +256,6 @@ func (w *mockMQWrapper) Put(ctx context.Context, streamName string, message inte
 	return "test-msg-id", nil
 }
 
-func (w *mockMQWrapper) Get(ctx context.Context, streamName string, startID string, blockMs *int) (string, interface{}, error) {
-	return "", nil, nil
-}
-
 func (w *mockMQWrapper) GetBlocking(ctx context.Context, streamName string, startID string, timeout ...time.Duration) (string, interface{}, error) {
 	// 模拟阻塞获取，超时后返回
 	select {
@@ -260,18 +264,6 @@ func (w *mockMQWrapper) GetBlocking(ctx context.Context, streamName string, star
 	case <-time.After(1 * time.Second):
 		return "", nil, nil
 	}
-}
-
-func (w *mockMQWrapper) GetRange(ctx context.Context, streamName string, startID, endID string, limit int64) ([]*external.Message, error) {
-	return []*external.Message{}, nil
-}
-
-func (w *mockMQWrapper) GetLatestID(ctx context.Context, streamName string) (string, error) {
-	return "", nil
-}
-
-func (w *mockMQWrapper) Pop(ctx context.Context, streamName string) (string, interface{}, error) {
-	return "", nil, nil
 }
 
 func (w *mockMQWrapper) Clear(ctx context.Context, streamName string) error {
@@ -284,19 +276,6 @@ func (w *mockMQWrapper) IsEmpty(ctx context.Context, streamName string) (bool, e
 
 func (w *mockMQWrapper) Size(ctx context.Context, streamName string) (int64, error) {
 	return 0, nil
-}
-
-func (w *mockMQWrapper) DeleteMessage(ctx context.Context, streamName string, messageID string) error {
-	return nil
-}
-
-func (w *mockMQWrapper) Subscribe(ctx context.Context, streamName string, bufferSize int) (<-chan *external.Message, func()) {
-	ch := make(chan *external.Message, bufferSize)
-	return ch, func() { close(ch) }
-}
-
-func (w *mockMQWrapper) Close() error {
-	return nil
 }
 
 // TestRedisStreamTask_DoneChan 测试 DoneChan 通道
@@ -387,6 +366,58 @@ func TestRedisStreamTask_PanicStillFinishes(t *testing.T) {
 	}
 	if !task.Done() {
 		t.Fatal("task Done() = false after runner panic")
+	}
+}
+
+func TestRedisStreamTask_FinishDestroysRunner(t *testing.T) {
+	defaultTaskRegistry.Clear()
+	runner := &mockTaskRunner{}
+	task := NewRedisStreamTask(&mockMQWrapper{}, runner)
+
+	task.Cancel()
+
+	if !runner.wasDestroyCalled() {
+		t.Fatal("TaskRunner.Destroy() was not called when task finished")
+	}
+}
+
+func TestRedisStreamTask_InvokeAfterCancelReturnsError(t *testing.T) {
+	defaultTaskRegistry.Clear()
+	runner := &mockTaskRunner{}
+	task := NewRedisStreamTask(&mockMQWrapper{}, runner)
+	task.Cancel()
+
+	if err := task.Invoke(context.Background()); err == nil {
+		t.Fatal("Invoke() succeeded after task was canceled")
+	}
+	if runner.wasInvokeCalled() {
+		t.Fatal("TaskRunner.Invoke() was called after task cancellation")
+	}
+}
+
+func TestRedisStreamTask_GetOutputReadsBufferedEventsWhenStartIDEmpty(t *testing.T) {
+	mq := newInMemoryMessageQueue()
+	task := NewRedisStreamTask(mq, &mockTaskRunner{})
+	defer task.Cancel()
+
+	eventJSON, err := json.Marshal(&model.Event{
+		ID:   "event-1",
+		Type: model.EventTypeDone,
+		Data: json.RawMessage(`{"message":"done"}`),
+	})
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	if _, err := mq.Put(context.Background(), "task:output:"+task.ID(), string(eventJSON)); err != nil {
+		t.Fatalf("put buffered event: %v", err)
+	}
+
+	events, err := task.GetOutput(context.Background(), "", 20)
+	if err != nil {
+		t.Fatalf("GetOutput() error = %v", err)
+	}
+	if len(events) != 1 || events[0].Type != model.EventTypeDone {
+		t.Fatalf("GetOutput() = %+v, want one buffered done event", events)
 	}
 }
 

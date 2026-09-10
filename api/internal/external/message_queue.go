@@ -16,10 +16,3 @@ type MessageQueue interface {
 
 // TaskMessageQueue 保留语义化别名，便于任务域表达依赖。
 type TaskMessageQueue = MessageQueue
-
-// Message 消息结构
-type Message struct {
-	ID     string
-	Data   interface{}
-	Stream string
-}

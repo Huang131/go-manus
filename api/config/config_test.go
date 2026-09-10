@@ -31,6 +31,11 @@ func TestValidate_RequiredFields(t *testing.T) {
 			mutate:  func(c *Config) { c.Database.MaxOpenConns = -1 },
 			wantSub: "MaxOpenConns",
 		},
+		{
+			name:    "negative sandbox http timeout",
+			mutate:  func(c *Config) { c.Sandbox.HTTPTimeout = -1 },
+			wantSub: "Sandbox.HTTPTimeout",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -71,6 +76,12 @@ func TestConfigApplyDefaultsUsesDomainDefaults(t *testing.T) {
 	}
 	if cfg.Database.MaxOpenConns != DefaultDatabaseMaxOpenConns {
 		t.Fatalf("database max open conns = %d, want %d", cfg.Database.MaxOpenConns, DefaultDatabaseMaxOpenConns)
+	}
+	if cfg.Sandbox.HTTPTimeout != DefaultSandboxHTTPTimeoutSec {
+		t.Fatalf("sandbox HTTP timeout = %d, want %d", cfg.Sandbox.HTTPTimeout, DefaultSandboxHTTPTimeoutSec)
+	}
+	if cfg.Search.HTTPTimeout != DefaultSearchHTTPTimeoutSec {
+		t.Fatalf("search HTTP timeout = %d, want %d", cfg.Search.HTTPTimeout, DefaultSearchHTTPTimeoutSec)
 	}
 }
 

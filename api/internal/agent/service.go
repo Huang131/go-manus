@@ -204,7 +204,9 @@ func (s *AgentService) StopSession(ctx context.Context, sessionID string) error 
 	}
 
 	// 更新会话状态
-	_ = s.sessionRep.UpdateStatus(ctx, sessionID, model.SessionStatusCompleted)
+	if err := s.sessionRep.UpdateStatus(ctx, sessionID, model.SessionStatusCompleted); err != nil {
+		return fmt.Errorf("更新会话状态失败: %w", err)
+	}
 
 	return nil
 }

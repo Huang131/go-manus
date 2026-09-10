@@ -3,6 +3,8 @@ package config
 const (
 	// LLM 默认工具调用超时时间（秒）。
 	DefaultLLMToolCallTimeoutSec = 15
+	DefaultSandboxHTTPTimeoutSec = 60
+	DefaultSearchHTTPTimeoutSec  = 30
 
 	// HTTP 服务默认超时时间（秒）。
 	DefaultServerReadTimeoutSec     = 30

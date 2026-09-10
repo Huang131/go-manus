@@ -11,11 +11,16 @@ import (
 
 	"github.com/bytedance/sonic"
 
-	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
 )
+
+func parseStreamSeq(id string) uint64 {
+	parts := strings.SplitN(id, "-", 2)
+	seq, _ := strconv.ParseUint(parts[0], 10, 64)
+	return seq
+}
 
 // ============================================================================
 // 测试辅助组件
@@ -45,13 +50,6 @@ func newInMemoryMessageQueue() *inMemoryMessageQueue {
 	return &inMemoryMessageQueue{streams: make(map[string]*inMemoryStream)}
 }
 
-// parseStreamSeq 从 "seq-0" 格式的流 ID 中解析序号
-func parseStreamSeq(id string) uint64 {
-	parts := strings.SplitN(id, "-", 2)
-	seq, _ := strconv.ParseUint(parts[0], 10, 64)
-	return seq
-}
-
 // Put 追加一条消息，返回自增的流 ID
 func (q *inMemoryMessageQueue) Put(ctx context.Context, streamName string, message interface{}) (string, error) {
 	q.mu.Lock()
@@ -66,31 +64,6 @@ func (q *inMemoryMessageQueue) Put(ctx context.Context, streamName string, messa
 	id := fmt.Sprintf("%d-0", st.nextSeq)
 	st.messages = append(st.messages, inMemoryMessage{seq: st.nextSeq, id: id, data: message})
 	return id, nil
-}
-
-// Get 非阻塞获取一条消息（blockMs > 0 时阻塞）
-func (q *inMemoryMessageQueue) Get(ctx context.Context, streamName string, startID string, blockMs *int) (string, interface{}, error) {
-	if blockMs != nil && *blockMs > 0 {
-		return q.GetBlocking(ctx, streamName, startID, time.Duration(*blockMs)*time.Millisecond)
-	}
-	return q.tryGet(streamName, startID)
-}
-
-// tryGet 立即尝试获取一条消息，无消息返回空
-func (q *inMemoryMessageQueue) tryGet(streamName, startID string) (string, interface{}, error) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	fromSeq := q.fromSeqLocked(streamName, startID)
-	st := q.streams[streamName]
-	if st != nil {
-		for _, msg := range st.messages {
-			if msg.seq > fromSeq {
-				return msg.id, msg.data, nil
-			}
-		}
-	}
-	return "", nil, nil
 }
 
 // fromSeqLocked 计算起始游标（调用方需持有锁）：
@@ -152,51 +125,6 @@ func (q *inMemoryMessageQueue) GetBlocking(ctx context.Context, streamName strin
 	}
 }
 
-// GetRange 获取范围内的消息（简化实现：返回全部消息）
-func (q *inMemoryMessageQueue) GetRange(ctx context.Context, streamName string, startID, endID string, limit int64) ([]*external.Message, error) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	var result []*external.Message
-	st := q.streams[streamName]
-	if st == nil {
-		return result, nil
-	}
-	for _, msg := range st.messages {
-		result = append(result, &external.Message{ID: msg.id, Data: msg.data, Stream: streamName})
-		if limit > 0 && int64(len(result)) >= limit {
-			break
-		}
-	}
-	return result, nil
-}
-
-// GetLatestID 获取最新消息 ID
-func (q *inMemoryMessageQueue) GetLatestID(ctx context.Context, streamName string) (string, error) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	st := q.streams[streamName]
-	if st == nil || len(st.messages) == 0 {
-		return "", nil
-	}
-	return st.messages[len(st.messages)-1].id, nil
-}
-
-// Pop 获取并移除第一条消息
-func (q *inMemoryMessageQueue) Pop(ctx context.Context, streamName string) (string, interface{}, error) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	st := q.streams[streamName]
-	if st == nil || len(st.messages) == 0 {
-		return "", nil, nil
-	}
-	msg := st.messages[0]
-	st.messages = st.messages[1:]
-	return msg.id, msg.data, nil
-}
-
 // Clear 清空队列
 func (q *inMemoryMessageQueue) Clear(ctx context.Context, streamName string) error {
 	q.mu.Lock()
@@ -221,63 +149,6 @@ func (q *inMemoryMessageQueue) Size(ctx context.Context, streamName string) (int
 	}
 	return int64(len(st.messages)), nil
 }
-
-// DeleteMessage 删除指定消息
-func (q *inMemoryMessageQueue) DeleteMessage(ctx context.Context, streamName string, messageID string) error {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-
-	st := q.streams[streamName]
-	if st == nil {
-		return nil
-	}
-	seq := parseStreamSeq(messageID)
-	for i, msg := range st.messages {
-		if msg.seq == seq {
-			st.messages = append(st.messages[:i], st.messages[i+1:]...)
-			break
-		}
-	}
-	return nil
-}
-
-// Subscribe 订阅消息（简化实现：轮询推送新消息）
-func (q *inMemoryMessageQueue) Subscribe(ctx context.Context, streamName string, bufferSize int) (<-chan *external.Message, func()) {
-	if bufferSize <= 0 {
-		bufferSize = 100
-	}
-	msgChan := make(chan *external.Message, bufferSize)
-	ctx, cancel := context.WithCancel(ctx)
-
-	cleanup := func() { cancel() }
-
-	go func() {
-		defer close(msgChan)
-		lastID := ""
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			id, data, err := q.GetBlocking(ctx, streamName, lastID, 100*time.Millisecond)
-			if err != nil || id == "" || data == nil {
-				continue
-			}
-			lastID = id
-			select {
-			case msgChan <- &external.Message{ID: id, Data: data, Stream: streamName}:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-
-	return msgChan, cleanup
-}
-
-// Close 关闭消息队列
-func (q *inMemoryMessageQueue) Close() error { return nil }
 
 // mockFailingTool 测试工具：返回错误结果，用于测试 tool_called 失败场景
 type mockFailingTool struct{}

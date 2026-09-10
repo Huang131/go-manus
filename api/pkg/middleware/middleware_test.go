@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -169,7 +171,11 @@ func TestRequestID_GeneratesWhenMissing(t *testing.T) {
 }
 
 func TestGenerateRequestID_NonEmpty(t *testing.T) {
-	if id := generateRequestID(); id == "" {
+	id := generateRequestID()
+	if id == "" {
 		t.Error("generateRequestID() returned empty string")
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		t.Fatalf("generateRequestID() = %q, want UUID: %v", id, err)
 	}
 }

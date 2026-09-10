@@ -36,6 +36,7 @@ oss:
 
 sandbox:
   address: http://sandbox:8080
+  http_timeout: 60
   image: ""
   name_prefix: manus
   ttl_minutes: 60
@@ -57,6 +58,7 @@ llm:
 
 search:
   provider: "bing"
+  http_timeout: 30
   bing_api_key: ""
   google_api_key: ""
   search_engine_id: ""

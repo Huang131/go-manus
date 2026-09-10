@@ -26,10 +26,18 @@ type BingSearchClient struct {
 
 // NewBingSearchClient 创建 Bing 搜索客户端
 func NewBingSearchClient(apiKey string) *BingSearchClient {
+	return NewBingSearchClientWithTimeout(apiKey, 30*time.Second)
+}
+
+// NewBingSearchClientWithTimeout 创建带请求超时的 Bing 客户端。
+func NewBingSearchClientWithTimeout(apiKey string, timeout time.Duration) *BingSearchClient {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
 	return &BingSearchClient{
 		apiKey: apiKey,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: timeout,
 		},
 	}
 }
@@ -174,10 +182,18 @@ type GoogleSearchClient struct {
 
 // NewGoogleSearchClient 创建 Google 搜索客户端
 func NewGoogleSearchClient(apiKey string) *GoogleSearchClient {
+	return NewGoogleSearchClientWithTimeout(apiKey, 30*time.Second)
+}
+
+// NewGoogleSearchClientWithTimeout 创建带请求超时的 Google 客户端。
+func NewGoogleSearchClientWithTimeout(apiKey string, timeout time.Duration) *GoogleSearchClient {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
 	return &GoogleSearchClient{
 		apiKey: apiKey,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: timeout,
 		},
 	}
 }
@@ -292,14 +308,16 @@ type SearchConfig struct {
 	GoogleAPIKey   string `mapstructure:"google_api_key"`
 	SearchEngineID string `mapstructure:"search_engine_id"`
 	Provider       string `mapstructure:"provider"` // "bing" or "google"
+	HTTPTimeout    int    `mapstructure:"http_timeout"`
 }
 
 // NewSearchEngine 根据配置创建搜索引擎客户端
 func NewSearchEngine(cfg *SearchConfig) SearchEngine {
+	timeout := time.Duration(cfg.HTTPTimeout) * time.Second
 	switch cfg.Provider {
 	case "google":
-		return NewGoogleSearchClient(cfg.GoogleAPIKey)
+		return NewGoogleSearchClientWithTimeout(cfg.GoogleAPIKey, timeout)
 	default:
-		return NewBingSearchClient(cfg.BingAPIKey)
+		return NewBingSearchClientWithTimeout(cfg.BingAPIKey, timeout)
 	}
 }

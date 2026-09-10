@@ -230,7 +230,11 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 				f.setPlan(plan)
 
 				// 压缩记忆
-				_ = f.react.CompactMemory()
+				if err := f.react.CompactMemory(); err != nil {
+					logger.WarnContext(ctx, "压缩 Agent 记忆失败",
+						logger.String("session_id", f.sessionID),
+						logger.Err(err))
+				}
 
 				f.setStatus(FlowStatusUpdating)
 
