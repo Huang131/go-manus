@@ -117,10 +117,8 @@ func NewAnthropicClient(cfg *AnthropicClientConfig) *AnthropicClient {
 		maxTokens:     cfg.MaxTokens,
 		requestPolicy: cfg.RequestPolicy,
 		costPolicy:    cfg.CostPolicy,
-		httpClient: &http.Client{
-			Timeout: defaultExternalHTTPTimeout,
-		},
-		version: version,
+		httpClient:    &http.Client{},
+		version:       version,
 	}
 }
 

@@ -59,7 +59,7 @@ func Logger() gin.HandlerFunc {
 }
 
 // CORS CORS 中间件
-// 鉴权由后端在路由内部完成（不依赖浏览器 Cookie），因此 AllowAllOrigins 安全。
+// 当前路由未配置鉴权中间件，CORS 仅负责跨域策略。
 // 同时显式放行 SSE 所需的 Last-Event-ID 头与常见 Content-Type。
 func CORS() gin.HandlerFunc {
 	config := cors.DefaultConfig()

@@ -26,6 +26,15 @@ type mockTaskRunner struct {
 	onDoneTask    *RedisStreamTask
 }
 
+type panicTaskRunner struct{}
+
+func (panicTaskRunner) Invoke(context.Context, *RedisStreamTask) error {
+	panic("test panic")
+}
+
+func (panicTaskRunner) Destroy() error          { return nil }
+func (panicTaskRunner) OnDone(*RedisStreamTask) {}
+
 func (m *mockTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) error {
 	m.mu.Lock()
 	m.invokeCalled = true
@@ -362,6 +371,23 @@ func TestRedisStreamTask_Invoke(t *testing.T) {
 
 	// 清理
 	task.Cancel()
+}
+
+func TestRedisStreamTask_PanicStillFinishes(t *testing.T) {
+	defaultTaskRegistry.Clear()
+	task := NewRedisStreamTask(&mockMQWrapper{}, panicTaskRunner{})
+	if err := task.Invoke(context.Background()); err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+
+	select {
+	case <-task.DoneChan():
+	case <-time.After(time.Second):
+		t.Fatal("task did not finish after runner panic")
+	}
+	if !task.Done() {
+		t.Fatal("task Done() = false after runner panic")
+	}
 }
 
 // TestRedisStreamTask_Cancel 测试任务取消

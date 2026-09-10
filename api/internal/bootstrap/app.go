@@ -514,7 +514,7 @@ func (a *App) initLLM(cfg *config.Config, opts Options) external.LLM {
 //   - A2A：Agent-to-Agent 通信配置
 //
 // 这些组件被传递给 Agent 服务，供 Agent 调用外部能力。
-func (a *App) initExternalClients(cfg *config.Config, opts Options) (external.LLM, external.Browser, external.SearchEngine, external.MessageQueue, *agent.MCPConfig, *agent.A2AConfig) {
+func (a *App) initExternalClients(cfg *config.Config, opts Options) (external.LLM, external.Browser, external.SearchEngine, external.TaskMessageQueue, *agent.MCPConfig, *agent.A2AConfig) {
 	// LLM 路由器
 	llm := a.initLLM(cfg, opts)
 
@@ -541,7 +541,7 @@ func (a *App) initExternalClients(cfg *config.Config, opts Options) (external.LL
 	}
 
 	// MessageQueue 消息队列（使用 Redis Streams）
-	var mq external.MessageQueue
+	var mq external.TaskMessageQueue
 	if a.Redis != nil {
 		mq = external.NewRedisStreamMessageQueue(a.Redis.Client)
 	}
@@ -597,7 +597,7 @@ func newA2AConfig(cfg *config.Config) *agent.A2AConfig {
 //   - 必须有 PostgreSQL（存储会话）
 //   - 必须有 MessageQueue（异步任务队列）
 //   - 必须有 LLM（核心能力）
-func (a *App) initAgent(opts Options, llm external.LLM, browser external.Browser, search external.SearchEngine, mq external.MessageQueue, mcpConfig *agent.MCPConfig, a2aConfig *agent.A2AConfig) error {
+func (a *App) initAgent(opts Options, llm external.LLM, browser external.Browser, search external.SearchEngine, mq external.TaskMessageQueue, mcpConfig *agent.MCPConfig, a2aConfig *agent.A2AConfig) error {
 	if !opts.EnableAgent {
 		return nil
 	}

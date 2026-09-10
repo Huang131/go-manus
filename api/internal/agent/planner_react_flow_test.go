@@ -137,6 +137,35 @@ func TestPlannerReActFlow_StatusGetters(t *testing.T) {
 	}
 }
 
+func TestPlannerReActFlow_EmitEventStopsWhenContextCanceled(t *testing.T) {
+	flow := &PlannerReActFlow{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if flow.emitEvent(ctx, make(chan model.BaseEvent), model.NewDoneEvent()) {
+		t.Fatal("emitEvent() = true, want false for canceled context")
+	}
+}
+
+func TestPlannerReActFlow_GetPlanReturnsSnapshot(t *testing.T) {
+	flow := &PlannerReActFlow{
+		plan: &model.Plan{
+			ID:    "plan-1",
+			Title: "original",
+			Steps: []model.PlanStep{{ID: "step-1", Status: model.ExecutionStatusPending}},
+		},
+	}
+
+	snapshot := flow.GetPlan()
+	snapshot.Title = "changed"
+	snapshot.Steps[0].Status = model.ExecutionStatusCompleted
+
+	current := flow.GetPlan()
+	if current.Title != "original" || current.Steps[0].Status != model.ExecutionStatusPending {
+		t.Fatalf("GetPlan() exposed mutable state: %+v", current)
+	}
+}
+
 // TestPlannerReActFlow_InvokeContext 测试 Invoke 方法上下文处理
 func TestPlannerReActFlow_InvokeContext(t *testing.T) {
 	// 创建 mock LLM

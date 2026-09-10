@@ -56,9 +56,7 @@ func NewOpenAIClient(cfg *OpenAIClientConfig) *OpenAIClient {
 		toolCallTimeout: time.Duration(cfg.ToolCallTimeout) * time.Second,
 		requestPolicy:   cfg.RequestPolicy,
 		costPolicy:      cfg.CostPolicy,
-		httpClient: &http.Client{
-			Timeout: defaultExternalHTTPTimeout,
-		},
+		httpClient:      &http.Client{},
 	}
 }
 

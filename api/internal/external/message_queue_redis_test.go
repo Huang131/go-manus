@@ -24,3 +24,12 @@ func TestRedisMessageQueueDefaultTimeoutsUseDurations(t *testing.T) {
 		t.Fatalf("queue lock expiry = %s, want %s", queue.lockExpire, defaultLockExpire)
 	}
 }
+
+func TestRedisMessageQueueStreamRetentionPolicy(t *testing.T) {
+	if streamMaxLen <= 0 {
+		t.Fatalf("stream max len = %d, want positive", streamMaxLen)
+	}
+	if streamRetention <= 0 {
+		t.Fatalf("stream retention = %s, want positive", streamRetention)
+	}
+}

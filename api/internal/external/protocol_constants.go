@@ -6,10 +6,9 @@ const (
 	openAIChatCompletionsPath = "/chat/completions"
 	anthropicMessagesPath     = "/v1/messages"
 
-	defaultAnthropicBaseURL    = "https://api.anthropic.com"
-	defaultAnthropicVersion    = "2023-06-01"
-	defaultExternalHTTPTimeout = 120 * time.Second
-	defaultA2AHTTPTimeout      = 10 * time.Minute
+	defaultAnthropicBaseURL = "https://api.anthropic.com"
+	defaultAnthropicVersion = "2023-06-01"
+	defaultA2AHTTPTimeout   = 10 * time.Minute
 )
 
 // Anthropic 内容块和思考模式协议值。

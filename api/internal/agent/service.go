@@ -32,7 +32,7 @@ type AgentService struct {
 	fileStorage  COSFileStorage
 	mcpTool      *MCPTool
 	a2aTool      *A2ATool
-	mq           external.MessageQueue
+	mq           external.TaskMessageQueue
 
 	// Session 与 Task 的映射（用于对接 Task 架构）
 	taskBySession map[string]*RedisStreamTask
@@ -51,7 +51,7 @@ func NewAgentService(
 	a2aConfig *A2AConfig,
 	browser external.Browser,
 	searchEngine external.SearchEngine,
-	mq external.MessageQueue,
+	mq external.TaskMessageQueue,
 	fileStorage COSFileStorage,
 ) *AgentService {
 	// 初始化 MCP 工具

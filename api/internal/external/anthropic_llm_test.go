@@ -32,6 +32,13 @@ func newAnthropicTestClient(t *testing.T, captured *map[string]interface{}, resp
 	return c
 }
 
+func TestNewAnthropicClient_DoesNotApplyGlobalTimeout(t *testing.T) {
+	client := NewAnthropicClient(&AnthropicClientConfig{})
+	if client.httpClient.Timeout != 0 {
+		t.Fatalf("http client timeout = %s, want request-scoped timeout", client.httpClient.Timeout)
+	}
+}
+
 // === 请求侧：tool_use / tool_result / system / tools 转换 ===
 
 func TestAnthropicClient_ToolUseRequestWire(t *testing.T) {

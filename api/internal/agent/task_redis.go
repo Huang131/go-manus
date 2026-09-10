@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/bytedance/sonic"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -150,8 +152,8 @@ type TaskRunner interface {
 type RedisStreamTask struct {
 	id           string
 	runner       TaskRunner
-	inputStream  external.MessageQueue
-	outputStream external.MessageQueue
+	inputStream  external.TaskMessageQueue
+	outputStream external.TaskMessageQueue
 	cancelFunc   context.CancelFunc
 	done         atomic.Bool
 	doneChan     chan struct{}
@@ -174,14 +176,14 @@ func (t *RedisStreamTask) IsDone() bool {
 // TaskStream Redis Stream 适配器
 // 将 external.MessageQueue 适配为 Task 需要的 Stream 接口
 type TaskStream struct {
-	mq         external.MessageQueue
+	mq         external.TaskMessageQueue
 	streamName string
 	lastID     string // 上次读取的消息 ID，用于游标推进；空值表示从头开始读取
 	mu         sync.Mutex
 }
 
 // NewTaskStream 创建任务流适配器
-func NewTaskStream(mq external.MessageQueue, streamName string) *TaskStream {
+func NewTaskStream(mq external.TaskMessageQueue, streamName string) *TaskStream {
 	return &TaskStream{
 		mq:         mq,
 		streamName: streamName,
@@ -261,7 +263,7 @@ const DefaultBlockTimeout = 3 * time.Second
 //   - mq: 消息队列
 //   - runner: 任务运行器
 //   - registry: 任务注册表（可选，为 nil 时使用全局默认注册表）
-func NewRedisStreamTask(mq external.MessageQueue, runner TaskRunner, registry ...TaskRegistryInterface) *RedisStreamTask {
+func NewRedisStreamTask(mq external.TaskMessageQueue, runner TaskRunner, registry ...TaskRegistryInterface) *RedisStreamTask {
 	taskID := uuid.New().String()
 
 	// 如果没有传入注册表，使用全局默认注册表（向后兼容）
@@ -371,11 +373,25 @@ func (t *RedisStreamTask) Invoke(ctx context.Context) error {
 
 // execute 任务执行逻辑（后台运行）
 func (t *RedisStreamTask) execute(ctx context.Context) {
-	defer t.onDone()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			logger.Error("TaskRunner.Invoke panic",
+				logger.String("task_id", t.id),
+				logger.Any("panic", recovered),
+				logger.String("stack", string(debug.Stack())))
+		}
+		t.onDone()
+	}()
 
 	// 调用 TaskRunner 执行任务
 	if t.runner != nil {
 		if err := t.runner.Invoke(ctx, t); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				logger.Info("TaskRunner.Invoke 因上下文结束",
+					logger.String("task_id", t.id),
+					logger.Err(err))
+				return
+			}
 			logger.Error("TaskRunner.Invoke 失败",
 				logger.String("task_id", t.id),
 				logger.Err(err))
@@ -462,7 +478,11 @@ func (t *RedisStreamTask) GetOutput(ctx context.Context, startID string, blockTi
 
 	// 解析事件
 	var event model.Event
-	if err := sonic.UnmarshalString(data.(string), &event); err != nil {
+	dataStr, err := streamDataString(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize event: %w", err)
+	}
+	if err := sonic.UnmarshalString(dataStr, &event); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal event: %w", err)
 	}
 	event.ID = id

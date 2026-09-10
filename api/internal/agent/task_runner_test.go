@@ -109,10 +109,16 @@ func TestMessageTool_NotifyUserSchema(t *testing.T) {
 }
 
 type attachmentStorage struct {
-	data []byte
+	data         []byte
+	uploadedKey  string
+	uploadedSize int64
+	uploadedType string
 }
 
 func (s *attachmentStorage) Upload(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error {
+	s.uploadedKey = key
+	s.uploadedSize = size
+	s.uploadedType = contentType
 	return nil
 }
 
@@ -129,6 +135,51 @@ type attachmentSandbox struct {
 	filepath string
 	filename string
 	data     []byte
+}
+
+func (s *attachmentSandbox) ReadFile(ctx context.Context, filepath string, startLine, endLine *int, sudo bool, maxLength int) (*model.ToolResult, error) {
+	return model.NewToolResult(map[string]interface{}{"content": string(s.data)}), nil
+}
+
+type generatedFileRepository struct {
+	repository.FileRepository
+	created *model.File
+}
+
+func (r *generatedFileRepository) Create(ctx context.Context, file *model.File) error {
+	r.created = file
+	return nil
+}
+
+func TestAgentTaskRunner_SyncFileToStorageRegistersMetadata(t *testing.T) {
+	storage := &attachmentStorage{data: []byte("generated")}
+	fileRepo := &generatedFileRepository{}
+	runner := &AgentTaskRunner{
+		sessionID:   "session-1",
+		fileStorage: storage,
+		fileRep:     fileRepo,
+		sandbox:     &attachmentSandbox{data: []byte("generated")},
+	}
+
+	if err := runner.syncFileToStorage(context.Background(), "/tmp/report.txt"); err != nil {
+		t.Fatalf("syncFileToStorage() error = %v", err)
+	}
+	if fileRepo.created == nil {
+		t.Fatal("expected generated file record")
+	}
+	file := fileRepo.created
+	if file.ID == "" || file.SessionID != "session-1" {
+		t.Fatalf("file identity = %+v", file)
+	}
+	if file.Filename != "report.txt" || file.Extension != ".txt" {
+		t.Fatalf("file name metadata = %+v", file)
+	}
+	if file.MimeType != "text/plain; charset=utf-8" || file.Size != int64(len("generated")) {
+		t.Fatalf("file content metadata = %+v", file)
+	}
+	if file.CreatedAt.IsZero() {
+		t.Fatal("expected created_at")
+	}
 }
 
 func (s *attachmentSandbox) UploadFile(ctx context.Context, fileData []byte, filepath, filename string) (*model.ToolResult, error) {

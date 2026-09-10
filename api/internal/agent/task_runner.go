@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"github.com/bytedance/sonic"
 	"io"
+	"mime"
+	"path"
 	"path/filepath"
 	"sync"
 	"time"
@@ -384,8 +386,9 @@ func (r *AgentTaskRunner) syncFileToStorage(ctx context.Context, filePath string
 		}
 	}
 
-	// 上传到存储
-	key := "agent/" + r.sessionID + "/" + filePath
+	// 对象 key 使用文件名，避免把沙箱绝对路径泄露或重复拼入对象存储路径。
+	filename := path.Base(filePath)
+	key := "agent/" + r.sessionID + "/" + filename
 	err = r.fileStorage.Upload(ctx, key, &readerWrapper{data: []byte(content)}, int64(len(content)), "text/plain")
 	if err != nil {
 		logger.WarnContext(ctx, "同步文件到存储失败", logger.String("filepath", filePath), logger.Err(err))
@@ -393,10 +396,21 @@ func (r *AgentTaskRunner) syncFileToStorage(ctx context.Context, filePath string
 	}
 
 	// 创建文件记录
+	extension := filepath.Ext(filename)
+	mimeType := mime.TypeByExtension(extension)
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
 	file := &model.File{
-		Filename: filePath,
-		Filepath: filePath,
-		Key:      key,
+		ID:        uuid.New().String(),
+		SessionID: r.sessionID,
+		Filename:  filename,
+		Filepath:  filePath,
+		Key:       key,
+		Extension: extension,
+		MimeType:  mimeType,
+		Size:      int64(len(content)),
+		CreatedAt: time.Now(),
 	}
 	if err := r.fileRep.Create(ctx, file); err != nil {
 		logger.WarnContext(ctx, "创建文件记录失败", logger.String("filepath", filePath), logger.Err(err))

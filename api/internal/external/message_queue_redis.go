@@ -18,6 +18,8 @@ const (
 	defaultBufferSize   = 100
 	defaultBlockTimeout = 3 * time.Second
 	maxBlockTimeout     = 5 * time.Second
+	streamMaxLen        = 1000
+	streamRetention     = 24 * time.Hour
 	defaultLockExpire   = 10 * time.Second
 	lockAcquireTimeout  = 5 * time.Second
 	lockRetryInterval   = 100 * time.Millisecond
@@ -49,6 +51,8 @@ func (q *RedisStreamMessageQueue) Put(ctx context.Context, streamName string, me
 
 	result, err := q.client.XAdd(ctx, &redis.XAddArgs{
 		Stream: streamName,
+		MaxLen: streamMaxLen,
+		Approx: true,
 		Values: map[string]interface{}{
 			"data": string(data),
 		},
@@ -59,6 +63,12 @@ func (q *RedisStreamMessageQueue) Put(ctx context.Context, streamName string, me
 			logger.String("stream", streamName),
 			logger.Err(err))
 		return "", fmt.Errorf("failed to add message: %w", err)
+	}
+	// 流在最后一次写入后保留一段时间，给 SSE 续读留出窗口，避免历史任务流永久占用 Redis。
+	if err := q.client.Expire(ctx, streamName, streamRetention).Err(); err != nil {
+		logger.WarnContext(ctx, "设置消息流过期时间失败",
+			logger.String("stream", streamName),
+			logger.Err(err))
 	}
 
 	logger.Debug("添加消息到队列成功",

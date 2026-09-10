@@ -78,11 +78,14 @@ func (a *BaseAgent) SetEventCh(ch chan<- model.BaseEvent) {
 
 // emitEvent 向事件通道发送事件，通道未注入时静默跳过。
 // 由 Flow 保证事件通道的消费方（task_runner）持续消费，此处阻塞发送安全。
-func (a *BaseAgent) emitEvent(ev model.BaseEvent) {
+func (a *BaseAgent) emitEvent(ctx context.Context, ev model.BaseEvent) {
 	if a.eventCh == nil {
 		return
 	}
-	a.eventCh <- ev
+	select {
+	case a.eventCh <- ev:
+	case <-ctx.Done():
+	}
 }
 
 // Name 返回 Agent 名称
@@ -431,7 +434,7 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 	// 发出工具调用开始事件（tool_calling），前端 SSE 实时展示调用参数
 	callingEvent := model.NewToolCallingEvent(toolCallID, functionName, arguments)
 	callingEvent.Name = tool.Name()
-	a.emitEvent(callingEvent)
+	a.emitEvent(ctx, callingEvent)
 
 	// 特殊处理 message_ask_user 工具
 	if functionName == MessageFunctionAskUser {
@@ -468,7 +471,7 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 		// 失败也发出 tool_called 事件，携带错误结果，前端可展示失败详情
 		calledEvent := model.NewToolCalledEvent(toolCallID, functionName, arguments, model.NewToolError(err.Error()))
 		calledEvent.Name = tool.Name()
-		a.emitEvent(calledEvent)
+		a.emitEvent(ctx, calledEvent)
 
 		return &ToolCallResult{
 			ToolCallID:   toolCallID,
@@ -482,7 +485,7 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 	// 发出工具调用完成事件（tool_called）
 	calledEvent := model.NewToolCalledEvent(toolCallID, functionName, arguments, result)
 	calledEvent.Name = tool.Name()
-	a.emitEvent(calledEvent)
+	a.emitEvent(ctx, calledEvent)
 
 	return &ToolCallResult{
 		ToolCallID:   toolCallID,

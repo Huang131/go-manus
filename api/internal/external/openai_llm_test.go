@@ -28,6 +28,13 @@ func newTestClient(t *testing.T, baseURL string) *OpenAIClient {
 	return c
 }
 
+func TestNewOpenAIClient_DoesNotApplyGlobalTimeout(t *testing.T) {
+	client := NewOpenAIClient(&OpenAIClientConfig{})
+	if client.httpClient.Timeout != 0 {
+		t.Fatalf("http client timeout = %s, want request-scoped timeout", client.httpClient.Timeout)
+	}
+}
+
 // rawOK 把任意 JSON 写入 200 响应
 func rawOK(w http.ResponseWriter, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
