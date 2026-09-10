@@ -1,0 +1,43 @@
+api/internal/repository/file_repository.go
+  s_31f27eced9dde7::t_715e94438bb9fe 231,298
+api/tests/app_config_repository_integration_test.go
+  s_31f27eced9dde7::t_73a3f13d7a52d6 1-188
+api/tests/session_repository_integration_test.go
+  s_31f27eced9dde7::t_e9de1a718d7b11 1-5,16-18,20-22,31,42-44,49-51,62,65,70-72,94,111,116-118,124-126,134-136,148,155-157,171-173,201-203,227-229,240-242,253
+  s_31f27eced9dde7::t_1702037b384796 6-15,19,23-30,32-41,45-48,52-61,63-64,66-69,119-123,127-133,137-147,149-154,158-170,174-200,204-226,230-239,243-252
+  s_31f27eced9dde7::t_9d5e5dcc694b56 73-93,95-110,112-115
+api/internal/repository/session_repository.go
+  s_31f27eced9dde7::t_02df770a94b879 332
+api/tests/file_repository_integration_test.go
+  s_31f27eced9dde7::t_049748cb07b3f5 21-31
+  s_31f27eced9dde7::t_0f41544079c05b 1-17,19-20,32-96,102-110,112-243
+  s_31f27eced9dde7::t_80becabc4fcfa4 18
+  s_31f27eced9dde7::t_79a56c7258b922 97-101,111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "4fd23adbe8475c0098005f144ca6c061e4e2781f",
+  "prompts": {},
+  "sessions": {
+    "s_31f27eced9dde7": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa126775f8bfc5c33242f61",
+        "model": "glm-5.3__dev"
+      },
+      "human_author": "Huang131 <1315970725@qq.com>",
+      "custom_attributes": {
+        "tool_use_id": "6aa21b9b5f8bfc5c332431d1",
+        "source_scene": "agent",
+        "tool_name": "RunCommand",
+        "client_type": "ide",
+        "runtime_client": "trae-tob-git-ai",
+        "session_id": "6aa126775f8bfc5c33242f61",
+        "edit_kind": "bash",
+        "external_session_id": "6aa126775f8bfc5c33242f61",
+        "operation_id": "6aa21b9b5f8bfc5c332431d1"
+      }
+    }
+  }
+}
