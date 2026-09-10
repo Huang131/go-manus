@@ -115,13 +115,14 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 			}
 		}()
 
-		f.setStatus(FlowStatusPlanning)
-
 		logger.InfoContext(ctx, "PlannerReActFlow 开始执行",
 			logger.String("session_id", f.sessionID),
-			logger.String("message", input.Message.ContentText))
+			logger.String("message", input.Message.ContentText),
+			logger.String("resume_status", string(f.currentStatus())))
 
-		// 状态机循环：主循环只做调度，每个状态的处理逻辑在对应的 handleXxx 方法中
+		// 状态机循环：主循环只做调度，每个状态的处理逻辑在对应的 handleXxx 方法中。
+		// 初始状态不强制重置：Waiting 表示上一轮在等用户输入，本轮 Invoke 携带新消息
+		// 从 Waiting 恢复继续执行，而不是重新规划。
 		for {
 			status := f.currentStatus()
 			var stop bool
@@ -237,7 +238,10 @@ func (f *PlannerReActFlow) handleExecuting(ctx context.Context, input *TaskInput
 
 	if err := f.react.ExecuteStep(ctx, plan, step, input); err != nil {
 		if err == ErrWaitForUser {
-			// 需要等待用户输入：下一轮 Invoke 会从 waiting -> executing 继续当前计划
+			// 需要等待用户输入：先把步骤状态（含 UserQuestion）写回 flow，
+			// 然后终止本轮 goroutine。flow 停在 Waiting，runner 继续等下一条输入；
+			// 用户回复会触发下一轮 Invoke，从 Waiting -> Executing 用新消息继续当前计划。
+			f.setPlan(plan)
 			logger.InfoContext(ctx, "ReActAgent 等待用户输入",
 				logger.String("question", step.UserQuestion))
 			if !f.emitEvent(ctx, ch, model.NewMessageEvent("assistant", step.UserQuestion)) ||
@@ -246,7 +250,7 @@ func (f *PlannerReActFlow) handleExecuting(ctx context.Context, input *TaskInput
 			}
 			f.setStatus(FlowStatusWaiting)
 			// 不压缩记忆，保留上下文
-			return false
+			return true
 		}
 		logger.ErrorContext(ctx, "ReActAgent 执行步骤失败", logger.Err(err))
 		if !f.emitEvent(ctx, ch, model.NewStepEvent(*step, model.StepEventStatusFailed)) {
@@ -280,7 +284,9 @@ func (f *PlannerReActFlow) handleExecuting(ctx context.Context, input *TaskInput
 	return false
 }
 
-// handleWaiting 用户新消息触发下一轮 Invoke 后，等待 -> 继续执行
+// handleWaiting 用户新消息触发下一轮 Invoke 后调用：等待 -> 继续执行当前计划。
+// 只有新一轮 Invoke 的 goroutine 会进入此状态（等待路径会终止上一轮 goroutine），
+// 因此这里不会用旧 input 重跑步骤。
 func (f *PlannerReActFlow) handleWaiting() bool {
 	f.setStatus(FlowStatusExecuting)
 	return false

@@ -289,14 +289,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 			// 处理不同类型的事件
 			switch e := event.(type) {
 			case *model.PlanEvent:
-				if e.Status == model.PlanEventStatusCompleted {
-					// 计划完成，更新会话状态
-					if err := r.sessionRep.UpdateStatus(ctx, r.sessionID, model.SessionStatusCompleted); err != nil {
-						logger.WarnContext(ctx, "更新会话完成状态失败",
-							logger.String("session_id", r.sessionID),
-							logger.Err(err))
-					}
-				}
+				// 计划完成事件不改会话状态：终态统一由 DoneEvent 处理（成功与失败路径都会收尾）
 			case *model.ErrorEvent:
 				logger.ErrorContext(ctx, "Agent 运行出错", logger.String("error", e.Message))
 			case *model.StepEvent:
@@ -306,12 +299,34 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 						_ = r.syncFileToStorage(ctx, filePath)
 					}
 				}
+			case *model.DoneEvent:
+				// 流终态（正常完成与出错收尾都会发出）：回写会话状态，避免 session 永远卡 Running
+				if err := r.sessionRep.UpdateStatus(ctx, r.sessionID, model.SessionStatusCompleted); err != nil {
+					logger.WarnContext(ctx, "更新会话完成状态失败",
+						logger.String("session_id", r.sessionID),
+						logger.Err(err))
+				}
 			}
 
 			logger.DebugContext(ctx, "AgentTaskRunner 输出事件",
 				logger.String("task_id", task.ID()),
 				logger.String("event_id", outputID),
 				logger.String("event_type", string(event.GetType())))
+		}
+
+		// Flow goroutine 已退出（事件通道关闭）。按流状态决定 runner 去向：
+		//   - Waiting：上一轮在等用户输入，继续留在循环里 Pop 下一条消息（task 保持活跃）
+		//   - Completed/Idle：本轮任务已到终态，退出 runner 触发 task 完成清理链
+		//     （onDone -> destroy -> registry 摘除 -> 短 TTL），否则 task 永远不算完成
+		switch r.flow.GetStatus() {
+		case FlowStatusWaiting:
+			logger.InfoContext(ctx, "Flow 等待用户输入，runner 继续监听输入流",
+				logger.String("task_id", task.ID()))
+		default:
+			logger.InfoContext(ctx, "Flow 已到终态，runner 退出",
+				logger.String("task_id", task.ID()),
+				logger.String("flow_status", string(r.flow.GetStatus())))
+			return nil
 		}
 	}
 }
