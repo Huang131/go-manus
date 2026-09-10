@@ -1,0 +1,70 @@
+api/internal/external/message_queue_test.go
+  s_31f27eced9dde7::t_256b5acfbd94bf 328-386
+api/internal/external/message_queue_redis.go
+  s_31f27eced9dde7::t_e59a163618014c 352,354-355,364-372
+  s_31f27eced9dde7::t_7d169500e32199 373-374
+api/internal/repository/app_config_repository.go
+  s_31f27eced9dde7::t_2df642216d63c4 240
+  s_31f27eced9dde7::t_68b7332e629234 7,235,241-243,245
+api/internal/handler/session_handler.go
+  s_31f27eced9dde7::t_e59a163618014c 5,128,133,177-182,201-203,258,264,266-270
+api/pkg/logger/logger_test.go
+  s_31f27eced9dde7::t_52d6c658fe6611 5-6,8-9,133-246,248,250-330
+  h_ec777d6650665b 247,249
+api/internal/repository/transaction.go
+  s_31f27eced9dde7::t_2df642216d63c4 19-28
+  s_31f27eced9dde7::t_68b7332e629234 1-18,29-33
+api/internal/repository/file_repository.go
+  s_31f27eced9dde7::t_2df642216d63c4 214
+  s_31f27eced9dde7::t_68b7332e629234 6,209,215-217,219
+api/internal/handler/session_handler_test.go
+  s_31f27eced9dde7::t_256b5acfbd94bf 324-340
+api/internal/repository/llm_model_repository_test.go
+  s_31f27eced9dde7::t_b044f049774772 17-20
+api/internal/repository/llm_model_repository.go
+  s_31f27eced9dde7::t_b044f049774772 9,120-121
+  s_31f27eced9dde7::t_3788d5839187e4 309,316-317,319
+  s_31f27eced9dde7::t_2df642216d63c4 314
+  s_31f27eced9dde7::t_7db84dabbaa382 315
+api/internal/repository/session_repository.go
+  s_31f27eced9dde7::t_3788d5839187e4 438,441
+  s_31f27eced9dde7::t_2df642216d63c4 434,436,448-450
+api/pkg/logger/logger.go
+  s_31f27eced9dde7::t_3152c4ddd25acf 169-171
+  s_31f27eced9dde7::t_6bd8cf9e07bde5 68,71-78,91-96,163,254
+  s_31f27eced9dde7::t_19f8b8271aad7b 172
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "fd0b5d2d9952a9b5f699791c789b87b95ee27520",
+  "prompts": {},
+  "humans": {
+    "h_ec777d6650665b": {
+      "author": "Huang131 <1315970725@qq.com>"
+    }
+  },
+  "sessions": {
+    "s_31f27eced9dde7": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa126775f8bfc5c33242f61",
+        "model": "minimax-m2.7"
+      },
+      "human_author": "Huang131 <1315970725@qq.com>",
+      "custom_attributes": {
+        "client_type": "ide",
+        "tool_type": "agent",
+        "source_scene": "unknown",
+        "tool_use_id": "6aa2348e5f8bfc5c33243562",
+        "edit_kind": "file_edit",
+        "operation_id": "6aa2348e5f8bfc5c33243562",
+        "runtime_client": "trae-tob-git-ai",
+        "session_id": "6aa126775f8bfc5c33242f61",
+        "external_session_id": "6aa126775f8bfc5c33242f61",
+        "tool_id": "Write",
+        "dedupe_key": "6aa126775f8bfc5c33242f61:6aa2348e5f8bfc5c33243562:afterEdit:8009fd5e"
+      }
+    }
+  }
+}
