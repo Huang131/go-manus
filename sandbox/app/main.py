@@ -103,5 +103,11 @@ app.add_middleware(
 # 5.注册错误并处理
 register_exception_handlers(app)
 
-# 6.集成路由
+# 6.健康检查端点
+@app.get("/health", tags=["健康检查"])
+async def health_check():
+    """健康检查端点，供 API 服务检测沙箱状态"""
+    return {"status": "healthy"}
+
+# 7.集成路由
 app.include_router(router, prefix="/api")

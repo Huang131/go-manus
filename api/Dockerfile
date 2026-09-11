@@ -3,26 +3,25 @@
 # ============================================================
 FROM golang:1.24-alpine AS builder
 
-# 安装构建工具
-RUN apk add --no-cache git make
+# 支持多平台构建 (Apple Silicon / amd64)
+ARG TARGETARCH
 
-# 设置 Go 工具链自动下载
 ENV GOTOOLCHAIN=auto
-
 WORKDIR /build
 
-# 复制 go mod 文件
+# 先复制 go mod 文件，利用缓存
 COPY go.mod go.sum ./
-
-# 下载依赖 (利用 Docker 缓存层)
-RUN go mod download
 
 # 复制源代码
 COPY . .
 
 # 编译二进制文件
 # CGO_ENABLED=0 表示静态编译，不依赖 libc
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+# 合并两个 cache mount 到一个 RUN，减少层数并加速增量构建
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build \
     -ldflags="-s -w" \
     -o go-manus \
     ./cmd/server
@@ -33,22 +32,17 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 FROM alpine:3.19 AS runner
 
 # 安装 ca-certificates (用于 HTTPS 请求) 和 tzdata
-RUN apk add --no-cache ca-certificates tzdata
-
-# 创建非 root 用户
-RUN adduser -D -g '' appuser
+RUN apk add --no-cache ca-certificates tzdata && \
+    # 创建非 root 用户
+    adduser -D -g '' appuser
 
 WORKDIR /app
 
-# 从 builder 阶段复制二进制文件
-COPY --from=builder /build/go-manus .
-COPY --from=builder /build/config.yaml .
-
-# 复制数据库迁移脚本
-COPY --from=builder /build/migrations ./migrations
-
-# 复制 pkg 目录 (如果需要)
-COPY --from=builder /build/pkg ./pkg
+# 从 builder 阶段复制文件
+# 注意：不再拷贝 /build/pkg，静态编译不需要源码
+COPY --from=builder /build/go-manus ./
+COPY --from=builder /build/config.yaml ./
+COPY --from=builder /build/migrations ./migrations/
 
 # 设置文件权限
 RUN chown -R appuser:appuser /app

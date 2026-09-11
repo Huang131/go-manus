@@ -229,14 +229,19 @@ clean-all:
 # ============================================================
 
 # 重建并启动特定服务
+# 使用 docker buildx build 替代 docker compose build，利用 BuildKit 缓存加速
+# --no-deps: up 时不启动依赖服务
 rebuild-api:
 	@echo "重建 API 服务..."
-	docker compose up -d --build api
+	docker buildx build --load -f api/Dockerfile -t go-manus-api:latest api
+	docker compose up -d --no-deps api
 
 rebuild-ui:
 	@echo "重建 UI 服务..."
-	docker compose up -d --build ui
+	docker buildx build --load -f ui/Dockerfile -t go-manus-ui:latest ui
+	docker compose up -d --no-deps ui
 
 rebuild-sandbox:
 	@echo "重建沙箱服务..."
-	docker compose up -d --build sandbox
+	docker buildx build --load -f sandbox/Dockerfile -t go-manus-sandbox:latest sandbox
+	docker compose up -d --no-deps sandbox

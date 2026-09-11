@@ -30,6 +30,9 @@ from app.models.shell import (
 
 logger = logging.getLogger(__name__)
 
+# 单个会话输出缓冲上限，超出后截断头部保留尾部，防止长会话内存无限增长
+MAX_OUTPUT_CHARS = 512 * 1024
+
 
 class ShellService:
     """Shell命令服务"""
@@ -37,6 +40,8 @@ class ShellService:
 
     def __init__(self) -> None:
         self.active_shells = {}
+        # 输出读取器 task 引用：必须持有引用，否则可能被事件循环 GC 中途取消
+        self.reader_tasks: Dict[str, asyncio.Task] = {}
 
     @classmethod
     def _get_display_path(cls, path: str) -> str:
