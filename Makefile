@@ -234,14 +234,14 @@ clean-all:
 rebuild-api:
 	@echo "重建 API 服务..."
 	docker buildx build --load -f api/Dockerfile -t go-manus-api:latest api
-	docker compose up -d --no-deps api
+	docker compose up -d --no-deps --force-recreate api
 
 rebuild-ui:
 	@echo "重建 UI 服务..."
 	docker buildx build --load -f ui/Dockerfile -t go-manus-ui:latest ui
-	docker compose up -d --no-deps ui
+	docker compose up -d --no-deps --force-recreate ui
 
 rebuild-sandbox:
 	@echo "重建沙箱服务..."
 	docker buildx build --load -f sandbox/Dockerfile -t go-manus-sandbox:latest sandbox
-	docker compose up -d --no-deps sandbox
+	docker compose up -d --no-deps --force-recreate sandbox
