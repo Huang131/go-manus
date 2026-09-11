@@ -1,0 +1,54 @@
+sandbox/.dockerignore
+  s_d79bfca50129ee::t_9768cf10485860 1-47
+sandbox/app/services/shell.py
+  s_d79bfca50129ee::t_e0701817f9660b 33-35,43-44
+sandbox/Dockerfile
+  s_d79bfca50129ee::t_04e21533037a65 44,49-50,52-53,68-69,71-72,74-75,77-78,90-92
+  s_d79bfca50129ee::t_b14a9cea3e7a2e 1-3,6-18,21-31,35-39,41-42,45-46,48,51,58,60-63,65,67,70,80-83,94-95
+sandbox/supervisord.conf
+  s_d79bfca50129ee::t_abb6d118163686 28,37
+Makefile
+  s_d79bfca50129ee::t_1ebec0af35b1b3 237,242,247
+  s_d79bfca50129ee::t_9d05f3a61aaa65 232-233,236,241,246
+sandbox/app/main.py
+  s_d79bfca50129ee::t_a1bcbe430fb7a7 106-112
+ui/Dockerfile
+  s_d79bfca50129ee::t_6530233be3207d 1,3-4,7,11,13-14,17,19-21,29,31,51
+docker-compose.yml
+  s_d79bfca50129ee::t_ffe5c64f7cc1c7 128
+  s_d79bfca50129ee::t_33a55509709c3c 157-162
+api/Dockerfile
+  s_d79bfca50129ee::t_ac1a0d2b994ae4 20-23
+  s_d79bfca50129ee::t_54fd847b1f87b9 6-7,24,42
+  s_d79bfca50129ee::t_7e3d29102767f6 12,35-37
+  s_d79bfca50129ee::t_07865560c9ccf6 41,43-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.2",
+  "base_commit_sha": "87e124f8905dc9bdd0226c295f0b113fbf782f51",
+  "prompts": {},
+  "sessions": {
+    "s_d79bfca50129ee": {
+      "agent_id": {
+        "tool": "trae",
+        "id": "6aa41b675f8bfc5c33244069",
+        "model": "minimax-m2.7"
+      },
+      "human_author": "Huang131 <1315970725@qq.com>",
+      "custom_attributes": {
+        "tool_type": "agent",
+        "dedupe_key": "6aa41b675f8bfc5c33244069:6aa43ad05f8bfc5c3324424f:afterEdit:6dcdceb0",
+        "runtime_client": "trae-tob-git-ai",
+        "edit_kind": "file_edit",
+        "session_id": "6aa41b675f8bfc5c33244069",
+        "tool_use_id": "6aa43ad05f8bfc5c3324424f",
+        "client_type": "ide",
+        "tool_id": "Write",
+        "source_scene": "unknown",
+        "external_session_id": "6aa41b675f8bfc5c33244069",
+        "operation_id": "6aa43ad05f8bfc5c3324424f"
+      }
+    }
+  }
+}
