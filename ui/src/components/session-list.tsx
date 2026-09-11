@@ -75,7 +75,7 @@ export function SessionList() {
   }
 
   // 错误态
-  if (error) {
+  if (error && sessions.length === 0) {
     return (
       <div className="flex flex-col items-center gap-2 py-8 text-sm text-muted-foreground">
         <p>加载失败</p>
@@ -100,6 +100,14 @@ export function SessionList() {
 
   return (
     <>
+      {error && (
+        <div className="flex items-center justify-between px-2 py-1 text-xs text-muted-foreground">
+          <span>{error}</span>
+          <button className="text-primary underline underline-offset-4 cursor-pointer" onClick={refresh}>
+            重试
+          </button>
+        </div>
+      )}
       <ItemGroup className="gap-1">
         {sessions.map((session) => (
           <SessionItem
@@ -121,4 +129,3 @@ export function SessionList() {
     </>
   )
 }
-

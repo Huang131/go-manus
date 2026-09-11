@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 
 # 单个会话输出缓冲上限，超出后截断头部保留尾部，防止长会话内存无限增长
 MAX_OUTPUT_CHARS = 512 * 1024
+MAX_CONSOLE_RECORDS = 100
 
 
 class ShellService:
@@ -42,6 +43,46 @@ class ShellService:
         self.active_shells = {}
         # 输出读取器 task 引用：必须持有引用，否则可能被事件循环 GC 中途取消
         self.reader_tasks: Dict[str, asyncio.Task] = {}
+
+    @staticmethod
+    def _append_output(current: str, output: str) -> str:
+        """保留最新输出，避免长期会话无限占用内存。"""
+        combined = current + output
+        if len(combined) <= MAX_OUTPUT_CHARS:
+            return combined
+        return combined[-MAX_OUTPUT_CHARS:]
+
+    def _start_output_reader_task(
+            self, session_id: str, process: asyncio.subprocess.Process
+    ) -> None:
+        """启动并持有输出读取任务，保证一个会话只消费当前进程的输出。"""
+        previous_task = self.reader_tasks.pop(session_id, None)
+        if previous_task and not previous_task.done():
+            previous_task.cancel()
+
+        task = asyncio.create_task(self._start_output_reader(session_id, process))
+        self.reader_tasks[session_id] = task
+
+        def remove_completed_task(completed_task: asyncio.Task) -> None:
+            if self.reader_tasks.get(session_id) is completed_task:
+                self.reader_tasks.pop(session_id, None)
+            if not completed_task.cancelled() and completed_task.exception() is not None:
+                logger.error(
+                    f"会话 {session_id} 的输出读取器异常结束: {completed_task.exception()}"
+                )
+
+        task.add_done_callback(remove_completed_task)
+
+    async def _stop_output_reader(self, session_id: str) -> None:
+        """取消并等待输出读取器，避免旧进程向新命令的记录写入输出。"""
+        task = self.reader_tasks.pop(session_id, None)
+        if task is None or task.done():
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
     @classmethod
     def _get_display_path(cls, path: str) -> str:
@@ -88,31 +129,35 @@ class ShellService:
 
         # 2.创建增量编码器（解决字符被切断的问题）
         decoder = codecs.getincrementaldecoder(encoding)(errors="replace")
-        shell = self.active_shells.get(session_id)
-
-        while True:
+        try:
+            while True:
             # 3.判断子进程是否有标准输出管道
-            if process.stdout:
-                try:
+                if process.stdout:
+                    try:
                     # 4.读取缓存区的数据，假设一次读取4096
-                    buffer = await process.stdout.read(4096)
-                    if not buffer:
-                        break
+                        buffer = await process.stdout.read(4096)
+                        if not buffer:
+                            break
 
                     # 5.使用编码器进行编码，同时设置final=False标识未结束
-                    output = decoder.decode(buffer, final=False)
+                        output = decoder.decode(buffer, final=False)
 
                     # 6.判断会话是否存在
-                    if shell:
+                        shell = self.active_shells.get(session_id)
+                        if shell and shell.process is process:
                         # 7.更新会话输出和控制台记录
-                        shell.output += output
-                        if shell.console_records:
-                            shell.console_records[-1].output += output
-                except Exception as e:
-                    logger.error(f"读取进程输出时错误: {str(e)}")
+                            shell.output = self._append_output(shell.output, output)
+                            if shell.console_records:
+                                record = shell.console_records[-1]
+                                record.output = self._append_output(record.output, output)
+                    except Exception as e:
+                        logger.error(f"读取进程输出时错误: {str(e)}")
+                        break
+                else:
                     break
-            else:
-                break
+        except asyncio.CancelledError:
+            logger.debug(f"会话 {session_id} 的输出读取器已取消")
+            raise
 
         logger.debug(f"会话 {session_id} 的输出读取器已完成")
 
@@ -238,8 +283,8 @@ class ShellService:
                     console_records=[ConsoleRecord(ps1=ps1, command=command, output="")],
                 )
 
-                # 5.创建后台任务来运行输出读取器
-                await asyncio.create_task(self._start_output_reader(session_id, process))
+                # 5.输出读取器独立运行，命令超时后仍持续收集输出。
+                self._start_output_reader_task(session_id, process)
             else:
                 # 6.该会话已存在则读取数据
                 logger.debug(f"使用现有的Shell会话: {session_id}")
@@ -257,6 +302,9 @@ class ShellService:
                         # 9.结束旧进程出现错误并记录日志调用kill强制关闭进程
                         logger.warning(f"强制终止Shell会话中的进程 {session_id} 失败: {str(e)}")
                         old_process.kill()
+                        await old_process.wait()
+
+                await self._stop_output_reader(session_id)
 
                 # 10.关闭之后创建一个新的进程
                 process = await self._create_process(exec_dir, command)
@@ -266,9 +314,11 @@ class ShellService:
                 shell.exec_dir = exec_dir
                 shell.output = ""
                 shell.console_records.append(ConsoleRecord(ps1=ps1, command=command, output=""))
+                if len(shell.console_records) > MAX_CONSOLE_RECORDS:
+                    shell.console_records = shell.console_records[-MAX_CONSOLE_RECORDS:]
 
-                # 12.创建后台任务来运行输出读取器
-                await asyncio.create_task(self._start_output_reader(session_id, process))
+                # 12.创建后台输出读取器，不等待进程结束。
+                self._start_output_reader_task(session_id, process)
 
             try:
 
@@ -349,9 +399,10 @@ class ShellService:
 
             # 7.记录日志/输出(直接使用原始字符串，不从input_data编码，避免编码不统一的情况)
             log_text = input_text + ("\n" if press_enter else "")
-            shell.output += log_text
+            shell.output = self._append_output(shell.output, log_text)
             if shell.console_records:
-                shell.console_records[-1].output += log_text
+                record = shell.console_records[-1]
+                record.output = self._append_output(record.output, log_text)
 
             # 8.向子进程写入数据
             process.stdin.write(input_data)
@@ -395,13 +446,16 @@ class ShellService:
                     # 6.优雅关闭失败，则强制关闭
                     logger.warning(f"尝试强制关闭进程: {session_id}")
                     process.kill()
+                    await process.wait()
 
                 # 7.记录日志并返回关闭结果
                 logger.info(f"进程已终止, 返回代码为: {process.returncode}")
+                await self._stop_output_reader(session_id)
                 return ShellKillResult(status="terminated", returncode=process.returncode)
             else:
                 # 8.进程已结束无需重复关闭
                 logger.info(f"进程已终止, 返回代码为: {process.returncode}")
+                await self._stop_output_reader(session_id)
                 return ShellKillResult(status="already_terminated", returncode=process.returncode)
         except Exception as e:
             # 9.记录日志并抛出异常

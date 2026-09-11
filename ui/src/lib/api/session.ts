@@ -55,6 +55,7 @@ export const sessionApi = {
     const controller = new AbortController();
 
     const startStream = async () => {
+      let parseError = false;
       try {
         const stream = await createSSEStream("/sessions/stream", {}, {
           signal: controller.signal,
@@ -80,13 +81,14 @@ export const sessionApi = {
           },
           (error) => {
             if (!controller.signal.aborted && onError) {
+              parseError = true;
               onError(error);
             }
           }
         );
 
         // 流正常结束（服务端关闭连接），通知上层以便重连
-        if (!controller.signal.aborted && onError) {
+        if (!controller.signal.aborted && onError && !parseError) {
           onError(new Error("SSE 流已结束"));
         }
       } catch (error) {
@@ -138,6 +140,7 @@ export const sessionApi = {
     const controller = new AbortController();
 
     const startStream = async () => {
+      let parseError = false;
       try {
         const stream = await createSSEStream(
           `/sessions/${sessionId}/chat`,
@@ -168,13 +171,14 @@ export const sessionApi = {
           },
           (error) => {
             if (!controller.signal.aborted && onError) {
+              parseError = true;
               onError(error);
             }
           }
         );
 
         // 流正常结束（服务端关闭连接），通知上层以便重连或状态恢复
-        if (!controller.signal.aborted && onError) {
+        if (!controller.signal.aborted && onError && !parseError) {
           onError(new Error("SSE_STREAM_END"));
         }
       } catch (error) {

@@ -169,11 +169,11 @@ if not message.get("content") and not message.get("tool_calls"):
 |------|--------------------|------------------|
 | `Dockerfile` | 安装 `xvfb x11vnc websockify chromium xterm socat` | **完全相同** |
 | `supervisord.conf` | `xvfb, chrome, socat, x11vnc, websockify, app` 6 个 program | **完全相同** |
-| 沙箱入口 | FastAPI 8080 (uvicorn hot reload) | **完全相同** (甚至连 `UVI_ARGS` 都保留) |
+| 沙箱入口 | FastAPI 8080 (uvicorn hot reload) | FastAPI 8080（生产默认关闭 reload，开发通过 `UVI_ARGS=--reload` 开启） |
 | 文件/Shell 端点 | `/files`, `/shell` + supervisor 控制 | **完全相同** |
 | 暴露端口 | `8080 9222 5900 5901` | **完全相同** |
 
-**评价**: 沙箱侧两边**字节级一致**, Go 版本甚至保留了 `UVI_ARGS` 这种 Python 专用变量, 纯粹是 Python sandbox 的副本。
+**评价**: 沙箱保留了原项目的大部分进程编排，但 Go 项目已调整 FastAPI 的热重载策略：生产默认关闭，开发时通过 `UVI_ARGS=--reload` 显式开启。
 
 ### 4.2 **VNC WebSocket 代理 (重大功能缺失)**
 

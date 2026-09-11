@@ -1,6 +1,6 @@
 # Manus 沙箱服务
 
-基于 Ubuntu 22.04 构建的沙箱环境，提供隔离的代码执行、浏览器自动化和远程桌面访问能力。
+基于 Ubuntu 22.04 构建的学习型沙箱环境，提供代码执行、浏览器自动化和远程桌面访问能力。
 
 ## 技术栈
 
@@ -63,13 +63,25 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 
 ## Docker 部署
 
-沙箱服务通过根目录的 `docker-compose.yml` 统一部署。生产环境中沙箱作为固定容器运行，API 服务通过 `SANDBOX_ADDRESS=manus-sandbox` 连接。
+沙箱服务通过根目录的 `docker-compose.yml` 统一部署。API 服务通过容器网络中的
+`SANDBOX_ADDRESS=http://sandbox:8080` 连接。
 
 ### 端口说明
 
-在 Docker Compose 部署中，沙箱端口仅在容器网络内部可访问，不对外暴露：
+根目录 Compose 默认保留 `${SANDBOX_PORT:-8090}:8080` 宿主机映射，方便学习和调试；
+生产环境建议删除 `ports` 映射，仅保留容器网络访问：
 
 - `8080` - FastAPI REST API
 - `9222` - Chrome DevTools Protocol
 - `5900` - VNC RFB
 - `5901` - WebSocket VNC（API 服务通过此端口代理 VNC 到前端）
+
+### 信任模型与安全边界
+
+沙箱提供 root 权限的 Shell 和文件操作，FastAPI 进程也以 root 运行；Chrome
+启用了远程调试并关闭同源策略，VNC 当前使用 `-nopw`。这些设置用于本地学习和
+调试，不应直接暴露到不可信网络。若部署到共享或生产环境，应移除宿主机端口映射、
+限制网络访问，并为 VNC/CDP 和 API 增加认证与最小权限隔离。
+
+Supervisor 的 FastAPI 进程默认不启用 `--reload`；本地开发需要显式设置
+`UVI_ARGS=--reload`。

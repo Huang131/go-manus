@@ -460,7 +460,7 @@ AI 最终回答 `1+1 = 2` 并给出任务执行总结，进程存活（healthy�
 | 4 | 空流续读走错路径 | ❌ 不存在 | Python 版的 `/chat` 是 async generator，无论 message 是否为空都走事件循环订阅路径 |
 | 5 | 500ms 死循环 | ❌ 不存在 | Python 版 SSE 保持长连 + 阻塞式事件订阅，没有"立即关闭"逻辑 |
 | 6 | 状态机空步骤卡死 | ❌ 不存在 | Python 版 `flow_planner_react.py` 在 `if not plan.steps` 分支直接 yield final answer 退出 |
-| 7 | CORS 配置冲突 | ❌ 不存在 | Python FastAPI `CORSMiddleware` 允许 `allow_origins=["*"]` + `allow_credentials=True` 兼容性更好（无 gin-cors 那种 hard 校验） |
+| 7 | CORS 配置冲突 | ⚠️ 曾存在 | FastAPI 虽允许配置 `allow_origins=["*"]` 与 `allow_credentials=True`，但浏览器不会把该组合视为可携带凭据的有效 CORS 响应；sandbox 已改为 `allow_credentials=False`。 |
 | 8 | LLM tool calling 慢 | ⚠️ 一样存在 | 模型能力问题，与语言无关 |
 | 9 | 工具调用失败 nil panic 杀进程 | ❌ 不存在 | Python 版工具调用失败走 `try/except` 返回错误 dict，**永远不会因为 None 解引用崩溃**；即使异常也只影响单个请求（asyncio 协程级），不会杀死整个 uvicorn 进程 |
 | 10 | reasoning_content 丢失 + planner 无降级 | ⚠️ 部分 | Python 的 openai sdk 响应是 dict，`resp.choices[0].message.content` 为空时可直接取 `reasoning_content`（字段本来就透传）；planner 失败的处理依赖各模型实现，原项目主推模型非推理模型，未暴露此问题 |

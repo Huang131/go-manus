@@ -60,16 +60,15 @@ class FileService:
 
             # 3.判断是否为sudo，如果是sudo系统则使用命令行的形式读取文件
             if sudo:
-                # 4.使用sudo cat命令读取文件内容
-                command = f"sudo cat '{filepath}'"
-                process = await asyncio.create_subprocess_shell(
-                    command,
+                # 使用参数数组传递路径，避免空格和引号破坏 shell 命令。
+                process = await asyncio.create_subprocess_exec(
+                    "sudo", "cat", filepath,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
 
                 # 5.读取子进程的输出，并等待子进程结束
-                stdout, stderr = process.communicate()
+                stdout, stderr = await process.communicate()
 
                 # 6.判断子进程的状态是否正常结束
                 if process.returncode != 0:
@@ -128,41 +127,30 @@ class FileService:
 
             # 2.判断是否是sudo权限，如果是则使用命令行的形式先写入一个缓存文件，然后将缓存文件覆盖原始文件
             if sudo:
-                # 3.使用命令的方式先向临时文件写入数据，计算追加模式
-                mode = ">>" if append else ">"
-
-                # 4.创建一个临时文件
-                temp_file = f"/tmp/file_write_{os.getpid()}.tmp"
-
-                # 5.创建一个内部函数使用asyncio创建新线程写入数据
-                def async_write_temp_file() -> int:
-                    with open(temp_file, "w", encoding="utf-8") as f:
-                        f.write(content)
-                    return len(content.encode("utf-8"))
-
-                # 6.使用asyncio创建子线程并写入
-                bytes_written = await asyncio.to_thread(async_write_temp_file)
-
-                # 7.使用命令行将临时文件写入到目标哦文件中
-                command = f"sudo bash -c \"cat {temp_file} {mode} {filepath}\""
-                process = await asyncio.create_subprocess_shell(
-                    command,
+                # sudo tee 从 stdin 写入，路径作为独立参数，避免命令注入和转义问题。
+                tee_args = ["sudo", "tee"]
+                if append:
+                    tee_args.append("-a")
+                tee_args.append(filepath)
+                process = await asyncio.create_subprocess_exec(
+                    *tee_args,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
 
                 # 8.等待子进程执行完毕
-                stdout, stderr = await process.communicate()
+                stdout, stderr = await process.communicate(content.encode("utf-8"))
+                bytes_written = len(content.encode("utf-8"))
 
                 # 9.检测子进程是否正常执行
                 if process.returncode != 0:
                     raise BadRequestException(f"文件内容写入失败: {stderr.decode()}")
 
-                # 10.清除下临时文件
-                os.unlink(temp_file)
             else:
                 # 11.非sudo使用Python方式写入，先确保文件路径存在
-                os.makedirs(os.path.dirname(filepath), exist_ok=True)
+                parent_dir = os.path.dirname(filepath)
+                if parent_dir:
+                    os.makedirs(parent_dir, exist_ok=True)
 
                 # 12.创建一个异步写入的函数
                 def async_write_file() -> int:
@@ -239,7 +227,7 @@ class FileService:
         def async_matches():
             nonlocal matches, line_numbers
             for idx, line in enumerate(lines):
-                if pattern.match(line):
+                if pattern.search(line):
                     matches.append(line)
                     line_numbers.append(idx)
 
@@ -278,7 +266,9 @@ class FileService:
             file_size = 0
 
             # 2.确保上传文件所在的目录存在
-            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            parent_dir = os.path.dirname(filepath)
+            if parent_dir:
+                os.makedirs(parent_dir, exist_ok=True)
 
             # 3.定义一个异步函数用于上传文件避免阻塞进程
             def async_write_file():

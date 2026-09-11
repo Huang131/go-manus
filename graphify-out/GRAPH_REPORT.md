@@ -1,16 +1,16 @@
-# Graph Report - go-manus  (2026-09-11)
+# Graph Report - go-manus  (2026-09-12)
 
 ## Corpus Check
-- 294 files · ~879,333 words
+- 293 files · ~880,574 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 3451 nodes · 8184 edges · 206 communities (178 shown, 28 thin omitted)
+- 3494 nodes · 8245 edges · 201 communities (177 shown, 24 thin omitted)
 - Extraction: 92% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 650 edges (avg confidence: 0.78)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `4a5f6a21`
+- Built from commit: `87e124f8`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -25,40 +25,40 @@
 - manus-settings.tsx
 - go-manus 前后端端到端 Streaming Review 与重构记录
 - testing.T
-- chat-input.tsx
-- ToolResult
+- session-item.tsx
+- context.Context
 - RoutedLLM
-- PostgresSessionRepository
+- Message
 - mooc-manus vs go-manus 功能差异与缺失分析
 - go-manus 多大模型支持技术方案：强类型核心协议 + 控制面 + Provider Adapter
 - .loadOne
 - Config
 - logger_test.go
-- lib/utils.ts
+- session-detail-view.tsx
 - .initRoutes
 - TestMessageQueueMockOperations
-- Response
-- Message
+- SupervisorService
+- LLMResponse
 - 2. 根因链：11 个 Bug 拆解
 - logger 包 os.Stdout 误关闭 Bug 深度解析
 - AnthropicClient
 - TestLLM_ModelInfo
-- SupervisorService
+- Docker 构建优化实践笔记
 - compilerOptions
 - OpenAIClient
 - endpoints/file.py
 - App
 - endpoints/shell.py
-- NewOpenAIClient
+- RuntimeHealth
 - AgentService
-- session-detail-view.tsx
+- chat-input.tsx
 - tools_integration_test.go
 - NewMockSessionRepository
 - external/search.go
 - go-manus 项目代码异味（Smell）分析与重构建议
 - Err
 - Factories
-- service_dependencies.py
+- main.py
 - run
 - tools_test.go
 - PlannerReActFlow
@@ -67,17 +67,17 @@
 - BaseAgent
 - fallback_llm_test.go
 - openai_llm_test.go
-- NewProviderError
+- fallback_test.go
 - dependencies
 - components.json
 - getJSON
-- Postgres
+- NewStatusService
 - RedisStreamTask
 - json_parser_repair.go
 - 记一次 Go 日志库 os.Stdout 被误关闭的 Bug 修复
 - 部署指南
 - index.tsx
-- context.Context
+- io.ReadCloser
 - testLLMModelRepo
 - Session
 - ShellService
@@ -85,10 +85,10 @@
 - LLMModel
 - Detailed Findings
 - Agent 核心架构
-- app_config.go
+- NewToolResult
 - event.go
 - logger.go
-- NewBaseAgent
+- LLM
 - Info
 - Refactoring with GitNexus
 - stubLLM
@@ -115,7 +115,7 @@
 - 2. Go 死锁与 channel 关闭：一次性 ping-pong 协程模式
 - package.json
 - 4.3 11 个 Bug 拆解
-- NotFound
+- FileHandler
 - go-manus 面试指南
 - DefaultFileCleanupService
 - 1. JSON `[]byte` vs `json.RawMessage`：PostgreSQL JSONB base64 编码陷阱
@@ -127,7 +127,7 @@
 - 7.2 工具系统详细对比
 - 七、详细模块对比
 - SessionHandler
-- button.tsx
+- vnc-overlay.tsx
 - go-manus 实战经验与面试考点沉淀（2026-09-04）
 - 3. Docker Desktop 替换：macOS 容器运行时选型
 - 3.3 Repository 层架构设计
@@ -135,7 +135,7 @@
 - 7.1 Memory 记忆模块详细对比
 - 7.4 存储层详细对比
 - 7.5 外部依赖详细对比
-- LLMResponse
+- testFileRepo
 - 学习路径
 - PlanSchemaJSON
 - 5. JSON 库替换踩坑：sonic 与 encoding/json 行为差异
@@ -144,11 +144,11 @@
 - 3.4 集成测试
 - 4. 快速启动（nginx 网关模式，推荐）
 - mockMQWrapper
-- .ExecCommand
+- Response
 - 3.1 Go 数据库错误处理：errors.Is() vs ==
 - 3. 核心知识点详解
 - @novnc/novnc
-- 端到端 Streaming Review 计划
+- NewProviderError
 - @radix-ui/react-label
 - @radix-ui/react-scroll-area
 - 5. 注意事项和踩坑点
@@ -167,7 +167,7 @@
 - 4. SSE 流式响应：从"一直转圈"看 SSE 协议与前端协作
 - Impact Analysis with GitNexus
 - Tool
-- NewFileService
+- testAppConfigRepo
 - 核心概念
 - test-env-down.sh
 - test-env-up.sh
@@ -184,29 +184,24 @@
 - BaseModel
 - NewSessionHandler
 - @radix-ui/react-slot
-- VNCProxy
+- response_test.go
 - @radix-ui/react-switch
 - react-dom
 - remark-gfm
 - tailwind-merge
 - SearchResults
-- app.go
+- externalClients
 - 10. 故障排查
-- Review 发现
-- progress.md
+- mockMessageQueue
+- markdown-content.tsx
 - AppConfigHandler
-- session_test.go
-- runInTx
-- fakeRedis
-- BrowserTool
-- FileTool
+- sessions-provider.tsx
+- SessionRepository
+- Redis
 - BuildAttachmentContextSection
-- SearchTool
-- ShellTool
-- shutdownCurrent
-- NewMessageTool
+- task_runner_test.go
 - NewToolError
-- NewSimpleMemory
+- sync.RWMutex
 
 ## God Nodes (most connected - your core abstractions)
 1. `cn()` - 117 edges
@@ -229,45 +224,45 @@
   api/internal/agent/base.go → api/internal/agent/memory.go
 - `NewBaseAgent()` --calls--> `NewToolRegistry()`  [INFERRED]
   api/internal/agent/base.go → api/internal/agent/tools.go
-- `NewPlannerAgent()` --calls--> `NewBaseAgent()`  [INFERRED]
-  api/internal/agent/planner_agent.go → api/internal/agent/base.go
+- `NewBaseAgentWithParser()` --calls--> `NewSimpleMemory()`  [INFERRED]
+  api/internal/agent/base.go → api/internal/agent/memory.go
 
 ## Import Cycles
 - None detected.
 
-## Communities (206 total, 28 thin omitted)
+## Communities (201 total, 24 thin omitted)
 
 ### Community 0 - "createSessionForTest"
-Cohesion: 0.16
-Nodes (27): deleteSessionDirect(), testFileRepo(), TestFileRepo_CountExpiredFiles(), TestFileRepo_CreateAndGetByID(), TestFileRepo_Delete_PhysicalDelete(), TestFileRepo_GetByID_NotFoundReturnsNil(), TestFileRepo_GetBySessionAndFilepath(), TestFileRepo_GetBySessionAndFilepath_NotFound() (+19 more)
+Cohesion: 0.17
+Nodes (33): TestFileAPI_Delete_Lifecycle(), TestFileAPI_Delete_NotFound(), TestFileAPI_Download_Lifecycle(), TestFileAPI_FileTableConsistency(), TestFileAPI_GetInfo_NotFound(), TestFileAPI_GetSessionFiles_Lifecycle(), TestFileAPI_Rename_Lifecycle(), TestFileAPI_Upload_Concurrent() (+25 more)
 
 ### Community 1 - "cn"
-Cohesion: 0.05
-Nodes (59): metadata, GlobalHeader(), LeftPanel(), ManusSettings(), DropdownMenuCheckboxItem(), DropdownMenuItem(), DropdownMenuLabel(), DropdownMenuRadioItem() (+51 more)
+Cohesion: 0.07
+Nodes (50): metadata, GlobalHeader(), LeftPanel(), ManusSettings(), Input(), Kbd(), KbdGroup(), Separator() (+42 more)
 
 ### Community 2 - "NewLLMModelService"
-Cohesion: 0.19
+Cohesion: 0.18
 Nodes (23): NewLLMModelService(), NewMockLLMModelRepository(), TestLLMModelService_Create(), TestLLMModelService_Create_MapsUniqueViolationToConflict(), TestLLMModelService_Create_PreservesDefaultLookupError(), TestLLMModelService_Create_PreservesPartialCapabilities(), TestLLMModelService_Create_PreservesRepositoryError(), TestLLMModelService_Create_Validation() (+15 more)
 
 ### Community 3 - "NewAppConfigService"
-Cohesion: 0.13
-Nodes (23): AppConfig, AppConfigType, pgx.Tx, AppConfigRepository, marshalConfigValue(), NewAppConfigRepository(), NewAppConfigRepositoryWithTx(), NewAppConfigService() (+15 more)
+Cohesion: 0.06
+Nodes (43): MCPServer, A2AConfig, AgentConfig, AppConfig, HealthStatus, LLMConfig, MCPConfig, NewLLMConfigResponse() (+35 more)
 
 ### Community 4 - "index.ts"
 Cohesion: 0.08
-Nodes (57): useSessionDetail(), UseSessionDetailResult, configApi, API_CONFIG, ApiError, createSSEConnection(), createSSEStream(), del() (+49 more)
+Nodes (54): configApi, API_CONFIG, ApiError, createSSEConnection(), createSSEStream(), del(), fetchWithTimeout(), get() (+46 more)
 
 ### Community 5 - "app_test.go"
 Cohesion: 0.09
 Nodes (28): Build(), newLifecycleManager(), normalizeFactories(), TestAppCloseHandlesNilReceiver(), TestAppCloseIsIdempotent(), TestAppShutdownClosesRegisteredResources(), TestAppStartRunsRegisteredHooksOnce(), TestBuildInitializeErrorWrapsSentinel() (+20 more)
 
 ### Community 6 - "queryer"
-Cohesion: 0.13
-Nodes (11): pgx.Tx, scanFile(), collectRows(), pgx.Tx, T, newQueryer(), scanSessionSummary(), pgx.Rows (+3 more)
+Cohesion: 0.10
+Nodes (16): Postgres, NewPostgres(), pgx.Tx, NewFileRepository(), NewFileRepositoryWithTx(), scanFile(), collectRows(), pgx.Tx (+8 more)
 
 ### Community 7 - "manus-settings.tsx"
-Cohesion: 0.07
-Nodes (39): DeleteSessionDialogProps, A2ASettingProps, CommonSettingProps, LLMSettingProps, MCPSettingProps, SETTING_MENUS, SettingTab, emptyDraft (+31 more)
+Cohesion: 0.08
+Nodes (37): DeleteSessionDialogProps, A2ASettingProps, CommonSettingProps, LLMSettingProps, MCPSettingProps, SETTING_MENUS, SettingTab, emptyDraft (+29 more)
 
 ### Community 8 - "go-manus 前后端端到端 Streaming Review 与重构记录"
 Cohesion: 0.06
@@ -275,23 +270,23 @@ Nodes (33): 1. 结论, 2.1 后端任务事件链路, 2.2 前端续读链路, 2.3
 
 ### Community 9 - "testing.T"
 Cohesion: 0.04
-Nodes (76): TestFlowStatus_Values(), TestPlannerReActFlow_GetPlanReturnsSnapshot(), TestPlannerReActFlow_PlanCreation(), TestPlannerReActFlow_PlanStepStatus(), TestPlannerReActFlow_StateTransitions(), TestPlannerReActFlow_StatusGetters(), TestAgentService_GetActiveTaskIDClearsCompletedTask(), TestAgentService_ResolveMessageAttachments() (+68 more)
+Nodes (75): TestFlowStatus_Values(), TestPlannerReActFlow_GetPlanReturnsSnapshot(), TestPlannerReActFlow_PlanCreation(), TestPlannerReActFlow_PlanStepStatus(), TestPlannerReActFlow_StateTransitions(), TestPlannerReActFlow_StatusGetters(), TestAgentService_StopSessionKeepsTaskMappingUntilRunnerExits(), TestAgentService_StopSessionReturnsStatusUpdateError() (+67 more)
 
-### Community 10 - "chat-input.tsx"
+### Community 10 - "session-item.tsx"
 Cohesion: 0.08
-Nodes (37): ChatInput, ChatInputProps, ChatInputRef, DeleteSessionDialog(), SessionItem(), SessionItemProps, SessionList(), Avatar() (+29 more)
+Nodes (29): DeleteSessionDialog(), SessionItem(), SessionItemProps, SessionList(), DropdownMenu(), DropdownMenuCheckboxItem(), DropdownMenuContent(), DropdownMenuItem() (+21 more)
 
-### Community 11 - "ToolResult"
-Cohesion: 0.06
-Nodes (8): attachmentSandbox, MessageTool, requiredToolString(), ToolResult, NewToolResult(), NewToolResultWithMessage(), MockBrowser, MockSandbox
+### Community 11 - "context.Context"
+Cohesion: 0.07
+Nodes (7): mockSandbox, ToolResult, DefaultFileService, BrowserClient, MockBrowser, MockSandbox, context.Context
 
 ### Community 12 - "RoutedLLM"
-Cohesion: 0.10
-Nodes (23): defaultLLMClientFactory(), LLM, NewDynamicLLM(), NewDynamicLLMWithFactory(), WithModelID(), betterHealth(), canFallbackAfterToolUse(), configKey() (+15 more)
+Cohesion: 0.12
+Nodes (18): NewDynamicLLM(), NewDynamicLLMWithFactory(), betterHealth(), canFallbackAfterToolUse(), configKey(), RoutedLLM, LLMRequest, hasCapabilityProfile() (+10 more)
 
-### Community 13 - "PostgresSessionRepository"
-Cohesion: 0.10
-Nodes (11): stopSessionRepository, successfulStopSessionRepository, TestAgentService_StopSessionKeepsTaskMappingUntilRunnerExits(), TestAgentService_StopSessionReturnsStatusUpdateError(), pgx.Tx, SessionRepository, marshalSessionEvents(), NewSessionRepository() (+3 more)
+### Community 13 - "Message"
+Cohesion: 0.13
+Nodes (4): Message, marshalSessionEvents(), TestMarshalSessionEventsRejectsInvalidJSON(), PostgresSessionRepository
 
 ### Community 14 - "mooc-manus vs go-manus 功能差异与缺失分析"
 Cohesion: 0.05
@@ -302,20 +297,20 @@ Cohesion: 0.05
 Nodes (40): Adapter 接口, AnthropicAdapter, CustomGatewayAdapter, go-manus 多大模型支持技术方案：强类型核心协议 + 控制面 + Provider Adapter, LLM 控制面, ModelHint, OpenAICompatibleAdapter, Provider Adapter (+32 more)
 
 ### Community 16 - ".loadOne"
-Cohesion: 0.09
-Nodes (29): Loader, headBytes(), NewLoader(), normalizeText(), tailBytes(), TestLoader_BinarySkipped(), TestLoader_DownloadError(), TestLoader_InlineBudget() (+21 more)
+Cohesion: 0.10
+Nodes (28): Loader, headBytes(), NewLoader(), normalizeText(), tailBytes(), TestLoader_BinarySkipped(), TestLoader_DownloadError(), TestLoader_InlineBudget() (+20 more)
 
 ### Community 17 - "Config"
 Cohesion: 0.09
-Nodes (23): TestLoadAllConfigFiles(), formatFieldError(), A2AAgent, A2AConfig, Config, DatabaseConfig, RedisConfig, SandboxConfig (+15 more)
+Nodes (24): TestLoadAllConfigFiles(), formatFieldError(), A2AAgent, A2AConfig, Config, DatabaseConfig, ObjectStorageConfig, RedisConfig (+16 more)
 
 ### Community 18 - "logger_test.go"
 Cohesion: 0.16
 Nodes (22): GetLevel(), Init(), InitWithConfig(), SetLevel(), stdoutWriteOK(), TestCallerInBusinessCode(), testCallerLocation(), TestGetLevel_DefaultWhenNotInitialized() (+14 more)
 
-### Community 19 - "lib/utils.ts"
-Cohesion: 0.10
-Nodes (26): AttachmentsMessage(), AttachmentsMessageProps, FileCard(), ChatMessageProps, StepBlock(), ToolRow(), FilePreviewPanel(), FilePreviewPanelProps (+18 more)
+### Community 19 - "session-detail-view.tsx"
+Cohesion: 0.08
+Nodes (38): PageProps, AttachmentsMessage(), AttachmentsMessageProps, FileCard(), ChatMessage(), ChatMessageProps, StepBlock(), ToolRow() (+30 more)
 
 ### Community 20 - ".initRoutes"
 Cohesion: 0.20
@@ -325,13 +320,13 @@ Nodes (17): defaultTrustedProxies(), CORS(), generateRequestID(), Logger(), Reco
 Cohesion: 0.27
 Nodes (5): TestMessageQueueDefaultTimeouts(), TestMessageQueueGetBlockingHonorsContext(), TestMessageQueueInterface(), TestMessageQueueMockOperations(), mockMQ
 
-### Community 22 - "Response"
-Cohesion: 0.15
-Nodes (27): activate_timeout(), cancel_timeout(), extend_timeout(), get_status(), get_timeout_status(), get, post, Response (+19 more)
-
-### Community 23 - "Message"
+### Community 22 - "SupervisorService"
 Cohesion: 0.10
-Nodes (15): SimpleMemory, Message, ResponseFormat, ToolCall, ToolSpec, sync.RWMutex, AudioURL, ContentPart (+7 more)
+Nodes (31): activate_timeout(), cancel_timeout(), extend_timeout(), get_status(), get_timeout_status(), get, post, Response (+23 more)
+
+### Community 23 - "LLMResponse"
+Cohesion: 0.09
+Nodes (18): mockLLM, mockLLMForTest, streamingAgentLLM, LLMRequest, LLMRequest, LLMResponse, ResponseFormat, ToolCall (+10 more)
 
 ### Community 24 - "2. 根因链：11 个 Bug 拆解"
 Cohesion: 0.06
@@ -345,81 +340,81 @@ Nodes (32): 1. 谁创建，谁负责关闭, 2. 进程级共享资源的保护契
 Cohesion: 0.16
 Nodes (13): LLMRequest, mustMarshalMap(), parseJSONMap(), textOf(), userContent(), AnthropicClient, AnthropicContent, AnthropicImageSource (+5 more)
 
-### Community 28 - "SupervisorService"
-Cohesion: 0.12
-Nodes (10): Exception, AppException, Any, 使用python的xml-rpc客户端连接一个本地sock文件文件实现连接rpc服务, 获取当前supervisor管理的所有进程信息, 传递指定分钟，并激活定时销毁任务同时关闭自动保活, 传递指定的时长，延长超时销毁的时间，单默认延长3分钟, 构造函数，完成supervisor服务链接 (+2 more)
+### Community 28 - "Docker 构建优化实践笔记"
+Cohesion: 0.05
+Nodes (38): 1.1 问题分析, 1.2 解决方案, 1.3 验证结果, 2.1 问题分析, 2.2 解决方案, 2.3 验证结果, 3.1 问题分析, 3.2.1 使用 uv 替代 pip (+30 more)
 
 ### Community 29 - "compilerOptions"
 Cohesion: 0.07
 Nodes (28): dom, dom.iterable, esnext, **/*.mts, .next/dev/types/**/*.ts, next-env.d.ts, .next/types/**/*.ts, node_modules (+20 more)
 
 ### Community 30 - "OpenAIClient"
-Cohesion: 0.13
-Nodes (19): estimateCostUSD(), LLMRequest, reasoningTokens(), sendStreamDelta(), toOpenAIMessages(), toOpenAITools(), truncateBody(), LLMDelta (+11 more)
+Cohesion: 0.09
+Nodes (30): defaultLLMClientFactory(), estimateCostUSD(), LLMRequest, NewOpenAIClient(), reasoningTokens(), sendStreamDelta(), newTestClient(), TestNewOpenAIClient_DoesNotApplyGlobalTimeout() (+22 more)
 
 ### Community 31 - "endpoints/file.py"
-Cohesion: 0.16
-Nodes (33): FileResponse, check_file_exists(), delete_file(), download_file(), find_files(), FileService, get, post (+25 more)
+Cohesion: 0.15
+Nodes (35): FileResponse, check_file_exists(), delete_file(), download_file(), find_files(), FileService, get, post (+27 more)
 
 ### Community 32 - "App"
-Cohesion: 0.18
-Nodes (9): BuildWithFactories(), ModelIDFromContext(), NewBrowserClient(), Warn(), App, lifecycleManager, Options, sync.Mutex (+1 more)
+Cohesion: 0.17
+Nodes (11): BuildWithFactories(), DefaultOptions(), newRepositories(), ModelIDFromContext(), NewBrowserClient(), Warn(), App, lifecycleManager (+3 more)
 
 ### Community 33 - "endpoints/shell.py"
-Cohesion: 0.19
-Nodes (24): exec_command(), kill_process(), post, Response, 根据传递的会话+写入内容+按下回车标识向指定子进程写入数据, 根据传递的会话id+是否返回控制台标识获取Shell命令执行结果, read_shell_output(), wait_process() (+16 more)
+Cohesion: 0.21
+Nodes (23): exec_command(), kill_process(), post, Response, 根据传递的会话+写入内容+按下回车标识向指定子进程写入数据, 根据传递的会话id+是否返回控制台标识获取Shell命令执行结果, read_shell_output(), wait_process() (+15 more)
 
-### Community 34 - "NewOpenAIClient"
-Cohesion: 0.13
-Nodes (19): NewOpenAIClient(), newTestClient(), TestNewOpenAIClient_DoesNotApplyGlobalTimeout(), BuildRuntimeConfigFromModel(), convertRequestPolicyExtra(), ProtocolFromProvider(), runtimeConfigToOpenAIClientConfig(), runtimeHealthFromModel() (+11 more)
+### Community 34 - "RuntimeHealth"
+Cohesion: 0.31
+Nodes (9): BuildRuntimeConfigFromModel(), convertRequestPolicyExtra(), ProtocolFromProvider(), runtimeHealthFromModel(), runtimeHealthToModel(), TestBuildRuntimeConfigFromModel(), TestProtocolFromProvider(), RuntimeHealth (+1 more)
 
 ### Community 35 - "AgentService"
-Cohesion: 0.19
-Nodes (9): A2AConfig, AgentService, AgentConfig, COSFileStorage, MCPConfig, NewAgentService(), nonNilEvents(), Sandbox (+1 more)
+Cohesion: 0.10
+Nodes (13): FileTool, ShellTool, A2AConfig, AgentService, AgentConfig, COSFileStorage, MCPConfig, NewAgentService() (+5 more)
 
-### Community 36 - "session-detail-view.tsx"
-Cohesion: 0.11
-Nodes (30): PageProps, ChatMessage(), findLatestTool(), SessionDetailView(), SessionDetailViewProps, A2APreview(), BrowserPreview(), ConsoleRecord (+22 more)
+### Community 36 - "chat-input.tsx"
+Cohesion: 0.14
+Nodes (15): ChatInput, ChatInputProps, ChatInputRef, SuggestedQuestions(), SuggestedQuestionsProps, Avatar(), AvatarBadge(), AvatarFallback() (+7 more)
 
 ### Community 37 - "tools_integration_test.go"
-Cohesion: 0.30
-Nodes (11): NewShellTool(), TestShellTool_Description(), TestShellTool_Invoke_Error(), TestShellTool_Invoke_Exec(), TestShellTool_Invoke_Kill(), TestShellTool_Invoke_Read(), TestShellTool_Invoke_UnknownAction(), TestShellTool_Invoke_Wait() (+3 more)
+Cohesion: 0.16
+Nodes (17): NewMCPTool(), parseMCPInvokeParams(), TestMCPToolInvokeAllowsMissingParams(), TestMCPToolInvokeValidatesParameters(), NewShellTool(), TestMCPTool(), TestMCPTool_WithConfig(), TestShellTool_Description() (+9 more)
 
 ### Community 38 - "NewMockSessionRepository"
-Cohesion: 0.19
-Nodes (22): SessionService, NewSessionService(), NewSessionServiceWithSandbox(), newMockFileRepo(), NewMockSessionRepository(), TestSessionService_AppendEvent(), TestSessionService_ClearUnreadCount(), TestSessionService_CreateSession() (+14 more)
+Cohesion: 0.11
+Nodes (33): dialSandboxVNC(), sameOrigin(), newLocalTestServer(), TestVNCProxy_AllowsSameOriginAndNonBrowserClient(), TestVNCProxy_ProxyEcho(), TestVNCProxy_RejectsCrossOrigin(), TestVNCProxy_ServiceError(), VNCProxy() (+25 more)
 
 ### Community 39 - "external/search.go"
-Cohesion: 0.24
-Nodes (14): SearchEngine, NewBingSearchClient(), NewBingSearchClientWithTimeout(), NewGoogleSearchClient(), NewGoogleSearchClientWithTimeout(), NewSearchEngine(), TestSearchClients_InvalidTimeoutUsesDefault(), TestSearchClients_UseConfiguredTimeout() (+6 more)
+Cohesion: 0.15
+Nodes (16): SearchTool, NewSearchTool(), SearchEngine, NewBingSearchClient(), NewBingSearchClientWithTimeout(), NewGoogleSearchClient(), NewGoogleSearchClientWithTimeout(), NewSearchEngine() (+8 more)
 
 ### Community 40 - "go-manus 项目代码异味（Smell）分析与重构建议"
 Cohesion: 0.09
 Nodes (22): 4.1 🔴 C1~C5：`json_parser_repair.go` 的 Bug 与 Dead Code, 4.2 🟡 W1：`AgentService` God Object, 4.3 🟡 W6/W7：`PlannerReActFlow` 与 `TaskRunner` 的 Long Method + Switch, 4.4 🟡 W9：`SessionRepository` Fat Interface, 🔴 Critical（必须立刻处理）, go-manus 项目代码异味（Smell）分析与重构建议, Immediate（本周，1~2 天）, Long-Term（1 个月+） (+14 more)
 
 ### Community 41 - "Err"
-Cohesion: 0.11
-Nodes (14): AgentTaskRunner, AgentTaskRunnerConfig, COSFileStorage, readerWrapper, AgentConfig, COSFileStorage, NewAgentTaskRunner(), RedisStreamMessageQueue (+6 more)
+Cohesion: 0.14
+Nodes (9): AgentTaskRunner, COSFileStorage, RedisStreamMessageQueue, redis.Client, NewRedisStreamMessageQueue(), DebugContext(), Err(), ErrorContext() (+1 more)
 
 ### Community 42 - "Factories"
-Cohesion: 0.20
-Nodes (13): defaultFactories(), COSFileStorage, FileCleanupService, SchedulerRunner, NewFileCleanupScheduler(), NewFileCleanupService(), TestFileCleanupKeepsDatabaseRecordWhenStorageDeleteFails(), TestFileCleanupSchedulerStartIsIdempotent() (+5 more)
+Cohesion: 0.22
+Nodes (12): defaultFactories(), FileCleanupService, SchedulerRunner, NewFileCleanupScheduler(), NewFileCleanupService(), TestFileCleanupKeepsDatabaseRecordWhenStorageDeleteFails(), TestFileCleanupSchedulerStartIsIdempotent(), TestFileCleanupSchedulerStopCancelsCleanupContext() (+4 more)
 
-### Community 43 - "service_dependencies.py"
-Cohesion: 0.13
-Nodes (16): APIRouter, BaseSettings, Request, get_settings(), Settings, auto_extend_timeout_middleware(), 使用中间件延长每次API请求是超时销毁时间, create_api_routes() (+8 more)
+### Community 43 - "main.py"
+Cohesion: 0.14
+Nodes (15): APIRouter, BaseSettings, Request, get_settings(), Settings, auto_extend_timeout_middleware(), 使用中间件延长每次API请求是超时销毁时间, create_api_routes() (+7 more)
 
 ### Community 44 - "run"
 Cohesion: 0.31
 Nodes (7): classifyBootstrapError(), main(), run(), serve(), TestServeReportsUnexpectedServerError(), net/http.Server, Config
 
 ### Community 45 - "tools_test.go"
-Cohesion: 0.06
-Nodes (37): A2ATool, mockTool, A2AConfig, marshalResponseText(), NewA2ATool(), TestA2ATool(), NewToolRegistry(), TestA2ATool_Cleanup() (+29 more)
+Cohesion: 0.05
+Nodes (40): A2ATool, BrowserTool, mockTool, A2AConfig, marshalResponseText(), NewA2ATool(), NewBrowserTool(), TestA2ATool() (+32 more)
 
 ### Community 46 - "PlannerReActFlow"
-Cohesion: 0.24
-Nodes (8): FlowStatus, PlannerReActFlow, TaskInput, BaseEvent, NewErrorEvent(), NewMessageEvent(), ErrorContext(), InfoContext()
+Cohesion: 0.25
+Nodes (7): FlowStatus, PlannerReActFlow, TaskInput, BaseEvent, NewErrorEvent(), NewMessageEvent(), InfoContext()
 
 ### Community 47 - "devDependencies"
 Cohesion: 0.10
@@ -430,8 +425,8 @@ Cohesion: 0.11
 Nodes (17): Claude Code 配置, Clone 后的首次使用, GitNexus, GitNexus, GitNexus, GitNexus 显示仓库未索引, Graphify, Graphify (+9 more)
 
 ### Community 49 - "BaseAgent"
-Cohesion: 0.14
-Nodes (9): BaseAgent, InvokeResult, ToolCallResult, AgentConfig, NewBaseAgentWithParser(), shouldPublishDeltas(), JSONParser, NewDefaultJSONParser() (+1 more)
+Cohesion: 0.12
+Nodes (12): BaseAgent, InvokeResult, ToolCallResult, AgentConfig, NewBaseAgentWithParser(), shouldPublishDeltas(), JSONParser, NewDefaultJSONParser() (+4 more)
 
 ### Community 50 - "fallback_llm_test.go"
 Cohesion: 0.15
@@ -441,9 +436,9 @@ Nodes (26): RoutedLLM, LLMRequest, modelNames(), newMockRuntimeHealthStore(), op
 Cohesion: 0.17
 Nodes (20): newTransportClient(), rawOK(), responseJSON(), TestOpenAIClient_401_Auth(), TestOpenAIClient_429_RateLimit(), TestOpenAIClient_5xx_Server(), TestOpenAIClient_ContentAndReasoning_Separated(), TestOpenAIClient_ContentOnly() (+12 more)
 
-### Community 52 - "NewProviderError"
-Cohesion: 0.10
-Nodes (29): ErrorKind, isFallbackable(), isRetryable(), NewProviderError(), CanFallbackAfterToolUse(), CanFallbackTo(), capabilitiesEquivalent(), ContextFits() (+21 more)
+### Community 52 - "fallback_test.go"
+Cohesion: 0.13
+Nodes (23): CanFallbackAfterToolUse(), CanFallbackTo(), capabilitiesEquivalent(), ContextFits(), EstimateContextTokens(), ModelCapabilities, fullCaps(), fullProfile() (+15 more)
 
 ### Community 53 - "dependencies"
 Cohesion: 0.11
@@ -454,16 +449,16 @@ Cohesion: 0.11
 Nodes (18): aliases, components, hooks, lib, ui, utils, iconLibrary, registries (+10 more)
 
 ### Community 55 - "getJSON"
-Cohesion: 0.12
-Nodes (54): Response, TestAppConfigAPI_A2AConfig_Lifecycle(), TestAppConfigAPI_AgentConfig_Lifecycle(), TestAppConfigAPI_EmptyUpdate(), TestAppConfigAPI_InvalidJSON(), TestAppConfigAPI_LLMConfig_Lifecycle(), TestAppConfigAPI_MCPConfig_Delete(), TestAppConfigAPI_MCPConfig_Lifecycle() (+46 more)
-
-### Community 56 - "Postgres"
 Cohesion: 0.13
-Nodes (12): StatusHandler, NewStatusHandler(), Postgres, NewPostgres(), Redis, redis.Client, NewRedis(), NewLLMModelRepository() (+4 more)
+Nodes (46): Response, TestAppConfigAPI_A2AConfig_Lifecycle(), TestAppConfigAPI_AgentConfig_Lifecycle(), TestAppConfigAPI_EmptyUpdate(), TestAppConfigAPI_InvalidJSON(), TestAppConfigAPI_LLMConfig_Lifecycle(), TestAppConfigAPI_MCPConfig_Delete(), TestAppConfigAPI_MCPConfig_Lifecycle() (+38 more)
+
+### Community 56 - "NewStatusService"
+Cohesion: 0.21
+Nodes (9): StatusHandler, NewStatusHandler(), SetupRoutes(), StatusService, NewStatusService(), TestStatusService_GetHealthStatus_SkippedServicesDegraded(), github.com/gin-gonic/gin.Engine, Handlers (+1 more)
 
 ### Community 57 - "RedisStreamTask"
-Cohesion: 0.07
-Nodes (8): blockingTaskRunner, DefaultTaskRegistry, panicTaskRunner, RedisStreamTask, Stream, Task, CompletedStreamRetention(), Debug()
+Cohesion: 0.09
+Nodes (6): blockingTaskRunner, DefaultTaskRegistry, panicTaskRunner, RedisStreamTask, CompletedStreamRetention(), Debug()
 
 ### Community 58 - "json_parser_repair.go"
 Cohesion: 0.23
@@ -478,32 +473,32 @@ Cohesion: 0.15
 Nodes (13): 1. 部署方式, 2. 架构总览, 3. 前置要求, 5.1 `.env` 模板（`api/.env.example`）, 5.2 必须在 `.env` 中补充的变量, 5. 环境变量配置, 6.1 通过 Makefile, 6.2 直接使用 docker-compose (+5 more)
 
 ### Community 61 - "index.tsx"
-Cohesion: 0.13
-Nodes (19): A2aTool(), A2aToolProps, BashTool(), BashToolProps, BrowserTool(), BrowserToolProps, DefaultTool(), DefaultToolProps (+11 more)
+Cohesion: 0.07
+Nodes (40): A2APreview(), BrowserPreview(), ConsoleRecord, FileToolPreview(), getToolContent(), getToolDescription(), getToolIcon(), MCPPreview() (+32 more)
 
-### Community 62 - "context.Context"
-Cohesion: 0.05
-Nodes (12): attachmentStorage, chatContextSessionRepository, mockSandbox, TestAgentServiceChatUsesDetachedContextForMessagePersistence(), DefaultFileService, mockMessageQueue, context.Context, io.Reader (+4 more)
+### Community 62 - "io.ReadCloser"
+Cohesion: 0.10
+Nodes (6): attachmentStorage, mockStorage, io.ReadCloser, io.Reader, cleanupStorageStub, stubStorage
 
 ### Community 63 - "testLLMModelRepo"
 Cohesion: 0.29
 Nodes (19): cleanupLLMModel(), newTestModel(), testLLMModelRepo(), TestLLMModelRepo_CreateAndGetByID(), TestLLMModelRepo_Delete(), TestLLMModelRepo_Delete_NotFoundNoError(), TestLLMModelRepo_GetByID_NotFoundReturnsNilNil(), TestLLMModelRepo_GetDefault_NoDefaultReturnsNilNil() (+11 more)
 
 ### Community 64 - "Session"
-Cohesion: 0.06
-Nodes (9): mockSessionRepo, Event, Session, SessionStatus, unixPointer(), time.Time, MockSessionServiceForHandler, DefaultSessionService (+1 more)
+Cohesion: 0.05
+Nodes (10): mockSessionRepo, Event, Session, SessionStatus, unixPointer(), time.Time, MockSessionServiceForHandler, stubVNCService (+2 more)
 
 ### Community 65 - "ShellService"
-Cohesion: 0.17
-Nodes (8): ConsoleRecord, Process, 根据传递的会话id+是否输出控制台记录获取Shell命令结果, 传递会话id+执行目录+命令在沙箱中执行后返回, 格式化命令结构提示，增强交互体验，例如: root@myserver:/var/log $, 根据传递的执行目录+命令创建一个asyncio管理的子进程, 启动协程以连续读取进程输出并将其存储到会话中, ShellService
+Cohesion: 0.11
+Nodes (14): ConsoleRecord, Exception, Process, AppException, NotFoundException, Any, 根据传递的执行目录+命令创建一个asyncio管理的子进程, 启动协程以连续读取进程输出并将其存储到会话中 (+6 more)
 
 ### Community 66 - "StdioMCPClient"
 Cohesion: 0.12
 Nodes (17): MCPClientManager, MCPToolInfo, NewStdioMCPClient(), MCPClient, MCPConfig, MCPConfigServer, MCPContent, MCPError (+9 more)
 
 ### Community 67 - "LLMModel"
-Cohesion: 0.14
-Nodes (11): LLMModel, pgx.Tx, LLMModelRepository, modelJSON(), modelJSONFields(), NewLLMModelRepositoryWithTx(), runtimeHealthToJSON(), scanLLMModel() (+3 more)
+Cohesion: 0.12
+Nodes (12): LLMModel, pgx.Tx, LLMModelRepository, modelJSON(), modelJSONFields(), NewLLMModelRepository(), NewLLMModelRepositoryWithTx(), runtimeHealthToJSON() (+4 more)
 
 ### Community 68 - "Detailed Findings"
 Cohesion: 0.10
@@ -513,25 +508,25 @@ Nodes (20): Architecture Smell Report, Detailed Findings, Executive Summary, His
 Cohesion: 0.20
 Nodes (10): 1. 整体架构, 3. Memory 系统, 4. 会话管理, 5. 事件驱动, 6. 代码结构, 7.1 添加新工具, 7.2 自定义 Agent, 7.3 集成新 LLM (+2 more)
 
-### Community 70 - "app_config.go"
-Cohesion: 0.10
-Nodes (20): MCPServer, A2AConfig, AgentConfig, HealthStatus, LLMConfig, MCPConfig, NewLLMConfigResponse(), TestLLMConfigRequest_MarshalJSON() (+12 more)
+### Community 70 - "NewToolResult"
+Cohesion: 0.14
+Nodes (3): attachmentSandbox, MessageTool, NewToolResult()
 
 ### Community 71 - "event.go"
 Cohesion: 0.06
-Nodes (33): TestPlannerReActFlow_EmitEventStopsWhenContextCanceled(), clonePlanSteps(), cloneStrings(), PlanStep, NewDoneEvent(), NewPlanEvent(), NewStepEvent(), NewTitleEvent() (+25 more)
+Nodes (33): TestPlannerReActFlow_EmitEventStopsWhenContextCanceled(), clonePlanSteps(), cloneStrings(), Plan, PlanStep, NewDoneEvent(), NewPlanEvent(), NewStepEvent() (+25 more)
 
 ### Community 72 - "logger.go"
-Cohesion: 0.16
-Nodes (21): Any(), Bool(), Dur(), Error(), Fatal(), Float64(), Get(), Int() (+13 more)
+Cohesion: 0.12
+Nodes (25): Any(), Bool(), Dur(), Error(), Fatal(), Float64(), Get(), Int() (+17 more)
 
-### Community 73 - "NewBaseAgent"
-Cohesion: 0.17
-Nodes (13): A2AAgent, AgentConfig, MCPServer, ReActAgent, NewBaseAgent(), TestBaseAgentInvokePublishesTextDeltas(), TestReActAgentSummarizeReportsWhetherDeltasWereEmitted(), DefaultAgentConfig() (+5 more)
+### Community 73 - "LLM"
+Cohesion: 0.10
+Nodes (20): PlannerAgent, ReActAgent, NewBaseAgent(), TestBaseAgentInvokePublishesTextDeltas(), TestReActAgentSummarizeReportsWhetherDeltasWereEmitted(), DefaultAgentConfig(), TestBaseAgent_InvokeWithEmptyRetry(), TestBaseAgent_InvokeWithEmptyRetry_AllEmpty() (+12 more)
 
 ### Community 74 - "Info"
-Cohesion: 0.24
-Nodes (5): newSSEContext(), Info(), context.CancelFunc, sync.WaitGroup, FileCleanupScheduler
+Cohesion: 0.27
+Nodes (4): Info(), sync.Once, sync.WaitGroup, FileCleanupScheduler
 
 ### Community 75 - "Refactoring with GitNexus"
 Cohesion: 0.18
@@ -550,8 +545,8 @@ Cohesion: 0.12
 Nodes (9): inMemoryMessage, inMemoryMessageQueue, inMemoryStream, mockEchoTool, mockFailingTool, newInMemoryMessageQueue(), parseStreamSeq(), TestToolCallingEvents_SSEStream() (+1 more)
 
 ### Community 79 - "OSS"
-Cohesion: 0.19
-Nodes (11): ObjectStorageConfig, TestBuildWithFactoriesInjectsFileCleanupScheduler(), generateURL(), OSS, NewOSS(), newUploader(), providerDefaultEndpoint(), github.com/aws/aws-sdk-go-v2/feature/s3/manager.Uploader (+3 more)
+Cohesion: 0.14
+Nodes (15): TestBuildWithFactoriesInjectsFileCleanupScheduler(), generateURL(), OSS, NewOSS(), newUploader(), providerDefaultEndpoint(), TestGenerateURL(), TestNewOSS_WithoutCredentials() (+7 more)
 
 ### Community 80 - "MergeDeltas"
 Cohesion: 0.20
@@ -562,55 +557,55 @@ Cohesion: 0.22
 Nodes (15): Benchmark_Sonic_Marshal_Large(), Benchmark_Sonic_Marshal_Small(), Benchmark_Sonic_Roundtrip_Large(), Benchmark_Sonic_Roundtrip_Small(), Benchmark_Sonic_Unmarshal_Large(), Benchmark_Sonic_Unmarshal_Small(), Benchmark_StdLib_Marshal_Large(), Benchmark_StdLib_Marshal_Small() (+7 more)
 
 ### Community 82 - "Error"
-Cohesion: 0.20
-Nodes (12): BadRequest(), Conflict(), FailedPrecondition(), Forbidden(), Internal(), New(), ToInternal(), Unauthorized() (+4 more)
+Cohesion: 0.18
+Nodes (13): BadRequest(), Conflict(), FailedPrecondition(), Forbidden(), Internal(), New(), NotFound(), ToInternal() (+5 more)
 
 ### Community 83 - "llm_model.go"
-Cohesion: 0.16
-Nodes (14): DefaultCapabilities(), CostPolicy, RuntimeHealth, ModelCapabilities, RequestPolicy, MergeDefaultCapabilities(), encoding/json.RawMessage, CostPolicy (+6 more)
+Cohesion: 0.18
+Nodes (13): DefaultCapabilities(), CostPolicy, ModelCapabilities, RequestPolicy, MergeDefaultCapabilities(), encoding/json.RawMessage, CostPolicy, LLMModelListResponse (+5 more)
 
 ### Community 84 - "anthropic_llm_test.go"
 Cohesion: 0.27
 Nodes (18): NewAnthropicClient(), anthropicErrorResponse(), errKind(), newAnthropicErrorClient(), newAnthropicTestClient(), TestAnthropicClient_HTTPErrorClassification(), TestAnthropicClient_NetworkError(), TestAnthropicClient_ProtocolError_NotFallbackable() (+10 more)
 
 ### Community 85 - "github.com/gin-gonic/gin.Context"
-Cohesion: 0.17
+Cohesion: 0.18
 Nodes (10): LLMModelHandler, NewLLMModelHandler(), NewLLMModelResponse(), LLMModelService, FromError(), TotalResponse, Success(), SuccessWithMsg() (+2 more)
 
 ### Community 86 - "File"
 Cohesion: 0.05
-Nodes (10): attachmentFileRepository, generatedFileRepository, File, FileRepository, NewFileRepository(), NewFileRepositoryWithTx(), cleanupRepoStub, emptyFileRepo (+2 more)
+Nodes (8): attachmentFileRepository, generatedFileRepository, File, FileRepository, cleanupRepoStub, emptyFileRepo, mockFileRepo, stubFileRepo
 
 ### Community 87 - "集成测试"
 Cohesion: 0.14
 Nodes (13): CI 集成, Makefile 命令说明, Q: 如何只运行特定测试, Q: 测试环境需要重新初始化吗, Q: 测试连接失败, 前置条件, 常见问题, 快速开始 (+5 more)
 
 ### Community 88 - "task_redis.go"
-Cohesion: 0.17
-Nodes (14): TaskRegistryInterface, TaskRunner, TaskStream, NewTaskStream(), parseTaskOutputMessages(), ReadTaskOutput(), readTaskOutput(), streamDataString() (+6 more)
+Cohesion: 0.11
+Nodes (15): Stream, Task, TaskRegistryInterface, TaskRunner, TaskStream, NewTaskStream(), parseTaskOutputMessages(), ReadTaskOutput() (+7 more)
 
 ### Community 89 - "NewRedisStreamTask"
 Cohesion: 0.16
 Nodes (21): mockTaskRunner, NewRedisStreamTask(), TestReadTaskOutputAfterTaskUnregistered(), TestRedisStreamTask_Cancel(), TestRedisStreamTask_CancelKeepsRegistryUntilRunnerExits(), TestRedisStreamTask_DoneChan(), TestRedisStreamTask_FinishDestroysRunner(), TestRedisStreamTask_FinishedChangesAfterRunnerExit() (+13 more)
 
 ### Community 90 - "FileService"
-Cohesion: 0.13
-Nodes (8): NotFoundException, Any, FileService, UploadFile, 根据传递的文件路径+内容向指定文件写入内容, 根据传递的文件路径+匹配规则查询文件内符合的内容, 根据传递的文件夹路径+glob规则查询文件列表, 根据传递的文件路径+起始行号+权限+最大长度读取文件内容
+Cohesion: 0.12
+Nodes (7): FileService, UploadFile, 根据传递的文件路径+内容向指定文件写入内容, 根据传递的文件路径+匹配规则查询文件内符合的内容, 根据传递的文件夹路径+glob规则查询文件列表, 根据传递的文件路径+起始行号+权限+最大长度读取文件内容, ServiceRegressionTests
 
 ### Community 91 - "NewDefaultTaskRegistry"
 Cohesion: 0.24
 Nodes (14): NewDefaultTaskRegistry(), TestDefaultTaskRegistry_CleanupCompleted(), TestDefaultTaskRegistry_CleanupCompletedWaitsForFinished(), TestDefaultTaskRegistry_Clear(), TestDefaultTaskRegistry_ConcurrentAccess(), TestDefaultTaskRegistry_Count(), TestDefaultTaskRegistry_DoubleUnregister(), TestDefaultTaskRegistry_List() (+6 more)
 
 ### Community 92 - "Manus 沙箱服务"
-Cohesion: 0.20
-Nodes (9): API 接口, Docker 部署, Manus 沙箱服务, 使用开发容器, 启动服务, 技术栈, 本地开发, 架构 (+1 more)
+Cohesion: 0.18
+Nodes (10): API 接口, Docker 部署, Manus 沙箱服务, 使用开发容器, 信任模型与安全边界, 启动服务, 技术栈, 本地开发 (+2 more)
 
 ### Community 93 - "Manus 前端 UI"
 Cohesion: 0.20
 Nodes (9): API 调用, Docker 部署, Manus 前端 UI, 安装与启动, 技术栈, 本地开发, 构建, 环境准备 (+1 more)
 
 ### Community 94 - "DefaultLLMModelService"
-Cohesion: 0.33
+Cohesion: 0.38
 Nodes (3): isUniqueViolation(), validateRequired(), DefaultLLMModelService
 
 ### Community 95 - "Commands"
@@ -633,13 +628,17 @@ Nodes (8): name, private, scripts, build, dev, lint, start, version
 Cohesion: 0.17
 Nodes (12): 4.3 11 个 Bug 拆解, Bug 10：client-side 未处理 abort, Bug 11：React 18 StrictMode 双调用, Bug 1：SSE `event:` 字段被钉死为 `message`, Bug 2：plan/step/title 事件被当作 message 渲染, Bug 3：done 事件未发出, Bug 4：连接复用时残留 state, Bug 5：心跳机制缺失 (+4 more)
 
-### Community 100 - "NotFound"
-Cohesion: 0.13
-Nodes (12): NotFound(), FileHandler, NewFileHandler(), DefaultFileService, FileService, TestFromError_GenericError(), TestFromError_MappedBusinessError(), TestResponse_Structure() (+4 more)
+### Community 100 - "FileHandler"
+Cohesion: 0.31
+Nodes (5): FileHandler, NewFileHandler(), DefaultFileService, FileService, COSFileStorage
 
 ### Community 101 - "go-manus 面试指南"
 Cohesion: 0.22
 Nodes (8): 1.1 项目定位, 1.2 核心模块, 1.3 数据库设计, 1. 项目概述, 2. 技术栈总结, go-manus 面试指南, 目录, 附录：关键代码位置
+
+### Community 102 - "DefaultFileCleanupService"
+Cohesion: 0.36
+Nodes (3): COSFileStorage, CleanupStats, DefaultFileCleanupService
 
 ### Community 103 - "1. JSON `[]byte` vs `json.RawMessage`：PostgreSQL JSONB base64 编码陷阱"
 Cohesion: 0.20
@@ -652,10 +651,6 @@ Nodes (9): 6.1 Why：测试是行为的契约, 6.2 历史 Bug 的回归测试, 6
 ### Community 105 - "UnixStreamHTTPConnection"
 Cohesion: 0.25
 Nodes (4): HTTPConnection, 重写连接方法，欺骗xml-rpc库让其觉得自己正在进行网络连接, UnixStreamHTTPConnection, UnixStreamTransport
-
-### Community 106 - "MCPTool"
-Cohesion: 0.14
-Nodes (8): MCPTool, MCPConfig, NewMCPTool(), parseMCPInvokeParams(), TestMCPToolInvokeAllowsMissingParams(), TestMCPToolInvokeValidatesParameters(), TestMCPTool(), TestMCPTool_WithConfig()
 
 ### Community 107 - "二、Findings（问题清单）"
 Cohesion: 0.18
@@ -674,12 +669,12 @@ Cohesion: 0.33
 Nodes (6): 7.3.1 SessionService 接口设计, 7.3.2 核心实现对比, 7.3.3 AgentService 任务管理, 7.3.4 面试分析点, 7.3 服务层详细对比, 七、详细模块对比
 
 ### Community 111 - "SessionHandler"
-Cohesion: 0.22
-Nodes (10): SessionHandler, mergeEventMetadata(), parseChatRequest(), setSSEHeaders(), TestMergeEventMetadata(), TestMergeEventMetadata_NullPayloadReturnsOriginalData(), TestSetSSEHeaders(), TestWriteSSEEventIncludesStreamCursor() (+2 more)
+Cohesion: 0.19
+Nodes (12): SessionHandler, mergeEventMetadata(), newSSEContext(), parseChatRequest(), setSSEHeaders(), TestMergeEventMetadata(), TestMergeEventMetadata_NullPayloadReturnsOriginalData(), TestSetSSEHeaders() (+4 more)
 
-### Community 112 - "button.tsx"
-Cohesion: 0.14
-Nodes (14): PlanPanel(), PlanPanelProps, SuggestedQuestions(), SuggestedQuestionsProps, Button(), buttonVariants, buildVNCUrl(), VNCOverlay() (+6 more)
+### Community 112 - "vnc-overlay.tsx"
+Cohesion: 0.31
+Nodes (6): buildVNCUrl(), VNCOverlay(), VNCOverlayProps, VNCViewer, VNCStatus, VNCViewerProps
 
 ### Community 113 - "go-manus 实战经验与面试考点沉淀（2026-09-04）"
 Cohesion: 0.25
@@ -709,9 +704,9 @@ Nodes (5): 7.4.1 Repository 接口设计, 7.4.2 数据库 Schema 对比, 7.4.3 �
 Cohesion: 0.40
 Nodes (5): 7.5.1 LLM 调用库对比, 7.5.2 Redis Stream 任务队列对比, 7.5.3 依赖包对比, 7.5.4 面试分析点, 7.5 外部依赖详细对比
 
-### Community 120 - "LLMResponse"
-Cohesion: 0.18
-Nodes (8): mockLLM, streamingAgentLLM, LLMRequest, LLMRequest, LLMResponse, NewMessageDeltaEvent(), NewMessageDoneEvent(), TestMessageStreamingEvents()
+### Community 120 - "testFileRepo"
+Cohesion: 0.29
+Nodes (12): deleteSessionDirect(), testFileRepo(), TestFileRepo_CountExpiredFiles(), TestFileRepo_CreateAndGetByID(), TestFileRepo_Delete_PhysicalDelete(), TestFileRepo_GetByID_NotFoundReturnsNil(), TestFileRepo_GetBySessionAndFilepath(), TestFileRepo_GetBySessionAndFilepath_NotFound() (+4 more)
 
 ### Community 121 - "学习路径"
 Cohesion: 0.40
@@ -741,6 +736,10 @@ Nodes (4): 4.1 准备环境变量, 4.2 一键启动, 4.3 访问入口（统一�
 Cohesion: 0.15
 Nodes (6): batchTaskOutputMQ, mockMQWrapper, retentionCall, StreamMessage, BatchMessageQueue, MessageQueue
 
+### Community 129 - "Response"
+Cohesion: 0.27
+Nodes (7): FastAPI, register_exception_handlers(), BaseModel, T, 基础API响应结构，继承BaseModel，并定义泛型, 失败消息提示，携带code+msg+data, Response
+
 ### Community 130 - "3.1 Go 数据库错误处理：errors.Is() vs =="
 Cohesion: 0.33
 Nodes (6): 3.1 Go 数据库错误处理：errors.Is() vs ==, errors.Is() 工作原理, Why：为什么不能直接用 == 比较？, 问题背景, 面试追问, 项目中的正确写法
@@ -749,9 +748,9 @@ Nodes (6): 3.1 Go 数据库错误处理：errors.Is() vs ==, errors.Is() 工作�
 Cohesion: 0.33
 Nodes (6): 3.6 文件清理服务, 3. 核心知识点详解, 业务规则：孤儿文件判定, 清理服务架构, 调度器设计, 面试追问
 
-### Community 133 - "端到端 Streaming Review 计划"
-Cohesion: 0.33
-Nodes (5): 目标, 端到端 Streaming Review 计划, 约束, 结果, 阶段
+### Community 133 - "NewProviderError"
+Cohesion: 0.42
+Nodes (6): ErrorKind, isFallbackable(), isRetryable(), NewProviderError(), TestProviderError_Kind(), ProviderError
 
 ### Community 136 - "5. 注意事项和踩坑点"
 Cohesion: 0.33
@@ -790,20 +789,20 @@ Cohesion: 0.22
 Nodes (8): Checklist, Example: "What breaks if I change validateUser?", Impact Analysis with GitNexus, Risk Assessment, Tools, Understanding Output, When to Use, Workflow
 
 ### Community 160 - "Tool"
-Cohesion: 0.12
-Nodes (11): mockLLMForTest, MultiFunctionTool, PlannerAgent, Tool, ToolRegistry, AgentConfig, NewPlannerAgent(), AgentConfig (+3 more)
+Cohesion: 0.18
+Nodes (9): AgentTaskRunnerConfig, COSFileStorage, MultiFunctionTool, readerWrapper, Tool, ToolRegistry, AgentConfig, NewAgentTaskRunner() (+1 more)
 
-### Community 161 - "NewFileService"
-Cohesion: 0.26
-Nodes (13): NewFileService(), TestFileServiceDeleteFileDeletesStorageAndRepo(), TestFileServiceDeleteFileRepoError(), TestFileServiceDeleteFileStorageError(), TestFileServiceDownloadFileNilStorageReturnsNilReader(), TestFileServiceDownloadFileStorageError(), TestFileServiceDownloadFileWithStorage(), TestFileServiceGetFileInfoFound() (+5 more)
+### Community 161 - "testAppConfigRepo"
+Cohesion: 0.42
+Nodes (8): testAppConfigRepo(), TestAppConfigRepo_DeleteConfig(), TestAppConfigRepo_GetConfig_NotFoundReturnsNilNil(), TestAppConfigRepo_ListConfigs(), TestAppConfigRepo_SaveAndGetConfig_RoundTrip(), TestAppConfigRepo_SaveConfig_UpdateExisting(), TestAppConfigRepo_WithTx_CommitsOnSuccess(), TestAppConfigRepo_WithTx_RollsBackOnError()
 
 ### Community 162 - "核心概念"
 Cohesion: 0.40
 Nodes (5): 1. Agent 架构, 2. A2A (Agent to Agent), 3. MCP (Model Context Protocol), 4. 沙箱环境, 核心概念
 
 ### Community 171 - "status_service_test.go"
-Cohesion: 0.25
-Nodes (5): TestStatusService_GetHealthStatus_SkippedServicesDegraded(), TestStatusService_GetHealthStatus_WrapsHealthErrors(), TestStatusServiceUsesInjectedClock(), TestToInternal(), fakePostgres
+Cohesion: 0.15
+Nodes (6): TestStatusService_GetHealthStatus_WrapsHealthErrors(), TestStatusServiceUsesInjectedClock(), TestToInternal(), fakeOSS, fakePostgres, fakeRedis
 
 ### Community 172 - "八、改进建议"
 Cohesion: 0.50
@@ -833,85 +832,77 @@ Nodes (5): Always Do, CLI, GitNexus — Code Intelligence, Never Do, Resources
 Cohesion: 0.38
 Nodes (14): NewSessionHandler(), NewMockSessionServiceForHandler(), setupRouter(), TestNewSSEContext_PreservesRequestValuesWithoutCancellation(), TestSessionHandler_Chat(), TestSessionHandler_ClearUnread(), TestSessionHandler_Create(), TestSessionHandler_Delete() (+6 more)
 
-### Community 183 - "VNCProxy"
-Cohesion: 0.17
-Nodes (13): dialSandboxVNC(), sameOrigin(), newLocalTestServer(), TestVNCProxy_AllowsSameOriginAndNonBrowserClient(), TestVNCProxy_ProxyEcho(), TestVNCProxy_RejectsCrossOrigin(), TestVNCProxy_ServiceError(), VNCProxy() (+5 more)
+### Community 183 - "response_test.go"
+Cohesion: 0.29
+Nodes (5): TestFromError_GenericError(), TestFromError_MappedBusinessError(), TestResponse_Structure(), TestSuccess_HttpResponse(), TestTotalResponse_Structure()
 
 ### Community 188 - "SearchResults"
 Cohesion: 0.67
 Nodes (3): SearchEvent, SearchResultItem, SearchResults
 
-### Community 189 - "app.go"
-Cohesion: 0.19
-Nodes (11): A2AAgent, A2AConfig, MCPConfig, MCPServer, DefaultOptions(), newA2AConfig(), newMCPConfig(), newRepositories() (+3 more)
+### Community 189 - "externalClients"
+Cohesion: 0.17
+Nodes (11): A2AAgent, AgentConfig, MCPServer, A2AAgent, A2AConfig, MCPConfig, MCPServer, newA2AConfig() (+3 more)
 
 ### Community 190 - "10. 故障排查"
 Cohesion: 0.50
 Nodes (4): 10.1 常见问题, 10.2 日志查看, 10.3 完全重置, 10. 故障排查
 
-### Community 191 - "Review 发现"
-Cohesion: 0.50
-Nodes (3): Review 发现, 初步证据（2026-09-11）, 进一步核验
+### Community 192 - "markdown-content.tsx"
+Cohesion: 0.33
+Nodes (6): components, headingClasses, MarkdownContent(), MarkdownContentProps, normalizeAutolinks(), URL_FOLLOWED_BY_CJK
 
 ### Community 193 - "AppConfigHandler"
 Cohesion: 0.27
 Nodes (6): getConfig(), AppConfigHandler, T, NewAppConfigHandler(), updateConfig(), AppConfigService
 
-### Community 194 - "session_test.go"
-Cohesion: 0.31
-Nodes (10): parseResponseDataAsArray(), parseTotalResponse(), createSessionsForTest(), TestSessionAPI_CreateAndList(), TestSessionAPI_DeleteNotFound(), TestSessionAPI_GetAllSessions(), TestSessionAPI_GetInvalidID(), TestSessionAPI_GetNotFound() (+2 more)
-
-### Community 195 - "runInTx"
+### Community 194 - "sessions-provider.tsx"
 Cohesion: 0.33
-Nodes (6): pgx.Tx, T, joinRollbackError(), logRollbackFailure(), rollbackTx(), runInTx()
+Nodes (6): sessionApi, normalizeSessions(), RETRY_CONFIG, SessionsContext, SessionsContextValue, SessionsProvider()
 
-### Community 197 - "BrowserTool"
-Cohesion: 0.29
-Nodes (3): BrowserTool, NewBrowserTool(), TestToolValidationRejectsMissingRequiredParameters()
+### Community 195 - "SessionRepository"
+Cohesion: 0.11
+Nodes (13): chatContextSessionRepository, stopSessionRepository, successfulStopSessionRepository, pgx.Tx, SessionRepository, NewSessionRepository(), NewSessionRepositoryWithTx(), pgx.Tx (+5 more)
 
-### Community 198 - "FileTool"
-Cohesion: 0.29
-Nodes (3): FileTool, NewFileTool(), TestFileTool()
+### Community 196 - "Redis"
+Cohesion: 0.40
+Nodes (3): Redis, redis.Client, NewRedis()
 
 ### Community 199 - "BuildAttachmentContextSection"
 Cohesion: 0.32
 Nodes (5): BuildAttachmentContextSection(), TestBuildAttachmentContextSection_Empty(), TestBuildAttachmentContextSection_Typed(), TestBuildAttachmentContextSection_IncludesContent(), TestCreatePlanPrompt_UsesAttachmentContext()
 
-### Community 202 - "shutdownCurrent"
-Cohesion: 0.33
-Nodes (4): shutdownCurrent(), Sync(), go.uber.org/zap/zapcore.WriteSyncer, neverCloseSyncer
-
-### Community 203 - "NewMessageTool"
-Cohesion: 0.50
-Nodes (3): TestMessageTool_NotifyUserSchema(), NewMessageTool(), TestMessageTool()
+### Community 203 - "task_runner_test.go"
+Cohesion: 0.17
+Nodes (9): TestAgentService_GetActiveTaskIDClearsCompletedTask(), TestAgentService_ResolveMessageAttachments(), TestAgentServiceChatUsesDetachedContextForMessagePersistence(), TestAgentTaskRunner_SyncFileToStorageRegistersMetadata(), TestAgentTaskRunner_SyncUserAttachmentsToSandbox(), TestMessageTool_NotifyUserSchema(), TestPopRetryConfig(), NewMessageTool() (+1 more)
 
 ### Community 220 - "NewToolError"
-Cohesion: 0.25
-Nodes (7): SandboxClient, NewSandboxClient(), sandboxToolResult(), NewToolError(), sandboxErrorResponse, sandboxRequest, sandboxResponse
+Cohesion: 0.15
+Nodes (9): requiredToolString(), SandboxClient, NewSandboxClient(), sandboxToolResult(), NewToolError(), NewToolResultWithMessage(), sandboxErrorResponse, sandboxRequest (+1 more)
 
-### Community 233 - "NewSimpleMemory"
-Cohesion: 0.36
-Nodes (6): Memory, NewSimpleMemory(), TestSimpleMemory_Add(), TestSimpleMemory_Clear(), TestSimpleMemory_Compact(), TestSimpleMemory_GetMessages()
+### Community 233 - "sync.RWMutex"
+Cohesion: 0.17
+Nodes (8): Memory, SimpleMemory, NewSimpleMemory(), TestSimpleMemory_Add(), TestSimpleMemory_Clear(), TestSimpleMemory_Compact(), TestSimpleMemory_GetMessages(), sync.RWMutex
 
 ## Knowledge Gaps
-- **643 isolated node(s):** `LLMConfig`, `SearchConfig`, `MCPServer`, `A2AAgent`, `github.com/Huang131/go-manus/api` (+638 more)
+- **665 isolated node(s):** `LLMConfig`, `SearchConfig`, `MCPServer`, `A2AAgent`, `github.com/Huang131/go-manus/api` (+660 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **28 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **24 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Event` connect `Session` to `AgentService`, `event.go`, `PostgresSessionRepository`, `SessionHandler`, `llm_model.go`, `task_redis.go`, `RedisStreamTask`, `context.Context`?**
+- **Why does `Event` connect `Session` to `SessionRepository`, `AgentService`, `event.go`, `Err`, `Message`, `SessionHandler`, `llm_model.go`, `task_redis.go`, `RedisStreamTask`?**
   _High betweenness centrality (0.010) - this node is a cross-community bridge._
-- **Why does `Err()` connect `Err` to `.ExecCommand`, `ToolResult`, `RoutedLLM`, `.loadOne`, `.initRoutes`, `App`, `AgentService`, `run`, `tools_test.go`, `PlannerReActFlow`, `BaseAgent`, `VNCProxy`, `RedisStreamTask`, `context.Context`, `StdioMCPClient`, `runInTx`, `event.go`, `logger.go`, `Info`, `OSS`, `github.com/gin-gonic/gin.Context`, `DefaultFileCleanupService`, `MCPTool`, `SessionHandler`?**
+- **Why does `Err()` connect `Err` to `context.Context`, `RoutedLLM`, `.loadOne`, `.initRoutes`, `App`, `AgentService`, `NewMockSessionRepository`, `run`, `tools_test.go`, `PlannerReActFlow`, `BaseAgent`, `RedisStreamTask`, `io.ReadCloser`, `StdioMCPClient`, `SessionRepository`, `event.go`, `logger.go`, `Info`, `OSS`, `github.com/gin-gonic/gin.Context`, `NewToolError`, `DefaultFileCleanupService`, `MCPTool`, `SessionHandler`?**
   _High betweenness centrality (0.010) - this node is a cross-community bridge._
-- **Why does `EventType` connect `event.go` to `Session`?**
+- **Why does `Info()` connect `Info` to `Tool`, `NewRedisStreamTask`, `StdioMCPClient`, `AgentService`, `Redis`, `queryer`, `DefaultFileCleanupService`, `logger.go`, `MCPTool`, `run`, `tools_test.go`, `PlannerReActFlow`, `OSS`, `logger_test.go`, `RedisStreamTask`?**
   _High betweenness centrality (0.010) - this node is a cross-community bridge._
 - **What connects `LLMConfig`, `SearchConfig`, `MCPServer` to the rest of the system?**
-  _643 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _665 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `cn` be split into smaller, more focused modules?**
-  _Cohesion score 0.05126582278481013 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.06526806526806526 - nodes in this community are weakly interconnected._
 - **Should `NewAppConfigService` be split into smaller, more focused modules?**
-  _Cohesion score 0.13213213213213212 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.05995975855130785 - nodes in this community are weakly interconnected._
 - **Should `index.ts` be split into smaller, more focused modules?**
-  _Cohesion score 0.07925407925407925 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.08306010928961749 - nodes in this community are weakly interconnected._

@@ -314,7 +314,7 @@ export function useSessionDetail(
           setError(err instanceof Error ? err : new Error('流式响应异常'))
           setStreaming(false)
           isSendMessageRef.current = false
-          setSession((prev) => prev ? { ...prev, status: 'completed' } : null)
+          // 网络断开不等于任务完成：保留当前状态，由空流重新连接并同步后端事件。
           if (messageStreamCleanupRef.current) {
             messageStreamCleanupRef.current()
             messageStreamCleanupRef.current = null

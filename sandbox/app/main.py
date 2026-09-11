@@ -95,7 +95,8 @@ app.middleware("http")(auto_extend_timeout_middleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    # 学习环境允许跨域，但不携带 Cookie，避免通配 origin 与 credentials 冲突。
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

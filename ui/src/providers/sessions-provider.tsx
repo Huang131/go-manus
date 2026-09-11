@@ -55,6 +55,7 @@ export function SessionsProvider({children}: { children: React.ReactNode }) {
   const [sessions, setSessions] = useState<Session[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [streamRetrySignal, setStreamRetrySignal] = useState(0)
 
   const cleanupRef = useRef<(() => void) | null>(null)
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -70,6 +71,8 @@ export function SessionsProvider({children}: { children: React.ReactNode }) {
       setError(null)
       const raw = await sessionApi.getSessions()
       setSessions(normalizeSessions(raw))
+      // 手动刷新同时重置 SSE 连接，避免达到重试上限后只能刷新 REST。
+      setStreamRetrySignal((value) => value + 1)
     } catch (err) {
       console.error('[Sessions] REST 获取失败:', err)
       setError(err instanceof Error ? err.message : '获取会话列表失败')
@@ -130,7 +133,9 @@ export function SessionsProvider({children}: { children: React.ReactNode }) {
           console.warn('[Sessions] SSE 断开:', err.message)
 
           if (retryCount >= RETRY_CONFIG.maxRetries) {
+            const message = '会话实时更新已停止，请点击“重试”恢复'
             console.error('[Sessions] 超过最大重试次数，停止重连')
+            setError(message)
             return
           }
 
@@ -160,7 +165,7 @@ export function SessionsProvider({children}: { children: React.ReactNode }) {
         retryTimerRef.current = null
       }
     }
-  }, [])
+  }, [streamRetrySignal])
 
   // ---------- 删除会话 ----------
   const deleteSession = useCallback(async (sessionId: string): Promise<boolean> => {
@@ -194,4 +199,3 @@ export function useSessions(): SessionsContextValue {
   }
   return ctx
 }
-

@@ -19,7 +19,7 @@
 | nginx | 80 | 80 | 统一网关，路由 `/api/`、`/sandbox/`、`/` |
 | ui | 3000 | 3000 | Next.js 前端 |
 | api | 8080 | 8080 | Go API 服务 |
-| sandbox | 8080 | 8090 | Python 沙箱服务（Shell / 文件） |
+| sandbox | 8080 | 8090（学习/调试） | Python 沙箱服务（Shell / 文件） |
 | postgres | 5432 | 5432 | PostgreSQL 16 |
 | redis | 6379 | 6379 | Redis 7（含消息队列） |
 | minio | 9000/9001 | 9000/9001 | 对象存储（S3 兼容，本地替代 COS） |
@@ -119,6 +119,9 @@ REDIS_PORT=6379
 
 > 说明：docker-compose 内 API 容器地址固定为 `postgres` / `redis` / `minio` / `sandbox`（容器间通信），`.env` 中的 `localhost` 地址仅用于本地直接运行时。
 
+`SANDBOX_PORT` 默认将宿主机 8090 映射到 sandbox 容器 8080，便于学习环境直接调试。
+生产部署建议删除 sandbox 的宿主机 `ports` 映射，仅通过 API/nginx 和容器网络访问。
+
 ## 6. 常用运维命令
 
 ### 6.1 通过 Makefile
@@ -183,7 +186,7 @@ docker exec -it go-manus-postgres pg_dump -U postgres -d manus > backup_$(date +
 ## 9. 安全与网络
 
 - 所有容器位于 `go-manus-network` 桥接网络，容器间通过服务名通信。
-- `sandbox` 以 `privileged: true` 运行并挂载 `/var/run/docker.sock`（支持 Docker in Docker），仅用于可信环境。
+- `sandbox` 以 `privileged: true` 运行并挂载 `/var/run/docker.sock`，且提供 root Shell/文件操作；Chrome 关闭同源策略，VNC 使用无密码模式。以上配置只适用于可信的学习/调试环境。生产部署应移除宿主机端口映射，并按需增加认证、网络隔离和权限降级。
 - 如需 HTTPS，在 [docker-compose.yml](docker-compose.yml) 中取消 `nginx` 的 `443` 端口注释并挂载证书，同时在 `nginx/conf.d/default.conf` 中配置 TLS。
 - 生产环境应将 `minio` 的默认账号 `minioadmin/minioadmin` 与 `.env` 中的 COS 密钥替换为强密码。
 
