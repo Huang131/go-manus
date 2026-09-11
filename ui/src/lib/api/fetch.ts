@@ -158,7 +158,7 @@ export async function request<T = unknown>(
     // 处理业务错误（code 不在成功范围内）
     if (result.code !== 0 && result.code !== 200) {
       if (skipErrorHandler) {
-        return result.data as T;
+        return result as unknown as T;
       }
       throw new ApiError(result.code, result.msg, result.data);
     }
@@ -482,4 +482,3 @@ function processSSEBuffer(
     processSSEEvent(event, onEvent, onError);
   }
 }
-

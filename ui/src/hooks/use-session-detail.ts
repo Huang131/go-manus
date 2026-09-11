@@ -42,21 +42,37 @@ export function useSessionDetail(
     let evToAppend = ev
     if (ev.data && typeof ev.data === 'object' && ('event' in ev.data || 'type' in ev.data) && 'data' in ev.data) {
       const normalized = normalizeEvent(ev.data as { event?: string; type?: string; data?: unknown })
-      if (normalized) evToAppend = normalized
+      if (normalized) evToAppend = { ...normalized, streamId: ev.streamId }
     }
 
-    const eventId = (evToAppend.data as { event_id?: string })?.event_id
-    if (eventId) lastEventIdRef.current = eventId
+    if (evToAppend.streamId) lastEventIdRef.current = evToAppend.streamId
 
-    setEvents((prev) => [...prev, evToAppend])
-    
+    const payload = evToAppend.data as { event_id?: string } | undefined
+    const streamId = evToAppend.streamId
+    const eventId = payload?.event_id
+
+    setEvents((prev) => {
+      if (
+        prev.some((item) => {
+          const itemPayload = item.data as { event_id?: string } | undefined
+          return (
+            (streamId !== undefined && item.streamId === streamId) ||
+            (eventId !== undefined && itemPayload?.event_id === eventId)
+          )
+        })
+      ) {
+        return prev
+      }
+      return [...prev, evToAppend]
+    })
+
     // 更新会话标题
     if (evToAppend.type === 'title' && evToAppend.data && typeof (evToAppend.data as { title?: string }).title === 'string') {
       setSession((prev) =>
         prev ? { ...prev, title: (evToAppend.data as { title: string }).title } : null
       )
     }
-    
+
     // 监听事件更新会话状态
     if (evToAppend.type === 'step') {
       const stepData = evToAppend.data as { status?: string }
@@ -84,15 +100,19 @@ export function useSessionDetail(
       setSession((prev) => prev ? { ...prev, status: 'waiting' } : null)
       setStreaming(false)
     }
-    
+
     // done 事件时更新为 completed
     if (evToAppend.type === 'done') {
       setSession((prev) => prev ? { ...prev, status: 'completed' } : null)
     }
-    
+
     // error 事件时也可以认为任务结束
     if (evToAppend.type === 'error') {
       setSession((prev) => prev ? { ...prev, status: 'completed' } : null)
+    }
+    if (evToAppend.type === 'stream_error') {
+      const message = (evToAppend.data as { message?: string })?.message
+      if (message) setError(new Error(message))
     }
   }, [])
 
@@ -120,7 +140,13 @@ export function useSessionDetail(
           }, 500)
           return
         }
-        console.warn('Session detail empty stream error:', err)
+        emptyStreamCleanupRef.current = null
+        setError(err)
+        setTimeout(() => {
+          if (!emptyStreamCleanupRef.current && !isSendMessageRef.current) {
+            startEmptyStream()
+          }
+        }, 1000)
       }
     )
   }, [sessionId, appendEvent])
@@ -157,7 +183,10 @@ export function useSessionDetail(
       if (rawEvents && Array.isArray(rawEvents) && rawEvents.length > 0) {
         const normalized = normalizeEvents(rawEvents)
         setEvents(normalized)
-        const lastEvId = (normalized[normalized.length - 1]?.data as { event_id?: string })?.event_id
+        // DB 历史事件可能只有业务 UUID；只有 Redis ms-seq 才能作为 XREAD 游标。
+        const lastEvId = [...normalized]
+          .reverse()
+          .find((event) => event.streamId && /^\d+-\d+$/.test(event.streamId))?.streamId
         if (lastEvId) lastEventIdRef.current = lastEvId
       }
     } catch (e) {
@@ -232,18 +261,16 @@ export function useSessionDetail(
       setSkipEmptyStream(false)
       isSendMessageRef.current = true
       setStreaming(true)
-      
+
       // 立即更新状态为 running，不等待 SSE 事件
       setSession((prev) => prev ? { ...prev, status: 'running' } : null)
-      
+
       const onEvent = (ev: SSEEventData) => {
         appendEvent(ev)
         // 错误事件：弹 toast 提示给用户，并把状态回滚到 completed
         if (ev.type === 'error') {
-          const errMsg =
-            (ev as any).message ||
-            (ev as any).msg ||
-            '服务异常，请稍后重试'
+          const errorData = ev.data as { message?: string; error?: string }
+          const errMsg = errorData.message || errorData.error || '服务异常，请稍后重试'
           toast.error(`AI 调用失败：${errMsg}`)
           setError(new Error(errMsg))
           setSession((prev) =>

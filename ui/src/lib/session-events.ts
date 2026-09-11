@@ -29,7 +29,13 @@ export function normalizeEvent(raw: RawEvent): SSEEventData | null {
   const type = (raw.type ?? raw.event) as SSEEventType | undefined;
   const data = raw.data;
   if (!type || data === undefined) return null;
-  return { type, data } as SSEEventData;
+  return {
+    type,
+    data,
+    streamId:
+      (raw as RawEvent & { stream_id?: string; id?: string }).stream_id ??
+      (raw as RawEvent & { id?: string }).id,
+  } as SSEEventData;
 }
 
 /**
@@ -167,6 +173,64 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
               files: msg.attachments.map(chatAttachmentToDisplay),
             });
           }
+        }
+        break;
+      }
+      case "message_delta": {
+        const delta = ev.data as { message_id?: string; delta?: string; sequence?: number };
+        if (!delta.message_id || typeof delta.delta !== "string") break;
+        const existingIdx = list.findIndex(
+          (item) => item.kind === "assistant" && (item.data as { message_id?: string }).message_id === delta.message_id,
+        );
+        if (existingIdx >= 0) {
+          const existing = list[existingIdx];
+          if (existing.kind === "assistant") {
+            const current = existing.data as ChatMessage & { message_id?: string; sequence?: number };
+            if (typeof delta.sequence === "number" && typeof current.sequence === "number" && delta.sequence <= current.sequence) {
+              break;
+            }
+            list[existingIdx] = {
+              ...existing,
+              data: {
+                ...current,
+                message: `${current.message ?? ""}${delta.delta}`,
+                message_id: delta.message_id,
+                sequence: delta.sequence,
+              },
+            };
+          }
+        } else {
+          list.push({
+            kind: "assistant",
+            id: stableId("assistant", messageIndex++, delta.message_id),
+            data: {
+              role: "assistant",
+              message: delta.delta,
+              message_id: delta.message_id,
+              sequence: delta.sequence,
+            } as ChatMessage,
+          });
+        }
+        break;
+      }
+      case "message_done": {
+        const done = ev.data as { message_id?: string; content?: string };
+        if (!done.message_id) break;
+        const existingIdx = list.findIndex(
+          (item) => item.kind === "assistant" && (item.data as { message_id?: string }).message_id === done.message_id,
+        );
+        if (existingIdx >= 0 && list[existingIdx].kind === "assistant") {
+          const existing = list[existingIdx];
+          list[existingIdx] = {
+            ...existing,
+            data: { ...existing.data, message: done.content ?? existing.data.message },
+          };
+        } else if (typeof done.content === "string") {
+          list.push({
+            kind: "assistant",
+            id: stableId("assistant", messageIndex++, done.message_id),
+            data: { role: "assistant", message: done.content, message_id: done.message_id } as ChatMessage,
+          });
         }
         break;
       }
@@ -309,6 +373,7 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
       case "plan":
       case "wait":
       case "done":
+      case "stream_error":
         break;
       case "error": {
         // 处理错误事件。

@@ -4,15 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/bytedance/sonic"
 	"runtime/debug"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/bytedance/sonic"
+	"github.com/google/uuid"
+
 	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/model"
-	"github.com/google/uuid"
 
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
@@ -32,16 +34,14 @@ type TaskRegistryInterface interface {
 // DefaultTaskRegistry 默认任务注册表实现
 // 使用 sync.RWMutex 而不是 channel：Go 风格更直接
 type DefaultTaskRegistry struct {
-	mu        sync.RWMutex
-	tasks     map[string]*RedisStreamTask
-	doneChans map[string]chan struct{} // 用于取消和清理
+	mu    sync.RWMutex
+	tasks map[string]*RedisStreamTask
 }
 
 // NewDefaultTaskRegistry 创建默认任务注册表
 func NewDefaultTaskRegistry() *DefaultTaskRegistry {
 	return &DefaultTaskRegistry{
-		tasks:     make(map[string]*RedisStreamTask),
-		doneChans: make(map[string]chan struct{}),
+		tasks: make(map[string]*RedisStreamTask),
 	}
 }
 
@@ -53,7 +53,6 @@ func (r *DefaultTaskRegistry) Register(task *RedisStreamTask) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.tasks[task.id] = task
-	r.doneChans[task.id] = task.doneChan // 保存 doneChan 引用
 	logger.Debug("任务注册到注册表",
 		logger.String("task_id", task.id))
 }
@@ -65,8 +64,6 @@ func (r *DefaultTaskRegistry) Unregister(taskID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.tasks, taskID)
-	// 只从 doneChans 中移除引用，不关闭 channel
-	delete(r.doneChans, taskID)
 	logger.Debug("任务从注册表移除",
 		logger.String("task_id", taskID))
 }
@@ -80,15 +77,14 @@ func (r *DefaultTaskRegistry) CleanupCompleted() int {
 
 	var toRemove []string
 	for id, task := range r.tasks {
-		if task.IsDone() {
+		// Done 只表示任务已请求结束；Finished 才表示 runner 和保留窗口处理完毕。
+		if task.Finished() {
 			toRemove = append(toRemove, id)
 		}
 	}
 
 	for _, id := range toRemove {
 		delete(r.tasks, id)
-		// 只移除引用，不关闭 channel
-		delete(r.doneChans, id)
 		logger.Debug("清理已完成任务",
 			logger.String("task_id", id))
 	}
@@ -128,7 +124,6 @@ func (r *DefaultTaskRegistry) Clear() {
 	r.mu.Lock()
 	tasks := r.tasks
 	r.tasks = make(map[string]*RedisStreamTask)
-	r.doneChans = make(map[string]chan struct{})
 	r.mu.Unlock()
 
 	// 注意：这里不调用 task.Cancel()，避免死锁
@@ -260,6 +255,8 @@ func (s *TaskStream) Len(ctx context.Context) (int, error) {
 
 // DefaultBlockTimeout 默认阻塞超时时间。
 const DefaultBlockTimeout = 3 * time.Second
+
+const maxTaskOutputBatch = 64
 
 // NewRedisStreamTask 创建基于 Redis Stream 的任务
 // 参数:
@@ -502,6 +499,19 @@ func (t *RedisStreamTask) PutInput(ctx context.Context, event interface{}) (stri
 
 // GetOutput 获取输出流中的事件
 func (t *RedisStreamTask) GetOutput(ctx context.Context, startID string, blockTimeout ...int) ([]*model.Event, error) {
+	return readTaskOutput(ctx, t.outputStream, t.outputStreamName(), startID, blockTimeout...)
+}
+
+// ReadTaskOutput 从任务输出流读取事件，不要求任务仍在内存注册表中。
+// 任务完成后 runner 会被释放，但 Redis 保留窗口内仍允许 SSE 续读。
+func ReadTaskOutput(ctx context.Context, mq external.TaskMessageQueue, taskID, startID string, blockTimeout ...int) ([]*model.Event, error) {
+	if mq == nil {
+		return nil, fmt.Errorf("task message queue is nil")
+	}
+	return readTaskOutput(ctx, mq, fmt.Sprintf("task:output:%s", taskID), startID, blockTimeout...)
+}
+
+func readTaskOutput(ctx context.Context, mq external.TaskMessageQueue, streamName, startID string, blockTimeout ...int) ([]*model.Event, error) {
 	ms := 0
 	if len(blockTimeout) > 0 {
 		ms = blockTimeout[0]
@@ -517,26 +527,66 @@ func (t *RedisStreamTask) GetOutput(ctx context.Context, startID string, blockTi
 	if startID == "" {
 		startID = "0"
 	}
-	id, data, err := t.outputStream.GetBlocking(ctx, t.outputStreamName(), startID, timeout)
+	if !ValidStreamID(startID) {
+		return nil, fmt.Errorf("invalid stream cursor %q", startID)
+	}
+	if batchMQ, ok := mq.(external.BatchMessageQueue); ok {
+		messages, err := batchMQ.GetBlockingBatch(ctx, streamName, startID, maxTaskOutputBatch, timeout)
+		if err != nil {
+			return nil, err
+		}
+		return parseTaskOutputMessages(messages)
+	}
+
+	id, data, err := mq.GetBlocking(ctx, streamName, startID, timeout)
 	if err != nil {
 		return nil, err
 	}
 	if data == nil {
 		return nil, nil
 	}
+	return parseTaskOutputMessages([]external.StreamMessage{{ID: id, Data: data}})
+}
 
-	// 解析事件
-	var event model.Event
-	dataStr, err := streamDataString(data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to serialize event: %w", err)
+// parseTaskOutputMessages 将队列消息转换为领域事件，并保持流游标顺序。
+func parseTaskOutputMessages(messages []external.StreamMessage) ([]*model.Event, error) {
+	events := make([]*model.Event, 0, len(messages))
+	for _, message := range messages {
+		if message.Data == nil {
+			continue
+		}
+		dataStr, err := streamDataString(message.Data)
+		if err != nil {
+			return nil, fmt.Errorf("failed to serialize event: %w", err)
+		}
+		var event model.Event
+		if err := sonic.UnmarshalString(dataStr, &event); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal event: %w", err)
+		}
+		event.ID = message.ID
+		events = append(events, &event)
 	}
-	if err := sonic.UnmarshalString(dataStr, &event); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal event: %w", err)
-	}
-	event.ID = id
+	return events, nil
+}
 
-	return []*model.Event{&event}, nil
+// validStreamID 校验 Redis Stream 游标，阻止业务 UUID 被误当作 XREAD 起点。
+// ValidStreamID 判断字符串是否为 Redis Stream 的合法游标。
+func ValidStreamID(id string) bool {
+	if id == "$" || id == "0" || id == "0-0" {
+		return true
+	}
+	parts := strings.Split(id, "-")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return false
+	}
+	for _, part := range parts {
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // SubscribeOutput 订阅输出流
@@ -556,7 +606,9 @@ func (t *RedisStreamTask) SubscribeOutput(ctx context.Context, bufferSize int) (
 		defer close(eventChan)
 		defer cancelContext()
 
-		lastID := ""
+		// 订阅需要先消费流中已经缓冲的事件；空游标在 Redis 中表示从最新位置开始，
+		// 会导致任务启动前产生的事件被跳过。
+		lastID := "0"
 		for {
 			select {
 			case <-subCtx.Done():
@@ -571,7 +623,18 @@ func (t *RedisStreamTask) SubscribeOutput(ctx context.Context, bufferSize int) (
 					logger.Warn("获取输出消息失败",
 						logger.String("task_id", t.id),
 						logger.Err(err))
-					time.Sleep(time.Second)
+					timer := time.NewTimer(time.Second)
+					select {
+					case <-timer.C:
+					case <-subCtx.Done():
+						if !timer.Stop() {
+							select {
+							case <-timer.C:
+							default:
+							}
+						}
+						return
+					}
 					continue
 				}
 				if data == nil {

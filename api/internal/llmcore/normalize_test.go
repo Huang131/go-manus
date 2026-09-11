@@ -111,6 +111,46 @@ func TestMergeDeltas_ToolCall(t *testing.T) {
 	}
 }
 
+func TestMergeDeltasAcceptsProviderToolCallFinishReasons(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+	}{
+		{name: "openai tool calls", in: "tool_calls"},
+		{name: "anthropic tool use", in: "tool_use"},
+		{name: "legacy function call", in: "function_call"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := MergeDeltas("test", []LLMDelta{
+				{ToolCalls: []ToolCallDelta{{Index: 0, ID: "call-1", Name: "search"}}},
+				{FinishReason: tt.in},
+			})
+			if len(resp.Message.ToolCalls) != 1 {
+				t.Fatalf("finish reason %q dropped tool call", tt.in)
+			}
+		})
+	}
+}
+
+func TestMergeDeltas_AnthropicToolUseRetainsToolCall(t *testing.T) {
+	resp := MergeDeltas("claude-test", []LLMDelta{
+		{ToolCalls: []ToolCallDelta{
+			{Index: 0, ID: "call-1", Type: ToolTypeFunction, Name: "search"},
+		}},
+		{ToolCalls: []ToolCallDelta{
+			{Index: 0, ArgumentsDelta: `{"q":"go"}`},
+		}},
+		{FinishReason: "tool_use"},
+	})
+	if resp.FinishReason != "tool_use" {
+		t.Fatalf("finish reason = %q, want tool_use", resp.FinishReason)
+	}
+	if len(resp.Message.ToolCalls) != 1 {
+		t.Fatalf("tool calls = %d, want 1", len(resp.Message.ToolCalls))
+	}
+}
+
 // TestMergeDeltas_MultipleToolCalls 场景 5：并行多 tool_call
 // 业务期望：按 Index 正确归位
 func TestMergeDeltas_MultipleToolCalls(t *testing.T) {

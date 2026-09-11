@@ -364,15 +364,8 @@ func (c *OpenAIClient) Stream(ctx context.Context, req *LLMRequest) (<-chan llmc
 		return nil, fmt.Errorf("marshal stream request: %w", err)
 	}
 	streamCtx := ctx
-	var cancelStream context.CancelFunc
-	if len(req.Tools) > 0 {
-		streamCtx, cancelStream = context.WithTimeout(ctx, c.toolCallTimeout)
-	}
 	httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, c.baseURL+openAIChatCompletionsPath, bytes.NewReader(reqBody))
 	if err != nil {
-		if cancelStream != nil {
-			cancelStream()
-		}
 		return nil, fmt.Errorf("create stream request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
@@ -383,9 +376,6 @@ func (c *OpenAIClient) Stream(ctx context.Context, req *LLMRequest) (<-chan llmc
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		if cancelStream != nil {
-			cancelStream()
-		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			pe := llmcore.NewProviderError(llmcore.KindTimeout, "openai_compat", c.modelName, "stream request timeout")
 			pe.StatusCode = http.StatusGatewayTimeout
@@ -397,9 +387,6 @@ func (c *OpenAIClient) Stream(ctx context.Context, req *LLMRequest) (<-chan llmc
 		return nil, pe
 	}
 	if resp.StatusCode != http.StatusOK {
-		if cancelStream != nil {
-			cancelStream()
-		}
 		defer resp.Body.Close()
 		body, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
@@ -409,16 +396,13 @@ func (c *OpenAIClient) Stream(ctx context.Context, req *LLMRequest) (<-chan llmc
 	}
 
 	deltas := make(chan llmcore.LLMDelta)
-	go c.readOpenAIStream(streamCtx, resp.Body, deltas, cancelStream)
+	go c.readOpenAIStream(streamCtx, resp.Body, deltas)
 	return deltas, nil
 }
 
-func (c *OpenAIClient) readOpenAIStream(ctx context.Context, body io.ReadCloser, deltas chan<- llmcore.LLMDelta, cancel context.CancelFunc) {
+func (c *OpenAIClient) readOpenAIStream(ctx context.Context, body io.ReadCloser, deltas chan<- llmcore.LLMDelta) {
 	defer close(deltas)
 	defer body.Close()
-	if cancel != nil {
-		defer cancel()
-	}
 
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 4096), 1024*1024)

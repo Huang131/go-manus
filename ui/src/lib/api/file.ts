@@ -1,6 +1,8 @@
 import { get, post } from "./fetch";
 import type { FileInfo, FileUploadParams } from "./types";
 
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "/api";
+
 /**
  * 文件模块 API
  */
@@ -37,7 +39,7 @@ export const fileApi = {
    */
   downloadFile: async (fileId: string): Promise<Blob> => {
     const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api"}/files/${fileId}/download`
+      `${API_BASE_URL}/files/${fileId}/download`
     );
 
     if (!response.ok) {
@@ -53,9 +55,6 @@ export const fileApi = {
    * @returns 文件下载 URL
    */
   getFileDownloadUrl: (fileId: string): string => {
-    const baseURL =
-      process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000/api";
-    return `${baseURL}/files/${fileId}/download`;
+    return `${API_BASE_URL}/files/${fileId}/download`;
   },
 };
-

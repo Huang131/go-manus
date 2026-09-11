@@ -43,21 +43,23 @@ const (
 type EventType string
 
 const (
-	EventTypeMessage     EventType = "message"
-	EventTypePlan        EventType = "plan"
-	EventTypeToolCalling EventType = "tool_calling"
-	EventTypeToolCalled  EventType = "tool_called"
-	EventTypeStep        EventType = "step"
-	EventTypeError       EventType = "error"
-	EventTypeTitle       EventType = "title"
-	EventTypeWait        EventType = "wait"
-	EventTypeDone        EventType = "done"
-	EventTypeBrowser     EventType = "browser"
-	EventTypeSearch      EventType = "search"
-	EventTypeShell       EventType = "shell"
-	EventTypeFile        EventType = "file"
-	EventTypeMCP         EventType = "mcp"
-	EventTypeA2A         EventType = "a2a"
+	EventTypeMessage      EventType = "message"
+	EventTypeMessageDelta EventType = "message_delta"
+	EventTypeMessageDone  EventType = "message_done"
+	EventTypePlan         EventType = "plan"
+	EventTypeToolCalling  EventType = "tool_calling"
+	EventTypeToolCalled   EventType = "tool_called"
+	EventTypeStep         EventType = "step"
+	EventTypeError        EventType = "error"
+	EventTypeTitle        EventType = "title"
+	EventTypeWait         EventType = "wait"
+	EventTypeDone         EventType = "done"
+	EventTypeBrowser      EventType = "browser"
+	EventTypeSearch       EventType = "search"
+	EventTypeShell        EventType = "shell"
+	EventTypeFile         EventType = "file"
+	EventTypeMCP          EventType = "mcp"
+	EventTypeA2A          EventType = "a2a"
 )
 
 // PlanEventStatus 计划事件状态
@@ -81,7 +83,7 @@ const (
 // Event 事件模型
 // 每个事件代表 Agent 执行过程中的一个原子动作或状态变化。
 type Event struct {
-	ID        string          `json:"id"`         // 事件唯一 ID，UUID 格式
+	ID        string          `json:"id"`         // Redis Stream 游标（ms-seq），用于 SSE 续读
 	Type      EventType       `json:"type"`       // 事件类型，标识事件种类
 	CreatedAt time.Time       `json:"created_at"` // 创建时间
 	Data      json.RawMessage `json:"data"`       // 事件负载，类型由 Type 决定
@@ -97,6 +99,30 @@ type MessageEvent struct {
 	Message     string    `json:"message"`               // 消息本身
 	Attachments []File    `json:"attachments,omitempty"` // 附件列表
 }
+
+// MessageDeltaEvent 表示助手消息的一段文本增量。
+// MessageID 在同一条助手消息的所有增量中保持不变，Sequence 从 1 开始递增，
+// 前端据此进行幂等聚合和断线重放。
+type MessageDeltaEvent struct {
+	MessageID string `json:"message_id"`
+	Delta     string `json:"delta"`
+	Sequence  int    `json:"sequence"`
+}
+
+func (e *MessageDeltaEvent) GetType() EventType { return EventTypeMessageDelta }
+
+func (e *MessageDeltaEvent) ToJSON() string { return toJSON(e) }
+
+// MessageDoneEvent 表示一条助手消息已经完成，Content 是聚合后的完整文本。
+type MessageDoneEvent struct {
+	MessageID    string `json:"message_id"`
+	Content      string `json:"content"`
+	FinishReason string `json:"finish_reason,omitempty"`
+}
+
+func (e *MessageDoneEvent) GetType() EventType { return EventTypeMessageDone }
+
+func (e *MessageDoneEvent) ToJSON() string { return toJSON(e) }
 
 // GetType 返回事件类型
 func (e *MessageEvent) GetType() EventType {
@@ -276,6 +302,20 @@ func NewMessageEvent(role, content string) *MessageEvent {
 		Type:    EventTypeMessage,
 		Role:    role,
 		Message: content,
+	}
+}
+
+// NewMessageDeltaEvent 创建消息增量事件。
+func NewMessageDeltaEvent(messageID, delta string, sequence int) *MessageDeltaEvent {
+	return &MessageDeltaEvent{MessageID: messageID, Delta: delta, Sequence: sequence}
+}
+
+// NewMessageDoneEvent 创建消息完成事件。
+func NewMessageDoneEvent(messageID, content, finishReason string) *MessageDoneEvent {
+	return &MessageDoneEvent{
+		MessageID:    messageID,
+		Content:      content,
+		FinishReason: finishReason,
 	}
 }
 

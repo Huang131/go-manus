@@ -160,7 +160,8 @@ const ExecutionPrompt = `你正在执行任务中的一个步骤。
 - 必要时再调用 file.read 工具读取完整文件
 - 如附件是二进制或截断状态，请显式说明`
 
-// SummarizePrompt 总结提示词
+// SummarizePrompt 总结提示词。
+// 总结是直接展示给用户的内容，使用纯文本输出才能实现端到端 token streaming。
 const SummarizePrompt = `所有任务步骤已完成，现在请总结整个任务的执行情况。
 
 任务执行总结要求：
@@ -170,8 +171,5 @@ const SummarizePrompt = `所有任务步骤已完成，现在请总结整个任�
 - 提供最终结果和结论
 - 如果有生成的文件，列出文件路径
 
-返回格式要求（JSON）：
-{{
-  "message": "任务执行总结",
-  "attachments": ["生成的附件文件路径"]
-}}`
+请直接输出面向用户的中文总结正文，不要输出 JSON、Markdown 标题或思考过程。
+如果有生成的文件，请在正文末尾列出文件路径。`

@@ -3,8 +3,10 @@ package agent
 import (
 	"context"
 	"fmt"
-	"github.com/bytedance/sonic"
 	"strings"
+
+	"github.com/bytedance/sonic"
+	"github.com/google/uuid"
 
 	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
@@ -185,7 +187,7 @@ func (a *BaseAgent) invokeWithEmptyRetry(ctx context.Context, req *external.LLMR
 
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		resp, err := a.llm.Invoke(ctx, &current)
+		resp, err := a.invokeLLM(ctx, &current, false)
 		if err != nil {
 			lastErr = err
 			// LLM 错误：注入空 assistant + 重试提示，然后继续
@@ -213,6 +215,62 @@ func (a *BaseAgent) invokeWithEmptyRetry(ctx context.Context, req *external.LLMR
 		return nil, maxRetries, lastErr
 	}
 	return nil, maxRetries, fmt.Errorf("LLM 连续 %d 次返回空内容", maxRetries)
+}
+
+// invokeLLM 优先消费 provider 的 token stream，并在事件通道中发布增量；
+// 不支持流式的 mock/适配器继续走 Invoke，保证 Agent 接口保持兼容。
+// 增量只携带文本，不暴露 reasoning，工具参数仍由聚合后的完整响应处理。
+func (a *BaseAgent) invokeLLM(ctx context.Context, req *external.LLMRequest, publishDeltas bool) (*llmcore.LLMResponse, error) {
+	resp, _, err := a.invokeLLMWithEmission(ctx, req, publishDeltas)
+	return resp, err
+}
+
+// invokeLLMWithEmission 与 invokeLLM 相同，但额外返回本次调用是否已经向事件流发布文本增量。
+// 总结阶段据此避免同时发送 message_delta/message_done 和重复的 message 事件。
+func (a *BaseAgent) invokeLLMWithEmission(ctx context.Context, req *external.LLMRequest, publishDeltas bool) (*llmcore.LLMResponse, bool, error) {
+	streaming, ok := a.llm.(external.StreamingLLM)
+	if !ok {
+		resp, err := a.llm.Invoke(ctx, req)
+		return resp, false, err
+	}
+
+	deltas, err := streaming.Stream(ctx, req)
+	if err != nil {
+		return nil, false, err
+	}
+	if deltas == nil {
+		return nil, false, fmt.Errorf("LLM 流式响应通道为空")
+	}
+	all := make([]llmcore.LLMDelta, 0, 16)
+	messageID := uuid.NewString()
+	sequence := 0
+	hasText := false
+	var streamErr string
+	for delta := range deltas {
+		if delta.Error != "" {
+			if streamErr == "" {
+				streamErr = delta.Error
+			}
+			continue
+		}
+		all = append(all, delta)
+		if publishDeltas && delta.ContentText != "" {
+			hasText = true
+			sequence++
+			a.emitEvent(ctx, model.NewMessageDeltaEvent(messageID, delta.ContentText, sequence))
+		}
+	}
+	if streamErr != "" {
+		return nil, false, fmt.Errorf("LLM 流式调用失败: %s", streamErr)
+	}
+	resp := llmcore.MergeDeltas(a.llm.ModelName(), all)
+	if resp == nil {
+		return nil, false, fmt.Errorf("LLM 流式响应为空")
+	}
+	if publishDeltas && hasText {
+		a.emitEvent(ctx, model.NewMessageDoneEvent(messageID, resp.Message.ContentText, resp.FinishReason))
+	}
+	return resp, publishDeltas && hasText, nil
 }
 
 // ToolCallResult 工具调用结果
@@ -243,6 +301,16 @@ const retryInterval = 1.0
 // 消息组装：system + 记忆原生消息 + 本次 query（不再拼接字符串上下文）。
 // 循环产生的 assistant/tool 消息在出口处合并进记忆并持久化。
 func (a *BaseAgent) Invoke(ctx context.Context, systemPrompt, query string) (*InvokeResult, error) {
+	return a.invoke(ctx, systemPrompt, query, true)
+}
+
+// InvokeWithoutStreaming 执行 ReAct 循环但不发布用户可见 token 增量。
+// Planner/ReAct 的结构化 JSON 响应需要完整聚合后解析，不能把半截 JSON 推给前端。
+func (a *BaseAgent) InvokeWithoutStreaming(ctx context.Context, systemPrompt, query string) (*InvokeResult, error) {
+	return a.invoke(ctx, systemPrompt, query, false)
+}
+
+func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publishDeltas bool) (*InvokeResult, error) {
 	// 1. 构建初始消息：system + 记忆 + 本次用户消息
 	messages := a.buildConversationMessages(systemPrompt, query)
 	// mergeFrom 指向本次用户消息，之后的所有消息都是本轮新增，需要合并进记忆
@@ -251,10 +319,11 @@ func (a *BaseAgent) Invoke(ctx context.Context, systemPrompt, query string) (*In
 	// 2. 循环调用 LLM 直到达到最大迭代次数或 LLM 不再调用工具
 	for iteration := 0; iteration < a.config.MaxIterations; iteration++ {
 		// 3. 调用 LLM
-		resp, err := a.llm.Invoke(ctx, &external.LLMRequest{
+		llmReq := &external.LLMRequest{
 			Messages: messages,
 			Tools:    a.GetToolsForLLM(),
-		})
+		}
+		resp, err := a.invokeLLM(ctx, llmReq, publishDeltas && shouldPublishDeltas(llmReq))
 		if err != nil {
 			// LLM 调用失败，尝试重试
 			for retry := 0; retry < a.config.MaxRetries; retry++ {
@@ -268,10 +337,11 @@ func (a *BaseAgent) Invoke(ctx context.Context, systemPrompt, query string) (*In
 					llmcore.Message{Role: llmcore.RoleUser, ContentText: "AI 无响应内容，请继续。"},
 				)
 
-				resp, err = a.llm.Invoke(ctx, &external.LLMRequest{
+				llmReq = &external.LLMRequest{
 					Messages: messages,
 					Tools:    a.GetToolsForLLM(),
-				})
+				}
+				resp, err = a.invokeLLM(ctx, llmReq, publishDeltas && shouldPublishDeltas(llmReq))
 				if err == nil {
 					break
 				}
@@ -393,6 +463,12 @@ func (a *BaseAgent) Invoke(ctx context.Context, systemPrompt, query string) (*In
 		Content: "",
 		Error:   fmt.Errorf("Agent 迭代超过最大次数: %d", a.config.MaxIterations),
 	}, fmt.Errorf("Agent 迭代超过最大次数: %d", a.config.MaxIterations)
+}
+
+// shouldPublishDeltas 对非结构化响应发布文本增量。
+// 工具参数始终只在完整流聚合后解析；即使请求携带工具定义，模型返回的自然语言内容仍可即时展示。
+func shouldPublishDeltas(req *external.LLMRequest) bool {
+	return req != nil && req.ResponseFormat == nil
 }
 
 // handleToolCall 处理单个工具调用

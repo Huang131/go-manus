@@ -79,9 +79,18 @@ func MergeDeltas(model string, deltas []LLMDelta) *LLMResponse {
 	resp.Message.ToolCalls = currentCalls
 
 	// finish_reason=tool_calls 才算有 tool_calls
-	if resp.FinishReason != FinishReasonToolCalls {
+	if !isToolCallFinishReason(resp.FinishReason) {
 		resp.Message.ToolCalls = nil
 	}
 
 	return resp
+}
+
+// NormalizeFinishReason 将不同 provider 的终止原因归一化为业务层协议。
+// Anthropic 使用 tool_use，OpenAI 兼容接口通常使用 tool_calls；
+// 业务层只应处理 FinishReasonToolCalls。
+// isToolCallFinishReason 识别各 provider 表示工具调用终止的原始值。
+// 响应仍保留 provider 原始 finish_reason，只在是否保留 ToolCalls 时做兼容判断。
+func isToolCallFinishReason(reason string) bool {
+	return reason == FinishReasonToolCalls || reason == "tool_use" || reason == "function_call"
 }

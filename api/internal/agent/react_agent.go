@@ -49,11 +49,12 @@ func (a *ReActAgent) ExecuteStep(ctx context.Context, plan *model.Plan, step *mo
 	prompt = strings.Replace(prompt, "{language}", plan.Language, 1)
 	prompt = strings.Replace(prompt, "{step}", step.Description, 1)
 
-	// 添加系统提示词
-	systemPrompt := SystemPrompt + "\n" + ReActSystemPrompt
+	// 总结阶段是面向用户的纯文本输出，不能叠加要求结构化 JSON 的 ReAct 系统提示。
+	systemPrompt := SystemPrompt
 
 	// 使用完整的 ReAct 循环调用 LLM（记忆以原生消息注入，不再拼字符串）
-	result, err := a.Invoke(ctx, systemPrompt, prompt)
+	// 步骤执行的响应是结构化 JSON；先完整聚合后解析，避免把半截 JSON 当作用户消息展示。
+	result, err := a.InvokeWithoutStreaming(ctx, systemPrompt, prompt)
 	if err != nil {
 		// 如果是等待用户输入的错误，记录用户问题到 step
 		if err == ErrWaitForUser {
@@ -112,7 +113,7 @@ func (a *ReActAgent) ExecuteStep(ctx context.Context, plan *model.Plan, step *mo
 }
 
 // Summarize 总结任务执行结果
-func (a *ReActAgent) Summarize(ctx context.Context) (string, []string, error) {
+func (a *ReActAgent) Summarize(ctx context.Context) (string, []string, bool, error) {
 	// 构建提示词
 	prompt := SummarizePrompt
 
@@ -122,12 +123,13 @@ func (a *ReActAgent) Summarize(ctx context.Context) (string, []string, error) {
 	// 构建消息历史：system + 记忆原生消息 + 总结请求
 	messages := a.buildConversationMessages(systemPrompt, prompt)
 
-	// 调用 LLM
-	resp, _, err := a.invokeWithEmptyRetry(ctx, &external.LLMRequest{
+	// 总结面向用户展示，使用非结构化文本流以便前端按 token 增量渲染。
+	// 若模型仍返回旧版 JSON，下面的解析逻辑仍可兼容并提取 message。
+	resp, emitted, err := a.invokeLLMWithEmission(ctx, &external.LLMRequest{
 		Messages: messages,
-	}, a.config.MaxRetries)
+	}, true)
 	if err != nil {
-		return "", nil, fmt.Errorf("LLM调用失败: %w", err)
+		return "", nil, false, fmt.Errorf("LLM调用失败: %w", err)
 	}
 
 	// 解析响应（使用 JSON 修复解析器）
@@ -138,9 +140,9 @@ func (a *ReActAgent) Summarize(ctx context.Context) (string, []string, error) {
 
 	if err := a.jsonParser.Parse(resp.Message.ContentText, &result); err != nil {
 		// 如果 JSON 解析失败，返回原始内容
-		return resp.Message.ContentText, nil, nil
+		return resp.Message.ContentText, nil, emitted, nil
 	}
 
 	logger.InfoContext(ctx, "ReActAgent 任务总结完成")
-	return result.Message, result.Attachments, nil
+	return result.Message, result.Attachments, emitted, nil
 }

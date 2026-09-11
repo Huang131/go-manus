@@ -77,9 +77,8 @@ type Tool interface {
 
 ### 第二阶段：掌握工具系统
 
-1. 阅读 [工具系统文档](./docs/TOOL_SYSTEM.md)
-2. 学习工具定义和注册机制：`api/internal/agent/tools.go`
-3. 实践自定义工具开发
+1. 学习工具定义和注册机制：`api/internal/agent/tools.go`
+2. 实践自定义工具开发
 
 ### 第三阶段：理解外部集成
 

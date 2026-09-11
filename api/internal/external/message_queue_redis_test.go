@@ -15,8 +15,8 @@ func TestRedisMessageQueueDefaultTimeoutsUseDurations(t *testing.T) {
 }
 
 func TestRedisMessageQueueStreamRetentionPolicy(t *testing.T) {
-	if streamMaxLen <= 0 {
-		t.Fatalf("stream max len = %d, want positive", streamMaxLen)
+	if streamMaxLen < 10000 {
+		t.Fatalf("stream max len = %d, want at least 10000 for token deltas", streamMaxLen)
 	}
 	if streamRetention <= 0 {
 		t.Fatalf("stream retention = %s, want positive", streamRetention)

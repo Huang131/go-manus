@@ -259,7 +259,6 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 			// 否则 GetOutput 反序列化得到的是业务 payload，event.Type 永远是空，
 			// SSE 推送时没有 event:xxx 业务类型行，前端 lastEventIdRef 也拿不到。
 			baseEvent := &model.Event{
-				ID:        eventID,
 				Type:      event.GetType(),
 				CreatedAt: eventCreatedAt,
 				Data:      eventJSON,
@@ -277,6 +276,10 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 				logger.WarnContext(ctx, "写入 output_stream 失败",
 					logger.String("task_id", task.ID()),
 					logger.Err(err))
+			} else if outputID != "" {
+				// Redis Stream ID 是 SSE 续读游标；业务 UUID 已保留在 payload.event_id。
+				// DB 历史事件也保存同一游标，页面刷新后可直接从该位置继续读取。
+				baseEvent.ID = outputID
 			}
 
 			// 同步到会话数据库

@@ -154,6 +154,17 @@ func TestEvent_Data_Nil(t *testing.T) {
 	}
 }
 
+func TestMessageStreamingEvents(t *testing.T) {
+	delta := NewMessageDeltaEvent("msg-1", "你", 1)
+	if delta.GetType() != EventTypeMessageDelta || delta.MessageID != "msg-1" || delta.Sequence != 1 {
+		t.Fatalf("unexpected delta event: %+v", delta)
+	}
+	done := NewMessageDoneEvent("msg-1", "你好", "stop")
+	if done.GetType() != EventTypeMessageDone || done.Content != "你好" {
+		t.Fatalf("unexpected done event: %+v", done)
+	}
+}
+
 func TestPlanAndStepEventsSnapshotMutableInput(t *testing.T) {
 	plan := Plan{Title: "before", Steps: []PlanStep{{ID: "step-1", Attachments: []string{"a"}}}}
 	planEvent := NewPlanEvent(plan, PlanEventStatusCreated)

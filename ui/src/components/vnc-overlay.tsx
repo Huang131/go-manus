@@ -17,7 +17,7 @@ export interface VNCOverlayProps {
 }
 
 function buildVNCUrl(sessionId: string): string {
-  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000/api'
+  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || '/api'
 
   let host: string
   let pathname: string

@@ -279,6 +279,24 @@ func TestDefaultTaskRegistry_CleanupCompleted(t *testing.T) {
 	registry.Clear()
 }
 
+func TestDefaultTaskRegistry_CleanupCompletedWaitsForFinished(t *testing.T) {
+	registry := NewDefaultTaskRegistry()
+	task := NewRedisStreamTask(&mockMQWrapper{mq: &external.RedisStreamMessageQueue{}}, &mockTaskRunner{}, registry)
+
+	task.finish("test task done")
+	if cleaned := registry.CleanupCompleted(); cleaned != 0 {
+		t.Fatalf("CleanupCompleted() = %d, want 0 before runner cleanup", cleaned)
+	}
+	if registry.Count() != 1 {
+		t.Fatalf("registry count = %d, want 1 before runner cleanup", registry.Count())
+	}
+
+	task.finished.Store(true)
+	if cleaned := registry.CleanupCompleted(); cleaned != 1 {
+		t.Fatalf("CleanupCompleted() = %d, want 1 after runner cleanup", cleaned)
+	}
+}
+
 // TestDefaultTaskRegistry_DoubleUnregister 测试重复移除任务不会 panic
 func TestDefaultTaskRegistry_DoubleUnregister(t *testing.T) {
 	registry := NewDefaultTaskRegistry()

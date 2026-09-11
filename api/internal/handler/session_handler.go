@@ -128,13 +128,14 @@ func (h *SessionHandler) Stream(c *gin.Context) {
 				logger.DebugContext(c.Request.Context(), "获取会话列表失败，跳过本轮 SSE 推送", logger.Err(err))
 				continue
 			}
-			data, err := sonic.MarshalString(sessions)
+			data, err := sonic.MarshalString(map[string]interface{}{"sessions": sessions})
 			if err != nil {
 				logger.ErrorContext(c.Request.Context(), "序列化会话 SSE 数据失败", logger.Err(err))
 				continue
 			}
-			c.SSEvent(sseEventSessions, data)
-			c.Writer.Flush()
+			if err := writeSSEEvent(c, sseEventSessions, "", []byte(data)); err != nil {
+				return
+			}
 		}
 	}
 }
@@ -196,6 +197,9 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 	if err != nil {
 		response.FromError(c, err)
 		return
+	}
+	if req.EventID == "" {
+		req.EventID = strings.TrimSpace(c.GetHeader("Last-Event-ID"))
 	}
 
 	// 创建独立的 context 用于事件获取，保留 request_id 等 context value，
@@ -266,10 +270,12 @@ func (h *SessionHandler) sendMessage(c *gin.Context, sessionID string, req *chat
 
 	// 所有可能失败的序列化操作完成后才切换为 SSE 响应。
 	setSSEHeaders(c)
-	c.SSEvent(sseEventMessage, string(userPayload))
-	c.Writer.Flush()
-	c.SSEvent(sseEventTaskID, string(taskIDData))
-	c.Writer.Flush()
+	if err := writeSSEEvent(c, sseEventMessage, "", userPayload); err != nil {
+		return "", err
+	}
+	if err := writeSSEEvent(c, sseEventTaskID, "", taskIDData); err != nil {
+		return "", err
+	}
 
 	return taskID, nil
 }
@@ -309,15 +315,21 @@ func (h *SessionHandler) streamTaskEvents(c *gin.Context, eventCtx context.Conte
 	pollAndPush := func() bool {
 		events, err := h.agent.GetTaskEvents(eventCtx, taskID, startID)
 		if err != nil {
-			return eventCtx.Err() != nil
+			logger.WarnContext(c.Request.Context(), "读取任务事件失败",
+				logger.String("task_id", taskID),
+				logger.String("start_id", startID),
+				logger.Err(err))
+			_ = writeSSEEvent(c, "stream_error", "", []byte(`{"message":"stream temporarily unavailable"}`))
+			return true
 		}
 		for _, event := range events {
 			startID = event.ID
 
 			// 对齐 Python 版本：event 字段为业务类型，data 字段平铺业务 payload。
 			payload := mergeEventMetadata(c.Request.Context(), event)
-			c.SSEvent(string(event.Type), string(payload))
-			c.Writer.Flush()
+			if err := writeSSEEvent(c, string(event.Type), event.ID, payload); err != nil {
+				return true
+			}
 
 			// done / error 都视为终态：结束 SSE 流，避免前端 0/N 计数永远卡在等待态。
 			// 后端 task 已结束，下一次连入会通过 lastEventId 续读到 done/error。

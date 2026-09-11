@@ -133,7 +133,8 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *llmc
 		Type: model.EventTypeMessage,
 		Data: userEventData,
 	}
-	if err := s.sessionRep.AppendEvent(ctx, sessionID, userEvent); err != nil {
+	// 用户消息和后台任务属于同一条异步链路，使用 taskCtx 避免客户端断开导致消息落库失败。
+	if err := s.sessionRep.AppendEvent(taskCtx, sessionID, userEvent); err != nil {
 		logger.WarnContext(ctx, "添加用户消息事件失败", logger.String("session_id", sessionID), logger.Err(err))
 	}
 
@@ -332,17 +333,29 @@ func (s *AgentService) getOrCreateTask(ctx context.Context, session *model.Sessi
 //
 // 现在直接透传底层解析好的 *model.Event，并保留 Redis Stream ID 作为 event_id 暴露给前端。
 func (s *AgentService) GetTaskEvents(ctx context.Context, taskID string, startID string) ([]*model.Event, error) {
-	task := defaultTaskRegistry.Get(taskID)
-	if task == nil {
-		logger.WarnContext(ctx, "GetTaskEvents: task not found", logger.String("task_id", taskID))
-		return nil, fmt.Errorf("task not found: %s", taskID)
-	}
-
 	logger.DebugContext(ctx, "GetTaskEvents 获取事件",
 		logger.String("task_id", taskID),
 		logger.String("start_id", startID))
 
-	events, err := task.GetOutput(ctx, startID)
+	// 活跃任务复用内存中的流实例；任务完成后 runner 会从 registry 注销，
+	// 但 Redis stream 仍保留短窗口，此时直接按 task ID 构造读取入口。
+	if task := defaultTaskRegistry.Get(taskID); task != nil {
+		events, err := task.GetOutput(ctx, startID)
+		if err != nil {
+			return nil, fmt.Errorf("get task events failed: %w", err)
+		}
+		return nonNilEvents(events), nil
+	}
+
+	// 未注册任务必须先确认 Redis stream 存在，避免对不存在的 task 永久 BLOCK。
+	size, err := s.mq.Size(ctx, fmt.Sprintf("task:output:%s", taskID))
+	if err != nil {
+		return nil, fmt.Errorf("check task stream failed: %w", err)
+	}
+	if size == 0 {
+		return nil, fmt.Errorf("task not found: %s", taskID)
+	}
+	events, err := ReadTaskOutput(ctx, s.mq, taskID, startID)
 	if err != nil {
 		logger.ErrorContext(ctx, "GetTaskEvents 获取事件失败",
 			logger.String("task_id", taskID),
@@ -366,6 +379,16 @@ func (s *AgentService) GetTaskEvents(ctx context.Context, taskID string, startID
 	return result, nil
 }
 
+func nonNilEvents(events []*model.Event) []*model.Event {
+	result := make([]*model.Event, 0, len(events))
+	for _, event := range events {
+		if event != nil {
+			result = append(result, event)
+		}
+	}
+	return result
+}
+
 // getToolNames 获取工具名称列表
 func (s *AgentService) getToolNames(tools []Tool) []string {
 	names := make([]string, len(tools))
@@ -383,8 +406,14 @@ func (s *AgentService) GetActiveTaskID(ctx context.Context, sessionID string) (s
 	defer s.mu.Unlock()
 
 	task, ok := s.taskBySession[sessionID]
-	if !ok || task == nil || task.Done() {
-		if ok {
+	if !ok || task == nil {
+		return "", nil
+	}
+	if task.Done() {
+		// Cancel 会先标记 Done，再等待 runner 完成销毁。
+		// 保留映射直到 Finished，阻止同一 session 在收尾窗口创建第二个 runner；
+		// 正常完成后由 task.SetOnFinished 回调删除映射。
+		if task.Finished() {
 			delete(s.taskBySession, sessionID)
 		}
 		return "", nil

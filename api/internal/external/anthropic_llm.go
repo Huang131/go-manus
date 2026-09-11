@@ -273,7 +273,11 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 // anthropicStreamEvent 是 Anthropic SSE 事件的通用载体。
 type anthropicStreamEvent struct {
 	Type  string `json:"type"`
-	Index int    `json:"index"`
+	Error struct {
+		Message string `json:"message"`
+		Type    string `json:"type"`
+	} `json:"error"`
+	Index int `json:"index"`
 	Delta struct {
 		Type        string `json:"type"`
 		Text        string `json:"text"`
@@ -314,15 +318,8 @@ func (c *AnthropicClient) Stream(ctx context.Context, req *LLMRequest) (<-chan l
 		return nil, fmt.Errorf("marshal stream request: %w", err)
 	}
 	streamCtx := ctx
-	var cancelStream context.CancelFunc
-	if len(req.Tools) > 0 {
-		streamCtx, cancelStream = context.WithTimeout(ctx, c.toolCallTimeout)
-	}
 	httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, c.baseURL+anthropicMessagesPath, bytes.NewReader(requestBody))
 	if err != nil {
-		if cancelStream != nil {
-			cancelStream()
-		}
 		return nil, fmt.Errorf("create stream request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
@@ -331,15 +328,9 @@ func (c *AnthropicClient) Stream(ctx context.Context, req *LLMRequest) (<-chan l
 	httpReq.Header.Set("anthropic-version", c.version)
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		if cancelStream != nil {
-			cancelStream()
-		}
 		return nil, c.classifySendError(err, len(req.Tools) > 0)
 	}
 	if resp.StatusCode != http.StatusOK {
-		if cancelStream != nil {
-			cancelStream()
-		}
 		defer resp.Body.Close()
 		body, readErr := io.ReadAll(resp.Body)
 		if readErr != nil {
@@ -351,16 +342,13 @@ func (c *AnthropicClient) Stream(ctx context.Context, req *LLMRequest) (<-chan l
 		return nil, c.classifyHTTPError(resp.StatusCode, body)
 	}
 	deltas := make(chan llmcore.LLMDelta)
-	go c.readAnthropicStream(streamCtx, resp.Body, deltas, cancelStream)
+	go c.readAnthropicStream(streamCtx, resp.Body, deltas)
 	return deltas, nil
 }
 
-func (c *AnthropicClient) readAnthropicStream(ctx context.Context, body io.ReadCloser, deltas chan<- llmcore.LLMDelta, cancel context.CancelFunc) {
+func (c *AnthropicClient) readAnthropicStream(ctx context.Context, body io.ReadCloser, deltas chan<- llmcore.LLMDelta) {
 	defer close(deltas)
 	defer body.Close()
-	if cancel != nil {
-		defer cancel()
-	}
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 4096), 1024*1024)
 	eventType := ""
@@ -382,6 +370,8 @@ func (c *AnthropicClient) readAnthropicStream(ctx context.Context, body io.ReadC
 		eventType = ""
 		delta := llmcore.LLMDelta{}
 		switch currentEventType {
+		case "error":
+			delta.Error = event.Error.Message
 		case "content_block_start":
 			if event.ContentBlock.Type == anthropicContentTypeToolUse {
 				delta.ToolCalls = []llmcore.ToolCallDelta{{Index: event.Index, ID: event.ContentBlock.ID, Type: llmcore.ToolTypeFunction, Name: event.ContentBlock.Name}}
@@ -404,6 +394,10 @@ func (c *AnthropicClient) readAnthropicStream(ctx context.Context, body io.ReadC
 					TotalTokens:      event.Usage.InputTokens + event.Usage.OutputTokens,
 				}
 			}
+		}
+		if delta.Error != "" {
+			_ = sendStreamDelta(ctx, deltas, delta)
+			return
 		}
 		if delta.ContentText == "" && delta.Reasoning == "" && len(delta.ToolCalls) == 0 && delta.FinishReason == "" && delta.Usage == nil {
 			continue

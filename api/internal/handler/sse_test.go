@@ -3,11 +3,11 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"net/http/httptest"
 
 	"github.com/Huang131/go-manus/api/internal/model"
 )
@@ -15,9 +15,7 @@ import (
 func TestSetSSEHeaders(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-
 	setSSEHeaders(ctx)
-
 	want := map[string]string{
 		"Content-Type":      "text/event-stream",
 		"Cache-Control":     "no-cache",
@@ -56,5 +54,18 @@ func TestMergeEventMetadata_NullPayloadReturnsOriginalData(t *testing.T) {
 	})
 	if string(got) != string(input) {
 		t.Fatalf("mergeEventMetadata() = %s, want original null payload", got)
+	}
+}
+
+func TestWriteSSEEventIncludesStreamCursor(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	if err := writeSSEEvent(ctx, "message_delta", "1710000000000-0", []byte(`{"delta":"你"}`)); err != nil {
+		t.Fatalf("writeSSEEvent() error = %v", err)
+	}
+	want := "id: 1710000000000-0\nevent: message_delta\ndata: {\"delta\":\"你\"}\n\n"
+	if recorder.Body.String() != want {
+		t.Fatalf("SSE body = %q, want %q", recorder.Body.String(), want)
 	}
 }

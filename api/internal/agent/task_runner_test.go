@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"sync"
 	"testing"
 
 	"github.com/Huang131/go-manus/api/internal/agent/attachment"
 	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
 )
@@ -34,6 +36,65 @@ func TestPopRetryConfig(t *testing.T) {
 type attachmentFileRepository struct {
 	repository.FileRepository
 	files map[string]*model.File
+}
+
+type chatContextSessionRepository struct {
+	repository.SessionRepository
+	mu        sync.Mutex
+	appendCtx context.Context
+}
+
+func (r *chatContextSessionRepository) GetByID(context.Context, string) (*model.Session, error) {
+	return &model.Session{ID: "session-1"}, nil
+}
+
+func (r *chatContextSessionRepository) UpdateLatestMessage(context.Context, string, string) error {
+	return nil
+}
+
+func (r *chatContextSessionRepository) AppendEvent(ctx context.Context, _ string, _ *model.Event) error {
+	r.mu.Lock()
+	r.appendCtx = ctx
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *chatContextSessionRepository) getAppendContext() context.Context {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.appendCtx
+}
+
+func TestAgentServiceChatUsesDetachedContextForMessagePersistence(t *testing.T) {
+	repo := &chatContextSessionRepository{}
+	svc := &AgentService{
+		sessionRep:    repo,
+		llm:           &mockLLM{},
+		agentConfig:   DefaultAgentConfig(),
+		mq:            newInMemoryMessageQueue(),
+		taskBySession: make(map[string]*RedisStreamTask),
+	}
+
+	requestCtx := context.WithValue(context.Background(), "request-id", "req-1")
+	requestCtx, cancel := context.WithCancel(requestCtx)
+	cancel()
+
+	_, err := svc.Chat(requestCtx, "session-1", &llmcore.Message{Role: llmcore.RoleUser, ContentText: "hello"})
+	if err != nil {
+		t.Fatalf("Chat() error = %v", err)
+	}
+	appendCtx := repo.getAppendContext()
+	if appendCtx == nil {
+		t.Fatal("AppendEvent context was nil")
+	}
+	if appendCtx.Err() != nil {
+		t.Fatalf("AppendEvent context error = %v, want nil", appendCtx.Err())
+	}
+	if got := appendCtx.Value("request-id"); got != "req-1" {
+		t.Fatalf("AppendEvent context value = %v, want req-1", got)
+	}
+
+	svc.Shutdown()
 }
 
 func (r *attachmentFileRepository) GetByID(ctx context.Context, id string) (*model.File, error) {

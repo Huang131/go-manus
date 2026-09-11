@@ -13,9 +13,10 @@ import (
 
 // 消息队列相关常量
 const (
-	defaultBlockTimeout      = 3 * time.Second
-	maxBlockTimeout          = 5 * time.Second
-	streamMaxLen             = 1000
+	defaultBlockTimeout = 3 * time.Second
+	maxBlockTimeout     = 5 * time.Second
+	// 保留足够的增量事件，避免短时断线时 token 前缀被过早裁剪。
+	streamMaxLen             = 10000
 	streamRetention          = 24 * time.Hour
 	completedStreamRetention = 30 * time.Minute
 )
@@ -58,8 +59,8 @@ func (q *RedisStreamMessageQueue) Put(ctx context.Context, streamName string, me
 			logger.Err(err))
 		return "", fmt.Errorf("failed to add message: %w", err)
 	}
-	// 只在流首次创建时设置运行期 TTL，避免每次写入都把过期时间向后刷新。
-	if err := q.client.ExpireNX(ctx, streamName, streamRetention).Err(); err != nil {
+	// 每次写入刷新运行期 TTL，保证超长任务不会在执行过程中丢失事件流。
+	if err := q.client.Expire(ctx, streamName, streamRetention).Err(); err != nil {
 		logger.WarnContext(ctx, "设置消息流过期时间失败",
 			logger.String("stream", streamName),
 			logger.Err(err))
@@ -145,6 +146,60 @@ func (q *RedisStreamMessageQueue) GetBlocking(ctx context.Context, streamName st
 
 			return msg.ID, data, nil
 		}
+	}
+}
+
+// GetBlockingBatch 阻塞读取一批消息，返回严格位于 startID 之后的事件。
+// COUNT 限制单次响应大小，避免 token 增量积压时产生过大的 SSE 批次。
+func (q *RedisStreamMessageQueue) GetBlockingBatch(ctx context.Context, streamName string, startID string, count int, timeout ...time.Duration) ([]StreamMessage, error) {
+	blockTimeout := defaultBlockTimeout
+	if len(timeout) > 0 && timeout[0] > 0 {
+		blockTimeout = timeout[0]
+	}
+	if blockTimeout > maxBlockTimeout {
+		blockTimeout = maxBlockTimeout
+	}
+	if startID == "" {
+		startID = "$"
+	}
+	if count <= 0 {
+		count = 1
+	}
+
+	for {
+		result, err := q.client.XRead(ctx, &redis.XReadArgs{
+			Streams: []string{streamName, startID},
+			Count:   int64(count),
+			Block:   blockTimeout,
+		}).Result()
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+		if err == redis.Nil {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("XRead batch failed: %w", err)
+		}
+
+		messages := make([]StreamMessage, 0, count)
+		for _, stream := range result {
+			for _, msg := range stream.Messages {
+				dataStr, ok := msg.Values["data"].(string)
+				if !ok {
+					return nil, fmt.Errorf("invalid message format")
+				}
+				var data interface{}
+				if err := sonic.Unmarshal([]byte(dataStr), &data); err != nil {
+					data = dataStr
+				}
+				messages = append(messages, StreamMessage{ID: msg.ID, Data: data})
+			}
+		}
+		return messages, nil
 	}
 }
 

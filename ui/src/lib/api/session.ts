@@ -70,11 +70,12 @@ export const sessionApi = {
                 ? JSON.parse(messageEvent.data)
                 : messageEvent.data;
 
-            // 服务端事件格式: event: sessions  data: { sessions: [...] }
+            // 服务端事件格式固定为 event: sessions + data: { sessions: [...] }。
             // 注意：部分事件可能没有 event: 行，此时 type 默认为 "message"
             // 因此只校验数据结构，不强制要求 type === "sessions"
-            if (data?.sessions && Array.isArray(data.sessions)) {
-              onSessions(data.sessions as Session[]);
+            const sessions = Array.isArray(data) ? data : data?.sessions;
+            if (Array.isArray(sessions)) {
+              onSessions(sessions as Session[]);
             }
           },
           (error) => {
@@ -162,6 +163,7 @@ export const sessionApi = {
             onEvent({
               type: messageEvent.type as SSEEventData["type"],
               data,
+              streamId: messageEvent.lastEventId || undefined,
             } as SSEEventData);
           },
           (error) => {
@@ -253,4 +255,3 @@ export const sessionApi = {
     );
   },
 };
-

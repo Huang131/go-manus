@@ -337,11 +337,11 @@ func (f *PlannerReActFlow) handleSummarizing(ctx context.Context, ch chan<- mode
 	// 空步骤计划如果流转到这里，说明上游已经出了结构化输出问题。
 	plan := f.planSnapshot()
 	if plan != nil && len(plan.Steps) > 0 {
-		summary, attachments, err := f.react.Summarize(ctx)
+		summary, attachments, emitted, err := f.react.Summarize(ctx)
 		if err != nil {
 			logger.WarnContext(ctx, "ReActAgent 总结任务失败", logger.Err(err))
 		} else {
-			if !f.emitEvent(ctx, ch, model.NewMessageEvent("assistant", summary)) {
+			if !emitted && !f.emitEvent(ctx, ch, model.NewMessageEvent("assistant", summary)) {
 				return true
 			}
 			for _, att := range attachments {

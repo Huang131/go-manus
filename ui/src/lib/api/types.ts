@@ -221,6 +221,7 @@ export type ChatMessage = {
 export type ChatParams = {
   message?: string;
   attachments?: string[];
+  event_id?: string;
   [key: string]: unknown;
 };
 
@@ -308,6 +309,9 @@ export type ToolCalledEvent = {
  */
 export type SSEEventType =
   | "message"
+  | "message_delta"
+  | "message_done"
+  | "stream_error"
   | "title"
   | "plan"
   | "step"
@@ -321,15 +325,35 @@ export type SSEEventType =
  * SSE 事件数据
  */
 export type SSEEventData =
-  | { type: "message"; data: ChatMessage }
-  | { type: "title"; data: { title: string } }
-  | { type: "plan"; data: PlanEvent }
-  | { type: "step"; data: StepEvent }
-  | { type: "tool_calling"; data: ToolCallingEvent }
-  | { type: "tool_called"; data: ToolCalledEvent }
-  | { type: "wait"; data: Record<string, unknown> }
-  | { type: "done"; data: Record<string, unknown> }
-  | { type: "error"; data: { error: string } };
+  | ({ type: "message"; data: ChatMessage } & SSEEventMeta)
+  | ({ type: "message_delta"; data: MessageDeltaEvent } & SSEEventMeta)
+  | ({ type: "message_done"; data: MessageDoneEvent } & SSEEventMeta)
+  | ({ type: "stream_error"; data: { message: string } } & SSEEventMeta)
+  | ({ type: "title"; data: { title: string } } & SSEEventMeta)
+  | ({ type: "plan"; data: PlanEvent } & SSEEventMeta)
+  | ({ type: "step"; data: StepEvent } & SSEEventMeta)
+  | ({ type: "tool_calling"; data: ToolCallingEvent } & SSEEventMeta)
+  | ({ type: "tool_called"; data: ToolCalledEvent } & SSEEventMeta)
+  | ({ type: "wait"; data: Record<string, unknown> } & SSEEventMeta)
+  | ({ type: "done"; data: Record<string, unknown> } & SSEEventMeta)
+  | ({ type: "error"; data: { error?: string; message?: string } } & SSEEventMeta);
+
+export type SSEEventMeta = {
+  /** Redis Stream ID，唯一用于 SSE 断线续读。 */
+  streamId?: string;
+};
+
+export type MessageDeltaEvent = {
+  message_id: string;
+  delta: string;
+  sequence: number;
+};
+
+export type MessageDoneEvent = {
+  message_id: string;
+  content: string;
+  finish_reason?: string;
+};
 
 /**
  * SSE 事件处理器
@@ -365,4 +389,3 @@ export type ViewShellParams = {
   shell_session_id: string;
   [key: string]: unknown;
 };
-

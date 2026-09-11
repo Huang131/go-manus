@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -269,6 +270,33 @@ type mockMQWrapper struct {
 	mq             *external.RedisStreamMessageQueue
 	mu             sync.Mutex
 	retentionCalls []retentionCall
+}
+
+type batchTaskOutputMQ struct {
+	mockMQWrapper
+	batchCalls    int
+	blockingCalls int
+	streamName    string
+	startID       string
+	count         int
+	timeout       time.Duration
+	messages      []external.StreamMessage
+}
+
+func (m *batchTaskOutputMQ) GetBlocking(ctx context.Context, streamName, startID string, timeout ...time.Duration) (string, interface{}, error) {
+	m.blockingCalls++
+	return "", nil, fmt.Errorf("unexpected single-message read")
+}
+
+func (m *batchTaskOutputMQ) GetBlockingBatch(_ context.Context, streamName, startID string, count int, timeout ...time.Duration) ([]external.StreamMessage, error) {
+	m.batchCalls++
+	m.streamName = streamName
+	m.startID = startID
+	m.count = count
+	if len(timeout) > 0 {
+		m.timeout = timeout[0]
+	}
+	return m.messages, nil
 }
 
 type retentionCall struct {
@@ -539,6 +567,98 @@ func TestRedisStreamTask_GetOutputReadsBufferedEventsWhenStartIDEmpty(t *testing
 	}
 	if len(events) != 1 || events[0].Type != model.EventTypeDone {
 		t.Fatalf("GetOutput() = %+v, want one buffered done event", events)
+	}
+}
+
+func TestValidStreamID(t *testing.T) {
+	tests := []struct {
+		id    string
+		valid bool
+	}{
+		{"", false},
+		{"0", true},
+		{"0-0", true},
+		{"$", true},
+		{"1710000000000-0", true},
+		{"uuid-value", false},
+		{"1710000000000", false},
+	}
+	for _, tt := range tests {
+		if got := ValidStreamID(tt.id); got != tt.valid {
+			t.Errorf("ValidStreamID(%q) = %v, want %v", tt.id, got, tt.valid)
+		}
+	}
+}
+
+func TestReadTaskOutputAfterTaskUnregistered(t *testing.T) {
+	mq := newInMemoryMessageQueue()
+	task := NewRedisStreamTask(mq, &mockTaskRunner{})
+
+	eventJSON, err := json.Marshal(&model.Event{
+		Type: model.EventTypeDone,
+		Data: json.RawMessage(`{"message":"done"}`),
+	})
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	if _, err := mq.Put(context.Background(), "task:output:"+task.ID(), string(eventJSON)); err != nil {
+		t.Fatalf("put event: %v", err)
+	}
+
+	task.Cancel()
+	if defaultTaskRegistry.Get(task.ID()) != nil {
+		t.Fatalf("task should be unregistered after cancel")
+	}
+
+	events, err := ReadTaskOutput(context.Background(), mq, task.ID(), "", 20)
+	if err != nil {
+		t.Fatalf("ReadTaskOutput() error = %v", err)
+	}
+	if len(events) != 1 || events[0].Type != model.EventTypeDone {
+		t.Fatalf("ReadTaskOutput() = %+v, want retained done event", events)
+	}
+}
+
+func TestReadTaskOutputPrefersBatchQueue(t *testing.T) {
+	mq := &batchTaskOutputMQ{messages: []external.StreamMessage{
+		{ID: "1710000000000-1", Data: `{"type":"message_delta","data":{"delta":"你"}}`},
+		{ID: "1710000000000-2", Data: `{"type":"message_done","data":{"content":"你好"}}`},
+	}}
+
+	events, err := ReadTaskOutput(context.Background(), mq, "task-1", "1710000000000-0", 250)
+	if err != nil {
+		t.Fatalf("ReadTaskOutput() error = %v", err)
+	}
+	if mq.batchCalls != 1 || mq.blockingCalls != 0 {
+		t.Fatalf("queue calls = batch:%d blocking:%d, want batch:1 blocking:0", mq.batchCalls, mq.blockingCalls)
+	}
+	if mq.streamName != "task:output:task-1" || mq.startID != "1710000000000-0" {
+		t.Fatalf("batch arguments = stream %q start %q", mq.streamName, mq.startID)
+	}
+	if mq.count != maxTaskOutputBatch || mq.timeout != 250*time.Millisecond {
+		t.Fatalf("batch options = count:%d timeout:%s", mq.count, mq.timeout)
+	}
+	if len(events) != 2 || events[0].ID != "1710000000000-1" || events[1].ID != "1710000000000-2" {
+		t.Fatalf("events = %+v, want ordered stream IDs", events)
+	}
+	if events[0].Type != model.EventTypeMessageDelta || events[1].Type != model.EventTypeMessageDone {
+		t.Fatalf("event types = %q, %q", events[0].Type, events[1].Type)
+	}
+}
+
+func TestParseTaskOutputMessagesBatchSkipsNilData(t *testing.T) {
+	events, err := parseTaskOutputMessages([]external.StreamMessage{
+		{ID: "1710000000000-1", Data: nil},
+		{ID: "1710000000000-2", Data: map[string]interface{}{
+			"type": model.EventTypeDone,
+			"data": map[string]interface{}{"message": "done"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("parseTaskOutputMessages() error = %v", err)
+	}
+	if len(events) != 1 || events[0].ID != "1710000000000-2" || events[0].Type != model.EventTypeDone {
+		t.Fatalf("events = %+v, want one done event with stream ID", events)
 	}
 }
 
