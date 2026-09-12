@@ -1,7 +1,7 @@
 'use client'
 
 import {useCallback, useEffect, useState} from 'react'
-import {CircuitBoard, Loader2, MoreHorizontal, Trash} from 'lucide-react'
+import {CircuitBoard, Loader2, MoreHorizontal, Pencil, Trash} from 'lucide-react'
 import {Button} from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -19,13 +19,14 @@ type SessionItemProps = {
   isActive: boolean
   onClick: (sessionId: string) => void
   onDelete: (session: Session) => void
+  onRename: (session: Session) => void
 }
 
 /**
  * 单个会话列表项
  * 展示会话标题、描述、时间及操作菜单
  */
-export function SessionItem({session, isActive, onClick, onDelete}: SessionItemProps) {
+export function SessionItem({session, isActive, onClick, onDelete, onRename}: SessionItemProps) {
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => {
@@ -40,6 +41,11 @@ export function SessionItem({session, isActive, onClick, onDelete}: SessionItemP
     e.stopPropagation()
     onDelete(session)
   }, [onDelete, session])
+
+  const handleRename = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    onRename(session)
+  }, [onRename, session])
 
   const description = session.latest_message || '暂无消息'
   const dateLabel = formatRelativeDate(session.latest_message_at)
@@ -86,6 +92,10 @@ export function SessionItem({session, isActive, onClick, onDelete}: SessionItemP
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="center" side="bottom">
+              <DropdownMenuItem className="cursor-pointer" onClick={handleRename}>
+                <Pencil/>
+                重命名
+              </DropdownMenuItem>
               <DropdownMenuItem
                 variant="destructive"
                 className="cursor-pointer"

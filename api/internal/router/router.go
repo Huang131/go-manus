@@ -34,7 +34,8 @@ func SetupRoutes(engine *gin.Engine, h *Handlers) {
 			sessions.POST("/stream", h.Session.Stream) // 同时支持 POST（前端 createSSEStream 默认用 POST）
 			sessions.GET("", h.Session.List)
 			sessions.GET("/:id", h.Session.Get)
-			sessions.POST("/:id/delete", h.Session.Delete)                          // 对齐原项目
+			sessions.POST("/:id/delete", h.Session.Delete) // 对齐原项目
+			sessions.POST("/:id/rename", h.Session.RenameSession)
 			sessions.POST("/:id/clear-unread-message-count", h.Session.ClearUnread) // 对齐原项目
 			sessions.POST("/:id/chat", h.Session.Chat)
 			sessions.POST("/:id/stop", h.Session.Stop)

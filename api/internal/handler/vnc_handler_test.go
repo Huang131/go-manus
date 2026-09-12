@@ -22,6 +22,10 @@ type stubVNCService struct {
 }
 
 func (s *stubVNCService) CreateSession(ctx context.Context) (*model.Session, error) { return nil, nil }
+func (s *stubVNCService) RenameSession(ctx context.Context, id string, title string) error {
+	return nil
+}
+
 func (s *stubVNCService) GetSession(ctx context.Context, id string) (*model.Session, error) {
 	return nil, nil
 }

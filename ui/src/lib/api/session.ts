@@ -217,6 +217,13 @@ export const sessionApi = {
   },
 
   /**
+   * 重命名会话
+   */
+  renameSession: (sessionId: string, title: string): Promise<void> => {
+    return post<void>(`/sessions/${sessionId}/rename`, { title });
+  },
+
+  /**
    * 清除未读消息数
    */
   clearUnreadMessageCount: (sessionId: string): Promise<void> => {

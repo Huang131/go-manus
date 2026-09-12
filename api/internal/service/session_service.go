@@ -20,6 +20,8 @@ type SessionService interface {
 	GetAllSessions(ctx context.Context) ([]*model.Session, error)
 	ListSessions(ctx context.Context, limit, offset int) ([]*model.Session, int, error)
 	DeleteSession(ctx context.Context, id string) error
+	// RenameSession 重命名会话标题
+	RenameSession(ctx context.Context, id string, title string) error
 	ClearUnreadCount(ctx context.Context, id string) error
 	GetSessionFiles(ctx context.Context, id string) ([]*model.File, error)
 	AppendEvent(ctx context.Context, sessionID string, event *model.Event) error
@@ -145,6 +147,18 @@ func (s *DefaultSessionService) GetSessionFiles(ctx context.Context, id string) 
 // AppendEvent 追加事件
 func (s *DefaultSessionService) AppendEvent(ctx context.Context, sessionID string, event *model.Event) error {
 	return s.repo.AppendEvent(ctx, sessionID, event)
+}
+
+// RenameSession 重命名会话标题
+func (s *DefaultSessionService) RenameSession(ctx context.Context, id string, title string) error {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return apperr.BadRequest("标题不能为空")
+	}
+	if len([]rune(title)) > 100 {
+		return apperr.BadRequest("标题最长 100 个字符")
+	}
+	return s.repo.UpdateTitle(ctx, id, title)
 }
 
 // GetVNCURL 返回会话对应的 VNC WebSocket 地址。

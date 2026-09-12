@@ -86,6 +86,10 @@ func (m *MockSessionServiceForHandler) AppendEvent(ctx context.Context, sessionI
 	return nil
 }
 
+func (m *MockSessionServiceForHandler) RenameSession(ctx context.Context, id string, title string) error {
+	return nil
+}
+
 func (m *MockSessionServiceForHandler) GetVNCURL(ctx context.Context, sessionID string) (string, error) {
 	return "ws://sandbox.local:5901", nil
 }

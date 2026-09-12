@@ -34,6 +34,7 @@ type SessionsContextValue = {
   /** 手动刷新（通过 REST 接口拉取一次） */
   refresh: () => Promise<void>
   deleteSession: (sessionId: string) => Promise<boolean>
+  renameSession: (sessionId: string, title: string) => Promise<boolean>
 }
 
 const SessionsContext = createContext<SessionsContextValue | null>(null)
@@ -178,8 +179,18 @@ export function SessionsProvider({children}: { children: React.ReactNode }) {
     }
   }, [])
 
+  const renameSession = useCallback(async (sessionId: string, title: string): Promise<boolean> => {
+    try {
+      await sessionApi.renameSession(sessionId, title)
+      setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, title } : s)))
+      return true
+    } catch {
+      return false
+    }
+  }, [])
+
   return (
-    <SessionsContext.Provider value={{sessions, loading, error, refresh, deleteSession}}>
+    <SessionsContext.Provider value={{sessions, loading, error, refresh, deleteSession, renameSession}}>
       {children}
     </SessionsContext.Provider>
   )

@@ -6,6 +6,7 @@ import {toast} from 'sonner'
 import {ItemGroup} from '@/components/ui/item'
 import {SessionItem} from '@/components/session-item'
 import {DeleteSessionDialog} from '@/components/delete-session-dialog'
+import {RenameSessionDialog} from '@/components/rename-session-dialog'
 import {useSessions} from '@/hooks/use-sessions'
 import type {Session} from '@/lib/api'
 
@@ -16,10 +17,11 @@ import type {Session} from '@/lib/api'
 export function SessionList() {
   const router = useRouter()
   const params = useParams()
-  const {sessions, loading, error, refresh, deleteSession} = useSessions()
+  const {sessions, loading, error, refresh, deleteSession, renameSession} = useSessions()
 
-  // 待删除的会话
+  // 待删除/待重命名的会话
   const [pendingDeleteSession, setPendingDeleteSession] = useState<Session | null>(null)
+  const [pendingRenameSession, setPendingRenameSession] = useState<Session | null>(null)
 
   const handleSessionClick = useCallback((sessionId: string) => {
     router.push(`/sessions/${sessionId}`)
@@ -27,6 +29,28 @@ export function SessionList() {
 
   const handleDeleteRequest = useCallback((session: Session) => {
     setPendingDeleteSession(session)
+  }, [])
+
+  const handleRenameRequest = useCallback((session: Session) => {
+    setPendingRenameSession(session)
+  }, [])
+
+  const handleRenameConfirm = useCallback(async (title: string) => {
+    if (!pendingRenameSession) return
+
+    const success = await renameSession(pendingRenameSession.id, title)
+    if (success) {
+      toast.success(`已重命名为「${title}」`)
+    } else {
+      toast.error('重命名失败，请重试')
+    }
+    setPendingRenameSession(null)
+  }, [pendingRenameSession, renameSession])
+
+  const handleRenameDialogOpenChange = useCallback((open: boolean) => {
+    if (!open) {
+      setPendingRenameSession(null)
+    }
   }, [])
 
   const handleDeleteConfirm = useCallback(async () => {
@@ -116,6 +140,7 @@ export function SessionList() {
             isActive={session.id === String(params?.id ?? '')}
             onClick={handleSessionClick}
             onDelete={handleDeleteRequest}
+            onRename={handleRenameRequest}
           />
         ))}
       </ItemGroup>
@@ -125,6 +150,14 @@ export function SessionList() {
         open={!!pendingDeleteSession}
         onOpenChange={handleDialogOpenChange}
         onConfirm={handleDeleteConfirm}
+      />
+
+      {/* 重命名弹窗 */}
+      <RenameSessionDialog
+        open={!!pendingRenameSession}
+        initialTitle={pendingRenameSession?.title || ''}
+        onOpenChange={handleRenameDialogOpenChange}
+        onConfirm={handleRenameConfirm}
       />
     </>
   )

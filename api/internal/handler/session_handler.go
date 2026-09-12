@@ -110,6 +110,23 @@ func (h *SessionHandler) Delete(c *gin.Context) {
 	response.Success(c, nil)
 }
 
+// RenameSession 重命名会话 (POST /{session_id}/rename)
+func (h *SessionHandler) RenameSession(c *gin.Context) {
+	id := c.Param("id")
+	var req struct {
+		Title string `json:"title"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.FromError(c, apperr.BadRequest("请求参数错误: "+err.Error()))
+		return
+	}
+	if err := h.service.RenameSession(c.Request.Context(), id, req.Title); err != nil {
+		response.FromError(c, err)
+		return
+	}
+	response.Success(c, nil)
+}
+
 // ClearUnread 清除未读数 (POST /{session_id}/clear-unread)
 func (h *SessionHandler) ClearUnread(c *gin.Context) {
 	id := c.Param("id")

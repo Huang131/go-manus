@@ -293,14 +293,19 @@ func TestFileServiceDeleteFileDeletesStorageAndRepo(t *testing.T) {
 	}
 }
 
+// TestFileServiceDeleteFileStorageError 存储删除失败不再使整个操作失败：
+// DB 记录先删（避免反向僵尸），残留对象仅告警、由 bucket 生命周期策略兜底。
 func TestFileServiceDeleteFileStorageError(t *testing.T) {
 	file := &model.File{ID: "file-1", Key: "k"}
 	storage := &stubStorage{deleteErr: errors.New("s3 delete failed")}
-	svc := NewFileService(&stubFileRepo{file: file}, storage)
+	repo := &stubFileRepo{file: file}
+	svc := NewFileService(repo, storage)
 
-	err := svc.DeleteFile(context.Background(), "file-1")
-	if err == nil || err.Error() != "s3 delete failed" {
-		t.Fatalf("DeleteFile() error = %v, want storage error", err)
+	if err := svc.DeleteFile(context.Background(), "file-1"); err != nil {
+		t.Fatalf("DeleteFile() error = %v, want nil (storage failure is non-fatal)", err)
+	}
+	if repo.deletedID != "file-1" {
+		t.Fatalf("repo.Delete not called, deletedID = %q", repo.deletedID)
 	}
 }
 
