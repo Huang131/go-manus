@@ -383,7 +383,7 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
           const d = item.data;
           const sid = (d.args as { session_id?: string })?.session_id;
           if (sid === payload.session_id && d.function.startsWith("shell")) {
-            targetCallId = d.tool_call_id ?? null;
+            targetCallId = (d as { tool_call_id?: string }).tool_call_id ?? null;
             targetTool = d;
           }
         }
