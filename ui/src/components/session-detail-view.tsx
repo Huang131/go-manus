@@ -73,11 +73,38 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
   const lastSendRef = useRef<{message: string; files: FileInfo[]; modelId?: string} | null>(null)
   const [autoRetry, setAutoRetry] = useState<{message: string; files: FileInfo[]} | null>(null)
 
-  // 切会话时重置为 Auto，避免上一个会话的选模型"串"到新会话
+  // 按会话持久化模型选择：刷新页面后保持该会话上次的选择（无记录则 Auto）。
+  // localStorage 仅在客户端 effect 中访问，避免 SSR 水合不一致。
+  const modelSelectionKey = sessionId ? `manus:model-selection:${sessionId}` : null
+
+  // 切会话时恢复该会话上次的选择（而不是无条件重置为 Auto），
+  // 避免上一个会话的选模型"串"到新会话
   useEffect(() => {
-    setSelectedModelId(AUTO_MODEL_ID)
     setAutoRetry(null)
-  }, [sessionId])
+    if (!sessionId) {
+      setSelectedModelId(AUTO_MODEL_ID)
+      return
+    }
+    let saved = AUTO_MODEL_ID
+    try {
+      saved = localStorage.getItem(modelSelectionKey ?? '') || AUTO_MODEL_ID
+    } catch {
+      // localStorage 不可用（隐私模式等）：退回 Auto
+    }
+    setSelectedModelId(saved)
+  }, [sessionId, modelSelectionKey])
+
+  // 选择变更时写回持久化存储
+  const handleModelSelect = useCallback((id: string) => {
+    setSelectedModelId(id)
+    if (modelSelectionKey) {
+      try {
+        localStorage.setItem(modelSelectionKey, id)
+      } catch {
+        // 存储不可用时静默：仅影响刷新后的记忆
+      }
+    }
+  }, [modelSelectionKey])
 
   // 发送链路出错（404 预检/SSE error）且当时选定了具体模型 → 给出切 Auto 重试入口
   useEffect(() => {
@@ -215,7 +242,7 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
 
   const handleAutoRetry = useCallback(() => {
     if (!autoRetry) return
-    setSelectedModelId(AUTO_MODEL_ID)
+    handleModelSelect(AUTO_MODEL_ID)
     const {message, files} = autoRetry
     setAutoRetry(null)
     chatInputRef.current?.clear()
@@ -403,7 +430,7 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
                 ref={chatInputRef}
                 onSend={handleSend}
                 modelId={selectedModelId}
-                onModelIdChange={setSelectedModelId}
+                onModelIdChange={handleModelSelect}
                 sessionId={sessionId}
                 isRunning={session?.status === 'running'}
                 onStop={handleStop}
