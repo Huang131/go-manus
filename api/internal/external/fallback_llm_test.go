@@ -2,6 +2,7 @@ package external
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -617,7 +618,7 @@ func TestRoutedLLM_PlanSortsByHealthThenLatency(t *testing.T) {
 	router.RecordSuccess("healthy-slow", 1500*time.Millisecond)
 	router.RecordSuccess("healthy-fast", 100*time.Millisecond)
 
-	plan := router.plan(context.Background(), &LLMRequest{})
+	plan, _ := router.plan(context.Background(), &LLMRequest{})
 	if len(plan) != 5 {
 		t.Fatalf("plan size = %d, want 5", len(plan))
 	}
@@ -637,7 +638,7 @@ func TestRoutedLLM_PlanFallsBackWhenCatalogEmpty(t *testing.T) {
 	}, nil)
 
 	// catalog 为 nil → 应返回 [fallback]
-	plan := router.plan(context.Background(), &LLMRequest{})
+	plan, _ := router.plan(context.Background(), &LLMRequest{})
 	if len(plan) != 1 || plan[0].ModelName != "fallback-only" {
 		t.Fatalf("plan = %v, want [fallback-only]", modelNames(plan))
 	}
@@ -659,7 +660,7 @@ func TestRoutedLLM_PlanPrefersFewerFailuresOnSameStatus(t *testing.T) {
 	}
 	router.RecordFailure("fewer-failures", nil, 100*time.Millisecond)
 
-	plan := router.plan(context.Background(), &LLMRequest{})
+	plan, _ := router.plan(context.Background(), &LLMRequest{})
 	if len(plan) < 2 {
 		t.Fatalf("plan size = %d, want >= 2", len(plan))
 	}
@@ -709,4 +710,81 @@ func modelNames(plan []*LLMRuntimeConfig) []string {
 		}
 	}
 	return names
+}
+
+// === Auto / 粘性路由语义（对齐 Cursor：选定不切换；Auto 才允许系统兜底） ===
+
+// openAIModelWithID 构造带 DB ID 的模型配置
+func openAIModelWithID(id, name string) *LLMRuntimeConfig {
+	p := openAITextProfile()
+	p.ID = id
+	return &LLMRuntimeConfig{Profile: p, ModelName: name}
+}
+
+// TestRoutedLLM_AutoAppendsConfiguredEnvFallback Auto（无 model_id）时，
+// 配置过的 env fallback 追加在 plan 末尾作为最后兜底。
+func TestRoutedLLM_AutoAppendsConfiguredEnvFallback(t *testing.T) {
+	catalog := []*LLMRuntimeConfig{openAIModelWithID("m-1", "db-model")}
+	fallback := &LLMRuntimeConfig{Profile: openAITextProfile(), ModelName: "env-fallback"}
+	router := NewRoutedLLM(func(ctx context.Context) ([]*LLMRuntimeConfig, error) {
+		return catalog, nil
+	}, fallback, nil)
+
+	plan, err := router.plan(context.Background(), &LLMRequest{})
+	if err != nil {
+		t.Fatalf("plan() error = %v", err)
+	}
+	if len(plan) != 2 || plan[0].ModelName != "db-model" || plan[1].ModelName != "env-fallback" {
+		t.Fatalf("plan = %v, want [db-model env-fallback]", modelNames(plan))
+	}
+}
+
+// TestRoutedLLM_AutoSkipsUnconfiguredEnvFallback 未配置的 env fallback
+// （零值占位）不应成为候选，避免对空模型名发起无效请求。
+func TestRoutedLLM_AutoSkipsUnconfiguredEnvFallback(t *testing.T) {
+	catalog := []*LLMRuntimeConfig{openAIModelWithID("m-1", "db-model")}
+	router := NewRoutedLLM(func(ctx context.Context) ([]*LLMRuntimeConfig, error) {
+		return catalog, nil
+	}, nil, nil) // nil → 内部替换为零值占位配置
+
+	plan, err := router.plan(context.Background(), &LLMRequest{})
+	if err != nil {
+		t.Fatalf("plan() error = %v", err)
+	}
+	if len(plan) != 1 || plan[0].ModelName != "db-model" {
+		t.Fatalf("plan = %v, want [db-model]", modelNames(plan))
+	}
+}
+
+// TestRoutedLLM_SpecifiedModelIsSticky 用户选定模型时 plan 只含该模型，
+// 即使配置了 env fallback 也不追加（失败直接报错，不静默切换）。
+func TestRoutedLLM_SpecifiedModelIsSticky(t *testing.T) {
+	catalog := []*LLMRuntimeConfig{openAIModelWithID("m-1", "db-model")}
+	fallback := &LLMRuntimeConfig{Profile: openAITextProfile(), ModelName: "env-fallback"}
+	router := NewRoutedLLM(func(ctx context.Context) ([]*LLMRuntimeConfig, error) {
+		return catalog, nil
+	}, fallback, nil)
+
+	ctx := WithModelID(context.Background(), "m-1")
+	plan, err := router.plan(ctx, &LLMRequest{})
+	if err != nil {
+		t.Fatalf("plan() error = %v", err)
+	}
+	if len(plan) != 1 || plan[0].ModelName != "db-model" {
+		t.Fatalf("plan = %v, want [db-model] (sticky)", modelNames(plan))
+	}
+}
+
+// TestRoutedLLM_UnknownModelIDErrors 选定的 model_id 不在目录中 → 显式报错。
+func TestRoutedLLM_UnknownModelIDErrors(t *testing.T) {
+	catalog := []*LLMRuntimeConfig{openAIModelWithID("m-1", "db-model")}
+	fallback := &LLMRuntimeConfig{Profile: openAITextProfile(), ModelName: "env-fallback"}
+	router := NewRoutedLLM(func(ctx context.Context) ([]*LLMRuntimeConfig, error) {
+		return catalog, nil
+	}, fallback, nil)
+
+	ctx := WithModelID(context.Background(), "missing")
+	if _, err := router.plan(ctx, &LLMRequest{}); !errors.Is(err, ErrModelNotAvailable) {
+		t.Fatalf("plan() error = %v, want ErrModelNotAvailable", err)
+	}
 }

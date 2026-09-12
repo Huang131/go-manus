@@ -60,5 +60,6 @@ P2：UnsetDefault 不进 defaultMu；Delete 事务外读过期 IsDefault；Creat
 ### 错误语义快速批
 11. Chat 会话不存在 → `apperr.NotFound`（404）；"task is stopping" → `apperr.Conflict`（409）；删除 Chat 里与 AppendEvent 重复的 UpdateLatestMessage 双写；UnsetDefault 补 defaultMu 锁
 
-### 设计决策待定（本轮回退项）
-- env fallback 追加进 plan 尾部：与既有测试固化的语义冲突（fallback 仅在 catalog 为空时使用，且不跨协议回退），已回退。若要"DB 模型全挂后兜底到 env 配置"，需先在测试层面确认设计意图（建议：同协议且 capability 兼容时追加，或提供显式配置开关）
+### 设计决策已定（2026-09-12，Auto 功能落地）
+- env fallback 追加进 plan 尾部：与既有测试固化的语义冲突（fallback 仅在 catalog 为空时使用，且不跨协议回退），已回退。若要"DB 模型全挂后兜底到 env 配置"，需先在测试层面确认设计意图（建议：同协议且 capability 兼容时追加，或提供显式配置开关）。
+- **已按业界语义（Cursor/Copilot 调研）落地 Auto 路由**：Auto（无 model_id）时 env fallback 追加 plan 末尾（仅配置过时）；指定 model_id 时粘性路由（单元素 plan、失败显式报错 ErrModelNotAvailable，Chat 层同步预检 404）；前端选择器新增「Auto · 跟随系统」且为默认选项。新增 4 个路由测试固化语义。

@@ -14,12 +14,14 @@ import (
 	"github.com/Huang131/go-manus/api/internal/handler"
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
+	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
 	"github.com/Huang131/go-manus/api/internal/router"
 	"github.com/Huang131/go-manus/api/internal/service"
 	"github.com/Huang131/go-manus/api/pkg/logger"
 	"github.com/Huang131/go-manus/api/pkg/middleware"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // ============================================================================
@@ -454,6 +456,10 @@ func (a *App) initLLM(cfg *config.Config, opts Options) external.LLM {
 		return nil
 	}
 
+	// 首次部署：数据库无任何模型时，把 env/配置文件里的模型落库为初始默认，
+	// 让"界面管理模型"从第一天就有数据可用；同时路由器的 env fallback 仍然保留。
+	a.seedDefaultModelFromEnv(cfg)
+
 	// 创建 fallback 配置（基于配置文件，作为最后的保底）
 	fallbackLLMCfg := &external.LLMRuntimeConfig{
 		Profile:         llmcore.ModelProfile{Protocol: llmcore.ProtocolOpenAICompat},
@@ -470,14 +476,18 @@ func (a *App) initLLM(cfg *config.Config, opts Options) external.LLM {
 		// provider 函数：从数据库动态获取模型配置
 		func(ctx context.Context) (*external.LLMRuntimeConfig, error) {
 			if a.Postgres != nil && a.repos.llmModel != nil {
-				// 优先级 1：请求上下文指定的 model_id
+				// 优先级 1：请求上下文指定的 model_id。
+				// 用户明确选定的模型粘性路由：不存在/被禁用时显式报错，
+				// 不允许静默降级到默认模型（对齐 Cursor 的"选定不切换"语义）。
 				if mid := external.ModelIDFromContext(ctx); mid != "" {
 					chosen, err := a.repos.llmModel.GetByID(ctx, mid)
 					if err != nil {
-						logger.Warn("failed to get model by ID", logger.String("model_id", mid), logger.Err(err))
-					} else if chosen != nil && chosen.IsEnabled {
-						return external.BuildRuntimeConfigFromModel(chosen, cfg.LLM.ToolCallTimeout), nil
+						return nil, fmt.Errorf("%w: %s: %v", external.ErrModelNotAvailable, mid, err)
 					}
+					if chosen == nil || !chosen.IsEnabled {
+						return nil, fmt.Errorf("%w: %s", external.ErrModelNotAvailable, mid)
+					}
+					return external.BuildRuntimeConfigFromModel(chosen, cfg.LLM.ToolCallTimeout), nil
 				}
 				// 优先级 2：默认模型
 				if def, err := a.repos.llmModel.GetDefault(ctx); err != nil {
@@ -500,6 +510,61 @@ func (a *App) initLLM(cfg *config.Config, opts Options) external.LLM {
 		routed.SetHealthStore(a.repos.llmModel)
 	}
 	return routed
+}
+
+// seedDefaultModelFromEnv 在模型表为空（首次部署）时，把 env/配置文件中的
+// LLM 配置落库为初始默认模型。已存在任何模型时为 no-op，重复启动安全。
+func (a *App) seedDefaultModelFromEnv(cfg *config.Config) {
+	if a.Postgres == nil || a.repos.llmModel == nil || cfg.LLM.ModelName == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	models, err := a.repos.llmModel.List(ctx)
+	if err != nil {
+		logger.Warn("检查模型表失败，跳过 env 模型种子落库", logger.Err(err))
+		return
+	}
+	if len(models) > 0 {
+		return
+	}
+
+	protocol := external.ProtocolFromProvider("", cfg.LLM.ModelName, cfg.LLM.BaseURL)
+	provider := "openai"
+	if protocol == llmcore.ProtocolAnthropic {
+		provider = "anthropic"
+	}
+	temperature := cfg.LLM.Temperature
+	maxTokens := cfg.LLM.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 8192
+	}
+
+	m := &model.LLMModel{
+		ID:          uuid.New().String(),
+		Name:        cfg.LLM.ModelName,
+		Provider:    provider,
+		BaseURL:     cfg.LLM.BaseURL,
+		APIKey:      cfg.LLM.APIKey,
+		ModelName:   cfg.LLM.ModelName,
+		Temperature: temperature,
+		MaxTokens:   maxTokens,
+		Tags:        []string{},
+		IsDefault:   true,
+		IsEnabled:   true,
+		Capabilities: model.MergeDefaultCapabilities(model.ModelCapabilities{
+			SupportsVision:    false,
+			SupportsReasoning: false,
+		}),
+	}
+	if err := a.repos.llmModel.Create(ctx, m); err != nil {
+		logger.Warn("env 模型种子落库失败", logger.Err(err))
+		return
+	}
+	logger.Info("已从 env 配置创建初始默认模型",
+		logger.String("model_name", cfg.LLM.ModelName),
+		logger.String("provider", provider))
 }
 
 // externalClients 收拢 initExternalClients 产出的外部客户端，
@@ -625,7 +690,7 @@ func (a *App) initAgent(opts Options, clients *externalClients) error {
 	// 创建 Agent 服务
 	a.AgentService = agent.NewAgentService(
 		context.Background(),
-		a.repos.session, a.repos.file, a.repos.appConfig, clients.llm, a.Sandbox,
+		a.repos.session, a.repos.file, a.repos.appConfig, a.repos.llmModel, clients.llm, a.Sandbox,
 		agent.DefaultAgentConfig(), clients.mcpConfig, clients.a2aConfig, clients.browser, clients.search, clients.mq, a.OSS,
 	)
 	a.stopHook(func() {

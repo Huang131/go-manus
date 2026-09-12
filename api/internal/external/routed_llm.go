@@ -35,6 +35,11 @@ type RoutedLLM struct {
 
 var _ StreamingLLM = (*RoutedLLM)(nil)
 
+// ErrModelNotAvailable 表示请求 ctx 指定的 model_id 在目录中不存在/被禁用。
+// 语义上不允许静默降级到其他模型（用户选了什么就用什么，失败要显式报错），
+// 调用方可用 errors.Is 识别并映射为 4xx。
+var ErrModelNotAvailable = errors.New("requested model not available")
+
 // NewRoutedLLM 创建带 fallback 能力的路由器。
 func NewRoutedLLM(catalog ModelCatalogProvider, fallback *LLMRuntimeConfig, factory LLMClientFactory) *RoutedLLM {
 	if fallback == nil {
@@ -76,7 +81,10 @@ func NewRoutedLLMFromSingleProvider(provider LLMConfigProvider, fallback *LLMRun
 
 // Invoke 先选主模型，再按严格规则 fallback。
 func (r *RoutedLLM) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMResponse, error) {
-	plan := r.plan(ctx, req)
+	plan, err := r.plan(ctx, req)
+	if err != nil {
+		return nil, err
+	}
 	var lastErr error
 	for idx, cfg := range plan {
 		if cfg == nil {
@@ -109,7 +117,10 @@ func (r *RoutedLLM) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMRe
 // Stream 选择支持流式能力的模型并透传增量。
 // 流式请求暂不做中途 fallback，因为响应可能已经部分发送给调用方。
 func (r *RoutedLLM) Stream(ctx context.Context, req *LLMRequest) (<-chan llmcore.LLMDelta, error) {
-	plan := r.plan(ctx, req)
+	plan, err := r.plan(ctx, req)
+	if err != nil {
+		return nil, err
+	}
 	for _, cfg := range plan {
 		if cfg == nil {
 			continue
@@ -141,27 +152,36 @@ func hasCapabilityProfile(cfg *LLMRuntimeConfig) bool {
 		caps.SupportsVision || caps.SupportsReasoning || caps.MaxContextTokens > 0 || caps.MaxOutputTokens > 0
 }
 
-func (r *RoutedLLM) plan(ctx context.Context, req *LLMRequest) []*LLMRuntimeConfig {
+func (r *RoutedLLM) plan(ctx context.Context, req *LLMRequest) ([]*LLMRuntimeConfig, error) {
 	catalog := []*LLMRuntimeConfig{r.fallback}
 	if r.catalog != nil {
-		if cfgs, err := r.catalog(ctx); err == nil && len(cfgs) > 0 {
+		if cfgs, err := r.catalog(ctx); err != nil {
+			// 用户指定的模型不可用：显式报错，不允许静默换成其他模型
+			if errors.Is(err, ErrModelNotAvailable) {
+				return nil, err
+			}
+			// 目录源暂时不可用（如 DB 抖动）：降级用 env fallback，保持可用性
+			logger.Warn("模型目录获取失败，降级使用 fallback 配置", logger.Err(err))
+		} else if len(cfgs) > 0 {
 			catalog = cfgs
 		}
 	}
 	r.applyStoredHealth(catalog)
 	if len(catalog) == 0 {
-		return []*LLMRuntimeConfig{r.fallback}
+		return []*LLMRuntimeConfig{r.fallback}, nil
 	}
 
 	// 请求级 model_id（"会话中途临时切换模型"）不受健康排序影响，强制作为 primary。
+	// Auto 语义（业界惯例，对齐 Cursor）：
+	//   - ctx 指定 model_id → 用户选定，粘性路由：plan 只含该模型，失败直接报错
+	//   - 未指定 model_id（Auto）→ 系统路由，env fallback 作为最后兜底追加在 plan 尾部
 	if modelID := ModelIDFromContext(ctx); modelID != "" {
 		for _, cfg := range catalog {
 			if cfg != nil && cfg.Profile.ID == modelID {
-				return []*LLMRuntimeConfig{cfg}
+				return []*LLMRuntimeConfig{cfg}, nil
 			}
 		}
-		logger.Warn("ctx 指定的 model_id 不在模型目录中，回退默认路由",
-			logger.String("model_id", modelID))
+		return nil, fmt.Errorf("%w: %s", ErrModelNotAvailable, modelID)
 	}
 
 	sort.SliceStable(catalog, func(i, j int) bool {
@@ -177,7 +197,13 @@ func (r *RoutedLLM) plan(ctx context.Context, req *LLMRequest) []*LLMRuntimeConf
 			plan = append(plan, candidate)
 		}
 	}
-	return plan
+	// Auto 路径：env fallback（部署方在配置文件里显式指定的保底模型）
+	// 作为最后一位追加。仅在它真实配置过时生效，避免把零值配置当候选。
+	if modelID := ModelIDFromContext(ctx); modelID == "" &&
+		r.fallback != nil && primary != r.fallback && r.fallback.ModelName != "" {
+		plan = append(plan, r.fallback)
+	}
+	return plan, nil
 }
 
 func betterHealth(a, b *LLMRuntimeConfig) bool {

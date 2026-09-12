@@ -1,7 +1,12 @@
-'use client'
+use client'
 
 import {useState, useRef, useEffect, forwardRef, useImperativeHandle} from 'react'
 import {cn, formatFileSize} from '@/lib/utils'
+
+// Auto：跟随系统的特殊选项。选中时不携带 model_id，
+// 由后端按健康度/可用性路由（并对配置文件兜底模型保持最后兜底）。
+const AUTO_MODEL_ID = '__auto__'
+
 import {ScrollArea, ScrollBar} from '@/components/ui/scroll-area'
 import {Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle} from '@/components/ui/item'
 import {Avatar, AvatarGroupCount} from '@/components/ui/avatar'
@@ -34,7 +39,7 @@ export interface ChatInputRef {
 export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
   ({ className, onInputValueChange, onSend, disabled = false, sessionId, isRunning = false, onStop }, ref) => {
   // 当前会话选中的模型 ID（用户可在输入框上方切换；空字符串=走 default）
-  const [currentModelId, setCurrentModelId] = useState<string>('')
+  const [currentModelId, setCurrentModelId] = useState<string>(AUTO_MODEL_ID)
   const [models, setModels] = useState<Array<{id: string; name: string; model_name: string; is_default?: boolean}>>([])
   const [modelsLoading, setModelsLoading] = useState(false)
   useEffect(() => {
@@ -45,22 +50,16 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
         if (!alive) return
         const enabled = (data.models || []).filter((m) => m.is_enabled !== false)
         setModels(enabled)
-        // 默认选中 default
-        if (!currentModelId) {
-          const def = enabled.find((m) => m.is_default) || enabled[0]
-          if (def) setCurrentModelId(def.id)
-        }
+        // 默认保持 Auto（跟随系统）；用户手动选定具体模型后才携带 model_id
       })
       .catch(() => {/* 静默失败，模型选择降级为不可用 */})
       .finally(() => alive && setModelsLoading(false))
     return () => { alive = false }
   }, [])
 
-  // 切会话时，重置模型选择为 default（避免上一个会话的选模型"串"到新会话）
+  // 切会话时，重置模型选择为 Auto（避免上一个会话的选模型"串"到新会话）
   useEffect(() => {
-    // 直接选 default（models 已加载）
-    const def = models.find((m) => m.is_default) || models[0]
-    setCurrentModelId(def ? def.id : '')
+    setCurrentModelId(AUTO_MODEL_ID)
   }, [sessionId])
     const [files, setFiles] = useState<FileInfo[]>([])
     const [uploading, setUploading] = useState(false)
@@ -150,7 +149,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
       if (onSend) {
         setSending(true)
         try {
-          await onSend(trimmedMessage, files, currentModelId)
+          await onSend(trimmedMessage, files, currentModelId === AUTO_MODEL_ID ? undefined : currentModelId)
           // 发送成功后清空输入框和文件列表
           setInputValue('')
           setFiles([])
@@ -262,8 +261,9 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
               onChange={(e) => setCurrentModelId(e.target.value)}
               disabled={modelsLoading}
               className="text-xs bg-transparent border rounded-full px-2 py-1 max-w-[180px] truncate cursor-pointer hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-primary"
-              title={models.find((m) => m.id === currentModelId)?.model_name || '选择模型'}
+              title={currentModelId === AUTO_MODEL_ID ? 'Auto（跟随系统）' : models.find((m) => m.id === currentModelId)?.model_name || '选择模型'}
             >
+              <option value={AUTO_MODEL_ID}>⚡ Auto · 跟随系统</option>
               {models.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.is_default ? '★ ' : ''}{m.name} · {m.model_name}

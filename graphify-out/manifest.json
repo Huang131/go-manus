@@ -1964,8 +1964,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/ui/src/components/chat-input.tsx": {
-    "mtime": 1788873720.1915474,
-    "ast_hash": "44829dba687d37c78c7bcc7631426038",
+    "mtime": 1789174096.8886397,
+    "ast_hash": "24828e2ecb0ed415c017d855cdeff79f",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/ui/src/components/global-header.tsx": {
@@ -2539,8 +2539,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/api/internal/bootstrap/app.go": {
-    "mtime": 1789049637.3538022,
-    "ast_hash": "0ed8ba797c5277630311a8850eba21b0",
+    "mtime": 1789173891.5292072,
+    "ast_hash": "d276b35aea77bc90ad7f5986f50780bc",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/api/internal/bootstrap/errors.go": {
@@ -2584,8 +2584,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/api/internal/agent/service.go": {
-    "mtime": 1789170474.0638907,
-    "ast_hash": "39889b4a037859a7e0b388db1f4a0e60",
+    "mtime": 1789173891.5271246,
+    "ast_hash": "262cf773ffd943ccc6a04a6635666110",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/api/internal/agent/service_stop_test.go": {
@@ -2899,8 +2899,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/api/internal/external/fallback_llm_test.go": {
-    "mtime": 1789045405.1947374,
-    "ast_hash": "53ecb00b25640d2ae16c5ae45d8fadda",
+    "mtime": 1789173973.6398356,
+    "ast_hash": "852a0f94bec3d18858b4daebe2779c7f",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/api/internal/external/runtime_config.go": {
@@ -2934,8 +2934,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/api/internal/external/routed_llm.go": {
-    "mtime": 1789170771.3515527,
-    "ast_hash": "399b4b6cac8932544baddaa1a40bd1f9",
+    "mtime": 1789173711.161052,
+    "ast_hash": "efd1c93f548b6923651e09ee244ade4b",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/api/internal/external/message_queue_test.go": {
@@ -3104,8 +3104,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/api/internal/router/router.go": {
-    "mtime": 1789172512.1665678,
-    "ast_hash": "75785ef07766d31393b912159d784dbf",
+    "mtime": 1789173338.5360708,
+    "ast_hash": "825271aed04e1f9e0e7a9bc2921bb836",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/api/pkg/middleware/middleware_test.go": {
@@ -3214,8 +3214,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/docs/CODE_REVIEW_2026-09-11.md": {
-    "mtime": 1789171521.6706312,
-    "ast_hash": "2ea15c996ff92174a221417bf97a2d5d",
+    "mtime": 1789174122.483595,
+    "ast_hash": "26873566005389c553be3b5121cc68bd",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/docs/FUNCTIONAL_COMPARISON.md": {

@@ -27,6 +27,7 @@ type AgentService struct {
 	sessionRep   repository.SessionRepository
 	fileRep      repository.FileRepository
 	configRep    repository.AppConfigRepository
+	llmModelRep  repository.LLMModelRepository
 	llm          external.LLM
 	sandbox      external.Sandbox
 	agentConfig  *AgentConfig
@@ -49,6 +50,7 @@ func NewAgentService(
 	sessionRep repository.SessionRepository,
 	fileRep repository.FileRepository,
 	configRep repository.AppConfigRepository,
+	llmModelRep repository.LLMModelRepository,
 	llm external.LLM,
 	sandbox external.Sandbox,
 	agentConfig *AgentConfig,
@@ -79,6 +81,7 @@ func NewAgentService(
 		sessionRep:    sessionRep,
 		fileRep:       fileRep,
 		configRep:     configRep,
+		llmModelRep:   llmModelRep,
 		llm:           llm,
 		sandbox:       sandbox,
 		agentConfig:   agentConfig,
@@ -104,6 +107,18 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *llmc
 	}
 	if session == nil {
 		return "", apperr.NotFound("会话不存在: " + sessionID)
+	}
+
+	// 用户选定的模型做同步预检：不存在/被禁用时快速失败（404），
+	// 而不是任务启动后在 SSE 里才报错。Auto（空 model_id）跳过。
+	if mid := external.ModelIDFromContext(ctx); mid != "" && s.llmModelRep != nil {
+		m, err := s.llmModelRep.GetByID(ctx, mid)
+		if err != nil {
+			return "", apperr.NotFound("所选模型不存在: " + mid)
+		}
+		if m == nil || !m.IsEnabled {
+			return "", apperr.NotFound("所选模型不存在或已禁用: " + mid)
+		}
 	}
 
 	// 创建独立的 task context，不受 HTTP 请求取消影响，但保留请求中的 trace 等 values。
