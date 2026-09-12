@@ -369,6 +369,45 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
         }
         break;
       }
+      case "shell_output": {
+        // 长命令运行期间的控制台增量：定位该 session 最近的 shell 工具
+        // （独立项与 step 内嵌可能共享同一 tool_call_id，一并替换引用）
+        const payload = ev.data as { session_id?: string; console?: Array<Record<string, unknown>> };
+        if (!payload?.session_id || !Array.isArray(payload.console)) break;
+
+        let targetCallId: string | null = null;
+        let targetTool: ToolEvent | null = null;
+        for (let i = list.length - 1; i >= 0 && !targetCallId; i--) {
+          const item = list[i];
+          if (item.kind !== "tool") continue;
+          const d = item.data;
+          const sid = (d.args as { session_id?: string })?.session_id;
+          if (sid === payload.session_id && d.function.startsWith("shell")) {
+            targetCallId = d.tool_call_id ?? null;
+            targetTool = d;
+          }
+        }
+        if (!targetCallId || !targetTool) break;
+
+        const newTool: ToolEvent = {
+          ...targetTool,
+          content: { ...(targetTool.content as Record<string, unknown> ?? {}), console: payload.console },
+        };
+        for (let i = 0; i < list.length; i++) {
+          const item = list[i];
+          if (item.kind === "tool" && item.data.tool_call_id === targetCallId) {
+            list[i] = { ...item, data: newTool };
+          } else if (item.kind === "step") {
+            const tIdx = item.tools.findIndex((t) => t.tool_call_id === targetCallId);
+            if (tIdx >= 0) {
+              const newTools = [...item.tools];
+              newTools[tIdx] = newTool;
+              list[i] = { ...item, tools: newTools };
+            }
+          }
+        }
+        break;
+      }
       case "title":
       case "plan":
       case "wait":

@@ -19,6 +19,9 @@ type cleanupRepoStub struct {
 	sessionFiles []*model.File
 }
 
+func (r *cleanupRepoStub) GetBySessionAndFilename(ctx context.Context, sessionID, filename string) (*model.File, error) {
+	return nil, nil
+}
 func (r *cleanupRepoStub) GetExpiredFiles(ctx context.Context, _ string, _ int64) ([]*model.File, error) {
 	r.getCalls++
 	if r.getCalls > 1 {

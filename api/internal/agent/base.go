@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/bytedance/sonic"
 	"github.com/google/uuid"
@@ -17,15 +18,16 @@ import (
 
 // BaseAgent Agent 基类
 type BaseAgent struct {
-	name         string
-	sessionID    string
-	config       *AgentConfig
-	llm          external.LLM
-	tools        []Tool
-	memory       Memory
-	toolRegistry *ToolRegistry
-	jsonParser   external.JSONParser
-	eventCh      chan<- model.BaseEvent // 事件输出通道（由 Flow 注入，nil 时静默）
+	name             string
+	sessionID        string
+	config           *AgentConfig
+	llm              external.LLM
+	tools            []Tool
+	memory           Memory
+	toolRegistry     *ToolRegistry
+	jsonParser       external.JSONParser
+	eventCh          chan<- model.BaseEvent // 事件输出通道（由 Flow 注入，nil 时静默）
+	shellWatchCancel context.CancelFunc     // 取消正在进行的 shell 输出 watch
 }
 
 // NewBaseAgent 创建基础 Agent
@@ -568,6 +570,20 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 	calledEvent.Name = tool.Name()
 	a.emitEvent(ctx, calledEvent)
 
+	// 长命令输出实时推流：shell exec 返回 running（同步等待窗口内未结束）时，
+	// 启动后台 watch 周期性推送控制台快照，前端据此刷新 shell 预览。
+	if functionName == "shell" && result != nil && result.Success {
+		if action, _ := arguments["action"].(string); action == "exec" {
+			if sessionID, _ := arguments["session_id"].(string); sessionID != "" {
+				if data, ok := result.Data.(map[string]interface{}); ok && data["status"] == "running" {
+					if sh, ok := tool.(interface{ Sandbox() external.Sandbox }); ok && sh.Sandbox() != nil {
+						a.startShellWatch(ctx, sh.Sandbox(), sessionID)
+					}
+				}
+			}
+		}
+	}
+
 	return &ToolCallResult{
 		ToolCallID:   toolCallID,
 		ToolName:     tool.Name(),
@@ -585,4 +601,77 @@ func (a *BaseAgent) GetToolRegistry() *ToolRegistry {
 // GetLLM 获取 LLM
 func (a *BaseAgent) GetLLM() external.LLM {
 	return a.llm
+}
+
+// shellOutputWatchTimeout 单条长命令输出 watch 的最长时长。
+const shellOutputWatchTimeout = 15 * time.Minute
+
+// startShellWatch 在 shell exec 返回 running 后启动后台轮询：
+// 周期性读取沙箱控制台记录并以 ShellOutputEvent 推送增量快照，
+// 进程结束后推一次最终快照再退出。新 watch 会顶掉旧 watch。
+func (a *BaseAgent) startShellWatch(ctx context.Context, sandbox external.Sandbox, sessionID string) {
+	// 顶掉旧 watch：同一会话同一时刻只跟踪最新一条长命令
+	if a.shellWatchCancel != nil {
+		a.shellWatchCancel()
+	}
+	watchCtx, cancel := context.WithCancel(ctx)
+	a.shellWatchCancel = cancel
+
+	go func() {
+		defer cancel()
+		deadline := time.Now().Add(shellOutputWatchTimeout)
+		var lastSnap string
+		for {
+			select {
+			case <-watchCtx.Done():
+				return
+			case <-time.After(1500 * time.Millisecond):
+			}
+			if time.Now().After(deadline) {
+				return
+			}
+
+			res, err := sandbox.ReadShellOutput(watchCtx, sessionID, true)
+			if err != nil || res == nil || !res.Success {
+				// 会话尚未产出记录等情况：下一轮重试
+				continue
+			}
+			if data, ok := res.Data.(map[string]interface{}); ok {
+				if console, ok := data["console_records"].([]interface{}); ok {
+					snap := fmt.Sprintf("%v", console)
+					if snap != lastSnap {
+						lastSnap = snap
+						records := make([]map[string]interface{}, 0, len(console))
+						for _, rec := range console {
+							if m, ok := rec.(map[string]interface{}); ok {
+								records = append(records, m)
+							}
+						}
+						a.emitEvent(watchCtx, model.NewShellOutputEvent(sessionID, records))
+					}
+				}
+			}
+
+			// 完成检测：WaitProcess 成功（非超时错误）说明进程已结束，
+			// 推一次最终快照后退出。
+			// 1s 等待窗口兼做轮询间隔：进程结束则收尾，超时（BadRequest）继续下一轮
+			waitSecs := 1
+			if wp, err := sandbox.WaitProcess(watchCtx, sessionID, &waitSecs); err == nil && wp != nil && wp.Success {
+				if res, err := sandbox.ReadShellOutput(watchCtx, sessionID, true); err == nil && res != nil && res.Success {
+					if data, ok := res.Data.(map[string]interface{}); ok {
+						if console, ok := data["console_records"].([]interface{}); ok {
+							records := make([]map[string]interface{}, 0, len(console))
+							for _, rec := range console {
+								if m, ok := rec.(map[string]interface{}); ok {
+									records = append(records, m)
+								}
+							}
+							a.emitEvent(watchCtx, model.NewShellOutputEvent(sessionID, records))
+						}
+					}
+				}
+				return
+			}
+		}
+	}()
 }

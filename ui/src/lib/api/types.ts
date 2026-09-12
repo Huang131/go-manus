@@ -334,6 +334,7 @@ export type SSEEventData =
   | ({ type: "step"; data: StepEvent } & SSEEventMeta)
   | ({ type: "tool_calling"; data: ToolCallingEvent } & SSEEventMeta)
   | ({ type: "tool_called"; data: ToolCalledEvent } & SSEEventMeta)
+  | ({ type: "shell_output"; data: ShellOutputEvent } & SSEEventMeta)
   | ({ type: "wait"; data: Record<string, unknown> } & SSEEventMeta)
   | ({ type: "done"; data: Record<string, unknown> } & SSEEventMeta)
   | ({ type: "error"; data: { error?: string; message?: string } } & SSEEventMeta);
@@ -341,6 +342,12 @@ export type SSEEventData =
 export type SSEEventMeta = {
   /** Redis Stream ID，唯一用于 SSE 断线续读。 */
   streamId?: string;
+};
+
+/** 长命令运行期间的控制台输出增量快照（console 为全量记录，直接替换渲染） */
+export type ShellOutputEvent = {
+  session_id: string;
+  console: Array<{ ps1: string; command: string; output: string }>;
 };
 
 export type MessageDeltaEvent = {

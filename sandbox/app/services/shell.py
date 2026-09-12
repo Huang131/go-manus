@@ -11,6 +11,7 @@ import getpass
 import logging
 import os.path
 import re
+import signal
 import socket
 import uuid
 from typing import Dict, Optional, List
@@ -115,6 +116,7 @@ class ShellService:
             command,  # 要执行的命令
             executable=shell_exec,  # 执行解释器
             cwd=exec_dir,
+            start_new_session=True,  # 独立进程组：terminate/kill 需覆盖命令派生的子进程
             stdout=asyncio.subprocess.PIPE,  # 创建管道以捕获标准输出
             stderr=asyncio.subprocess.STDOUT,  # 将标准错误重定向到标准输出流
             stdin=asyncio.subprocess.PIPE,  # 创建管道以允许标准输入
@@ -196,6 +198,23 @@ class ShellService:
 
         return clean_console_records
 
+
+    @staticmethod
+    def _terminate_process_tree(process: asyncio.subprocess.Process) -> None:
+        """终止进程及其派生的整组子进程（start_new_session 使 bash 成为组长）。"""
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            process.terminate()
+
+    @staticmethod
+    def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
+        """强制杀死整组进程。"""
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            process.kill()
+
     async def wait_process(self, session_id: str, seconds: Optional[int] = None) -> ShellWaitResult:
         """传递会话id+时间，等待子进程结束"""
         # 1.判断下传递的会话是否存在
@@ -212,6 +231,15 @@ class ShellService:
             # 3.判断是否设置seconds
             seconds = 60 if seconds is None or seconds <= 0 else seconds
             await asyncio.wait_for(process.wait(), timeout=seconds)
+
+            # 3.1 等待该会话的输出读取器消费完管道尾部（EOF），否则立刻读
+            # console/output 可能截掉最后一截输出（读取器尚未轮转完）
+            reader_task = self.reader_tasks.get(session_id)
+            if reader_task and not reader_task.done():
+                try:
+                    await asyncio.wait_for(asyncio.shield(reader_task), timeout=2)
+                except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+                    pass
 
             # 4.记录日志并返回等待结果
             logger.info(f"进程已完成, 返回代码为: {process.returncode}")
@@ -263,9 +291,9 @@ class ShellService:
         logger.info(f"正在会话 {session_id} 中执行命令: {command}")
         if not exec_dir or exec_dir == "":
             exec_dir = os.path.expanduser("~")
-        if not os.path.exists(exec_dir):
-            logger.error(f"当前目录不存在: {exec_dir}")
-            raise BadRequestException(f"当前目录不存在: {exec_dir}")
+        if exec_dir and not os.path.isdir(exec_dir):
+            logger.error(f"执行目录不存在或不是目录: {exec_dir}")
+            raise BadRequestException(f"执行目录不存在或不是目录: {exec_dir}")
 
         try:
             # 2.格式化生成ps1格式
@@ -295,13 +323,13 @@ class ShellService:
                 if old_process.returncode is None:
                     logger.debug(f"正在终止会话中的上一个进程: {session_id}")
                     try:
-                        # 8.结束旧进程并优雅等待1s
-                        old_process.terminate()
+                        # 8.结束旧进程组并优雅等待1s
+                        self._terminate_process_tree(old_process)
                         await asyncio.wait_for(old_process.wait(), timeout=1)
                     except Exception as e:
                         # 9.结束旧进程出现错误并记录日志调用kill强制关闭进程
                         logger.warning(f"强制终止Shell会话中的进程 {session_id} 失败: {str(e)}")
-                        old_process.kill()
+                        self._kill_process_tree(old_process)
                         await old_process.wait()
 
                 await self._stop_output_reader(session_id)
@@ -406,7 +434,7 @@ class ShellService:
 
             # 8.向子进程写入数据
             process.stdin.write(input_data)
-            await process.stdin.drain()
+            await asyncio.wait_for(process.stdin.drain(), timeout=5)
 
             # 9.记录日志并返回写入结果
             logger.info("成功向子进程写入数据")
@@ -437,7 +465,7 @@ class ShellService:
             if process.returncode is None:
                 # 4.记录日志并尝试先优雅的关闭
                 logger.info(f"尝试优雅终止进程: {session_id}")
-                process.terminate()
+                self._terminate_process_tree(process)
 
                 try:
                     # 5.等待3秒时间
@@ -445,7 +473,7 @@ class ShellService:
                 except asyncio.TimeoutError as _:
                     # 6.优雅关闭失败，则强制关闭
                     logger.warning(f"尝试强制关闭进程: {session_id}")
-                    process.kill()
+                    self._kill_process_tree(process)
                     await process.wait()
 
                 # 7.记录日志并返回关闭结果

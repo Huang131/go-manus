@@ -54,6 +54,18 @@ func (s *DefaultFileService) UploadFile(ctx context.Context, sessionID, filename
 		return nil, fmt.Errorf("%w: cannot upload file without storage", ErrStorageUnavailable)
 	}
 
+	// 幂等去重：同会话下同名且同大小的文件直接复用既有记录，
+	// 不重复占用存储（业界惯例：聊天附件按会话+文件名+大小视为同一文件）。
+	if s.repo != nil {
+		if existing, err := s.repo.GetBySessionAndFilename(ctx, sessionID, filename); err == nil && existing != nil && existing.Size == size {
+			logger.Info("检测到重复上传，复用既有文件记录",
+				logger.String("session_id", sessionID),
+				logger.String("filename", filename),
+				logger.String("file_id", existing.ID))
+			return existing, nil
+		}
+	}
+
 	fileID := uuid.New().String()
 	ext := filepath.Ext(filename)
 	key := "files/" + sessionID + "/" + fileID + ext

@@ -47,7 +47,7 @@ class FileSearchRequest(BaseModel):
 class FileFindRequest(BaseModel):
     """文件查找请求结构体"""
     dir_path: str = Field(..., description="搜索的目录绝对路径")
-    glob_pattern: str = Field(..., description="文件名模式(glob语法)")
+    glob_pattern: Optional[str] = Field(default="*", description="文件名模式(glob语法)，缺省匹配全部")
 
 
 class FileCheckRequest(BaseModel):

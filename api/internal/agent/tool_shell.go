@@ -75,6 +75,11 @@ func (t *ShellTool) ReadOnly() bool {
 	return false
 }
 
+// Sandbox 返回底层沙箱客户端（供 BaseAgent 的 shell 输出 watcher 轮询）。
+func (t *ShellTool) Sandbox() external.Sandbox {
+	return t.sandbox
+}
+
 // Invoke 调用工具
 func (t *ShellTool) Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
 	action, toolErr := requiredToolString(params, "action")

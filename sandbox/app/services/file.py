@@ -243,6 +243,10 @@ class FileService:
     @classmethod
     async def find_files(cls, dir_path: str, glob_pattern: str) -> FileFindResult:
         """根据传递的文件夹路径+glob规则查询文件列表"""
+        # 0.glob 必须是相对模式：以 / 开头会 join 出目录逃逸（如 /etc/**）
+        if os.path.isabs(glob_pattern):
+            raise BadRequestException("glob_pattern 必须是相对路径")
+
         # 1.检测下传递进来的目录是否存在
         if not os.path.exists(dir_path):
             raise NotFoundException(f"当前文件夹不存在: {dir_path}")

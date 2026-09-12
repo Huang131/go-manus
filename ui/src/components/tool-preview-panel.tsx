@@ -95,7 +95,7 @@ function JumpToLatestButton({ onClick }: { onClick: () => void }) {
 
 function ShellPreview({ tool }: { tool: ToolEvent }) {
   const content = getToolContent(tool)
-  const consoleData = content?.console
+  const consoleData = content?.console ?? (content as { console_records?: unknown } | null)?.console_records
   const sessionId = getArg(tool.args, 'session_id')
 
   const records: ConsoleRecord[] = useMemo(() => {

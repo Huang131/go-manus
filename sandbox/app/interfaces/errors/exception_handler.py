@@ -8,6 +8,7 @@
 import logging
 
 from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
@@ -18,6 +19,16 @@ logger = logging.getLogger(__name__)
 
 
 def register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_error_handler(req: Request, e: RequestValidationError) -> JSONResponse:
+        """参数校验失败统一包装成 {code,msg,data} 信封，避免走 FastAPI 原生 422 格式"""
+        errors = "; ".join(f"{'.'.join(str(loc) for loc in err.get('loc', []))}: {err.get('msg', '')}" for err in e.errors()[:3])
+        logger.warning(f"RequestValidationError: {errors}")
+        return JSONResponse(
+            status_code=422,
+            content=Response.error(msg=f"请求参数校验失败: {errors}"),
+        )
+
     @app.exception_handler(AppException)
     async def app_exception_handler(req: Request, e: AppException) -> JSONResponse:
         """处理Manus沙箱自定义业务异常，将所有状态统一响应结构"""

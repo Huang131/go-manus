@@ -372,6 +372,10 @@ type mockFileRepo struct {
 	files map[string][]*model.File
 }
 
+func (m *mockFileRepo) GetBySessionAndFilename(ctx context.Context, sessionID, filename string) (*model.File, error) {
+	return nil, nil
+}
+
 func (m *mockFileRepo) ListBySessionID(ctx context.Context, sessionID string) ([]*model.File, error) {
 	return m.files[sessionID], nil
 }

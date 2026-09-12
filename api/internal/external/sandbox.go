@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/Huang131/go-manus/api/config"
@@ -302,7 +303,7 @@ func (c *SandboxClient) DeleteFile(ctx context.Context, filepath string) (*model
 
 // ListFiles 列出目录文件
 func (c *SandboxClient) ListFiles(ctx context.Context, dirPath string) (*model.ToolResult, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, "file/find-files", &sandboxRequest{
+	resp, err := c.doRequest(ctx, http.MethodPost, "file/find-files", &sandboxRequest{
 		DirPath: dirPath,
 	})
 	if err != nil {
@@ -340,9 +341,13 @@ func (c *SandboxClient) SearchInFile(ctx context.Context, filepath, regex string
 
 // FindFiles 查找文件
 func (c *SandboxClient) FindFiles(ctx context.Context, dirPath, globPattern string) (*model.ToolResult, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, "file/find-files", &sandboxRequest{
+	glob := globPattern
+	if glob == "" {
+		glob = "*"
+	}
+	resp, err := c.doRequest(ctx, http.MethodPost, "file/find-files", &sandboxRequest{
 		DirPath: dirPath,
-		GlobPtn: globPattern,
+		GlobPtn: glob,
 	})
 	if err != nil {
 		return model.NewToolError(err.Error()), err
@@ -410,14 +415,37 @@ func (c *SandboxClient) UploadFile(ctx context.Context, fileData []byte, filepat
 }
 
 // DownloadFile 下载沙箱文件
+// DownloadFile 下载沙箱文件。
+// sandbox 端点是 GET + query 参数 + 二进制 FileResponse（非 {code,msg,data} 信封），
+// 因此这里不走 doRequest，直接读原始字节流放进 ToolResult.Data。
 func (c *SandboxClient) DownloadFile(ctx context.Context, filepath string) (*model.ToolResult, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, "file/download-file", &sandboxRequest{
-		Filepath: filepath,
-	})
+	if c.address == "" {
+		return model.NewToolError("sandbox address not configured"), fmt.Errorf("sandbox address not configured")
+	}
+	url := fmt.Sprintf("%s/api/file/download-file?filepath=%s", c.address, url.QueryEscape(filepath))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return model.NewToolError(err.Error()), err
 	}
-	return sandboxToolResult(resp), nil
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return model.NewToolError(err.Error()), fmt.Errorf("download file failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+		return model.NewToolError(fmt.Sprintf("download file failed: status=%d body=%s", resp.StatusCode, string(body))), fmt.Errorf("download file failed: status=%d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return model.NewToolError(err.Error()), fmt.Errorf("read download body: %w", err)
+	}
+	return model.NewToolResult(map[string]interface{}{
+		"filepath": filepath,
+		"filename": filepath, // Go 侧无 Content-Disposition 解析，调用方按需取 basename
+		"size":     len(data),
+		"content":  string(data),
+	}), nil
 }
 
 // HealthCheck 健康检查

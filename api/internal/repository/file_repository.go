@@ -15,6 +15,8 @@ type FileRepository interface {
 	GetByID(ctx context.Context, id string) (*model.File, error)
 	// GetBySessionAndFilepath 根据 session_id + filepath 查重（替代旧 sessions.files JSONB 的路径去重逻辑）
 	GetBySessionAndFilepath(ctx context.Context, sessionID, filepath string) (*model.File, error)
+	// GetBySessionAndFilename 查找会话内同名的最近文件（用于上传幂等去重）
+	GetBySessionAndFilename(ctx context.Context, sessionID, filename string) (*model.File, error)
 	Update(ctx context.Context, file *model.File) error
 	Delete(ctx context.Context, id string) error
 	DeleteBySessionID(ctx context.Context, sessionID string) error
@@ -83,6 +85,20 @@ func (r *PostgresFileRepository) GetBySessionAndFilepath(ctx context.Context, se
 	q := r.queryer()
 	query := `SELECT ` + fileColumns + ` FROM files WHERE session_id = $1 AND filepath = $2 LIMIT 1`
 	file, err := scanFile(q.QueryRow(ctx, query, sessionID, filepath))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return file, nil
+}
+
+// GetBySessionAndFilename 查找会话内同名的最近文件（用于上传幂等去重）
+func (r *PostgresFileRepository) GetBySessionAndFilename(ctx context.Context, sessionID, filename string) (*model.File, error) {
+	q := r.queryer()
+	query := `SELECT ` + fileColumns + ` FROM files WHERE session_id = $1 AND filename = $2 ORDER BY created_at DESC LIMIT 1`
+	file, err := scanFile(q.QueryRow(ctx, query, sessionID, filename))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

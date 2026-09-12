@@ -210,6 +210,9 @@ class SupervisorService:
         # 1.获取超时分钟数
         if minutes is None:
             raise BadRequestException("超时时间未配置, 请核实后重试")
+        # 无激活的超时定时器时直接按给定时长激活，避免 None - now 抛 TypeError
+        if self.shutdown_time is None:
+            return await self.activate_timeout(minutes)
         remaining = self.shutdown_time - datetime.now()
         timeout_minutes = round(max(0, remaining.total_seconds()) / 60) + minutes
 

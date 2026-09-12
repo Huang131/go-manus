@@ -135,10 +135,10 @@ async def find_files(
         request: FileFindRequest,
         file_service: FileService = Depends(get_file_service),
 ) -> Response[FileFindRequest]:
-    """根据传递的文件夹+glob文件规则查找文件列表"""
+    """根据传递的文件夹+glob文件规则查找文件列表（glob_pattern 缺省为当前目录全部文件）"""
     result = await file_service.find_files(
         dir_path=request.dir_path,
-        glob_pattern=request.glob_pattern,
+        glob_pattern=request.glob_pattern or "*",
     )
 
     return Response.success(
@@ -157,9 +157,10 @@ async def upload_file(
         file_service: FileService = Depends(get_file_service),
 ) -> Response[FileUploadResult]:
     """根据传递的文件源+路径上传文件到沙箱"""
-    # 1.判断filepath是否传递，如果没有则使用临时路径
+    # 1.判断filepath是否传递，如果没有则使用临时路径。
+    # basename 化防止 filename 携带 ../ 或绝对路径造成路径穿越
     if not filepath:
-        filepath = f"/tmp/{file.filename}"
+        filepath = f"/tmp/{os.path.basename(file.filename)}"
 
     # 2.调用服务将文件上传至沙箱
     result = await file_service.upload_file(file=file, filepath=filepath)
@@ -207,8 +208,9 @@ async def check_file_exists(
     )
 
 
-@router.post(
+@router.api_route(
     path="/delete-file",
+    methods=["POST", "DELETE"],
     response_model=Response[FileDeleteResult],
 )
 async def delete_file(

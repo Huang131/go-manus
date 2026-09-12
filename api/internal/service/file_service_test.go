@@ -13,6 +13,10 @@ import (
 
 type emptyFileRepo struct{}
 
+func (emptyFileRepo) GetBySessionAndFilename(ctx context.Context, sessionID, filename string) (*model.File, error) {
+	return nil, nil
+}
+
 func (emptyFileRepo) Create(context.Context, *model.File) error            { return nil }
 func (emptyFileRepo) GetByID(context.Context, string) (*model.File, error) { return nil, nil }
 func (emptyFileRepo) GetBySessionAndFilepath(context.Context, string, string) (*model.File, error) {
@@ -44,6 +48,9 @@ type stubFileRepo struct {
 	deletedID  string // 记录 Delete 收到的 ID
 }
 
+func (s *stubFileRepo) GetBySessionAndFilename(ctx context.Context, sessionID, filename string) (*model.File, error) {
+	return nil, nil
+}
 func (s *stubFileRepo) Create(_ context.Context, f *model.File) error {
 	if s.createErr != nil {
 		return s.createErr

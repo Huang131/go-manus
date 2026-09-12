@@ -57,6 +57,7 @@ const (
 	EventTypeBrowser      EventType = "browser"
 	EventTypeSearch       EventType = "search"
 	EventTypeShell        EventType = "shell"
+	EventTypeShellOutput  EventType = "shell_output"
 	EventTypeFile         EventType = "file"
 	EventTypeMCP          EventType = "mcp"
 	EventTypeA2A          EventType = "a2a"
@@ -402,6 +403,30 @@ func (e *ToolCalledEvent) GetType() EventType {
 
 // ToJSON 将事件转换为 JSON 字符串
 func (e *ToolCalledEvent) ToJSON() string { return toJSON(e) }
+
+// ShellOutputEvent 长命令运行期间的控制台输出增量快照。
+// 由 BaseAgent 的 shell watcher 在 exec 返回 running 后周期性推送，
+// 前端用它实时刷新对应 shell 工具的预览。
+type ShellOutputEvent struct {
+	SessionID string                   `json:"session_id"`
+	Console   []map[string]interface{} `json:"console"`
+}
+
+// GetType 返回事件类型
+func (e *ShellOutputEvent) GetType() EventType {
+	return EventTypeShellOutput
+}
+
+// ToJSON 将事件转换为 JSON 字符串
+func (e *ShellOutputEvent) ToJSON() string { return toJSON(e) }
+
+// NewShellOutputEvent 创建 shell 输出事件
+func NewShellOutputEvent(sessionID string, console []map[string]interface{}) *ShellOutputEvent {
+	if console == nil {
+		console = []map[string]interface{}{}
+	}
+	return &ShellOutputEvent{SessionID: sessionID, Console: console}
+}
 
 // NewToolCallingEvent 创建工具调用中事件
 func NewToolCallingEvent(toolCallID, functionName string, arguments map[string]interface{}) *ToolCallingEvent {
