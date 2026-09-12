@@ -16,6 +16,7 @@ export type UseSessionDetailResult = {
   refreshFiles: () => Promise<void>
   sendMessage: (message: string, attachmentIds: string[], modelId?: string) => Promise<void>
   streaming: boolean
+  lastSendError: Error | null
 }
 
 /**

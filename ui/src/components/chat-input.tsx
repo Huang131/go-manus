@@ -1,6 +1,6 @@
-use client'
+'use client'
 
-import {useState, useRef, forwardRef, useImperativeHandle} from 'react'
+import {useState, useRef, forwardRef, useImperativeHandle, useCallback} from 'react'
 import {cn, formatFileSize} from '@/lib/utils'
 import {AUTO_MODEL_ID, useModels} from '@/providers/models-provider'
 
@@ -249,22 +249,20 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
             )}
           </Button>
           {/* 模型选择下拉（原生 select，零依赖；Auto 始终可选，用户切换即下次发送生效） */}
-          {
-            <select
-              value={modelId}
-              onChange={(e) => handleModelChange(e.target.value)}
-              disabled={modelsLoading}
-              className="text-xs bg-transparent border rounded-full px-2 py-1 max-w-[180px] truncate cursor-pointer hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-primary"
-              title={modelId === AUTO_MODEL_ID ? 'Auto（跟随系统）' : models.find((m) => m.id === modelId)?.model_name || '选择模型'}
-            >
-              <option value={AUTO_MODEL_ID}>⚡ Auto · 跟随系统</option>
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.is_default ? '★ ' : ''}{m.name} · {m.model_name}
-                </option>
-              ))}
-            </select>
-          )}
+          <select
+            value={modelId}
+            onChange={(e) => handleModelChange(e.target.value)}
+            disabled={modelsLoading}
+            className="text-xs bg-transparent border rounded-full px-2 py-1 max-w-[180px] truncate cursor-pointer hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-primary"
+            title={modelId === AUTO_MODEL_ID ? 'Auto（跟随系统）' : models.find((m) => m.id === modelId)?.model_name || '选择模型'}
+          >
+            <option value={AUTO_MODEL_ID}>⚡ Auto · 跟随系统</option>
+            {models.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.is_default ? '★ ' : ''}{m.name} · {m.model_name}
+              </option>
+            ))}
+          </select>
         </div>
         {/* 发送/暂停按钮 */}
         <div className="flex gap-2">

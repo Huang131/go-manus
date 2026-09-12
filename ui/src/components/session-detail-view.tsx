@@ -70,7 +70,7 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
   // 支持失败后从外部把选择切换为 Auto 并重发）
   const [selectedModelId, setSelectedModelId] = useState<string>(AUTO_MODEL_ID)
   // 上一次发送记录：失败时用于"切换 Auto 重试"
-  const lastSendRef = useRef<{message: string; files: FileInfo[]} | null>(null)
+  const lastSendRef = useRef<{message: string; files: FileInfo[]; modelId?: string} | null>(null)
   const [autoRetry, setAutoRetry] = useState<{message: string; files: FileInfo[]} | null>(null)
 
   // 切会话时重置为 Auto，避免上一个会话的选模型"串"到新会话
@@ -195,7 +195,7 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
 
   const handleSend = useCallback(
     async (message: string, uploadedFiles: FileInfo[], modelId?: string) => {
-      lastSendRef.current = {message, files: uploadedFiles}
+      lastSendRef.current = {message, files: uploadedFiles, modelId}
       try {
         const attachmentIds = uploadedFiles.map((f) => f.id)
         await sendMessage(message, attachmentIds, modelId)
