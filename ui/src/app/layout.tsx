@@ -2,6 +2,7 @@ import React from 'react'
 import type {Metadata} from 'next'
 import {SidebarProvider} from '@/components/ui/sidebar'
 import {SessionsProvider} from '@/providers/sessions-provider'
+import {ModelsProvider} from '@/providers/models-provider'
 import {Toaster} from '@/components/ui/sonner'
 import './globals.css'
 import {LeftPanel} from '@/components/left-panel'
@@ -25,6 +26,7 @@ export default function RootLayout(
   return (
     <html lang="zh-CN" suppressHydrationWarning>
     <body className="h-dvh overflow-hidden">
+    <ModelsProvider>
     <SessionsProvider>
       <SidebarProvider
         className="h-full !min-h-0"
@@ -46,6 +48,7 @@ export default function RootLayout(
         </div>
       </SidebarProvider>
     </SessionsProvider>
+    </ModelsProvider>
     <Toaster position="top-center" richColors/>
     </body>
     </html>

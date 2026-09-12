@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { SessionHeader } from '@/components/session-header'
-import { ChatInput } from '@/components/chat-input'
+import { ChatInput, type ChatInputRef } from '@/components/chat-input'
+import { AUTO_MODEL_ID } from '@/providers/models-provider'
 import { PlanPanel } from '@/components/plan-panel'
 import { ChatMessage } from '@/components/chat-message'
 import { FilePreviewPanel } from '@/components/file-preview-panel'
@@ -51,6 +52,7 @@ function findLatestTool(timeline: TimelineItem[]): ToolEvent | null {
 
 export function SessionDetailView({ sessionId, initialMessage, initialAttachments, hasInitialMessage }: SessionDetailViewProps) {
   const router = useRouter()
+  const chatInputRef = useRef<ChatInputRef>(null)
   const {
     session,
     files,
@@ -62,6 +64,19 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
     sendMessage,
     streaming,
   } = useSessionDetail(sessionId, hasInitialMessage)
+
+  // 模型选择状态（提升到此处持有：chat-input 只做受控展示，
+  // 支持失败后从外部把选择切换为 Auto 并重发）
+  const [selectedModelId, setSelectedModelId] = useState<string>(AUTO_MODEL_ID)
+  // 上一次发送记录：失败时用于"切换 Auto 重试"
+  const lastSendRef = useRef<{message: string; files: FileInfo[]} | null>(null)
+  const [autoRetry, setAutoRetry] = useState<{message: string; files: FileInfo[]} | null>(null)
+
+  // 切会话时重置为 Auto，避免上一个会话的选模型"串"到新会话
+  useEffect(() => {
+    setSelectedModelId(AUTO_MODEL_ID)
+    setAutoRetry(null)
+  }, [sessionId])
 
   const timeline = useMemo(() => eventsToTimeline(events), [events])
   const planSteps = useMemo(() => getLatestPlanFromEvents(events), [events])
@@ -172,16 +187,34 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
 
   const handleSend = useCallback(
     async (message: string, uploadedFiles: FileInfo[], modelId?: string) => {
+      lastSendRef.current = {message, files: uploadedFiles}
       try {
         const attachmentIds = uploadedFiles.map((f) => f.id)
         await sendMessage(message, attachmentIds, modelId)
+        setAutoRetry(null)
       } catch (e) {
         toast.error(e instanceof Error ? e.message : '发送失败，请重试')
+        // 选定了具体模型且发送失败（如模型不存在/上游不可用）：
+        // 给出"切换 Auto 重试"的快速恢复路径（对齐 Cursor 的错误恢复交互）
+        if (modelId) {
+          setAutoRetry({message, files: uploadedFiles})
+        }
         throw e
       }
     },
     [sendMessage]
   )
+
+  const handleAutoRetry = useCallback(() => {
+    if (!autoRetry) return
+    setSelectedModelId(AUTO_MODEL_ID)
+    const {message, files} = autoRetry
+    setAutoRetry(null)
+    chatInputRef.current?.clear()
+    handleSend(message, files, undefined).catch(() => {
+      // 重试失败已在 handleSend 内 toast，不再叠加
+    })
+  }, [autoRetry, handleSend])
 
   const handleViewAllFiles = useCallback(() => {
     refreshFiles()
@@ -344,8 +377,25 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
 
             <div className="flex-shrink-0 bg-[#f8f8f7] py-3">
               <PlanPanel className="mb-2" steps={planSteps} />
+              {/* 发送失败（选定了具体模型）时的快速恢复：切 Auto 重试 */}
+              {autoRetry && (
+                <div className="flex items-center justify-between gap-2 mx-3 mb-1 px-3 py-2 text-xs rounded-lg bg-red-50 border border-red-200">
+                  <span className="text-red-600 truncate">所选模型调用失败，可切换为 Auto 后自动重试</span>
+                  <div className="flex gap-1 flex-shrink-0">
+                    <Button size="xs" variant="ghost" className="cursor-pointer" onClick={() => setAutoRetry(null)}>
+                      忽略
+                    </Button>
+                    <Button size="xs" className="cursor-pointer" onClick={handleAutoRetry}>
+                      切换 Auto 重试
+                    </Button>
+                  </div>
+                </div>
+              )}
               <ChatInput
+                ref={chatInputRef}
                 onSend={handleSend}
+                modelId={selectedModelId}
+                onModelIdChange={setSelectedModelId}
                 sessionId={sessionId}
                 isRunning={session?.status === 'running'}
                 onStop={handleStop}

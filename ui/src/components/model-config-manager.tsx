@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { toast } from 'sonner'
 import { Loader2, Pencil, Plus, Star, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -40,28 +40,12 @@ const emptyDraft: Partial<LLMModel> = {
 }
 
 export function ModelConfigManager() {
-  const [models, setModels] = useState<LLMModel[]>([])
-  const [loading, setLoading] = useState(false)
+  // 模型列表来自全局 ModelsProvider：配置变更后 refresh()，
+  // 聊天输入框的选择器同步生效，无需刷新页面。
+  const {models, loading, refresh} = useModels()
   const [mode, setMode] = useState<Mode>(null)
   const [draft, setDraft] = useState<Partial<LLMModel>>(emptyDraft)
   const [saving, setSaving] = useState(false)
-
-  const fetchModels = useCallback(async () => {
-    setLoading(true)
-    try {
-      const data = await configApi.listLLMModels()
-      setModels(data?.models ?? [])
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : '加载模型失败'
-      toast.error(msg)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    fetchModels()
-  }, [fetchModels])
 
   const openCreate = () => {
     setDraft({ ...emptyDraft })
@@ -90,7 +74,7 @@ export function ModelConfigManager() {
         toast.success('模型已更新')
       }
       setMode(null)
-      await fetchModels()
+      await refresh()
     } catch (e) {
       const msg = e instanceof Error ? e.message : '保存失败'
       toast.error(msg)
@@ -104,7 +88,7 @@ export function ModelConfigManager() {
     try {
       await configApi.deleteLLMModel(m.id)
       toast.success('已删除')
-      await fetchModels()
+      await refresh()
     } catch (e) {
       const msg = e instanceof Error ? e.message : '删除失败'
       toast.error(msg)
@@ -115,7 +99,7 @@ export function ModelConfigManager() {
     try {
       await configApi.setDefaultLLMModel(m.id)
       toast.success(`已将「${m.name}」设为默认`)
-      await fetchModels()
+      await refresh()
     } catch (e) {
       const msg = e instanceof Error ? e.message : '设置默认失败'
       toast.error(msg)
@@ -125,7 +109,7 @@ export function ModelConfigManager() {
   const handleToggleEnabled = async (m: LLMModel, enabled: boolean) => {
     try {
       await configApi.updateLLMModel(m.id, { ...m, is_enabled: enabled })
-      await fetchModels()
+      await refresh()
     } catch (e) {
       const msg = e instanceof Error ? e.message : '更新失败'
       toast.error(msg)

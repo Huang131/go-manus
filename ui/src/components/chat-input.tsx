@@ -2,10 +2,8 @@ use client'
 
 import {useState, useRef, useEffect, forwardRef, useImperativeHandle} from 'react'
 import {cn, formatFileSize} from '@/lib/utils'
+import {AUTO_MODEL_ID, useModels} from '@/providers/models-provider'
 
-// Auto：跟随系统的特殊选项。选中时不携带 model_id，
-// 由后端按健康度/可用性路由（并对配置文件兜底模型保持最后兜底）。
-const AUTO_MODEL_ID = '__auto__'
 
 import {ScrollArea, ScrollBar} from '@/components/ui/scroll-area'
 import {Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle} from '@/components/ui/item'
@@ -21,6 +19,9 @@ interface ChatInputProps {
   className?: string
   onInputValueChange?: (value: string) => void
   onSend?: (message: string, files: FileInfo[], modelId?: string) => Promise<void>
+  /** 当前选中的模型（受控，状态由父组件持有，支持"切换 Auto 重试"等外部干预） */
+  modelId: string
+  onModelIdChange?: (id: string) => void
   disabled?: boolean
   /** 当前会话 ID，上传附件时会关联到该会话 */
   sessionId?: string | null
@@ -34,34 +35,14 @@ export interface ChatInputRef {
   setInputText: (text: string) => void
   getInputValue: () => string
   getFiles: () => FileInfo[]
+  /** 清空输入框与附件列表（如"切换 Auto 重试"成功发起后） */
+  clear: () => void
 }
 
 export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
-  ({ className, onInputValueChange, onSend, disabled = false, sessionId, isRunning = false, onStop }, ref) => {
-  // 当前会话选中的模型 ID（用户可在输入框上方切换；空字符串=走 default）
-  const [currentModelId, setCurrentModelId] = useState<string>(AUTO_MODEL_ID)
-  const [models, setModels] = useState<Array<{id: string; name: string; model_name: string; is_default?: boolean}>>([])
-  const [modelsLoading, setModelsLoading] = useState(false)
-  useEffect(() => {
-    let alive = true
-    setModelsLoading(true)
-    configApi.listLLMModels()
-      .then((data) => {
-        if (!alive) return
-        const enabled = (data.models || []).filter((m) => m.is_enabled !== false)
-        setModels(enabled)
-        // 默认保持 Auto（跟随系统）；用户手动选定具体模型后才携带 model_id
-      })
-      .catch(() => {/* 静默失败，模型选择降级为不可用 */})
-      .finally(() => alive && setModelsLoading(false))
-    return () => { alive = false }
-  }, [])
-
-  // 切会话时，重置模型选择为 Auto（避免上一个会话的选模型"串"到新会话）
-  useEffect(() => {
-    setCurrentModelId(AUTO_MODEL_ID)
-  }, [sessionId])
-    const [files, setFiles] = useState<FileInfo[]>([])
+  ({ className, onInputValueChange, onSend, disabled = false, sessionId, isRunning = false, onStop, modelId, onModelIdChange }, ref) => {
+  const {models: allModels, loading: modelsLoading} = useModels()
+  const models = allModels.filter((m) => m.is_enabled !== false)
     const [uploading, setUploading] = useState(false)
     const [sending, setSending] = useState(false)
     const [inputValue, setInputValue] = useState('')
@@ -83,6 +64,11 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
       },
       getInputValue: () => inputValue,
       getFiles: () => files,
+      clear: () => {
+        setInputValue('')
+        setFiles([])
+        onInputValueChange?.('')
+      },
     }))
 
     const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -149,7 +135,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
       if (onSend) {
         setSending(true)
         try {
-          await onSend(trimmedMessage, files, currentModelId === AUTO_MODEL_ID ? undefined : currentModelId)
+          await onSend(trimmedMessage, files, modelId === AUTO_MODEL_ID ? undefined : modelId)
           // 发送成功后清空输入框和文件列表
           setInputValue('')
           setFiles([])
@@ -254,14 +240,14 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
               <Paperclip/>
             )}
           </Button>
-          {/* 模型选择下拉（原生 select，零依赖；用户切换即下次发送生效） */}
-          {models.length > 0 && (
+          {/* 模型选择下拉（原生 select，零依赖；Auto 始终可选，用户切换即下次发送生效） */}
+          {
             <select
-              value={currentModelId}
-              onChange={(e) => setCurrentModelId(e.target.value)}
+              value={modelId}
+              onChange={(e) => onModelIdChange?.(e.target.value)}
               disabled={modelsLoading}
               className="text-xs bg-transparent border rounded-full px-2 py-1 max-w-[180px] truncate cursor-pointer hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-primary"
-              title={currentModelId === AUTO_MODEL_ID ? 'Auto（跟随系统）' : models.find((m) => m.id === currentModelId)?.model_name || '选择模型'}
+              title={modelId === AUTO_MODEL_ID ? 'Auto（跟随系统）' : models.find((m) => m.id === modelId)?.model_name || '选择模型'}
             >
               <option value={AUTO_MODEL_ID}>⚡ Auto · 跟随系统</option>
               {models.map((m) => (
