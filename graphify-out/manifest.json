@@ -1924,13 +1924,13 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/ui/src/components/session-detail-view.tsx": {
-    "mtime": 1789176895.1257718,
-    "ast_hash": "b68a214caa6cd8c7c5d9d6d44422867c",
+    "mtime": 1789178448.191,
+    "ast_hash": "e0dad3124a89c17877cf9d2de09cf90c",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/ui/src/components/model-config-manager.tsx": {
-    "mtime": 1789176815.1908019,
-    "ast_hash": "6be02d7dc5ce94a85cd485719d2e1a43",
+    "mtime": 1789178448.088,
+    "ast_hash": "896875a70bead9b1ddaf25c6b4c39e2a",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/ui/src/components/vnc-viewer.tsx": {
@@ -1964,8 +1964,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/ui/src/components/chat-input.tsx": {
-    "mtime": 1789175835.1911786,
-    "ast_hash": "0ae404074280cf1b1f646907049ebaca",
+    "mtime": 1789178447.486,
+    "ast_hash": "c4a22ee0ad8c0b13de66f8e6ef38704c",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/ui/src/components/global-header.tsx": {
@@ -2139,8 +2139,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/ui/src/hooks/use-session-detail.ts": {
-    "mtime": 1789168247.353746,
-    "ast_hash": "4e0a971caf9118177c1c41c5220b2381",
+    "mtime": 1789178448.273,
+    "ast_hash": "c60cc6672ab3e1766ce398fde5064ec5",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/ui/src/hooks/use-sessions.ts": {
@@ -3159,8 +3159,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/ui/README.md": {
-    "mtime": 1788873720.0103323,
-    "ast_hash": "8b2b32158e2fb66393cc6a213b6cd5a4",
+    "mtime": 1789178411.7824662,
+    "ast_hash": "0010748388297cc0ba79ede4b42a2fb6",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md": {

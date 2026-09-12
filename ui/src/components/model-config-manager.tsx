@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
+import { useModels } from '@/providers/models-provider'
 import { Loader2, Pencil, Plus, Star, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'

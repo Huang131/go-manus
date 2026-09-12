@@ -63,6 +63,7 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
     refreshFiles,
     sendMessage,
     streaming,
+    lastSendError,
   } = useSessionDetail(sessionId, hasInitialMessage)
 
   // 模型选择状态（提升到此处持有：chat-input 只做受控展示，
@@ -77,6 +78,13 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
     setSelectedModelId(AUTO_MODEL_ID)
     setAutoRetry(null)
   }, [sessionId])
+
+  // 发送链路出错（404 预检/SSE error）且当时选定了具体模型 → 给出切 Auto 重试入口
+  useEffect(() => {
+    if (lastSendError && lastSendRef.current?.modelId) {
+      setAutoRetry({message: lastSendRef.current.message, files: lastSendRef.current.files})
+    }
+  }, [lastSendError])
 
   const timeline = useMemo(() => eventsToTimeline(events), [events])
   const planSteps = useMemo(() => getLatestPlanFromEvents(events), [events])

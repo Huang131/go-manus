@@ -1,6 +1,6 @@
-'use client'
+use client'
 
-import {useState, useRef, useEffect, forwardRef, useImperativeHandle} from 'react'
+import {useState, useRef, forwardRef, useImperativeHandle} from 'react'
 import {cn, formatFileSize} from '@/lib/utils'
 import {AUTO_MODEL_ID, useModels} from '@/providers/models-provider'
 
@@ -11,7 +11,6 @@ import {Avatar, AvatarGroupCount} from '@/components/ui/avatar'
 import {ArrowUp, FileText, Paperclip, XCircle, Loader2, Pause} from 'lucide-react'
 import {Button} from '@/components/ui/button'
 import {fileApi} from '@/lib/api/file'
-import {configApi} from '@/lib/api/config'
 import type {FileInfo} from '@/lib/api/types'
 import {toast} from 'sonner'
 
@@ -19,8 +18,8 @@ interface ChatInputProps {
   className?: string
   onInputValueChange?: (value: string) => void
   onSend?: (message: string, files: FileInfo[], modelId?: string) => Promise<void>
-  /** 当前选中的模型（受控，状态由父组件持有，支持"切换 Auto 重试"等外部干预） */
-  modelId: string
+  /** 当前选中的模型（受控）。可选：不传时内部自持状态、默认 Auto（如首页） */
+  modelId?: string
   onModelIdChange?: (id: string) => void
   disabled?: boolean
   /** 当前会话 ID，上传附件时会关联到该会话 */
@@ -40,12 +39,21 @@ export interface ChatInputRef {
 }
 
 export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
-  ({ className, onInputValueChange, onSend, disabled = false, sessionId, isRunning = false, onStop, modelId, onModelIdChange }, ref) => {
+  ({ className, onInputValueChange, onSend, disabled = false, sessionId, isRunning = false, onStop, modelId: modelIdProp, onModelIdChange }, ref) => {
+    // 受控/非受控双模式：父组件传 modelId 则受控（支持外部干预，如切 Auto 重试）；
+    // 不传则内部自持，默认 Auto。
+    const [internalModelId, setInternalModelId] = useState<string>(AUTO_MODEL_ID)
+    const modelId = modelIdProp ?? internalModelId
+    const handleModelChange = useCallback((id: string) => {
+      if (modelIdProp === undefined) setInternalModelId(id)
+      onModelIdChange?.(id)
+    }, [modelIdProp, onModelIdChange])
   const {models: allModels, loading: modelsLoading} = useModels()
   const models = allModels.filter((m) => m.is_enabled !== false)
-    const [uploading, setUploading] = useState(false)
+  const [uploading, setUploading] = useState(false)
     const [sending, setSending] = useState(false)
     const [inputValue, setInputValue] = useState('')
+    const [files, setFiles] = useState<FileInfo[]>([])
     const fileInputRef = useRef<HTMLInputElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -244,7 +252,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
           {
             <select
               value={modelId}
-              onChange={(e) => onModelIdChange?.(e.target.value)}
+              onChange={(e) => handleModelChange(e.target.value)}
               disabled={modelsLoading}
               className="text-xs bg-transparent border rounded-full px-2 py-1 max-w-[180px] truncate cursor-pointer hover:bg-gray-50 focus:outline-none focus:ring-1 focus:ring-primary"
               title={modelId === AUTO_MODEL_ID ? 'Auto（跟随系统）' : models.find((m) => m.id === modelId)?.model_name || '选择模型'}

@@ -31,6 +31,11 @@ export function useSessionDetail(
   const [events, setEvents] = useState<SSEEventData[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
+  // 仅由"发送消息"链路产生的错误（HTTP/SSE），用于驱动"切换 Auto 重试"横幅；
+  // 与 refresh 等其他来源的 error 区分开。
+  const [lastSendError, setLastSendError] = useState<Error | null>(null)
+  // 空流重连定时器：卸载/切会话时必须清除，否则产生孤儿 SSE 连接
+  const emptyStreamTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [streaming, setStreaming] = useState(false)
   const [skipEmptyStream, setSkipEmptyStream] = useState(initialSkipEmptyStream || false)
   const emptyStreamCleanupRef = useRef<(() => void) | null>(null)
@@ -133,7 +138,7 @@ export function useSessionDetail(
         // 流正常结束（服务端关闭连接），延迟重连
         if (err.message === 'SSE_STREAM_END') {
           emptyStreamCleanupRef.current = null
-          setTimeout(() => {
+          emptyStreamTimerRef.current = setTimeout(() => {
             if (!emptyStreamCleanupRef.current && !isSendMessageRef.current) {
               startEmptyStream()
             }
@@ -142,7 +147,7 @@ export function useSessionDetail(
         }
         emptyStreamCleanupRef.current = null
         setError(err)
-        setTimeout(() => {
+        emptyStreamTimerRef.current = setTimeout(() => {
           if (!emptyStreamCleanupRef.current && !isSendMessageRef.current) {
             startEmptyStream()
           }
@@ -152,6 +157,10 @@ export function useSessionDetail(
   }, [sessionId, appendEvent])
 
   const stopEmptyStream = useCallback(() => {
+    if (emptyStreamTimerRef.current) {
+      clearTimeout(emptyStreamTimerRef.current)
+      emptyStreamTimerRef.current = null
+    }
     if (emptyStreamCleanupRef.current) {
       emptyStreamCleanupRef.current()
       emptyStreamCleanupRef.current = null
@@ -207,6 +216,14 @@ export function useSessionDetail(
   }, [sessionId, normalizeFileList])
 
   useEffect(() => {
+    // 切会话：清理上一会话的消息流与状态，避免事件串台、游标串用
+    if (messageStreamCleanupRef.current) {
+      messageStreamCleanupRef.current()
+      messageStreamCleanupRef.current = null
+    }
+    setEvents([])
+    setLastSendError(null)
+    lastEventIdRef.current = ''
     if (!sessionId) {
       setLoading(false)
       setSession(null)
@@ -238,9 +255,13 @@ export function useSessionDetail(
     }
   }, [sessionId, session?.status, skipEmptyStream, startEmptyStream, stopEmptyStream])
 
-  // 组件卸载时清理消息流
+  // 组件卸载时清理消息流与重连定时器
   useEffect(() => {
     return () => {
+      if (emptyStreamTimerRef.current) {
+        clearTimeout(emptyStreamTimerRef.current)
+        emptyStreamTimerRef.current = null
+      }
       if (messageStreamCleanupRef.current) {
         messageStreamCleanupRef.current()
         messageStreamCleanupRef.current = null
@@ -261,6 +282,7 @@ export function useSessionDetail(
       setSkipEmptyStream(false)
       isSendMessageRef.current = true
       setStreaming(true)
+      setLastSendError(null)
 
       // 立即更新状态为 running，不等待 SSE 事件
       setSession((prev) => prev ? { ...prev, status: 'running' } : null)
@@ -273,6 +295,7 @@ export function useSessionDetail(
           const errMsg = errorData.message || errorData.error || '服务异常，请稍后重试'
           toast.error(`AI 调用失败：${errMsg}`)
           setError(new Error(errMsg))
+          setLastSendError(new Error(errMsg))
           setSession((prev) =>
             prev ? { ...prev, status: 'completed' } : null
           )
@@ -311,7 +334,9 @@ export function useSessionDetail(
             return
           }
           // 实际错误
-          setError(err instanceof Error ? err : new Error('流式响应异常'))
+          const sendErr = err instanceof Error ? err : new Error('流式响应异常')
+          setError(sendErr)
+          setLastSendError(sendErr)
           setStreaming(false)
           isSendMessageRef.current = false
           // 网络断开不等于任务完成：保留当前状态，由空流重新连接并同步后端事件。
@@ -338,5 +363,6 @@ export function useSessionDetail(
     refreshFiles,
     sendMessage,
     streaming,
+    lastSendError,
   }
 }
