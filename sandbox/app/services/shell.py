@@ -14,6 +14,7 @@ import re
 import signal
 import socket
 import uuid
+import time
 from typing import Dict, Optional, List
 
 from app.interfaces.errors.exceptions import (
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 # 单个会话输出缓冲上限，超出后截断头部保留尾部，防止长会话内存无限增长
 MAX_OUTPUT_CHARS = 512 * 1024
 MAX_CONSOLE_RECORDS = 100
+SESSION_IDLE_SECONDS = 30 * 60
 
 
 class ShellService:
@@ -44,6 +46,38 @@ class ShellService:
         self.active_shells = {}
         # 输出读取器 task 引用：必须持有引用，否则可能被事件循环 GC 中途取消
         self.reader_tasks: Dict[str, asyncio.Task] = {}
+        self.session_locks: Dict[str, asyncio.Lock] = {}
+        self.session_last_access: Dict[str, float] = {}
+
+    def _get_session_lock(self, session_id: str) -> asyncio.Lock:
+        """为同一会话复用锁，串行化进程切换和输入写入。"""
+        return self.session_locks.setdefault(session_id, asyncio.Lock())
+
+    def _cleanup_stale_sessions(self) -> None:
+        """回收已结束且长期未访问的会话，防止全局注册表无限增长。"""
+        now = time.monotonic()
+        stale_ids = []
+        for session_id, last_access in self.session_last_access.items():
+            lock = self.session_locks.get(session_id)
+            if lock is not None and lock.locked():
+                continue
+            shell = self.active_shells.get(session_id)
+            if (
+                    now - last_access > SESSION_IDLE_SECONDS
+                    and shell is not None
+                    and shell.process.returncode is not None
+            ):
+                stale_ids.append(session_id)
+        for session_id in stale_ids:
+            self.active_shells.pop(session_id, None)
+            self.session_last_access.pop(session_id, None)
+            lock = self.session_locks.get(session_id)
+            # 当前请求可能仍持有锁；仅在锁空闲时一并回收，避免下一请求拿到两把锁。
+            if lock is None or not lock.locked():
+                self.session_locks.pop(session_id, None)
+
+    def _touch_session(self, session_id: str) -> None:
+        self.session_last_access[session_id] = time.monotonic()
 
     @staticmethod
     def _append_output(current: str, output: str) -> str:
@@ -180,11 +214,17 @@ class ShellService:
         """从指定会话中获取控制台记录"""
         # 1.判断下传递的会话是否存在
         logger.debug(f"正在获取Shell会话的控制台记录: {session_id}")
+        self._cleanup_stale_sessions()
         if session_id not in self.active_shells:
             logger.error(f"Shell会话不存在: {session_id}")
             raise NotFoundException(f"Shell会话不存在: {session_id}")
 
         # 2.获取原始的控制台记录列表
+        self._touch_session(session_id)
+        return self._get_console_records_unlocked(session_id)
+
+    def _get_console_records_unlocked(self, session_id: str) -> List[ConsoleRecord]:
+        """读取控制台记录的内部实现，调用方需确保会话状态不会并发变更。"""
         console_records = self.active_shells[session_id].console_records
         clean_console_records = []
 
@@ -216,15 +256,23 @@ class ShellService:
             process.kill()
 
     async def wait_process(self, session_id: str, seconds: Optional[int] = None) -> ShellWaitResult:
-        """传递会话id+时间，等待子进程结束"""
+        """按会话串行等待进程退出。"""
+        self._cleanup_stale_sessions()
+        async with self._get_session_lock(session_id):
+            return await self._wait_process_unlocked(session_id, seconds)
+
+    async def _wait_process_unlocked(self, session_id: str, seconds: Optional[int] = None) -> ShellWaitResult:
+        """等待进程退出的内部实现，供已持有会话锁的流程调用。"""
         # 1.判断下传递的会话是否存在
         logger.debug(f"正在Shell会话中等待进程: {session_id}, 超时: {seconds}s")
+        self._cleanup_stale_sessions()
         if session_id not in self.active_shells:
             logger.error(f"Shell会话不存在: {session_id}")
             raise NotFoundException(f"Shell会话不存在: {session_id}")
 
         # 2.获取会话和子进程
         shell = self.active_shells[session_id]
+        self._touch_session(session_id)
         process = shell.process
 
         try:
@@ -254,15 +302,23 @@ class ShellService:
             raise AppException(f"Shell会话进程等待过程出错: {str(e)}")
 
     async def read_shell_output(self, session_id: str, console: bool = False) -> ShellReadResult:
-        """根据传递的会话id+是否输出控制台记录获取Shell命令结果"""
+        """按会话串行读取输出。"""
+        self._cleanup_stale_sessions()
+        async with self._get_session_lock(session_id):
+            return self._read_shell_output_unlocked(session_id, console)
+
+    def _read_shell_output_unlocked(self, session_id: str, console: bool = False) -> ShellReadResult:
+        """读取输出的内部实现，供已持有会话锁的流程调用。"""
         # 1.判断下传递的会话是否存在
         logger.debug(f"查看Shell会话内容: {session_id}")
+        self._cleanup_stale_sessions()
         if session_id not in self.active_shells:
             logger.error(f"Shell会话不存在: {session_id}")
             raise NotFoundException(f"Shell会话不存在: {session_id}")
 
         # 2.获取会话
         shell = self.active_shells[session_id]
+        self._touch_session(session_id)
 
         # 3.获取原生输出并移除额外字符
         raw_output = shell.output
@@ -270,7 +326,7 @@ class ShellService:
 
         # 4.判断是否获取控制台记录
         if console:
-            console_records = self.get_console_records(session_id)
+            console_records = self._get_console_records_unlocked(session_id)
         else:
             console_records = []
 
@@ -286,9 +342,22 @@ class ShellService:
             exec_dir: Optional[str],
             command: str,
     ) -> ShellExecuteResult:
+        """按会话串行执行命令，避免并发请求相互替换进程。"""
+        self._cleanup_stale_sessions()
+        async with self._get_session_lock(session_id):
+            return await self._exec_command_unlocked(session_id, exec_dir, command)
+
+    async def _exec_command_unlocked(
+            self,
+            session_id: str,
+            exec_dir: Optional[str],
+            command: str,
+    ) -> ShellExecuteResult:
         """传递会话id+执行目录+命令在沙箱中执行后返回"""
         # 1.记录日志并判断执行目录是否存在
         logger.info(f"正在会话 {session_id} 中执行命令: {command}")
+        self._cleanup_stale_sessions()
+        self._touch_session(session_id)
         if not exec_dir or exec_dir == "":
             exec_dir = os.path.expanduser("~")
         if exec_dir and not os.path.isdir(exec_dir):
@@ -352,13 +421,13 @@ class ShellService:
 
                 # 13.尝试等待子进程执行(最多等待5s)
                 logger.debug(f"正在等待会话中的进程完成: {session_id}")
-                wait_result = await self.wait_process(session_id, seconds=5)
+                wait_result = await self._wait_process_unlocked(session_id, seconds=5)
 
                 # 14.判断返回代码是否非空(已结束)则同步返回执行结果
                 if wait_result.returncode is not None:
                     # 15.记录日志并查看结果
                     logger.debug(f"Shell会话进程已结束, 代码: {wait_result.returncode}")
-                    view_result = await self.read_shell_output(session_id)
+                    view_result = self._read_shell_output_unlocked(session_id)
 
                     return ShellExecuteResult(
                         session_id=session_id,
@@ -396,9 +465,21 @@ class ShellService:
             input_text: str,
             press_enter: bool
     ) -> ShellWriteResult:
+        """按会话串行写入输入，避免与命令切换并发执行。"""
+        self._cleanup_stale_sessions()
+        async with self._get_session_lock(session_id):
+            return await self._write_shell_input_unlocked(session_id, input_text, press_enter)
+
+    async def _write_shell_input_unlocked(
+            self,
+            session_id: str,
+            input_text: str,
+            press_enter: bool
+    ) -> ShellWriteResult:
         """根据传递的数据向指定子进程写入数据"""
         # 1.判断下传递的会话是否存在
         logger.debug(f"写入Shell会话中的子进程: {session_id}, 是否按下回车键: {press_enter}")
+        self._cleanup_stale_sessions()
         if session_id not in self.active_shells:
             logger.error(f"Shell会话不存在: {session_id}")
             raise NotFoundException(f"Shell会话不存在: {session_id}")
@@ -406,6 +487,7 @@ class ShellService:
         # 2.获取会话和子进程
         shell = self.active_shells[session_id]
         process = shell.process
+        self._touch_session(session_id)
 
         try:
             # 3.检查子进程是否结束
@@ -449,9 +531,16 @@ class ShellService:
             raise AppException(f"向子进程写入数据出错: {str(e)}")
 
     async def kill_process(self, session_id: str) -> ShellKillResult:
+        """按会话串行终止进程。"""
+        self._cleanup_stale_sessions()
+        async with self._get_session_lock(session_id):
+            return await self._kill_process_unlocked(session_id)
+
+    async def _kill_process_unlocked(self, session_id: str) -> ShellKillResult:
         """根据传递的Shell会话id关闭对应进程"""
         # 1.判断下传递的会话是否存在
         logger.debug(f"正在终止会话中的进程: {session_id}")
+        self._cleanup_stale_sessions()
         if session_id not in self.active_shells:
             logger.error(f"Shell会话不存在: {session_id}")
             raise NotFoundException(f"Shell会话不存在: {session_id}")
@@ -459,6 +548,7 @@ class ShellService:
         # 2.获取会话和子进程
         shell = self.active_shells[session_id]
         process = shell.process
+        self._touch_session(session_id)
 
         try:
             # 3.检查子进程是否还在运行

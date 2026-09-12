@@ -38,16 +38,18 @@
 
 ## 本地开发
 
-### 启动服务
-
-在容器内或本地：
+推荐使用根目录 Compose 启动 sandbox。需要进入运行中的容器调试时：
 
 ```bash
-# 安装依赖
-pip3 install -r requirements.txt
+docker compose up -d sandbox
+docker exec -it go-manus-sandbox bash
+```
 
-# 启动 API 服务
-uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+本地直接运行时使用锁定依赖：
+
+```bash
+uv sync --frozen
+uv run uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 ```
 
 ## Docker 部署

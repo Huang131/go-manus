@@ -70,10 +70,10 @@ async def shutdown(
 async def restart(
         supervisor_service: SupervisorService = Depends(get_supervisor_service),
 ) -> Response[SupervisorActionResult]:
-    """重启supervisor管理的所有子进程"""
+    """重启Supervisor管理的非 API 子进程，避免中断当前 HTTP 请求。"""
     result = await supervisor_service.restart()
     return Response.success(
-        msg="重启Supervisor所有进程服务成功",
+        msg="重启Supervisor非 API 子进程成功",
         data=result,
     )
 

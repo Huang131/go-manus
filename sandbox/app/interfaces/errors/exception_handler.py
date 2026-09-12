@@ -26,7 +26,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         logger.warning(f"RequestValidationError: {errors}")
         return JSONResponse(
             status_code=422,
-            content=Response.error(msg=f"请求参数校验失败: {errors}"),
+            content=Response.fail(422, msg=f"请求参数校验失败: {errors}").model_dump(),
         )
 
     @app.exception_handler(AppException)

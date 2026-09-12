@@ -29,7 +29,6 @@ logs/
 Dockerfile
 .dockerignore
 docker-compose*.yml
-.devops/
 
 # Build artifacts
 dist/

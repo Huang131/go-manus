@@ -7,9 +7,11 @@
 """
 import asyncio
 import glob
+import itertools
 import logging
 import os.path
 import re
+import tempfile
 from typing import Optional
 
 from fastapi import UploadFile
@@ -32,6 +34,10 @@ from app.models.file import (
 
 logger = logging.getLogger(__name__)
 
+MAX_SEARCH_MATCHES = 10_000
+MAX_FIND_FILES = 10_000
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+
 
 class FileService:
     """文件沙箱服务"""
@@ -50,6 +56,13 @@ class FileService:
     ) -> FileReadResult:
         """根据传递的文件路径+起始行号+权限+最大长度读取文件内容"""
         try:
+            if max_length is not None and max_length < 1:
+                raise BadRequestException("max_length 必须大于0")
+            if ((start_line is not None and start_line < 0)
+                    or (end_line is not None and end_line < 0)):
+                raise BadRequestException("行号不能小于0")
+            if start_line is not None and end_line is not None and start_line > end_line:
+                raise BadRequestException("起始行不能大于结束行")
             # 1.检测在当前权限下能否获取该文件
             if not os.path.exists(filepath) and not sudo:
                 logger.error(f"要读取的文件不存在或无权限: {filepath}")
@@ -216,6 +229,7 @@ class FileService:
         lines = content.splitlines()
         matches = []
         line_numbers = []
+        truncated = False
 
         # 3.将外部传递的regex转换为正则
         try:
@@ -225,9 +239,12 @@ class FileService:
 
         # 4.创建一个异步函数，使用子线程方式执行避免长时间io阻塞
         def async_matches():
-            nonlocal matches, line_numbers
+            nonlocal matches, line_numbers, truncated
             for idx, line in enumerate(lines):
                 if pattern.search(line):
+                    if len(matches) >= MAX_SEARCH_MATCHES:
+                        truncated = True
+                        break
                     matches.append(line)
                     line_numbers.append(idx)
 
@@ -238,6 +255,7 @@ class FileService:
             filepath=filepath,
             matches=matches,
             line_numbers=line_numbers,
+            truncated=truncated,
         )
 
     @classmethod
@@ -254,39 +272,50 @@ class FileService:
         # 2.定义一个异步函数使用asyncio子线程运行避免IO阻塞
         def async_glob():
             search_pattern = os.path.join(dir_path, glob_pattern)
-            return glob.glob(search_pattern, recursive=True)
+            files = list(itertools.islice(
+                glob.iglob(search_pattern, recursive=True), MAX_FIND_FILES + 1
+            ))
+            return files[:MAX_FIND_FILES], len(files) > MAX_FIND_FILES
 
         # 3.创建子线程完成任务
-        files = await asyncio.to_thread(async_glob)
+        files, truncated = await asyncio.to_thread(async_glob)
 
-        return FileFindResult(dir_path=dir_path, files=files)
+        return FileFindResult(dir_path=dir_path, files=files, truncated=truncated)
 
     @classmethod
     async def upload_file(cls, file: UploadFile, filepath: str) -> FileUploadResult:
         """根据传递的文件源+路径将文件上传至沙箱"""
+        temp_path = None
         try:
             # 1.定义分块上传，每次只上传8k
             chunk_size = 1024 * 8
             file_size = 0
 
             # 2.确保上传文件所在的目录存在
-            parent_dir = os.path.dirname(filepath)
-            if parent_dir:
-                os.makedirs(parent_dir, exist_ok=True)
+            parent_dir = os.path.dirname(filepath) or "."
+            os.makedirs(parent_dir, exist_ok=True)
+            fd, temp_path = tempfile.mkstemp(prefix=".upload-", dir=parent_dir)
+            os.close(fd)
 
             # 3.定义一个异步函数用于上传文件避免阻塞进程
             def async_write_file():
                 nonlocal file_size
-                with open(filepath, "wb") as f:
+                with open(temp_path, "wb") as f:
                     while True:
                         chunk = file.file.read(chunk_size)
                         if not chunk:
                             break
+                        if file_size + len(chunk) > MAX_UPLOAD_BYTES:
+                            raise BadRequestException(
+                                f"上传文件不能超过 {MAX_UPLOAD_BYTES // (1024 * 1024)} MiB"
+                            )
                         f.write(chunk)
                         file_size += len(chunk)
 
             # 4.使用asyncio子线程完成函数调用
             await asyncio.to_thread(async_write_file)
+            os.replace(temp_path, filepath)
+            temp_path = None
 
             return FileUploadResult(
                 filepath=filepath,
@@ -294,7 +323,14 @@ class FileService:
                 success=True,
             )
         except Exception as e:
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                except FileNotFoundError:
+                    pass
             logger.error(f"上传文件到沙箱出错: {str(e)}")
+            if isinstance(e, BadRequestException):
+                raise
             raise AppException(f"上传文件到沙箱出错: {str(e)}")
 
     @classmethod

@@ -169,18 +169,21 @@ class SupervisorService:
             raise AppException(f"关闭supervisord服务失败: {str(e)}")
 
     async def restart(self) -> SupervisorActionResult:
-        """重启Supervisor管理的进程"""
+        """重启非 API 子进程，避免停止当前 HTTP 服务。"""
         try:
-            stop_result = await self._call_rpc(self.server.supervisor.stopAllProcesses)
-            start_result = await self._call_rpc(self.server.supervisor.startAllProcesses)
-            return SupervisorActionResult(
-                status="restarted",
-                stop_result=stop_result,
-                start_result=start_result,
-            )
-        except Exception as _:
-            logger.error(f"重启Supervisor进程服务失败")
-            raise AppException(f"重启Supervisor进程服务失败")
+            processes = await self._call_rpc(self.server.supervisor.getAllProcessInfo)
+            names = [process["name"] for process in processes if process["name"] != "app"]
+            stopped = []
+            started = []
+            # 先逆序停止，尽量保持显示和代理进程的依赖关系。
+            for name in reversed(names):
+                stopped.append(await self._call_rpc(self.server.supervisor.stopProcess, name, True))
+            for name in names:
+                started.append(await self._call_rpc(self.server.supervisor.startProcess, name, True))
+            return SupervisorActionResult(status="restarted", stop_result=stopped, start_result=started)
+        except Exception as e:
+            logger.error(f"重启Supervisor子进程失败: {e}")
+            raise AppException(f"重启Supervisor子进程失败: {e}")
 
     async def activate_timeout(self, minutes: Optional[int] = None) -> SupervisorTimeout:
         """传递指定分钟，并激活定时销毁任务同时关闭自动保活"""
@@ -189,6 +192,8 @@ class SupervisorService:
         timeout_minutes = minutes or setting.server_timeout_minutes
         if timeout_minutes is None:
             raise BadRequestException("超时时间未配置, 并且未读取到系统默认超时时间")
+        if timeout_minutes <= 0:
+            raise BadRequestException("超时时间必须大于0分钟")
 
         # 2.更新超时配置
         self.timeout_active = True
@@ -210,6 +215,8 @@ class SupervisorService:
         # 1.获取超时分钟数
         if minutes is None:
             raise BadRequestException("超时时间未配置, 请核实后重试")
+        if minutes <= 0:
+            raise BadRequestException("延长时间必须大于0分钟")
         # 无激活的超时定时器时直接按给定时长激活，避免 None - now 抛 TypeError
         if self.shutdown_time is None:
             return await self.activate_timeout(minutes)
@@ -235,7 +242,7 @@ class SupervisorService:
         """取消超时销毁设置"""
         # 1.判断是否设置了超时销毁
         if not self.timeout_active:
-            return SupervisorTimeout(status="no_timeout_active", activate=False)
+            return SupervisorTimeout(status="no_timeout_active", active=False)
 
         # 2.取消销毁任务
         if self.shutdown_task:
