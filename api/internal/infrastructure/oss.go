@@ -2,6 +2,7 @@ package infrastructure
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -148,6 +149,12 @@ func NewOSS(cfg *appconfig.ObjectStorageConfig) (*OSS, error) {
 		o.UsePathStyle = Provider(cfg.Provider) == ProviderMinio || strings.Contains(endpoint, "minio")
 	})
 
+	// 首次部署自愈：bucket 不存在（HeadBucket 404）时自动创建，
+	// 保证全新 MinIO/对象存储开箱即用，无需手动初始化。
+	if err := ensureBucket(context.Background(), client, cfg.Bucket); err != nil {
+		logger.Warn("初始化存储桶失败，存储功能可能不可用", logger.Err(err))
+	}
+
 	logger.Info("S3-compatible storage connection established",
 		logger.String("provider", cfg.Provider),
 		logger.String("endpoint", endpoint),
@@ -170,6 +177,25 @@ func newUploader(client *s3.Client) *manager.Uploader {
 		u.PartSize = 10 * 1024 * 1024 // 每个分片 10MB
 		u.Concurrency = 4
 	})
+}
+
+// ensureBucket 检查 bucket 是否存在，404 时自动创建（幂等）。
+func ensureBucket(ctx context.Context, client *s3.Client, bucket string) error {
+	_, err := client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(bucket)})
+	if err == nil {
+		return nil
+	}
+	var httpStatus interface{ HTTPStatusCode() int }
+	if !errors.As(err, &httpStatus) || httpStatus.HTTPStatusCode() != 404 {
+		// 非 404（网络/权限）不做创建动作，原样返回
+		return err
+	}
+	_, err = client.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: aws.String(bucket)})
+	if err != nil {
+		return fmt.Errorf("create bucket %s: %w", bucket, err)
+	}
+	logger.Info("存储桶不存在，已自动创建", logger.String("bucket", bucket))
+	return nil
 }
 
 // Close 关闭客户端。
