@@ -1,4 +1,4 @@
-use client'
+'use client'
 
 import {useState, useRef, useEffect, forwardRef, useImperativeHandle} from 'react'
 import {cn, formatFileSize} from '@/lib/utils'
