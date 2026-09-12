@@ -66,7 +66,10 @@ func runInTx[T any](
 }
 
 func rollbackTx(ctx context.Context, tx pgx.Tx) error {
-	if err := tx.Rollback(ctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+	// 回滚不能复用业务 ctx：走到回滚往往正是因为 ctx 已取消/超时，
+	// 复用会让 Rollback 立即失败、事务悬挂到连接被池销毁。
+	rctx := context.WithoutCancel(ctx)
+	if err := tx.Rollback(rctx); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
 		return fmt.Errorf("rollback transaction: %w", err)
 	}
 	return nil

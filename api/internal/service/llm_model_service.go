@@ -257,6 +257,9 @@ func (s *DefaultLLMModelService) SetDefault(ctx context.Context, id string) erro
 
 // UnsetDefault 取消默认模型（清空 default 标记，agent 启动时会降级到第一个 enabled）
 func (s *DefaultLLMModelService) UnsetDefault(ctx context.Context) error {
+	// 与 SetDefault 持同一把锁：并发 Set+Unset 才不会把刚设好的 default 清掉
+	s.defaultMu.Lock()
+	defer s.defaultMu.Unlock()
 	return s.repo.ClearDefault(ctx)
 }
 

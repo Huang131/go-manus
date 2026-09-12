@@ -152,6 +152,18 @@ func (r *RoutedLLM) plan(ctx context.Context, req *LLMRequest) []*LLMRuntimeConf
 	if len(catalog) == 0 {
 		return []*LLMRuntimeConfig{r.fallback}
 	}
+
+	// 请求级 model_id（"会话中途临时切换模型"）不受健康排序影响，强制作为 primary。
+	if modelID := ModelIDFromContext(ctx); modelID != "" {
+		for _, cfg := range catalog {
+			if cfg != nil && cfg.Profile.ID == modelID {
+				return []*LLMRuntimeConfig{cfg}
+			}
+		}
+		logger.Warn("ctx 指定的 model_id 不在模型目录中，回退默认路由",
+			logger.String("model_id", modelID))
+	}
+
 	sort.SliceStable(catalog, func(i, j int) bool {
 		return betterHealth(catalog[i], catalog[j])
 	})

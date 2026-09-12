@@ -93,6 +93,16 @@ func (h *SessionHandler) List(c *gin.Context) {
 // Delete 删除会话 (POST /{session_id}/delete)
 func (h *SessionHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
+	// 先停掉该会话的活跃任务：软删后 agent 若继续运行，会持续消耗
+	// LLM/沙箱资源，且其事件/状态写入全部命中已删会话而静默失败。
+	if h.agent != nil {
+		if err := h.agent.StopSession(c.Request.Context(), id); err != nil {
+			// 没有活跃任务等情况不算删除失败，记录后继续
+			logger.Warn("删除会话前停止活跃任务失败（继续删除）",
+				logger.String("session_id", id),
+				logger.Err(err))
+		}
+	}
 	if err := h.service.DeleteSession(c.Request.Context(), id); err != nil {
 		response.FromError(c, err)
 		return

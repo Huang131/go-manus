@@ -282,8 +282,15 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 				baseEvent.ID = outputID
 			}
 
-			// 同步到会话数据库
-			if err := r.sessionRep.AppendEvent(ctx, r.sessionID, baseEvent); err != nil {
+			// 同步到会话数据库。
+			// 逐 token 的 delta 事件只进 Redis（保 SSE 续读），不落库：
+			// 长回复每秒数百个增量会让 DB 写入放大，且最终内容已由
+			// MessageDoneEvent 作为权威记录落库。
+			if event.GetType() == model.EventTypeMessageDelta {
+				logger.DebugContext(ctx, "跳过 delta 事件落库",
+					logger.String("task_id", task.ID()),
+					logger.String("event_id", eventID))
+			} else if err := r.sessionRep.AppendEvent(ctx, r.sessionID, baseEvent); err != nil {
 				logger.WarnContext(ctx, "添加事件到会话失败",
 					logger.String("session_id", r.sessionID),
 					logger.Err(err))

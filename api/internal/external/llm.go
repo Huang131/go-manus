@@ -3,6 +3,7 @@ package external
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 )
@@ -26,6 +27,16 @@ func ModelIDFromContext(ctx context.Context) string {
 		return v
 	}
 	return ""
+}
+
+// llmStreamOverallTimeout 单条流式响应的整体截止时间。
+// 远大于正常回复时长，只兜底"上游挂起、再也不吐增量也不结束"的场景，
+// 避免任务在无 deadline 的 ctx 上永久挂起。
+const llmStreamOverallTimeout = 10 * time.Minute
+
+// streamContext 为流式请求派生带整体截止的 context，保留父 ctx 的取消语义。
+func streamContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, llmStreamOverallTimeout)
 }
 
 // LLMRequest LLM 请求参数（阶段 1d：Messages / Tools / ResponseFormat 改用 llmcore 强类型）
@@ -173,13 +184,18 @@ func defaultLLMClientFactory(cfg *LLMRuntimeConfig) LLM {
 	}
 	switch cfg.Profile.Protocol {
 	case llmcore.ProtocolAnthropic:
+		// 与 OpenAI 分支对齐：策略/成本/工具超时必须透传，
+		// 否则 DB 配置的 Claude 模型会丢失 reasoning 模式、成本恒 0。
 		return NewAnthropicClient(&AnthropicClientConfig{
-			BaseURL:     cfg.BaseURL,
-			APIKey:      cfg.APIKey,
-			ModelName:   cfg.ModelName,
-			Temperature: cfg.Temperature,
-			MaxTokens:   cfg.MaxTokens,
-			Version:     cfg.AnthropicVersion,
+			BaseURL:         cfg.BaseURL,
+			APIKey:          cfg.APIKey,
+			ModelName:       cfg.ModelName,
+			Temperature:     cfg.Temperature,
+			MaxTokens:       cfg.MaxTokens,
+			ToolCallTimeout: cfg.ToolCallTimeout,
+			RequestPolicy:   cfg.Profile.RequestPolicy,
+			CostPolicy:      cfg.Profile.CostPolicy,
+			Version:         cfg.AnthropicVersion,
 		})
 	default:
 		return NewOpenAIClient(runtimeConfigToOpenAIClientConfig(cfg))

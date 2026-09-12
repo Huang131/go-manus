@@ -263,6 +263,11 @@ func (a *BaseAgent) invokeLLMWithEmission(ctx context.Context, req *external.LLM
 	if streamErr != "" {
 		return nil, false, fmt.Errorf("LLM 流式调用失败: %s", streamErr)
 	}
+	// ctx 取消/超时时流会被静默截断：此时 all 里只有半截内容，
+	// 不能当成完整回复合并进记忆或发给调用方。
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
 	resp := llmcore.MergeDeltas(a.llm.ModelName(), all)
 	if resp == nil {
 		return nil, false, fmt.Errorf("LLM 流式响应为空")

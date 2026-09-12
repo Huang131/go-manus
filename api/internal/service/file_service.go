@@ -124,10 +124,20 @@ func (s *DefaultFileService) DeleteFile(ctx context.Context, id string) error {
 		return apperr.NotFound("文件不存在")
 	}
 
+	// 先删 DB 记录再删对象：DB 失败时对象还在（仅存储成本泄漏，可由
+	// bucket 生命周期策略兜底）；反过来先删对象会让记录指向已删对象，
+	// 之后每次下载必然 404/500。
+	if err := s.repo.Delete(ctx, id); err != nil {
+		return err
+	}
 	if s.storage != nil {
 		if err := s.storage.Delete(ctx, file.Key); err != nil {
-			return err
+			// 记录已删、对象残留：孤儿对象不影响用户，记录告警便于对账
+			logger.Warn("删除存储对象失败（记录已删，孤儿对象待对账）",
+				logger.String("file_id", id),
+				logger.String("key", file.Key),
+				logger.Err(err))
 		}
 	}
-	return s.repo.Delete(ctx, id)
+	return nil
 }

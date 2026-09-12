@@ -294,6 +294,14 @@ type anthropicStreamEvent struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
 	} `json:"usage,omitempty"`
+	// Message 仅 message_start 事件携带，其中的 usage.input_tokens 是
+	// 本次请求的 prompt token 总量；message_delta 里的 usage 只有 output_tokens。
+	Message struct {
+		Usage struct {
+			InputTokens  int `json:"input_tokens"`
+			OutputTokens int `json:"output_tokens"`
+		} `json:"usage"`
+	} `json:"message"`
 }
 
 // Stream 调用 Anthropic SSE 接口，统一输出 llmcore 增量。
@@ -317,7 +325,9 @@ func (c *AnthropicClient) Stream(ctx context.Context, req *LLMRequest) (<-chan l
 	if err != nil {
 		return nil, fmt.Errorf("marshal stream request: %w", err)
 	}
-	streamCtx := ctx
+	// 整体截止的 cancel 由 reader goroutine 释放，不能 defer 在 Stream 里，
+	// 否则 Stream 返回即取消、流还没被消费。
+	streamCtx, cancelStream := streamContext(ctx)
 	httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, c.baseURL+anthropicMessagesPath, bytes.NewReader(requestBody))
 	if err != nil {
 		return nil, fmt.Errorf("create stream request: %w", err)
@@ -342,16 +352,21 @@ func (c *AnthropicClient) Stream(ctx context.Context, req *LLMRequest) (<-chan l
 		return nil, c.classifyHTTPError(resp.StatusCode, body)
 	}
 	deltas := make(chan llmcore.LLMDelta)
-	go c.readAnthropicStream(streamCtx, resp.Body, deltas)
+	// cancel 不能在 Stream 返回时触发：流由 reader goroutine 异步消费，
+	// 由它在结束时负责释放（含整体截止定时器）。
+	go c.readAnthropicStream(streamCtx, resp.Body, deltas, cancelStream)
 	return deltas, nil
 }
 
-func (c *AnthropicClient) readAnthropicStream(ctx context.Context, body io.ReadCloser, deltas chan<- llmcore.LLMDelta) {
+func (c *AnthropicClient) readAnthropicStream(ctx context.Context, body io.ReadCloser, deltas chan<- llmcore.LLMDelta, cancel context.CancelFunc) {
+	defer cancel()
 	defer close(deltas)
 	defer body.Close()
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 4096), 1024*1024)
 	eventType := ""
+	// message_start 携带的 prompt token 总量，message_delta 阶段拼回 usage
+	inputTokens := 0
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if strings.HasPrefix(line, "event:") {
@@ -372,6 +387,9 @@ func (c *AnthropicClient) readAnthropicStream(ctx context.Context, body io.ReadC
 		switch currentEventType {
 		case "error":
 			delta.Error = event.Error.Message
+		case "message_start":
+			// 记录 prompt token 总量，供 message_delta 组装完整 usage
+			inputTokens = event.Message.Usage.InputTokens
 		case "content_block_start":
 			if event.ContentBlock.Type == anthropicContentTypeToolUse {
 				delta.ToolCalls = []llmcore.ToolCallDelta{{Index: event.Index, ID: event.ContentBlock.ID, Type: llmcore.ToolTypeFunction, Name: event.ContentBlock.Name}}
@@ -389,9 +407,9 @@ func (c *AnthropicClient) readAnthropicStream(ctx context.Context, body io.ReadC
 			delta.FinishReason = event.Delta.StopReason
 			if event.Usage != nil {
 				delta.Usage = &llmcore.Usage{
-					PromptTokens:     event.Usage.InputTokens,
+					PromptTokens:     inputTokens,
 					CompletionTokens: event.Usage.OutputTokens,
-					TotalTokens:      event.Usage.InputTokens + event.Usage.OutputTokens,
+					TotalTokens:      inputTokens + event.Usage.OutputTokens,
 				}
 			}
 		}

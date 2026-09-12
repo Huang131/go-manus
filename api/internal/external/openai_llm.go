@@ -363,7 +363,9 @@ func (c *OpenAIClient) Stream(ctx context.Context, req *LLMRequest) (<-chan llmc
 	if err != nil {
 		return nil, fmt.Errorf("marshal stream request: %w", err)
 	}
-	streamCtx := ctx
+	// 整体截止的 cancel 由 reader goroutine 释放，不能 defer 在 Stream 里，
+	// 否则 Stream 返回即取消、流还没被消费。
+	streamCtx, cancelStream := streamContext(ctx)
 	httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, c.baseURL+openAIChatCompletionsPath, bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, fmt.Errorf("create stream request: %w", err)
@@ -396,11 +398,13 @@ func (c *OpenAIClient) Stream(ctx context.Context, req *LLMRequest) (<-chan llmc
 	}
 
 	deltas := make(chan llmcore.LLMDelta)
-	go c.readOpenAIStream(streamCtx, resp.Body, deltas)
+	// cancel 由 reader goroutine 结束时释放（含整体截止定时器）。
+	go c.readOpenAIStream(streamCtx, resp.Body, deltas, cancelStream)
 	return deltas, nil
 }
 
-func (c *OpenAIClient) readOpenAIStream(ctx context.Context, body io.ReadCloser, deltas chan<- llmcore.LLMDelta) {
+func (c *OpenAIClient) readOpenAIStream(ctx context.Context, body io.ReadCloser, deltas chan<- llmcore.LLMDelta, cancel context.CancelFunc) {
+	defer cancel()
 	defer close(deltas)
 	defer body.Close()
 

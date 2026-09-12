@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bytedance/sonic"
 
+	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -15,6 +17,9 @@ import (
 
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
+
+// taskShutdownTimeout Shutdown 时等待单个任务退出的上限。
+const taskShutdownTimeout = 10 * time.Second
 
 // AgentService Agent 服务
 type AgentService struct {
@@ -98,12 +103,7 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *llmc
 		return "", fmt.Errorf("获取会话失败: %w", err)
 	}
 	if session == nil {
-		return "", fmt.Errorf("会话不存在: %s", sessionID)
-	}
-
-	// 更新最新消息
-	if err := s.sessionRep.UpdateLatestMessage(ctx, sessionID, message.ContentText); err != nil {
-		logger.WarnContext(ctx, "更新最新消息失败", logger.String("session_id", sessionID), logger.Err(err))
+		return "", apperr.NotFound("会话不存在: " + sessionID)
 	}
 
 	// 创建独立的 task context，不受 HTTP 请求取消影响，但保留请求中的 trace 等 values。
@@ -231,6 +231,41 @@ func (s *AgentService) Shutdown() {
 		}
 	}
 
+	// 等待各任务 runner 退出（有上限），避免 stopHook 关闭 Redis/PG 后
+	// runner 仍在写库、或在写出时悬挂。
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for _, task := range tasks {
+			if task == nil {
+				continue
+			}
+			select {
+			case <-task.DoneChan():
+			case <-time.After(taskShutdownTimeout):
+				logger.Warn("等待任务退出超时，继续关闭",
+					logger.String("task_id", task.ID()))
+			}
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(taskShutdownTimeout):
+		logger.Warn("Agent 任务等待整体超时，继续关闭")
+	}
+
+	// 释放工具持有的外部资源（MCP 子进程、A2A 连接）；跨进程退出前必须收口。
+	if s.mcpTool != nil {
+		if err := s.mcpTool.Cleanup(); err != nil {
+			logger.Warn("清理 MCP 工具失败", logger.Err(err))
+		}
+	}
+	if s.a2aTool != nil {
+		if err := s.a2aTool.Cleanup(); err != nil {
+			logger.Warn("清理 A2A 工具失败", logger.Err(err))
+		}
+	}
+
 	logger.Info("Agent 服务已关闭")
 }
 
@@ -290,7 +325,7 @@ func (s *AgentService) getOrCreateTask(ctx context.Context, session *model.Sessi
 			return task, nil
 		}
 		if !task.Finished() {
-			return nil, fmt.Errorf("session task is stopping")
+			return nil, apperr.Conflict("会话任务正在停止，请稍后重试")
 		}
 	}
 
