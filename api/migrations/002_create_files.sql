@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS files (
     extension   VARCHAR(255) NOT NULL DEFAULT '',
     mime_type   VARCHAR(255) NOT NULL DEFAULT '',
     size        BIGINT NOT NULL DEFAULT 0,
+    sha256      CHAR(64) NOT NULL DEFAULT '',
     session_id  VARCHAR(255) NOT NULL,
     updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(0)
@@ -21,6 +22,10 @@ CREATE TABLE IF NOT EXISTS files (
 CREATE INDEX IF NOT EXISTS idx_files_session_id ON files(session_id);
 CREATE INDEX IF NOT EXISTS idx_files_created_at ON files(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_files_extension ON files(extension);
+-- 内容级去重：同会话内相同内容只保留一条记录（上传时流式计算 sha256，
+-- 并发上传的竞态由唯一索引在数据库层封死）；空串行（历史/外部数据）不参与唯一约束
+CREATE UNIQUE INDEX IF NOT EXISTS uq_files_session_sha256
+    ON files (session_id, sha256) WHERE sha256 <> '';
 
 -- ============================================================
 -- 字段注释

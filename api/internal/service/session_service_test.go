@@ -376,6 +376,10 @@ func (m *mockFileRepo) GetBySessionAndFilename(ctx context.Context, sessionID, f
 	return nil, nil
 }
 
+func (m *mockFileRepo) GetBySessionAndHash(ctx context.Context, sessionID, sha256 string) (*model.File, error) {
+	return nil, nil
+}
+
 func (m *mockFileRepo) ListBySessionID(ctx context.Context, sessionID string) ([]*model.File, error) {
 	return m.files[sessionID], nil
 }

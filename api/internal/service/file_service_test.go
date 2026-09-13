@@ -17,6 +17,10 @@ func (emptyFileRepo) GetBySessionAndFilename(ctx context.Context, sessionID, fil
 	return nil, nil
 }
 
+func (emptyFileRepo) GetBySessionAndHash(context.Context, string, string) (*model.File, error) {
+	return nil, nil
+}
+
 func (emptyFileRepo) Create(context.Context, *model.File) error            { return nil }
 func (emptyFileRepo) GetByID(context.Context, string) (*model.File, error) { return nil, nil }
 func (emptyFileRepo) GetBySessionAndID(context.Context, string, string) (*model.File, error) {
@@ -52,6 +56,10 @@ type stubFileRepo struct {
 }
 
 func (s *stubFileRepo) GetBySessionAndFilename(ctx context.Context, sessionID, filename string) (*model.File, error) {
+	return nil, nil
+}
+
+func (s *stubFileRepo) GetBySessionAndHash(ctx context.Context, sessionID, sha256 string) (*model.File, error) {
 	return nil, nil
 }
 func (s *stubFileRepo) Create(_ context.Context, f *model.File) error {

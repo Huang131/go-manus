@@ -11,6 +11,7 @@ type File struct {
 	Extension string    `json:"extension"`
 	MimeType  string    `json:"mime_type"`
 	Size      int64     `json:"size"`
+	Sha256    string    `json:"sha256,omitempty"` // 内容哈希，同会话内内容级去重
 	SessionID string    `json:"session_id,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }

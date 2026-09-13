@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -72,9 +74,14 @@ func (s *DefaultFileService) UploadFile(ctx context.Context, sessionID, filename
 	ext := filepath.Ext(filename)
 	key := "files/" + sessionID + "/" + fileID + ext
 
-	if err := s.storage.Upload(ctx, key, reader, size, contentType); err != nil {
+	// 流式计算内容哈希：TeeReader 在上传的同时喂给 sha256，无需二次读取
+	hasher := sha256.New()
+	tee := io.TeeReader(reader, hasher)
+
+	if err := s.storage.Upload(ctx, key, tee, size, contentType); err != nil {
 		return nil, err
 	}
+	contentHash := hex.EncodeToString(hasher.Sum(nil))
 
 	file := &model.File{
 		ID:        fileID,
@@ -85,16 +92,32 @@ func (s *DefaultFileService) UploadFile(ctx context.Context, sessionID, filename
 		Extension: ext,
 		MimeType:  contentType,
 		Size:      size,
+		Sha256:    contentHash,
 		CreatedAt: time.Now(),
 	}
 
 	if err := s.repo.Create(ctx, file); err != nil {
+		// (session_id, sha256) 唯一索引命中 = 并发上传同内容：复用既有记录
+		if existing, hashErr := s.repo.GetBySessionAndHash(ctx, sessionID, contentHash); hashErr == nil && existing != nil {
+			_ = s.storage.Delete(ctx, key)
+			return existing, nil
+		}
 		if cleanupErr := s.storage.Delete(ctx, key); cleanupErr != nil {
 			logger.Warn("清理文件上传孤儿对象失败",
 				logger.String("key", key),
 				logger.Err(cleanupErr))
 		}
 		return nil, err
+	}
+
+	// 内容级去重：同会话内相同内容（可不同文件名）复用既有记录
+	if existing, err := s.repo.GetBySessionAndHash(ctx, sessionID, contentHash); err == nil && existing != nil && existing.ID != file.ID {
+		_ = s.repo.Delete(ctx, file.ID)
+		_ = s.storage.Delete(ctx, key)
+		logger.Info("检测到同内容文件，复用既有记录",
+			logger.String("session_id", sessionID),
+			logger.String("file_id", existing.ID))
+		return existing, nil
 	}
 	return file, nil
 }

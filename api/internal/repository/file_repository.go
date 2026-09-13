@@ -19,6 +19,8 @@ type FileRepository interface {
 	GetBySessionAndFilepath(ctx context.Context, sessionID, filepath string) (*model.File, error)
 	// GetBySessionAndFilename 查找会话内同名的最近文件（用于上传幂等去重）
 	GetBySessionAndFilename(ctx context.Context, sessionID, filename string) (*model.File, error)
+	// GetBySessionAndHash 按 (session_id, sha256) 查找同内容文件（内容级去重）
+	GetBySessionAndHash(ctx context.Context, sessionID, sha256 string) (*model.File, error)
 	Update(ctx context.Context, file *model.File) error
 	Delete(ctx context.Context, id string) error
 	DeleteBySessionID(ctx context.Context, sessionID string) error
@@ -57,7 +59,7 @@ func (r *PostgresFileRepository) queryer() queryer {
 }
 
 // fileColumns 是 files 表的标准查询列，集中定义避免各方法重复列举。
-const fileColumns = `id, session_id, filename, filepath, key, extension, mime_type, size, created_at`
+const fileColumns = `id, session_id, filename, filepath, key, extension, mime_type, size, sha256, created_at`
 
 // scanFile 把一行结果映射为 *model.File，供 QueryRow 与 Query 行迭代共用。
 func scanFile(s rowScanner) (*model.File, error) {
@@ -73,11 +75,11 @@ func (r *PostgresFileRepository) Create(ctx context.Context, file *model.File) e
 	q := r.queryer()
 	query := `
 		INSERT INTO files (id, session_id, filename, filepath, key, extension, mime_type, size, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
 	_, err := q.Exec(ctx, query,
 		file.ID, file.SessionID, file.Filename, file.Filepath,
-		file.Key, file.Extension, file.MimeType, file.Size, file.CreatedAt,
+		file.Key, file.Extension, file.MimeType, file.Size, file.Sha256, file.CreatedAt,
 	)
 	return err
 }
@@ -101,6 +103,20 @@ func (r *PostgresFileRepository) GetBySessionAndFilename(ctx context.Context, se
 	q := r.queryer()
 	query := `SELECT ` + fileColumns + ` FROM files WHERE session_id = $1 AND filename = $2 ORDER BY created_at DESC LIMIT 1`
 	file, err := scanFile(q.QueryRow(ctx, query, sessionID, filename))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return file, nil
+}
+
+// GetBySessionAndHash 按 (session_id, sha256) 查找同内容文件（内容级去重）
+func (r *PostgresFileRepository) GetBySessionAndHash(ctx context.Context, sessionID, sha256 string) (*model.File, error) {
+	q := r.queryer()
+	query := `SELECT ` + fileColumns + ` FROM files WHERE session_id = $1 AND sha256 = $2 ORDER BY created_at DESC LIMIT 1`
+	file, err := scanFile(q.QueryRow(ctx, query, sessionID, sha256))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

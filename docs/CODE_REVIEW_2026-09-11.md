@@ -85,7 +85,7 @@ P2：UnsetDefault 不进 defaultMu；Delete 事务外读过期 IsDefault；Creat
 - [ ] persistHealth 异步化/去抖（每次调用同步写 DB）
 - [ ] GetAllSessions 加 LIMIT（SSE 每 5s 全量拉取）
 - [ ] BrowserClient JS 转义（LLM 可控字符串拼进模板）
-- [ ] 上传去重 TOCTOU（(session_id,filename) 唯一索引）+ 内容级 sha256
+- [x] 内容级 sha256 去重 ✓2026-09-13（migration 005 加列+(session_id,sha256) 唯一索引封死 TOCTOU；流式 TeeReader 哈希；004 占位模型移除，env 种子正式生效）
 - [ ] DownloadFile io.ReadAll 加大小上限
 - [ ] RoutedLLM 共享 fallback Health 数据竞争（applyStoredHealth 写共享 cfg）
 
@@ -96,7 +96,7 @@ P2：UnsetDefault 不进 defaultMu；Delete 事务外读过期 IsDefault；Creat
 - [ ] FileInfo/SessionFile 类型合并；死代码清扫（createSSEConnection/getSession/clearUnreadMessageCount）
 - [ ] refresh() 不 bump streamRetrySignal；prevToolCountRef 切会话重置
 - [ ] appendEvent step 状态读嵌套 step.status（重连空流状态机不翻转）
-- [ ] 持久化 model id 不在列表时回落 Auto
+- [x] 持久化 model id 不在列表时回落 Auto ✓2026-09-13（chat-input 校验）
 - [ ] tool-preview-panel 关闭图标 Maximize2 → X
 
 ### sandbox
@@ -105,3 +105,13 @@ P2：UnsetDefault 不进 defaultMu；Delete 事务外读过期 IsDefault；Creat
 - [ ] supervisor stop-all 仍停止 app 自身；restart 无总超时
 - [ ] read-shell-output 增量 delta 协议（替代全量快照传输）
 - [ ] endpoint 测试扩展（wait/read/kill/会话复用/读取器竞态）
+
+
+---
+
+# 增量修复 2026-09-13（内容级去重 + 测试验证）
+
+- migration 005：files.sha256 列 + (session_id, sha256) 部分唯一索引（TOCTOU 收口）
+- UploadFile 流式 TeeReader 计算 sha256；同会话同内容复用既有记录（含并发唯一索引兜底）
+- 004 占位 GPT-4 INSERT 移除：env 种子（seedDefaultModelFromEnv）成为初始模型唯一来源，开发库已验证生效
+- sandbox 测试套件容器内跑通：56 passed（运行方式见上）
