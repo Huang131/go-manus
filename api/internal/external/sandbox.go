@@ -3,6 +3,7 @@ package external
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/bytedance/sonic"
@@ -484,9 +485,14 @@ func (c *SandboxClient) DownloadFile(ctx context.Context, filepath string) (*mod
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 		return model.NewToolError(fmt.Sprintf("download file failed: status=%d body=%s", resp.StatusCode, string(body))), fmt.Errorf("download file failed: status=%d", resp.StatusCode)
 	}
-	data, err := io.ReadAll(resp.Body)
+	// 上限保护：沙箱文件可能非常大，避免一次性读爆 api 进程内存
+	const maxDownloadBytes = 64 << 20 // 64MB
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxDownloadBytes+1))
 	if err != nil {
 		return model.NewToolError(err.Error()), fmt.Errorf("read download body: %w", err)
+	}
+	if len(data) > maxDownloadBytes {
+		return model.NewToolError("file too large to download (limit 64MB)"), fmt.Errorf("download file exceeds 64MB limit")
 	}
 	return model.NewToolResult(map[string]interface{}{
 		"filepath": filepath,
@@ -541,8 +547,19 @@ func (c *BrowserClient) ViewPage(ctx context.Context, sessionID string) (*model.
 // Navigate 使用浏览器导航到指定 URL
 func (c *BrowserClient) Navigate(ctx context.Context, sessionID, url string) (*model.ToolResult, error) {
 	// 通过执行 Playwright 脚本实现导航
-	script := fmt.Sprintf(`const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.goto('%s'); await browser.close(); })();`, url)
+	script := fmt.Sprintf(`const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.goto(%s); await browser.close(); })();`, jsString(url))
 	return c.sandbox.ExecCommand(ctx, sessionID, "", script)
+}
+
+// jsString 把 Go 字符串安全序列化为 JS 字符串字面量（含引号）。
+// LLM 可控的 url/text/key 等直接 Sprintf 进 JS 模板存在注入面，
+// 一律经由本函数以 JSON 编码嵌入。
+func jsString(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return `""`
+	}
+	return string(b)
 }
 
 // Restart 重启浏览器并访问指定 URL
@@ -573,15 +590,15 @@ func (c *BrowserClient) Input(ctx context.Context, sessionID, text string, press
 	var script string
 	if index != nil {
 		if pressEnter {
-			script = fmt.Sprintf(`const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.locator('input').nth(%d).fill('%s'); await page.keyboard.press('Enter'); await browser.close(); })();`, *index, text)
+			script = fmt.Sprintf(`const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.locator('input').nth(%d).fill(%s); await page.keyboard.press('Enter'); await browser.close(); })();`, *index, jsString(text))
 		} else {
-			script = fmt.Sprintf(`const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.locator('input').nth(%d).fill('%s'); await browser.close(); })();`, *index, text)
+			script = fmt.Sprintf(`const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.locator('input').nth(%d).fill(%s); await browser.close(); })();`, *index, jsString(text))
 		}
 	} else if coordinateX != nil && coordinateY != nil {
 		if pressEnter {
-			script = fmt.Sprintf(`const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.mouse.click(%f, %f); await page.keyboard.type('%s'); await page.keyboard.press('Enter'); await browser.close(); })();`, *coordinateX, *coordinateY, text)
+			script = fmt.Sprintf(`const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.mouse.click(%f, %f); await page.keyboard.type(%s); await page.keyboard.press('Enter'); await browser.close(); })();`, *coordinateX, *coordinateY, jsString(text))
 		} else {
-			script = fmt.Sprintf(`const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.mouse.click(%f, %f); await page.keyboard.type('%s'); await browser.close(); })();`, *coordinateX, *coordinateY, text)
+			script = fmt.Sprintf(`const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.mouse.click(%f, %f); await page.keyboard.type(%s); await browser.close(); })();`, *coordinateX, *coordinateY, jsString(text))
 		}
 	} else {
 		return model.NewToolError("either index or coordinates required"), fmt.Errorf("either index or coordinates required")
@@ -597,7 +614,7 @@ func (c *BrowserClient) MoveMouse(ctx context.Context, sessionID string, coordin
 
 // PressKey 模拟按键
 func (c *BrowserClient) PressKey(ctx context.Context, sessionID, key string) (*model.ToolResult, error) {
-	script := fmt.Sprintf(`const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.keyboard.press('%s'); await browser.close(); })();`, key)
+	script := fmt.Sprintf(`const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.keyboard.press(%s); await browser.close(); })();`, jsString(key))
 	return c.sandbox.ExecCommand(ctx, sessionID, "", script)
 }
 
@@ -647,7 +664,9 @@ func (c *BrowserClient) Screenshot(ctx context.Context, sessionID string, fullPa
 	return []byte(result.Message), nil
 }
 
-// ConsoleExec 在浏览器控制台执行 JavaScript
+// ConsoleExec 在浏览器控制台执行 JavaScript。
+// 注：该端点的语义就是执行任意脚本（能力即设计），javascript 不做转义；
+// 风险边界由沙箱隔离保证。
 func (c *BrowserClient) ConsoleExec(ctx context.Context, sessionID, javascript string) (*model.ToolResult, error) {
 	script := fmt.Sprintf(`const { chromium } = require('playwright'); (async () => { const browser = await chromium.launch(); const page = await browser.newPage(); await page.evaluate(() => { %s }); await browser.close(); })();`, javascript)
 	return c.sandbox.ExecCommand(ctx, sessionID, "", script)

@@ -377,16 +377,7 @@ export type SSEEventHandler = (event: SSEEventData) => void;
 /**
  * 会话文件信息
  */
-export type SessionFile = {
-  id: string;
-  filename: string;
-  filepath: string;
-  key: string;
-  extension: string;
-  content_type: string;
-  size: number;
-  [key: string]: unknown;
-};
+export type SessionFile = FileInfo;
 
 /**
  * 查看文件内容请求参数

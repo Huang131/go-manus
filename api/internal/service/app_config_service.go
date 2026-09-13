@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/bytedance/sonic"
@@ -32,6 +33,9 @@ type AppConfigService interface {
 // DefaultAppConfigService 应用配置服务默认实现
 type DefaultAppConfigService struct {
 	repo repository.AppConfigRepository
+	// mu 串行化配置合并写入：MCP/A2A/LLM 的更新都是读-改-写，
+	// 并发写会互相覆盖丢条目（单进程内互斥即可覆盖全部入口）
+	mu sync.Mutex
 }
 
 // NewAppConfigService 创建应用配置服务

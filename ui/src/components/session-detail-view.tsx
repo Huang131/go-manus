@@ -128,6 +128,10 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
   const [showJumpToBottom, setShowJumpToBottom] = useState(false)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const prevToolCountRef = useRef(0)
+  // 切会话时重置工具计数基线：新会话工具数不超过上一会话时"自动追踪最新工具"才不会失效
+  useEffect(() => {
+    prevToolCountRef.current = 0
+  }, [sessionId])
 
   const hasPreview = previewFile !== null || previewTool !== null
 

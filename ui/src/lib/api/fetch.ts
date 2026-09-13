@@ -275,26 +275,6 @@ export function del<T = unknown>(
   });
 }
 
-/**
- * 创建 SSE 连接
- */
-export function createSSEConnection(
-  endpoint: string,
-  data?: unknown,
-): EventSource {
-  const url = endpoint.startsWith("http")
-    ? endpoint
-    : `${API_CONFIG.baseURL}${endpoint}`;
-
-  // 对于 POST 请求，使用 fetch + ReadableStream 方式
-  if (data !== undefined) {
-    throw new Error(
-      "带数据的 SSE 连接请使用 createSSEStream 函数"
-    );
-  }
-
-  return new EventSource(url);
-}
 
 /**
  * 创建流式 SSE 连接（支持 POST 请求）
@@ -400,9 +380,11 @@ export async function parseSSEStream(
       const { done, value } = await reader.read();
 
       if (done) {
-        // 处理缓冲区中剩余的数据
+        // 流结束：未以 \n\n 终结的残包是截断数据（违反 SSE 语义），不解析。
+        // 之前会把它当完整事件 parse 并以"解析 SSE 数据失败"上抛，
+        // 被 use-session-detail 误当成真实发送错误。
         if (buffer.trim()) {
-          processSSEBuffer(buffer, onEvent, onError);
+          console.warn("[SSE] 丢弃流结束时未终结的残包", buffer.slice(0, 200));
         }
         break;
       }

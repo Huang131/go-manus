@@ -156,10 +156,12 @@ func (r *PostgresSessionRepository) GetByID(ctx context.Context, id string) (*mo
 // GetAll 获取所有会话 (按最新消息时间排序，排除已删除)
 func (r *PostgresSessionRepository) GetAll(ctx context.Context) ([]*model.Session, error) {
 	q := r.queryer()
+	// 上限保护：GetAll 服务于 SSE 会话流推送，无界全量会在会话数增长后拖垮轮询
 	query := `
 		SELECT ` + sessionSummaryColumns + `
 		FROM sessions WHERE deleted_at IS NULL
 		ORDER BY latest_message_at DESC NULLS LAST, created_at DESC, id DESC
+		LIMIT 500
 	`
 	rows, err := q.Query(ctx, query)
 	if err != nil {

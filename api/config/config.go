@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/go-playground/validator/v10"
@@ -75,10 +76,20 @@ type DatabaseConfig struct {
 	MaxIdleConns int    `mapstructure:"max_idle_conns" validate:"gte=0"`
 }
 
-// DSN 返回 PostgreSQL 连接字符串
+// DSN 返回 PostgreSQL 连接字符串。
+// 用 net/url 构造：user/password 含 @ : / % # 等特殊字符时必须转义，
+// Sprintf 拼接会导致连接串解析错乱。
 func (d *DatabaseConfig) DSN() string {
-	return fmt.Sprintf("postgres://%s:%s@%s:%d/%s?sslmode=disable",
-		d.User, d.Password, d.Host, d.Port, d.Database)
+	u := url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(d.User, d.Password),
+		Host:   fmt.Sprintf("%s:%d", d.Host, d.Port),
+		Path:   d.Database,
+	}
+	q := u.Query()
+	q.Set("sslmode", "disable")
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // RedisConfig Redis 配置

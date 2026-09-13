@@ -466,6 +466,9 @@ class FileService:
     ) -> FileSearchResult:
         """根据传递的文件路径+匹配规则查询文件内符合的内容"""
         matches, line_numbers = [], []
+        # ReDoS 防护：限制模式长度（无复杂度分析能力，至少挡住超长病态模式）
+        if len(regex) > 256:
+            raise BadRequestException("正则表达式过长（上限 256 字符）")
         try:
             pattern = re.compile(regex)
         except Exception as e:

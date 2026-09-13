@@ -81,8 +81,21 @@ export function useSessionDetail(
 
     // 监听事件更新会话状态
     if (evToAppend.type === 'step') {
-      const stepData = evToAppend.data as { status?: string }
-      if (stepData.status === 'running') {
+      // 后端 FullStepEvent 同时携带外层 status 与嵌套 step.status：
+      // 两种形状都读取，避免其中一种形状下状态机不翻转
+      const stepData = evToAppend.data as {
+        status?: string
+        step?: { status?: string }
+      }
+      const effectiveStepStatus = stepData.status ?? stepData.step?.status
+      if (effectiveStepStatus === 'running') {
+        setSession((prev) => prev ? { ...prev, status: 'running' } : null)
+      }
+      if (effectiveStepStatus === 'waiting') {
+        setSession((prev) => prev ? { ...prev, status: 'waiting' } : null)
+        setStreaming(false)
+      }
+    }
         setSession((prev) => prev ? { ...prev, status: 'running' } : null)
       }
       if (stepData.status === 'waiting') {

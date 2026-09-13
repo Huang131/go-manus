@@ -31,6 +31,8 @@ type RoutedLLM struct {
 	mu       sync.RWMutex
 	health   map[string]LLMRuntimeHealth
 	store    RuntimeHealthStore
+	// healthPersisting 记录在途的健康持久化（按 modelKey 去抖）
+	healthPersisting map[string]bool
 }
 
 var _ StreamingLLM = (*RoutedLLM)(nil)
@@ -95,11 +97,11 @@ func (r *RoutedLLM) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMRe
 		latency := time.Since(start)
 		if err == nil {
 			r.RecordSuccess(configKey(cfg), latency)
-			r.persistHealth(ctx, cfg)
+			r.persistHealthAsync(cfg)
 			return resp, nil
 		}
 		r.RecordFailure(configKey(cfg), err, latency)
-		r.persistHealth(ctx, cfg)
+		r.persistHealthAsync(cfg)
 		lastErr = err
 		if idx == 0 {
 			if pe, ok := err.(*llmcore.ProviderError); ok && pe.Fallbackable && canFallbackAfterToolUse(req) {
@@ -307,6 +309,47 @@ func (r *RoutedLLM) persistHealth(ctx context.Context, cfg *LLMRuntimeConfig) {
 			logger.String("model_id", cfg.Profile.ID),
 			logger.Err(err))
 	}
+}
+
+// persistHealthAsync 异步持久化健康快照：LLM 调用热路径不再同步写 DB。
+// 同一模型的并发持久化按 modelKey 去重（inFlight 集合），失败仅告警。
+func (r *RoutedLLM) persistHealthAsync(cfg *LLMRuntimeConfig) {
+	if cfg == nil || r.store == nil {
+		return
+	}
+	key := configKey(cfg)
+
+	r.mu.Lock()
+	if r.healthPersisting == nil {
+		r.healthPersisting = make(map[string]bool)
+	}
+	if r.healthPersisting[key] {
+		r.mu.Unlock()
+		return // 已有同模型的持久化在途，健康状态由后续调用继续更新
+	}
+	r.healthPersisting[key] = true
+	// 取 RecordSuccess/RecordFailure 刚写回的内存健康（cfg.Health 是 plan 时的旧快照）
+	health, ok := r.health[key]
+	id := cfg.Profile.ID
+	r.mu.Unlock()
+	if !ok {
+		return
+	}
+
+	go func() {
+		defer func() {
+			r.mu.Lock()
+			delete(r.healthPersisting, key)
+			r.mu.Unlock()
+		}()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := r.store.UpdateRuntimeHealth(ctx, id, runtimeHealthToModel(health)); err != nil {
+			logger.Warn("persist llm runtime health failed",
+				logger.String("model_id", id),
+				logger.Err(err))
+		}
+	}()
 }
 
 func (r *RoutedLLM) applyStoredHealth(catalog []*LLMRuntimeConfig) {

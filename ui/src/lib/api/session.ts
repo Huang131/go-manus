@@ -108,13 +108,7 @@ export const sessionApi = {
     };
   },
 
-  /**
-   * 获取会话详情
-   */
-  getSession: (sessionId: string): Promise<Session> => {
-    return get<Session>(`/sessions/${sessionId}`);
-  },
-
+  
   /**
    * 获取会话详情（含事件列表，与 chat 流式响应格式一致）
    * 若后端在 GET /sessions/:id 中返回 events 字段则一并返回
@@ -223,16 +217,7 @@ export const sessionApi = {
     return post<void>(`/sessions/${sessionId}/rename`, { title });
   },
 
-  /**
-   * 清除未读消息数
-   */
-  clearUnreadMessageCount: (sessionId: string): Promise<void> => {
-    return post<void>(
-      `/sessions/${sessionId}/clear-unread-message-count`,
-      {}
-    );
-  },
-
+  
   /**
    * 获取会话文件列表
    */

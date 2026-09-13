@@ -9,7 +9,6 @@ export {
   post,
   put,
   del,
-  createSSEConnection,
   createSSEStream,
   parseSSEStream,
   ApiError,

@@ -6,18 +6,7 @@ import { getToolKind, getFriendlyToolLabel, getArg } from '@/components/tool-use
 import type { ToolKind } from '@/components/tool-use/utils'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
-import {
-  Maximize2,
-  Monitor,
-  Play,
-  Terminal,
-  Globe,
-  Search,
-  FileSearch,
-  Wrench,
-  Bot,
-  Sparkles,
-} from 'lucide-react'
+import { Maximize2, Monitor, Play, Terminal, Globe, Search, FileSearch, Wrench, Bot, Sparkles, , X } from 'lucide-react'
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -355,7 +344,7 @@ export function ToolPreviewPanel({
             aria-label="关闭预览"
             className="cursor-pointer"
           >
-            <Maximize2 size={16} />
+            <X size={16} />
           </Button>
         </div>
         <div className="flex items-center gap-2 text-sm text-gray-600">

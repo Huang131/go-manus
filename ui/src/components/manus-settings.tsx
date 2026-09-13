@@ -493,7 +493,7 @@ function MCPSetting({servers, loading, onToggleEnabled, onDelete, onAdd}: MCPSet
             </Dialog>
           </FieldLegend>
           <FieldDescription className="text-sm">
-            模型上下文协议 (MCP) 通过集成外部工具来增强 Manus 的性能，例如私有域搜索、网页浏览、订餐、PPT 生成等任务。
+            A2A（Agent-to-Agent）协议用于对接外部智能体服务，配置后可在对话中调用其他 Agent 的能力。
           </FieldDescription>
 
           {/* 加载态 */}

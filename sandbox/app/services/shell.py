@@ -172,6 +172,15 @@ class ShellService:
             limit=1024 * 1024,  # 设置缓冲区大小并限制为1MB
         )
 
+    _CONSOLE_BUDGET_BYTES = 5 * 1024 * 1024  # 单会话控制台记录总预算（5MB）
+
+    def _trim_console_budget(self, shell) -> None:
+        """控制台记录总预算：超出时丢弃最旧记录，防长会话内存无限增长。"""
+        total = sum(len(r.output) for r in shell.console_records)
+        while shell.console_records and total > self._CONSOLE_BUDGET_BYTES:
+            removed = shell.console_records.pop(0)
+            total -= len(removed.output)
+
     async def _start_output_reader(self, session_id: str, process: asyncio.subprocess.Process) -> None:
         """启动协程以连续读取进程输出并将其存储到会话中"""
         # 1.ubuntu系统统一使用utf-8编码
@@ -201,6 +210,7 @@ class ShellService:
                             if shell.console_records:
                                 record = shell.console_records[-1]
                                 record.output = self._append_output(record.output, output)
+                                self._trim_console_budget(shell)
                     except Exception as e:
                         logger.error(f"读取进程输出时错误: {str(e)}")
                         break
@@ -219,6 +229,7 @@ class ShellService:
                 if shell.console_records:
                     record = shell.console_records[-1]
                     record.output = self._append_output(record.output, tail)
+                    self._trim_console_budget(shell)
 
         logger.debug(f"会话 {session_id} 的输出读取器已完成")
 
@@ -600,6 +611,7 @@ class ShellService:
             if shell.console_records:
                 record = shell.console_records[-1]
                 record.output = self._append_output(record.output, log_text)
+                self._trim_console_budget(shell)
 
             # 9.记录日志并返回写入结果
             logger.info("成功向子进程写入数据")

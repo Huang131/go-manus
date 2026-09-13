@@ -473,9 +473,19 @@ func TestRoutedLLM_PersistRuntimeHealth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
-	got, ok := store.updates["model-1"]
-	if !ok {
-		t.Fatal("expected runtime health to be persisted")
+	// persistHealth 已异步化（去抖）：轮询等待在途持久化完成
+	var got modelRuntimeHealthSnapshot
+	var ok bool
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		got, ok = store.updates["model-1"]
+		if ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expected runtime health to be persisted (async)")
+			time.Sleep(10 * time.Millisecond)
+		}
 	}
 	if got.status != model.HealthStateHealthy {
 		t.Fatalf("status = %s, want healthy", got.status)

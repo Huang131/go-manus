@@ -184,10 +184,22 @@ class SupervisorService:
             raise AppException(f"获取进程信息失败: {str(e)}")
 
     async def stop_all_processes(self) -> SupervisorActionResult:
-        """停止supervisor管理的所有进程"""
+        """停止除 app 外的全部受管进程。
+
+        supervisor 的 stopAllProcesses 会连本 HTTP 服务一起停（响应发不回去），
+        因此逐个停止、排除 app 自身，与 restart 的排除逻辑对称。
+        """
         try:
-            result = await self._call_rpc(self.server.supervisor.stopAllProcesses)
-            return SupervisorActionResult(status="stopped", result=result)
+            processes = await self._call_rpc(self.server.supervisor.getAllProcessInfo)
+            stopped = []
+            for process in processes:
+                name = process.get("name")
+                if name == "app":
+                    continue
+                if process.get("statename", "RUNNING") == "RUNNING":
+                    await self._call_rpc(self.server.supervisor.stopProcess, name, True)
+                    stopped.append(name)
+            return SupervisorActionResult(status="stopped", result={"stopped": stopped})
         except Exception as e:
             logger.error(f"停止supervisor所有进程服务失败: {str(e)}")
             raise AppException(f"停止supervisor所有进程服务失败: {str(e)}")
