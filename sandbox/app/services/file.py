@@ -351,30 +351,25 @@ class FileService:
             sudo: bool = False,
     ) -> FileReplaceResult:
         """根据传递的数据替换文件内指定的内容"""
-        # 1.调用服务获取对应的文件内容
-        file_read_result = await self.read_file(filepath=filepath, sudo=sudo, max_length=None)
-        if file_read_result.truncated:
-            raise BadRequestException(
-                f"文件超过可替换上限 {MAX_READ_BYTES // (1024 * 1024)} MiB"
-            )
-        content = file_read_result.content
+        # 读取和写回必须处于同一把锁内，否则并发 append 可能被旧快照覆盖。
+        async with self._get_write_lock(filepath):
+            file_read_result = await self.read_file(filepath=filepath, sudo=sudo, max_length=None)
+            if file_read_result.truncated:
+                raise BadRequestException(
+                    f"文件超过可替换上限 {MAX_READ_BYTES // (1024 * 1024)} MiB"
+                )
+            content = file_read_result.content
+            replaced_count = content.count(old_str)
+            if replaced_count == 0:
+                return FileReplaceResult(filepath=filepath, replaced_count=0)
 
-        # 2.计算old_str出现的次数，只有出现次数>0才需要替换
-        replaced_count = content.count(old_str)
-        if replaced_count == 0:
+            new_content = content.replace(old_str, new_str)
+            if len(new_content.encode("utf-8")) > MAX_WRITE_BYTES:
+                raise BadRequestException(
+                    f"替换后的文件不能超过 {MAX_WRITE_BYTES // (1024 * 1024)} MiB"
+                )
+            await self._write_file_locked(filepath, new_content, False, False, False, sudo)
             return FileReplaceResult(filepath=filepath, replaced_count=replaced_count)
-
-        # 3.替换旧内容
-        new_content = content.replace(old_str, new_str)
-
-        # 4.将替换后的新内容写入到文件中
-        await self.write_file(
-            filepath=filepath,
-            content=new_content,
-            sudo=sudo,
-        )
-
-        return FileReplaceResult(filepath=filepath, replaced_count=replaced_count)
 
     async def search_in_file(
             self,

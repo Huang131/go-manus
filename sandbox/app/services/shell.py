@@ -49,6 +49,20 @@ class ShellService:
         self.session_locks: Dict[str, asyncio.Lock] = {}
         self.session_last_access: Dict[str, float] = {}
 
+    async def shutdown(self) -> None:
+        """关闭所有会话进程和输出读取器，避免应用重启遗留子进程。"""
+        for session_id in list(self.active_shells):
+            try:
+                await self.kill_process(session_id)
+            except NotFoundException:
+                continue
+            except Exception:
+                logger.exception("关闭 Shell 会话失败: %s", session_id)
+        self.active_shells.clear()
+        self.reader_tasks.clear()
+        self.session_last_access.clear()
+        self.session_locks.clear()
+
     def _get_session_lock(self, session_id: str) -> asyncio.Lock:
         """为同一会话复用锁，串行化进程切换和输入写入。"""
         return self.session_locks.setdefault(session_id, asyncio.Lock())
@@ -268,6 +282,8 @@ class ShellService:
     async def wait_process(self, session_id: str, seconds: Optional[int] = None) -> ShellWaitResult:
         """等待指定会话当前进程退出，等待过程不占用会话锁。"""
         self._cleanup_stale_sessions()
+        if session_id not in self.active_shells:
+            raise NotFoundException(f"Shell会话不存在: {session_id}")
         async with self._get_session_lock(session_id):
             shell = self.active_shells.get(session_id)
             if shell is None:
@@ -294,8 +310,8 @@ class ShellService:
             if reader_task and not reader_task.done():
                 try:
                     await asyncio.wait_for(asyncio.shield(reader_task), timeout=2)
-                except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
-                    pass
+                except asyncio.TimeoutError:
+                    logger.warning("等待输出读取器超时: %s", session_id)
 
             # 4.记录日志并返回等待结果
             logger.info(f"进程已完成, 返回代码为: {process.returncode}")
@@ -304,6 +320,8 @@ class ShellService:
             # 记录日志并抛出BadRequest异常
             logger.warning(f"Shell会话进程等待超时: {seconds}s")
             raise BadRequestException(f"Shell会话进程等待超时: {seconds}s")
+        except (BadRequestException, NotFoundException):
+            raise
         except Exception as e:
             # 记录日志并抛出AppException
             logger.error(f"Shell会话进程等待过程出错: {str(e)}")
@@ -312,6 +330,8 @@ class ShellService:
     async def read_shell_output(self, session_id: str, console: bool = False) -> ShellReadResult:
         """按会话串行读取输出。"""
         self._cleanup_stale_sessions()
+        if session_id not in self.active_shells:
+            raise NotFoundException(f"Shell会话不存在: {session_id}")
         async with self._get_session_lock(session_id):
             return self._read_shell_output_unlocked(session_id, console)
 
@@ -444,6 +464,8 @@ class ShellService:
                 self._start_output_reader_task(session_id, process)
 
             return process
+        except (BadRequestException, NotFoundException):
+            raise
         except Exception as e:
             # 19.执行过程中出现异常并记录日志后返回自定义异常
             logger.error(f"命令执行失败: {str(e)}", exc_info=True)
@@ -460,6 +482,8 @@ class ShellService:
     ) -> ShellWriteResult:
         """按会话串行写入输入，避免与命令切换并发执行。"""
         self._cleanup_stale_sessions()
+        if session_id not in self.active_shells:
+            raise NotFoundException(f"Shell会话不存在: {session_id}")
         async with self._get_session_lock(session_id):
             return await self._write_shell_input_unlocked(session_id, input_text, press_enter)
 
@@ -518,6 +542,8 @@ class ShellService:
             # 10.捕获编码异常
             logger.error(f"编码错误: {str(e)}")
             raise AppException(f"编码错误: {str(e)}")
+        except (BadRequestException, NotFoundException):
+            raise
         except Exception as e:
             # 11.捕获通用异常
             logger.error(f"向子进程写入数据出错: {str(e)}")
@@ -526,6 +552,8 @@ class ShellService:
     async def kill_process(self, session_id: str) -> ShellKillResult:
         """获取进程后在锁外终止，保证终止期间仍可读取会话输出。"""
         self._cleanup_stale_sessions()
+        if session_id not in self.active_shells:
+            raise NotFoundException(f"Shell会话不存在: {session_id}")
         async with self._get_session_lock(session_id):
             shell = self.active_shells.get(session_id)
             if shell is None:

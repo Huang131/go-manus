@@ -32,9 +32,24 @@
 | POST | `/api/file/write-file` | 写入文件 |
 | POST | `/api/file/upload-file` | 上传文件 |
 | GET | `/api/file/download-file` | 下载文件 |
+| POST | `/api/file/replace-in-file` | 替换文件内容 |
+| POST | `/api/file/search-in-file` | 搜索文件内容 |
+| POST | `/api/file/find-files` | 查找文件 |
+| POST | `/api/file/check-file-exists` | 检查文件是否存在 |
+| DELETE | `/api/file/delete-file` | 删除文件 |
 | POST | `/api/shell/exec-command` | 执行命令 |
 | POST | `/api/shell/read-shell-output` | 读取 Shell 输出 |
+| POST | `/api/shell/wait-process` | 等待 Shell 进程 |
+| POST | `/api/shell/write-shell-input` | 向 Shell 写入输入 |
+| POST | `/api/shell/kill-process` | 终止 Shell 进程 |
 | GET | `/api/supervisor/status` | 获取进程状态 |
+| POST | `/api/supervisor/stop-all-processes` | 停止所有子进程 |
+| POST | `/api/supervisor/shutdown` | 关闭 Supervisor |
+| POST | `/api/supervisor/restart` | 重启非 API 子进程 |
+| POST | `/api/supervisor/activate-timeout` | 激活自动关闭超时 |
+| POST | `/api/supervisor/extend-timeout` | 延长自动关闭超时 |
+| POST | `/api/supervisor/cancel-timeout` | 取消自动关闭超时 |
+| GET | `/api/supervisor/timeout-status` | 获取超时状态 |
 
 文件接口默认限制单次上传 100 MiB、普通写入 10 MiB、读取 100 MiB；搜索和文件查找最多返回 10,000 条结果，超过上限时响应中的 `truncated` 为 `true`。
 

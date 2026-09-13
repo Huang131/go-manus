@@ -70,12 +70,30 @@ class SupervisorService:
         self.shutdown_time = None
         self.shutdown_timer = None
         self._expand_enabled = True  # 是否自动保活(每调用一次接口就增加时间)
+        self._state_lock = asyncio.Lock()
+        self._rpc_lock = asyncio.Lock()
 
         # 3.检测是否配置了自动销毁
         if settings.server_timeout_minutes is not None:
             # 4.设置销毁时间+定时器
             self.shutdown_time = datetime.now() + timedelta(minutes=settings.server_timeout_minutes)
             self._setup_timer(settings.server_timeout_minutes)
+
+    def _get_state_lock(self) -> asyncio.Lock:
+        """懒加载状态锁，兼容测试中通过 __new__ 构造的服务实例。"""
+        lock = getattr(self, "_state_lock", None)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._state_lock = lock
+        return lock
+
+    def _get_rpc_lock(self) -> asyncio.Lock:
+        """复用 RPC 锁，避免多个线程并发使用同一 XML-RPC 连接。"""
+        lock = getattr(self, "_rpc_lock", None)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._rpc_lock = lock
+        return lock
 
     @property
     def expand_enabled(self) -> bool:
@@ -107,7 +125,19 @@ class SupervisorService:
         try:
             # 3.获取事件循环并添加任务
             loop = asyncio.get_event_loop()
-            self.shutdown_task = loop.create_task(shutdown_after_timeout())
+            task = loop.create_task(shutdown_after_timeout())
+            self.shutdown_task = task
+
+            def on_timer_done(completed_task: asyncio.Task) -> None:
+                if self.shutdown_task is completed_task:
+                    self.shutdown_task = None
+                if completed_task.cancelled():
+                    return
+                error = completed_task.exception()
+                if error is not None:
+                    logger.error("Supervisor 自动关闭任务失败: %s", error)
+
+            task.add_done_callback(on_timer_done)
         except Exception as _:
             # 4.如果事件循环失败则创建一个新的线程来执行定时器
             if hasattr(self, "shutdown_timer") and self.shutdown_timer:
@@ -132,11 +162,11 @@ class SupervisorService:
             logger.error(f"连接Supervisor服务失败: {str(e)}")
             raise BadRequestException(f"连接Supervisor服务失败: {str(e)}")
 
-    @classmethod
-    async def _call_rpc(cls, method, *args) -> Any:
+    async def _call_rpc(self, method, *args) -> Any:
         """根据传递的方法+参数调用rpc方法"""
         try:
-            return await asyncio.to_thread(method, *args)
+            async with self._get_rpc_lock():
+                return await asyncio.to_thread(method, *args)
         except Exception as e:
             logger.error(f"RPC方法调用失败: {str(e)}")
             raise BadRequestException(f"RPC方法调用失败: {str(e)}")
@@ -198,20 +228,17 @@ class SupervisorService:
         if timeout_minutes <= 0:
             raise BadRequestException("超时时间必须大于0分钟")
 
-        # 2.更新超时配置
-        self.timeout_active = True
-        self.shutdown_time = datetime.now() + timedelta(minutes=timeout_minutes)
-
-        # 3.创建一个新的定时器
-        self._setup_timer(timeout_minutes)
-
-        return SupervisorTimeout(
-            status="timeout_activated",
-            active=True,
-            shutdown_time=self.shutdown_time.isoformat(),
-            timeout_minutes=timeout_minutes,
-            remaining_seconds=(self.shutdown_time - datetime.now()).total_seconds(),
-        )
+        async with self._get_state_lock():
+            self.timeout_active = True
+            self.shutdown_time = datetime.now() + timedelta(minutes=timeout_minutes)
+            self._setup_timer(timeout_minutes)
+            return SupervisorTimeout(
+                status="timeout_activated",
+                active=True,
+                shutdown_time=self.shutdown_time.isoformat(),
+                timeout_minutes=timeout_minutes,
+                remaining_seconds=(self.shutdown_time - datetime.now()).total_seconds(),
+            )
 
     async def extend_timeout(self, minutes: Optional[int] = 3) -> SupervisorTimeout:
         """传递指定的时长，延长超时销毁的时间，单默认延长3分钟"""
@@ -220,67 +247,50 @@ class SupervisorService:
             raise BadRequestException("超时时间未配置, 请核实后重试")
         if minutes <= 0:
             raise BadRequestException("延长时间必须大于0分钟")
-        # 无激活的超时定时器时直接按给定时长激活，避免 None - now 抛 TypeError
-        if self.shutdown_time is None:
+        # 无激活的超时定时器时直接按给定时长激活，避免 None - now 抛 TypeError。
+        if getattr(self, "shutdown_time", None) is None:
             return await self.activate_timeout(minutes)
-        remaining = self.shutdown_time - datetime.now()
-        timeout_minutes = round(max(0, remaining.total_seconds()) / 60) + minutes
-
-        # 2.更新超时配置
-        self.timeout_active = True
-        self.shutdown_time = datetime.now() + timedelta(minutes=timeout_minutes)
-
-        # 3.创建一个新的定时器
-        self._setup_timer(timeout_minutes)
-
-        return SupervisorTimeout(
-            status="timeout_extended",
-            active=True,
-            shutdown_time=self.shutdown_time.isoformat(),
-            timeout_minutes=timeout_minutes,
-            remaining_seconds=(self.shutdown_time - datetime.now()).total_seconds(),
-        )
+        async with self._get_state_lock():
+            remaining = self.shutdown_time - datetime.now()
+            timeout_minutes = round(max(0, remaining.total_seconds()) / 60) + minutes
+            self.timeout_active = True
+            self.shutdown_time = datetime.now() + timedelta(minutes=timeout_minutes)
+            self._setup_timer(timeout_minutes)
+            return SupervisorTimeout(
+                status="timeout_extended",
+                active=True,
+                shutdown_time=self.shutdown_time.isoformat(),
+                timeout_minutes=timeout_minutes,
+                remaining_seconds=(self.shutdown_time - datetime.now()).total_seconds(),
+            )
 
     async def cancel_timeout(self) -> SupervisorTimeout:
         """取消超时销毁设置"""
-        # 1.判断是否设置了超时销毁
-        if not self.timeout_active:
-            return SupervisorTimeout(status="no_timeout_active", active=False)
-
-        # 2.取消销毁任务
-        if self.shutdown_task:
-            try:
+        async with self._get_state_lock():
+            if not self.timeout_active:
+                return SupervisorTimeout(status="no_timeout_active", active=False)
+            if self.shutdown_task:
                 self.shutdown_task.cancel()
                 self.shutdown_task = None
-            except Exception as e:
-                logger.warning(f"取消shutdown任务失败: {str(e)}")
-
-        # 3.同步检查是否存在定时器
-        if hasattr(self, 'shutdown_timer') and self.shutdown_timer:
-            self.shutdown_timer.cancel()
-            self.shutdown_timer = None
-
-        # 4.更新超时配置
-        self.timeout_active = False
-        self.shutdown_time = None
-        self._expand_enabled = True
-
-        return SupervisorTimeout(status="timeout_cancelled", active=False)
+            if getattr(self, "shutdown_timer", None):
+                self.shutdown_timer.cancel()
+                self.shutdown_timer = None
+            self.timeout_active = False
+            self.shutdown_time = None
+            self._expand_enabled = True
+            return SupervisorTimeout(status="timeout_cancelled", active=False)
 
     async def get_timeout_status(self) -> SupervisorTimeout:
         """获取当前supervisor的超时状态"""
-        # 1.判断是否开启超时销毁功能
-        if not self.timeout_active:
-            return SupervisorTimeout(active=False)
-
-        # 2.统计剩余秒数
-        remaining_seconds = 0
-        if self.shutdown_time:
-            remaining = self.shutdown_time - datetime.now()
-            remaining_seconds = max(0, remaining.total_seconds())
-
-        return SupervisorTimeout(
-            active=self.timeout_active,
-            shutdown_time=self.shutdown_time.isoformat() if self.shutdown_time else None,
-            remaining_seconds=remaining_seconds
-        )
+        async with self._get_state_lock():
+            if not self.timeout_active:
+                return SupervisorTimeout(active=False)
+            remaining_seconds = 0
+            if self.shutdown_time:
+                remaining = self.shutdown_time - datetime.now()
+                remaining_seconds = max(0, remaining.total_seconds())
+            return SupervisorTimeout(
+                active=self.timeout_active,
+                shutdown_time=self.shutdown_time.isoformat() if self.shutdown_time else None,
+                remaining_seconds=remaining_seconds
+            )

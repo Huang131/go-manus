@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from app.interfaces.errors.exceptions import BadRequestException
+from app.interfaces.errors.exceptions import BadRequestException, NotFoundException
 from app.interfaces.schemas.file import FileWriteRequest
 from app.interfaces.schemas.shell import ShellExecuteRequest, ShellWaitRequest
 from app.models.file import FileReadResult
@@ -24,6 +24,14 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(elapsed, 7)
         kill_result = await service.kill_process("test-session")
         self.assertIsNotNone(kill_result.returncode)
+
+    async def test_shell_shutdown_terminates_active_processes(self):
+        service = ShellService()
+        await service.exec_command("shutdown-session", tempfile.gettempdir(), "sleep 30")
+        await service.shutdown()
+        self.assertEqual(service.active_shells, {})
+        self.assertEqual(service.reader_tasks, {})
+        self.assertEqual(service.session_locks, {})
 
     async def test_read_output_is_not_blocked_by_process_wait(self):
         service = ShellService()
@@ -97,6 +105,13 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         process.communicate.assert_awaited_once_with(b"hello")
 
+    async def test_write_input_preserves_bad_request_error(self):
+        service = ShellService()
+        await service.exec_command("write-error-session", tempfile.gettempdir(), "exit 0")
+        await service.wait_process("write-error-session", seconds=2)
+        with self.assertRaises(BadRequestException):
+            await service.write_shell_input("write-error-session", "input", True)
+
     async def test_write_reports_utf8_byte_count(self):
         with tempfile.TemporaryDirectory() as directory:
             filepath = str(Path(directory, "utf8.txt"))
@@ -126,6 +141,18 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
             )
             content = Path(filepath).read_text(encoding="utf-8")
         self.assertEqual(sorted(content), ["a", "b"])
+
+    async def test_replace_and_append_preserve_both_operations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            filepath = str(Path(directory, "replace-append.txt"))
+            Path(filepath).write_text("old", encoding="utf-8")
+            service = FileService()
+            await asyncio.gather(
+                service.replace_in_file(filepath, "old", "new"),
+                service.write_file(filepath, "-append", append=True),
+            )
+            content = Path(filepath).read_text(encoding="utf-8")
+        self.assertEqual(content, "new-append")
 
     async def test_search_matches_content_beyond_line_start(self):
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as file:
@@ -267,6 +294,40 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(file_service_module, "MAX_READ_BYTES", 8):
             with self.assertRaises(BadRequestException):
                 await FileService().replace_in_file(filepath, "content", "changed")
+
+    async def test_replace_rejects_oversized_result(self):
+        import app.services.file as file_service_module
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as file:
+            file.write("old")
+            filepath = file.name
+        self.addCleanup(Path(filepath).unlink, missing_ok=True)
+        with patch.object(file_service_module, "MAX_WRITE_BYTES", 2):
+            with self.assertRaises(BadRequestException):
+                await FileService().replace_in_file(filepath, "old", "larger")
+
+    async def test_unknown_shell_session_does_not_register_lock(self):
+        service = ShellService()
+        with self.assertRaises(NotFoundException):
+            await service.read_shell_output("missing-session")
+        self.assertNotIn("missing-session", service.session_locks)
+
+    async def test_supervisor_timeout_updates_are_serialized(self):
+        from app.services.supervisor import SupervisorService
+
+        service = SupervisorService.__new__(SupervisorService)
+        service.timeout_active = False
+        service.shutdown_time = None
+        service.shutdown_task = None
+        service.shutdown_timer = None
+        service._setup_timer = lambda minutes: None
+        await asyncio.gather(
+            service.activate_timeout(1),
+            service.activate_timeout(2),
+        )
+        status = await service.get_timeout_status()
+        self.assertTrue(status.active)
+        self.assertGreater(status.remaining_seconds, 0)
 
     async def test_find_files_rejects_file_as_directory(self):
         with tempfile.NamedTemporaryFile() as file:

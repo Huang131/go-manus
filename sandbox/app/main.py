@@ -16,6 +16,7 @@ from app.core.config import get_settings
 from app.core.middleware import auto_extend_timeout_middleware
 from app.interfaces.endpoints.routes import router
 from app.interfaces.errors.exception_handler import register_exception_handlers
+from app.interfaces.service_dependencies import get_shell_service
 
 
 def setup_logging() -> None:
@@ -60,6 +61,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         # 3.应用结束后的操作
+        await get_shell_service().shutdown()
         logger.info("Manus沙箱关闭成功")
 
 
