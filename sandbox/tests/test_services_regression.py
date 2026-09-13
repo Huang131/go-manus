@@ -77,7 +77,7 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
             try:
                 os.chdir(directory)
                 with patch("app.services.file.os.makedirs") as makedirs:
-                    result = await FileService.write_file("work.txt", "content")
+                    result = await FileService().write_file("work.txt", "content")
             finally:
                 os.chdir(previous_directory)
             self.assertEqual(result.bytes_written, len("content"))
@@ -88,7 +88,7 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         process.returncode = 0
         process.communicate.return_value = (b"", b"")
         with patch("app.services.file.asyncio.create_subprocess_exec", return_value=process) as create:
-            result = await FileService.write_file("/tmp/path with 'quote'.txt", "hello", sudo=True)
+            result = await FileService().write_file("/tmp/path with 'quote'.txt", "hello", sudo=True)
         self.assertEqual(result.bytes_written, len("hello"))
         create.assert_awaited_once_with(
             "sudo", "tee", "/tmp/path with 'quote'.txt",
@@ -100,7 +100,7 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_write_reports_utf8_byte_count(self):
         with tempfile.TemporaryDirectory() as directory:
             filepath = str(Path(directory, "utf8.txt"))
-            result = await FileService.write_file(filepath, "你好")
+            result = await FileService().write_file(filepath, "你好")
         self.assertEqual(result.bytes_written, len("你好".encode("utf-8")))
 
     async def test_append_copies_existing_file_in_chunks(self):
@@ -110,11 +110,22 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
             filepath = str(Path(directory, "append.txt"))
             Path(filepath).write_text("old-content", encoding="utf-8")
             with patch.object(file_service_module.shutil, "copyfileobj", wraps=file_service_module.shutil.copyfileobj) as copy:
-                result = await FileService.write_file(filepath, "-new", append=True)
+                result = await FileService().write_file(filepath, "-new", append=True)
             content = Path(filepath).read_text(encoding="utf-8")
         self.assertEqual(result.bytes_written, 4)
         self.assertEqual(content, "old-content-new")
         copy.assert_called_once()
+
+    async def test_concurrent_append_preserves_both_writes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            filepath = str(Path(directory, "concurrent.txt"))
+            service = FileService()
+            await asyncio.gather(
+                service.write_file(filepath, "a", append=True),
+                service.write_file(filepath, "b", append=True),
+            )
+            content = Path(filepath).read_text(encoding="utf-8")
+        self.assertEqual(sorted(content), ["a", "b"])
 
     async def test_search_matches_content_beyond_line_start(self):
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as file:

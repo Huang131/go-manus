@@ -13,7 +13,7 @@ import os.path
 import re
 import shutil
 import tempfile
-from typing import Iterator, Optional
+from typing import Dict, Iterator, Optional
 
 from fastapi import UploadFile
 
@@ -50,6 +50,12 @@ class FileService:
     def __init__(self) -> None:
         # 服务无状态，保留显式构造函数便于 FastAPI 依赖注入和后续扩展。
         super().__init__()
+        # 仅串行化同一文件的写入，不影响不同文件并发处理。
+        self._write_locks: Dict[str, asyncio.Lock] = {}
+
+    def _get_write_lock(self, filepath: str) -> asyncio.Lock:
+        """获取目标文件锁，避免并发 append 读取同一旧快照后互相覆盖。"""
+        return self._write_locks.setdefault(filepath, asyncio.Lock())
 
     @staticmethod
     def _ensure_regular_file(filepath: str) -> None:
@@ -245,9 +251,8 @@ class FileService:
                 parts.append(addition)
         return "".join(parts) + ("(truncated)" if truncated else ""), truncated
 
-    @classmethod
     async def write_file(
-            cls,
+            self,
             filepath: str,
             content: str,
             append: bool = False,
@@ -256,6 +261,17 @@ class FileService:
             sudo: bool = False,
     ) -> FileWriteResult:
         """根据传递的文件路径+内容向指定文件写入内容"""
+        lock = self._get_write_lock(filepath)
+        async with lock:
+            return await self._write_file_locked(
+                filepath, content, append, leading_newline, trailing_newline, sudo
+            )
+
+    async def _write_file_locked(
+            self, filepath: str, content: str, append: bool,
+            leading_newline: bool, trailing_newline: bool, sudo: bool,
+    ) -> FileWriteResult:
+        """在文件锁内执行完整写入，保证 append 的读取、复制和替换不可交错。"""
         temp_path = None
         try:
             # 1.组装实际写入的内容
