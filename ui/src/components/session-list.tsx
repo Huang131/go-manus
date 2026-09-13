@@ -41,10 +41,11 @@ export function SessionList() {
     const success = await renameSession(pendingRenameSession.id, title)
     if (success) {
       toast.success(`已重命名为「${title}」`)
+      setPendingRenameSession(null)
     } else {
+      // 失败时保留弹窗与输入，用户可直接重试
       toast.error('重命名失败，请重试')
     }
-    setPendingRenameSession(null)
   }, [pendingRenameSession, renameSession])
 
   const handleRenameDialogOpenChange = useCallback((open: boolean) => {

@@ -83,6 +83,14 @@ func (a *BaseAgent) SetEventCh(ch chan<- model.BaseEvent) {
 // emitEvent 向事件通道发送事件，通道未注入时静默跳过。
 // 由 Flow 保证事件通道的消费方（task_runner）持续消费，此处阻塞发送安全。
 func (a *BaseAgent) emitEvent(ctx context.Context, ev model.BaseEvent) {
+	// 事件通道可能已被 flow 收尾关闭（如 shell watcher 与 flow 生命周期不同步），
+	// send-on-closed-channel 会 panic，这里兜底 recover 保证 watcher 等后台
+	// goroutine 的误发不会杀死整个进程。
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Warn("emitEvent 向已关闭的事件通道发送被忽略", logger.Any("panic", r))
+		}
+	}()
 	if a.eventCh == nil {
 		return
 	}
@@ -606,6 +614,16 @@ func (a *BaseAgent) GetLLM() external.LLM {
 // shellOutputWatchTimeout 单条长命令输出 watch 的最长时长。
 const shellOutputWatchTimeout = 15 * time.Minute
 
+// StopShellWatch 停止正在进行的 shell 输出 watch。
+// flow 到达终态/任务收尾时必须调用：事件通道随即关闭，
+// 存活的 watcher 向其发送会触发 send-on-closed-channel panic。
+func (a *BaseAgent) StopShellWatch() {
+	if a.shellWatchCancel != nil {
+		a.shellWatchCancel()
+		a.shellWatchCancel = nil
+	}
+}
+
 // startShellWatch 在 shell exec 返回 running 后启动后台轮询：
 // 周期性读取沙箱控制台记录并以 ShellOutputEvent 推送增量快照，
 // 进程结束后推一次最终快照再退出。新 watch 会顶掉旧 watch。
@@ -618,7 +636,10 @@ func (a *BaseAgent) startShellWatch(ctx context.Context, sandbox external.Sandbo
 	a.shellWatchCancel = cancel
 
 	go func() {
-		defer cancel()
+		defer func() {
+			cancel()
+			a.shellWatchCancel = nil
+		}()
 		deadline := time.Now().Add(shellOutputWatchTimeout)
 		var lastSnap string
 		for {

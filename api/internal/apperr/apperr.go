@@ -1,6 +1,7 @@
 package apperr
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 )
@@ -81,6 +82,10 @@ func (e *Error) Unwrap() error {
 	}
 	return e.Cause
 }
+
+// ErrSessionNotFound 会话写操作命中 0 行（不存在或已软删除）的哨兵错误，
+// response 层据此映射 404。
+var ErrSessionNotFound = errors.New("session not found")
 
 // Is 只比较错误类型，方便 errors.Is 统一判断。
 func (e *Error) Is(target error) bool {

@@ -26,6 +26,8 @@ import { Button } from '@/components/ui/button'
 export interface SessionDetailViewProps {
   sessionId: string
   initialMessage?: string
+  /** 首页跳转携带的初始模型选择 */
+  initialModelId?: string
   initialAttachments?: string[]
   hasInitialMessage?: boolean
 }
@@ -50,7 +52,7 @@ function findLatestTool(timeline: TimelineItem[]): ToolEvent | null {
   return null
 }
 
-export function SessionDetailView({ sessionId, initialMessage, initialAttachments, hasInitialMessage }: SessionDetailViewProps) {
+export function SessionDetailView({ sessionId, initialMessage, initialAttachments, initialModelId, hasInitialMessage }: SessionDetailViewProps) {
   const router = useRouter()
   const chatInputRef = useRef<ChatInputRef>(null)
   const {
@@ -213,7 +215,10 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
     ) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setInitialMessageSentSessionId(sessionId)
-      sendMessage(initialMessage, initialAttachments || [])
+      if (initialModelId) {
+        handleModelSelect(initialModelId)
+      }
+      sendMessage(initialMessage, initialAttachments || [], initialModelId)
         .then(() => {
           setTimeout(() => {
             router.replace(`/sessions/${sessionId}`)

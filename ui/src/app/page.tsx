@@ -17,7 +17,7 @@ export default function Page() {
     chatInputRef.current?.setInputText(question)
   }
 
-  const handleSend = async (message: string, files: FileInfo[]) => {
+  const handleSend = async (message: string, files: FileInfo[], modelId?: string) => {
     if (sending) return
 
     setSending(true)
@@ -29,7 +29,7 @@ export default function Page() {
 
       // 2. 将消息数据编码到 URL，在详情页发送
       const attachments = files.map((file) => file.id)
-      const payload = JSON.stringify({ message, attachments })
+      const payload = JSON.stringify({ message, attachments, model_id: modelId })
       // 使用 Base64 编码避免 URL 特殊字符问题
       const encoded = btoa(encodeURIComponent(payload))
       

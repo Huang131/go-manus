@@ -379,14 +379,19 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
 
         let targetCallId: string | null = null;
         let targetTool: ToolEvent | null = null;
+        // shell 工具通常内嵌在 running step 的 tools 中：从后往前同时扫描
+        // 独立工具项与 step.tools，定位该 session 最近的 shell 工具
         for (let i = list.length - 1; i >= 0 && !targetCallId; i--) {
           const item = list[i];
-          if (item.kind !== "tool") continue;
-          const d = item.data;
-          const sid = (d.args as { session_id?: string })?.session_id;
-          if (sid === payload.session_id && d.function.startsWith("shell")) {
-            targetCallId = (d as { tool_call_id?: string }).tool_call_id ?? null;
-            targetTool = d;
+          const candidates: ToolEvent[] =
+            item.kind === "tool" ? [item.data] : item.kind === "step" ? item.tools : [];
+          for (const d of candidates) {
+            const sid = (d.args as { session_id?: string })?.session_id;
+            if (sid === payload.session_id && d.function.startsWith("shell")) {
+              targetCallId = (d as { tool_call_id?: string }).tool_call_id ?? null;
+              targetTool = d;
+              break;
+            }
           }
         }
         if (!targetCallId || !targetTool) break;

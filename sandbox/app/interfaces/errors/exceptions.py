@@ -28,8 +28,11 @@ class AppException(Exception):
         self.status_code = status_code
         self.data = data
 
-        # 2.记录日志并调用父类构造函数
-        logger.error(f"沙箱发生错误: {msg} (code: {status_code})")
+        # 2.记录日志并调用父类构造函数。
+        # 4xx 属预期业务失败（如 wait-process 轮询超时被高频触发），降为 WARNING
+        # 避免 api 侧 1.5s 一次的 shell 输出轮询刷出 ERROR 日志洪水。
+        log_fn = logger.warning if 400 <= status_code < 500 else logger.error
+        log_fn(f"沙箱发生错误: {msg} (code: {status_code})")
         super().__init__(self.msg)
 
 

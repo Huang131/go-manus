@@ -166,8 +166,13 @@ func (s *DefaultSessionService) RenameSession(ctx context.Context, id string, ti
 // 之所以保留 sessionID 入参，是为了对齐 mooc-manus 的 get_vnc_url(session_id) 接口契约
 // （即使 go-manus 当前使用单一共享 sandbox，仍然校验会话存在）。
 func (s *DefaultSessionService) GetVNCURL(ctx context.Context, sessionID string) (string, error) {
-	if _, err := s.repo.GetByID(ctx, sessionID); err != nil {
+	session, err := s.repo.GetByID(ctx, sessionID)
+	if err != nil {
 		return "", err
+	}
+	// repo 对不存在的会话返回 (nil, nil)：不校验会让任意 sessionID 建立 VNC 代理
+	if session == nil {
+		return "", apperr.NotFound("会话不存在: " + sessionID)
 	}
 	if s.sandboxAddress == "" {
 		return "", apperr.FailedPrecondition("sandbox 地址未配置")

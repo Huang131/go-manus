@@ -253,12 +253,28 @@ class ShellService:
         console_records = self.active_shells[session_id].console_records
         clean_console_records = []
 
-        # 3.执行循环处理所有记录输出
+        # 3.逐条清洗输出，带增量缓存：输出只追加时仅清洗尾部新增部分，
+        # shell 输出高频轮询（api 侧 watcher 1.5s/次）不再做全量重算。
         for console_record in console_records:
+            output = console_record.output
+            cached_raw = console_record._clean_cache_raw
+            cached_out = console_record._clean_cache_out
+            if output == cached_raw:
+                clean_output = cached_out
+            elif cached_raw and output.startswith(cached_raw):
+                clean_output = cached_out + self._remove_ansi_escape_codes(output[len(cached_raw):])
+                console_record._clean_cache_raw = output
+                console_record._clean_cache_out = clean_output
+            else:
+                # 首次清洗或输出被截断/重置（前缀不再匹配）：全量清洗
+                clean_output = self._remove_ansi_escape_codes(output)
+                console_record._clean_cache_raw = output
+                console_record._clean_cache_out = clean_output
+
             clean_console_records.append(ConsoleRecord(
                 ps1=console_record.ps1,
                 command=console_record.command,
-                output=self._remove_ansi_escape_codes(console_record.output),
+                output=clean_output,
             ))
 
         return clean_console_records
@@ -271,8 +287,11 @@ class ShellService:
             return False
         try:
             os.killpg(process_group_id, 0)
-        except (ProcessLookupError, PermissionError):
+        except ProcessLookupError:
             return False
+        except PermissionError:
+            # EPERM：组存在但派生了更高权限（如 sudo）子进程，不能当作已死
+            return True
         return True
 
     @staticmethod

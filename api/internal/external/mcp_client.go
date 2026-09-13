@@ -60,6 +60,7 @@ type StdioMCPClient struct {
 	stdout     io.Reader
 	reader     *bufio.Reader
 	nextID     int
+	mu         sync.Mutex // 串行化 ID 分配与请求-响应读取（共享 bufio 不允许并发）
 	closed     atomic.Bool
 	serverName string
 	env        map[string]string
@@ -174,6 +175,8 @@ func (c *StdioMCPClient) getConfigEnv() map[string]string {
 
 // sendInitialize 发送初始化请求
 func (c *StdioMCPClient) sendInitialize(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	req := MCPRequest{
 		JSONRPC: mcpJSONRPCVersion,
 		ID:      c.nextID,
@@ -206,6 +209,8 @@ func (c *StdioMCPClient) ListTools(ctx context.Context) ([]MCPToolInfo, error) {
 		return nil, fmt.Errorf("MCP client is closed")
 	}
 
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	req := MCPRequest{
 		JSONRPC: mcpJSONRPCVersion,
 		ID:      c.nextID,
@@ -275,6 +280,8 @@ func (c *StdioMCPClient) CallTool(ctx context.Context, name string, args map[str
 		return nil, fmt.Errorf("MCP client is closed")
 	}
 
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	req := MCPRequest{
 		JSONRPC: mcpJSONRPCVersion,
 		ID:      c.nextID,

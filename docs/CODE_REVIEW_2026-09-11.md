@@ -63,3 +63,45 @@ P2：UnsetDefault 不进 defaultMu；Delete 事务外读过期 IsDefault；Creat
 ### 设计决策已定（2026-09-12，Auto 功能落地）
 - env fallback 追加进 plan 尾部：与既有测试固化的语义冲突（fallback 仅在 catalog 为空时使用，且不跨协议回退），已回退。若要"DB 模型全挂后兜底到 env 配置"，需先在测试层面确认设计意图（建议：同协议且 capability 兼容时追加，或提供显式配置开关）。
 - **已按业界语义（Cursor/Copilot 调研）落地 Auto 路由**：Auto（无 model_id）时 env fallback 追加 plan 末尾（仅配置过时）；指定 model_id 时粘性路由（单元素 plan、失败显式报错 ErrModelNotAvailable，Chat 层同步预检 404）；前端选择器新增「Auto · 跟随系统」且为默认选项。新增 4 个路由测试固化语义。
+
+
+---
+
+# 增量审查 2026-09-13（三服务全量复审）
+
+三路并行复审 api/ui/sandbox 当前基线。**修复核验**：sandbox 上轮 20 项 17 项正确落地（超预期：`..` 拒绝、sudo rm 参数数组、流式读文件、路径锁+原子替换、49+7 测试）；ui 上轮 P0 三项确认彻底修复；api 14 项 backlog 修 7。
+
+## 本轮新发现（已按批次修复）
+
+**P0**：api `startShellWatch` 向已关闭事件通道发送（任务正常完成路径必触发，可致进程崩溃）→ `StopShellWatch()` + flow 收尾调用 + emitEvent recover 兜底。
+**P1**：① shell_output 落库写放大（只进 Redis，同 delta）② ui shell_output 发现循环漏扫 step.tools（实时 console 主路径失效）③ ui 首页 handleSend 丢弃 modelId（payload 编码进 URL，详情页 init 链路透传）④ sandbox read-shell-output 全量重算无缓存（增加 prefix 增量清洗缓存）⑤ watcher 轮询触发 wait-process 400 → ERROR 日志洪水（AppException 按 status_code 分级日志）⑥ sudo 派生 root 子进程 killpg EPERM 被误判组已死（EPERM=存在）。
+**P2 已修**：MCP client 串行化锁（nextID/共享 bufio 竞争）、ErrSessionNotFound → 404（哨兵移入 apperr）、GetVNCURL 校验会话存在、upload filename None 守卫、sudo search 正则移出事件循环、ui Auto 静默失败 toast、重命名失败保留弹窗、Auto 重试不清草稿。
+
+## 待办 backlog（第三批，按优先级）
+
+### api
+- [ ] DSN 用 url.UserPassword 构造（特殊字符密码连接失败）
+- [ ] app_config MCP/A2A/LLM 合并事务化（读改写并发丢失）
+- [ ] persistHealth 异步化/去抖（每次调用同步写 DB）
+- [ ] GetAllSessions 加 LIMIT（SSE 每 5s 全量拉取）
+- [ ] BrowserClient JS 转义（LLM 可控字符串拼进模板）
+- [ ] 上传去重 TOCTOU（(session_id,filename) 唯一索引）+ 内容级 sha256
+- [ ] DownloadFile io.ReadAll 加大小上限
+- [ ] RoutedLLM 共享 fallback Health 数据竞争（applyStoredHealth 写共享 cfg）
+
+### ui
+- [ ] manus-settings.tsx 拆分（895 行，含 97 行死代码 LLMSetting + A2A 文案复制自 MCP）
+- [ ] timeline O(n²) 增量化（message_delta/console 高频事件下全量重算）
+- [ ] fetch.ts 截断残包不再当完整事件解析（避免假 stream_error）
+- [ ] FileInfo/SessionFile 类型合并；死代码清扫（createSSEConnection/getSession/clearUnreadMessageCount）
+- [ ] refresh() 不 bump streamRetrySignal；prevToolCountRef 切会话重置
+- [ ] appendEvent step 状态读嵌套 step.status（重连空流状态机不翻转）
+- [ ] 持久化 model id 不在列表时回落 Auto
+- [ ] tool-preview-panel 关闭图标 Maximize2 → X
+
+### sandbox
+- [ ] 运行中会话不回收（TTL 仅覆盖已退出进程）；console_records 总预算
+- [ ] sudo search 正则 ReDoS 限制
+- [ ] supervisor stop-all 仍停止 app 自身；restart 无总超时
+- [ ] read-shell-output 增量 delta 协议（替代全量快照传输）
+- [ ] endpoint 测试扩展（wait/read/kill/会话复用/读取器竞态）

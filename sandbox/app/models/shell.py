@@ -8,7 +8,7 @@
 import asyncio.subprocess
 from typing import Optional, List
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, PrivateAttr, ConfigDict
 
 
 class ConsoleRecord(BaseModel):
@@ -16,6 +16,12 @@ class ConsoleRecord(BaseModel):
     ps1: str = Field(..., description="ps1")
     command: str = Field(..., description="执行命令")
     output: str = Field(default="", description="输出内容")
+
+    # ANSI 清洗结果缓存（私有字段，不参与序列化/落盘）。
+    # 输出只会被读取器追加，缓存的清洗结果按 prefix 复用，
+    # 消除 shell 输出轮询下每请求对全部记录的全量重算。
+    _clean_cache_raw: str = PrivateAttr(default="")
+    _clean_cache_out: str = PrivateAttr(default="")
 
 
 class Shell(BaseModel):

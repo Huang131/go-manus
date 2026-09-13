@@ -162,7 +162,9 @@ async def upload_file(
     # 1.判断filepath是否传递，如果没有则使用临时路径。
     # basename 化防止 filename 携带 ../ 或绝对路径造成路径穿越
     if not filepath:
-        filepath = f"/tmp/{os.path.basename(file.filename)}"
+        # multipart part 可能无 filename（filename=None），basename(None) 会 TypeError
+        raw_name = file.filename or "upload.bin"
+        filepath = f"/tmp/{os.path.basename(raw_name)}"
 
     # 2.调用服务将文件上传至沙箱
     result = await file_service.upload_file(file=file, filepath=filepath)

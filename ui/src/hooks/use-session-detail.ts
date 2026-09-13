@@ -338,6 +338,7 @@ export function useSessionDetail(
           const sendErr = err instanceof Error ? err : new Error('流式响应异常')
           setError(sendErr)
           setLastSendError(sendErr)
+          toast.error(`消息发送失败：${sendErr.message}`)
           setStreaming(false)
           isSendMessageRef.current = false
           // 网络断开不等于任务完成：保留当前状态，由空流重新连接并同步后端事件。

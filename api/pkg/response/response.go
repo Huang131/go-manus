@@ -58,6 +58,16 @@ func FromError(c *gin.Context, err error) {
 		return
 	}
 
+	// 会话不存在（写操作命中 0 行）：映射 404，避免落成 500
+	if errors.Is(err, apperr.ErrSessionNotFound) {
+		c.JSON(http.StatusNotFound, Response{
+			Code: http.StatusNotFound,
+			Msg:  "会话不存在",
+			Data: nil,
+		})
+		return
+	}
+
 	var ae *apperr.Error
 	if errors.As(err, &ae) {
 		c.JSON(ae.Status(), Response{

@@ -286,7 +286,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 			// 逐 token 的 delta 事件只进 Redis（保 SSE 续读），不落库：
 			// 长回复每秒数百个增量会让 DB 写入放大，且最终内容已由
 			// MessageDoneEvent 作为权威记录落库。
-			if event.GetType() == model.EventTypeMessageDelta {
+			if event.GetType() == model.EventTypeMessageDelta || event.GetType() == model.EventTypeShellOutput {
 				logger.DebugContext(ctx, "跳过 delta 事件落库",
 					logger.String("task_id", task.ID()),
 					logger.String("event_id", eventID))
