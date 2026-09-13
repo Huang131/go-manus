@@ -70,6 +70,7 @@ export default function SessionDetailPage({ params }: PageProps) {
       sessionId={sessionData.id}
       initialMessage={sessionData.initialMessage}
       initialAttachments={sessionData.initialAttachments}
+      initialModelId={sessionData.initialModelId}
       hasInitialMessage={sessionData.hasInitialMessage}
     />
   )

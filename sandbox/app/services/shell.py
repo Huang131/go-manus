@@ -174,12 +174,16 @@ class ShellService:
 
     _CONSOLE_BUDGET_BYTES = 5 * 1024 * 1024  # 单会话控制台记录总预算（5MB）
 
+    # 缓存尾部"未终结的 ANSI 转义序列"（ESC 后跟参数字符但没有终止字母）。
+    # 增量清洗若在转义序列中间切边界，会把 \x1b[3 之类碎片残留在输出里。
+    _TRAILING_PARTIAL_ESC = re.compile(r"\x1b\[[0-9;=?]*$")
+
     def _trim_console_budget(self, shell) -> None:
         """控制台记录总预算：超出时丢弃最旧记录，防长会话内存无限增长。"""
-        total = sum(len(r.output) for r in shell.console_records)
+        total = sum(len(r.output.encode("utf-8")) for r in shell.console_records)
         while shell.console_records and total > self._CONSOLE_BUDGET_BYTES:
             removed = shell.console_records.pop(0)
-            total -= len(removed.output)
+            total -= len(removed.output.encode("utf-8"))
 
     async def _start_output_reader(self, session_id: str, process: asyncio.subprocess.Process) -> None:
         """启动协程以连续读取进程输出并将其存储到会话中"""
@@ -257,15 +261,27 @@ class ShellService:
             output = console_record.output
             cached_raw = console_record._clean_cache_raw
             cached_out = console_record._clean_cache_out
-            if output == cached_raw:
+            pending = console_record._clean_pending
+            if output == cached_raw and not pending:
                 clean_output = cached_out
             elif cached_raw and output.startswith(cached_raw):
-                clean_output = cached_out + self._remove_ansi_escape_codes(output[len(cached_raw):])
+                # 增量清洗：把缓存尾部可能被截断的转义序列（pending）与新增段
+                # 合并后整体清洗；段尾若仍有未终结转义则扣下待下一轮合并，
+                # 避免转义序列跨界残留碎片
+                seg = pending + output[len(cached_raw):]
+                m_partial = self._TRAILING_PARTIAL_ESC.search(seg)
+                if m_partial:
+                    clean_output = cached_out + self._remove_ansi_escape_codes(seg[:m_partial.start()])
+                    console_record._clean_pending = seg[m_partial.start():]
+                else:
+                    clean_output = cached_out + self._remove_ansi_escape_codes(seg)
+                    console_record._clean_pending = ""
                 console_record._clean_cache_raw = output
                 console_record._clean_cache_out = clean_output
             else:
                 # 首次清洗或输出被截断/重置（前缀不再匹配）：全量清洗
-                clean_output = self._remove_ansi_escape_codes(output)
+                clean_output = self._remove_ansi_escape_codes(pending + output)
+                console_record._clean_pending = ""
                 console_record._clean_cache_raw = output
                 console_record._clean_cache_out = clean_output
 
@@ -590,7 +606,10 @@ class ShellService:
 
             # 7.向子进程写入数据，成功后再记录回显，避免失败输入污染输出。
             process.stdin.write(input_data)
-            await asyncio.wait_for(process.stdin.drain(), timeout=5)
+            try:
+                await asyncio.wait_for(process.stdin.drain(), timeout=5)
+            except asyncio.TimeoutError:
+                raise BadRequestException("写入 shell 输入超时（进程可能未读取输入）")
 
             # 8.记录日志/输出(直接使用原始字符串，不从input_data编码，避免编码不统一的情况)
             log_text = input_text + ("\n" if press_enter else "")

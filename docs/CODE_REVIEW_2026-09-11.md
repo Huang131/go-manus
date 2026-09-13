@@ -126,4 +126,12 @@ P2：UnsetDefault 不进 defaultMu；Delete 事务外读过期 IsDefault；Creat
 - session-events.ts：assistant message 按 message_id 去重（重连重放/delta+message 并发不再渲染两条）
 - sandbox：删除无锁死代码 get_console_records（调用方均走 _unlocked 版本）
 
-仍开放（维持原优先级）：timeline O(n²) 增量化、manus-settings 多文件拆分、SSE_STREAM_END 魔法字符串类型化、sandbox 增量 delta 协议、read_file budget 计数含跳过前缀、drain 超时 500→4xx、tests/ 打进镜像。
+仍开放（维持原优先级）：timeline O(n²) 增量化、manus-settings 多文件拆分、SSE_STREAM_END 魔法字符串类型化、sandbox 增量 delta 协议、tests/ 打进镜像。
+
+# 增量修复 2026-09-13（第五批：终审发现项）
+
+- ui P1：page.tsx initialModelId 透传补齐（首页模型选择此前静默失效）
+- ui P2：A2A/MCP 两区描述文案互换归位；脏 model id 校验（chat-input 回落 Auto）
+- sandbox P1：清洗缓存 ANSI 跨界残留修复（_clean_pending 待并缓冲 + _TRAILING_PARTIAL_ESC 边界检测），56 测试复跑通过
+- sandbox：restart 8s 总超时重新落地（重构中丢失）；console 预算改按 UTF-8 字节计；drain 超时 500→4xx
+- sandbox 测试运行方式：uv pip install --python /venv/bin/python pytest（生产镜像未含 pytest/tests，已记入待办）

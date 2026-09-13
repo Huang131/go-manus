@@ -1887,8 +1887,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/ui/src/app/sessions/[id]/page.tsx": {
-    "mtime": 1789299975.7310915,
-    "ast_hash": "dae7704e3565c8aabcf77d51d71026ae",
+    "mtime": 1789311939.0305862,
+    "ast_hash": "cce13b23bf70274b442612a81eb708ed",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/ui/src/config/app.config.ts": {
@@ -1972,8 +1972,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/ui/src/components/manus-settings.tsx": {
-    "mtime": 1789305078.3539634,
-    "ast_hash": "9e3b2b0102ee24042c995f4707c2d077",
+    "mtime": 1789312010.0137649,
+    "ast_hash": "6858269504c191b0e088fb238dd352d6",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/ui/src/components/suggested-questions.tsx": {
@@ -2247,8 +2247,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/sandbox/app/models/shell.py": {
-    "mtime": 1789300273.1179445,
-    "ast_hash": "ac25c9db404437ec3673005ee521f7cf",
+    "mtime": 1789312160.7688043,
+    "ast_hash": "7984469015dc207b269e6a123a09ce46",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/sandbox/app/models/__init__.py": {
@@ -2262,13 +2262,13 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/sandbox/app/services/supervisor.py": {
-    "mtime": 1789303905.9068854,
-    "ast_hash": "f5af0349dd778d943625cf09f7abb3f2",
+    "mtime": 1789312160.7641413,
+    "ast_hash": "33ed1f7763e9f4d654cd5c5d23858fac",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/sandbox/app/services/shell.py": {
-    "mtime": 1789310548.647655,
-    "ast_hash": "68a3f60fa7e5df840732555cfa2edec0",
+    "mtime": 1789312359.5738792,
+    "ast_hash": "f1c05bbae1f65d77eb297ab7362b0119",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/sandbox/app/services/__init__.py": {
@@ -3247,8 +3247,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/docs/CODE_REVIEW_2026-09-11.md": {
-    "mtime": 1789310663.2706692,
-    "ast_hash": "809da75be56cd07c565a8814cb880382",
+    "mtime": 1789312561.251241,
+    "ast_hash": "3d98f0c7a6f393f1bf067f4ac87c346f",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/docs/FUNCTIONAL_COMPARISON.md": {

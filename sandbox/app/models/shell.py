@@ -22,6 +22,7 @@ class ConsoleRecord(BaseModel):
     # 消除 shell 输出轮询下每请求对全部记录的全量重算。
     _clean_cache_raw: str = PrivateAttr(default="")
     _clean_cache_out: str = PrivateAttr(default="")
+    _clean_pending: str = PrivateAttr(default="")
 
 
 class Shell(BaseModel):

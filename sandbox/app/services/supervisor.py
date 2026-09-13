@@ -10,6 +10,7 @@ import http.client
 import logging
 import socket
 import xmlrpc.client
+import time
 from datetime import datetime, timedelta
 from typing import List, Any, Optional
 
@@ -221,12 +222,19 @@ class SupervisorService:
             stopped = []
             started = []
             # 只停止确实运行中的进程；已停止/异常进程直接启动，避免 stopProcess 报错。
+            deadline = time.monotonic() + 8  # 总超时：单进程卡住不拖死整个请求
             running = [process["name"] for process in managed
                        if process.get("statename", "RUNNING") == "RUNNING"]
             for name in reversed(running):
+                if time.monotonic() > deadline:
+                    logger.warning("restart 总超时，剩余进程跳过停止")
+                    break
                 stopped.append(await self._call_rpc(self.server.supervisor.stopProcess, name, True))
             for process in managed:
                 name = process["name"]
+                if time.monotonic() > deadline:
+                    logger.warning("restart 总超时，剩余进程跳过启动")
+                    break
                 started.append(await self._call_rpc(self.server.supervisor.startProcess, name, True))
             return SupervisorActionResult(status="restarted", stop_result=stopped, start_result=started)
         except Exception as e:
