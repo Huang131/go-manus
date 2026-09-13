@@ -58,3 +58,4 @@ class FileCheckRequest(BaseModel):
 class FileDeleteRequest(BaseModel):
     """删除文件请求结构体"""
     filepath: str = Field(..., description="要删除的文件绝对路径")
+    sudo: bool = Field(default=False, description="是否使用sudo权限删除")

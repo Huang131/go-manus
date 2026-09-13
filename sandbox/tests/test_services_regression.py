@@ -174,6 +174,19 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
             result = await FileService.check_file_exists(directory)
         self.assertFalse(result.exists)
 
+    async def test_sudo_delete_uses_argument_array(self):
+        process = AsyncMock()
+        process.returncode = 0
+        process.communicate.return_value = (b"", b"")
+        with patch("app.services.file.asyncio.create_subprocess_exec", return_value=process) as create:
+            result = await FileService().delete_file("/tmp/path with 'quote'.txt", sudo=True)
+        self.assertTrue(result.deleted)
+        create.assert_awaited_once_with(
+            "sudo", "rm", "--", "/tmp/path with 'quote'.txt",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
     async def test_activate_timeout_zero_does_not_fall_back_to_default(self):
         from app.services.supervisor import SupervisorService
 

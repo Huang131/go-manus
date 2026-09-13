@@ -393,15 +393,27 @@ class FileService:
             exists=os.path.isfile(filepath),
         )
 
-    async def delete_file(self, filepath: str) -> FileDeleteResult:
+    async def delete_file(self, filepath: str, sudo: bool = False) -> FileDeleteResult:
         """根据传递的路径+sudo删除指定文件"""
-        # 1.判断文件是否存在
-        await self.ensure_file(filepath)
+        # sudo 模式下普通用户可能无法看到文件，交给 rm 返回权限和不存在错误。
+        if not sudo:
+            await self.ensure_file(filepath)
 
         try:
-            # 2.调用命令删除文件
-            os.remove(filepath)
+            if sudo:
+                process = await asyncio.create_subprocess_exec(
+                    "sudo", "rm", "--", filepath,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, stderr = await process.communicate()
+                if process.returncode != 0:
+                    raise NotFoundException(f"删除文件失败: {stderr.decode(errors='replace').strip()}")
+            else:
+                os.remove(filepath)
             return FileDeleteResult(filepath=filepath, deleted=True)
         except Exception as e:
             logger.error(f"删除文件{filepath}失败: {str(e)}")
+            if isinstance(e, (BadRequestException, NotFoundException)):
+                raise
             raise AppException(f"删除文件{filepath}失败: {str(e)}")

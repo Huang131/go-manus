@@ -222,6 +222,7 @@ async def delete_file(
     """根据传递的文件路径删除指定的文件"""
     result = await file_service.delete_file(
         filepath=request.filepath,
+        sudo=request.sudo,
     )
 
     return Response.success(
