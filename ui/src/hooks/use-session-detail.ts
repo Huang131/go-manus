@@ -17,6 +17,7 @@ export type UseSessionDetailResult = {
   sendMessage: (message: string, attachmentIds: string[], modelId?: string) => Promise<void>
   streaming: boolean
   lastSendError: Error | null
+  streamingText: { messageId: string; text: string } | null
 }
 
 /**
@@ -37,6 +38,8 @@ export function useSessionDetail(
   const [lastSendError, setLastSendError] = useState<Error | null>(null)
   // 空流重连定时器：卸载/切会话时必须清除，否则产生孤儿 SSE 连接
   const emptyStreamTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 流式中的 assistant 增量文本（独立于 events，避免每 token 触发 timeline 全量重算）
+  const [streamingText, setStreamingText] = useState<{ messageId: string; text: string } | null>(null)
   const [streaming, setStreaming] = useState(false)
   const [skipEmptyStream, setSkipEmptyStream] = useState(initialSkipEmptyStream || false)
   const emptyStreamCleanupRef = useRef<(() => void) | null>(null)
@@ -128,6 +131,23 @@ export function useSessionDetail(
     }
   }, [])
 
+  // 流式增量路由：message_delta 进独立 state（O(1) 更新），
+  // 不进 events 数组——那会每个 token 触发 timeline 全量重算 O(n²)。
+  // 返回 true 表示该事件已被路由，调用方不要再 appendEvent。
+  const routeStreamingDelta = useCallback((ev: SSEEventData): boolean => {
+    if (ev.type !== 'message_delta') return false
+    const d = ev.data as { message_id?: string; delta?: string }
+    const mid = d?.message_id
+    const delta = d?.delta
+    if (!mid || typeof delta !== 'string') return false
+    setStreamingText((prev) =>
+      prev && prev.messageId === mid
+        ? { messageId: mid, text: prev.text + delta }
+        : { messageId: mid, text: delta }
+    )
+    return true
+  }, [])
+
   const startEmptyStream = useCallback(() => {
     if (!sessionId) return
     if (emptyStreamCleanupRef.current) {
@@ -137,7 +157,11 @@ export function useSessionDetail(
     emptyStreamCleanupRef.current = sessionApi.chat(
       sessionId,
       { event_id: lastEventIdRef.current || undefined },
-      (ev) => appendEvent(ev),
+      (ev) => {
+        if (routeStreamingDelta(ev)) return
+        appendEvent(ev)
+        if (ev.type === 'message_done') setStreamingText(null)
+      },
       (err) => {
         if (err.name === 'AbortError') {
           return
@@ -230,6 +254,7 @@ export function useSessionDetail(
     }
     setEvents([])
     setLastSendError(null)
+    setStreamingText(null)
     lastEventIdRef.current = ''
     if (!sessionId) {
       setLoading(false)
@@ -295,7 +320,9 @@ export function useSessionDetail(
       setSession((prev) => prev ? { ...prev, status: 'running' } : null)
 
       const onEvent = (ev: SSEEventData) => {
+        if (routeStreamingDelta(ev)) return
         appendEvent(ev)
+        if (ev.type === 'message_done') setStreamingText(null)
         // 错误事件：弹 toast 提示给用户，并把状态回滚到 completed
         if (ev.type === 'error') {
           const errorData = ev.data as { message?: string; error?: string }
@@ -303,11 +330,13 @@ export function useSessionDetail(
           toast.error(`AI 调用失败：${errMsg}`)
           setError(new Error(errMsg))
           setLastSendError(new Error(errMsg))
+          setStreamingText(null)
           setSession((prev) =>
             prev ? { ...prev, status: 'completed' } : null
           )
         }
         if (ev.type === 'done') {
+          setStreamingText(null)
           setStreaming(false)
           isSendMessageRef.current = false
           // 清理消息流的 cleanup
@@ -372,5 +401,6 @@ export function useSessionDetail(
     sendMessage,
     streaming,
     lastSendError,
+    streamingText,
   }
 }

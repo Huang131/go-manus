@@ -66,6 +66,7 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
     sendMessage,
     streaming,
     lastSendError,
+    streamingText,
   } = useSessionDetail(sessionId, hasInitialMessage)
 
   // 模型选择状态（提升到此处持有：chat-input 只做受控展示，
@@ -416,7 +417,26 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
                   />
                 ))}
 
-                {(session?.status === 'running' || (hasInitialMessage && initialMessageSentSessionId !== sessionId)) && (
+                {/* 流式中的 assistant 回复：独立渲染，不进 events 数组 */}
+                {streamingText && streamingText.text && (
+                  <ChatMessage
+                    key={streamingText.messageId}
+                    item={{
+                      kind: 'assistant',
+                      id: streamingText.messageId,
+                      data: {
+                        role: 'assistant',
+                        message_id: streamingText.messageId,
+                        message: streamingText.text,
+                      },
+                    }}
+                    onViewAllFiles={handleViewAllFiles}
+                    onFileClick={handleFileClick}
+                    onToolClick={handleToolClick}
+                  />
+                )}
+
+                {(session?.status === 'running' || (hasInitialMessage && initialMessageSentSessionId !== sessionId)) && !streamingText && (
                   <div className="flex items-center gap-2 text-sm text-gray-500 py-3">
                     <Loader2 className="size-4 animate-spin" />
                     <span>正在思考中...</span>

@@ -126,7 +126,17 @@ P2：UnsetDefault 不进 defaultMu；Delete 事务外读过期 IsDefault；Creat
 - session-events.ts：assistant message 按 message_id 去重（重连重放/delta+message 并发不再渲染两条）
 - sandbox：删除无锁死代码 get_console_records（调用方均走 _unlocked 版本）
 
-仍开放（维持原优先级）：timeline O(n²) 增量化、manus-settings 多文件拆分、SSE_STREAM_END 魔法字符串类型化、sandbox 增量 delta 协议、tests/ 打进镜像。
+仍开放（维持原优先级）：manus-settings 多文件拆分、sandbox 增量 delta 协议。
+
+# 增量修复 2026-09-14（timeline O(n²) 消除 + 最小两项）
+
+- **timeline O(n²) 消除**：message_delta 不再进 events 数组（每个 token 触发
+  eventsToTimeline 全量重算的根源），改为 hook 内独立 streamingText 状态
+  （O(1) 累加）+ 详情页渲染独立流式气泡；message_done 到达时清空并由
+  最终消息接管。空流重连路径同样路由。sessionId 切换/收尾全部清空。
+- StreamEndError 类型化落地（instanceof 替代魔法字符串比对）
+- sandbox tests/ 进镜像 + Makefile test-sandbox 目标（56 passed 实测）
+- ui: 首页 initialModelId 透传、A2A/MCP 文案归位、脏 model id 回落 Auto
 
 # 增量修复 2026-09-13（第五批：终审发现项）
 
