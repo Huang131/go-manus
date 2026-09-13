@@ -1972,8 +1972,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/ui/src/components/manus-settings.tsx": {
-    "mtime": 1789312010.0137649,
-    "ast_hash": "6858269504c191b0e088fb238dd352d6",
+    "mtime": 1789320772.5828555,
+    "ast_hash": "3e4336158a1b41aa796b60a730576a96",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/ui/src/components/suggested-questions.tsx": {
@@ -3247,8 +3247,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/docs/CODE_REVIEW_2026-09-11.md": {
-    "mtime": 1789318582.660871,
-    "ast_hash": "dc1fc8e17c2047f9f0e94ee9f41373e9",
+    "mtime": 1789321009.653191,
+    "ast_hash": "913825a62b1936939dccdedcd2d9c362",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/docs/FUNCTIONAL_COMPARISON.md": {
@@ -3384,6 +3384,21 @@
   "/Users/huang/GolandProjects/study/go-manus/ui/public/icon.png": {
     "mtime": 1788873720.1895192,
     "ast_hash": "c9b6bd3339b13d7cfaac820d25c245ba",
+    "semantic_hash": ""
+  },
+  "/Users/huang/GolandProjects/study/go-manus/ui/src/components/settings/CommonSetting.tsx": {
+    "mtime": 1789319405.5019608,
+    "ast_hash": "46b628f3c39f1d7de95c0e1d8350a72b",
+    "semantic_hash": ""
+  },
+  "/Users/huang/GolandProjects/study/go-manus/ui/src/components/settings/A2ASetting.tsx": {
+    "mtime": 1789320846.820508,
+    "ast_hash": "88d635bf0e46411b0ea9c10a77f19817",
+    "semantic_hash": ""
+  },
+  "/Users/huang/GolandProjects/study/go-manus/ui/src/components/settings/MCPSetting.tsx": {
+    "mtime": 1789320846.8208811,
+    "ast_hash": "ea0f8d9ec0573da00bd2496d3589fdc0",
     "semantic_hash": ""
   }
 }

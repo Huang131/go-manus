@@ -126,7 +126,16 @@ P2：UnsetDefault 不进 defaultMu；Delete 事务外读过期 IsDefault；Creat
 - session-events.ts：assistant message 按 message_id 去重（重连重放/delta+message 并发不再渲染两条）
 - sandbox：删除无锁死代码 get_console_records（调用方均走 _unlocked 版本）
 
-仍开放（维持原优先级）：manus-settings 多文件拆分、sandbox 增量 delta 协议。
+仍开放（维持原优先级）：sandbox 增量 delta 协议。
+
+# 增量重构 2026-09-14（manus-settings 拆分）
+
+manus-settings.tsx（787 行）拆分为 4 个文件：
+- components/settings/CommonSetting.tsx —— 通用配置表单
+- components/settings/A2ASetting.tsx —— A2A 配置区（含添加弹窗）
+- components/settings/MCPSetting.tsx —— MCP 配置区（含 normalizeMCPConfig + 添加弹窗）
+- components/manus-settings.tsx —— 主弹窗壳（tab 菜单 + 数据编排 + 内容分发，约 350 行）
+行为无变化；docker ui 构建通过；全栈部署验证 healthy。
 
 # 增量修复 2026-09-14（timeline O(n²) 消除 + 最小两项）
 
