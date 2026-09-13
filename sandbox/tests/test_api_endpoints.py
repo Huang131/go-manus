@@ -3,6 +3,10 @@ import json
 import unittest
 from typing import Any
 
+from fastapi import FastAPI
+
+from app.interfaces.errors.exception_handler import register_exception_handlers
+from app.interfaces.errors.exceptions import AppException
 from app.interfaces.service_dependencies import (
     get_file_service,
     get_shell_service,
@@ -128,6 +132,16 @@ class ApiEndpointTests(unittest.TestCase):
         status, body = self.run_request("GET", "/api/supervisor/timeout-status")
         self.assertEqual(status, 200)
         self.assertFalse(body["data"]["active"])
+
+    def test_app_exception_handler_preserves_error_data(self):
+        test_app = FastAPI()
+        register_exception_handlers(test_app)
+        handler = test_app.exception_handlers[AppException]
+        request = type("Request", (), {})()
+
+        response = asyncio.run(handler(request, AppException("failed", data={"request_id": "r1"})))
+
+        self.assertEqual(json.loads(response.body)["data"], {"request_id": "r1"})
 
 
 if __name__ == "__main__":

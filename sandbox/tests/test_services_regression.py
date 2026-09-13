@@ -1,5 +1,6 @@
 import asyncio
 import os
+import stat
 import tempfile
 import time
 import unittest
@@ -35,6 +36,60 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service.active_shells, {})
         self.assertEqual(service.reader_tasks, {})
         self.assertEqual(service.session_locks, {})
+
+    async def test_kill_process_terminates_background_descendant_after_shell_exits(self):
+        service = ShellService()
+        with tempfile.TemporaryDirectory() as directory:
+            pid_file = Path(directory, "child.pid")
+            result = await service.exec_command(
+                "background-child-session",
+                directory,
+                f"sleep 30 >/dev/null 2>&1 & echo $! > {pid_file}",
+            )
+            child_pid = int(pid_file.read_text(encoding="utf-8"))
+            self.assertEqual(result.status, "completed")
+
+            kill_result = await service.kill_process("background-child-session")
+
+        self.assertEqual(kill_result.status, "terminated")
+        for _ in range(20):
+            try:
+                os.kill(child_pid, 0)
+            except ProcessLookupError:
+                break
+            if Path(f"/proc/{child_pid}/stat").read_text(encoding="utf-8").split()[2] == "Z":
+                break
+            await asyncio.sleep(0.05)
+        else:
+            self.fail(f"后台子进程仍存活: {child_pid}")
+
+    async def test_terminate_and_wait_falls_back_without_process_group_id(self):
+        finished = asyncio.Event()
+
+        class Process:
+            returncode = None
+
+            async def wait(self):
+                await finished.wait()
+                return self.returncode
+
+        process = Process()
+        service = ShellService()
+
+        async def timeout(awaitable, **_kwargs):
+            raise asyncio.TimeoutError
+
+        def force_kill(target, process_group_id=None):
+            self.assertIsNone(process_group_id)
+            target.returncode = -9
+            finished.set()
+
+        with patch("app.services.shell.asyncio.wait_for", side_effect=timeout), \
+                patch.object(service, "_terminate_process_tree"), \
+                patch.object(service, "_kill_process_tree", side_effect=force_kill):
+            await service._terminate_and_wait(process, None)
+
+        self.assertEqual(process.returncode, -9)
 
     async def test_read_output_is_not_blocked_by_process_wait(self):
         service = ShellService()
@@ -82,6 +137,36 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         process.communicate.assert_not_awaited()
 
+    async def test_sudo_read_stops_process_when_end_line_stops_consuming_output(self):
+        class Stream:
+            def __init__(self, chunks):
+                self.chunks = iter(chunks)
+
+            async def read(self, size=-1):
+                return next(self.chunks, b"")
+
+        class Process:
+            def __init__(self):
+                self.returncode = None
+                self.stdout = Stream([b"first line\n"])
+                self.stderr = Stream([])
+                self.terminated = False
+
+            def terminate(self):
+                self.terminated = True
+                self.returncode = 0
+
+            async def wait(self):
+                self.returncode = 0
+                return self.returncode
+
+        process = Process()
+        with patch("app.services.file.asyncio.create_subprocess_exec", return_value=process):
+            result = await FileService.read_file("/tmp/large.txt", sudo=True, end_line=1)
+
+        self.assertEqual(result.content, "first line")
+        self.assertTrue(process.terminated)
+
     async def test_relative_path_write_does_not_create_empty_directory(self):
         with tempfile.TemporaryDirectory() as directory:
             previous_directory = Path.cwd()
@@ -107,6 +192,181 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
             stderr=asyncio.subprocess.PIPE,
         )
         process.communicate.assert_awaited_once_with(b"hello")
+
+    async def test_sudo_search_stops_process_for_unterminated_long_line(self):
+        import app.services.file as file_service_module
+
+        class Stream:
+            def __init__(self, chunks):
+                self.chunks = iter(chunks)
+
+            async def read(self, size=-1):
+                return next(self.chunks, b"")
+
+        class Process:
+            def __init__(self):
+                self.returncode = None
+                self.stdout = Stream([b"x" * 32])
+                self.stderr = Stream([])
+                self.terminated = False
+
+            def terminate(self):
+                self.terminated = True
+                self.returncode = 0
+
+            async def wait(self):
+                self.returncode = 0
+                return self.returncode
+
+        process = Process()
+        with patch.object(file_service_module, "MAX_PENDING_BYTES", 16), \
+                patch.object(file_service_module.asyncio, "create_subprocess_exec", return_value=process):
+            result = await FileService().search_in_file("/tmp/large.txt", "target", sudo=True)
+
+        self.assertTrue(result.truncated)
+        self.assertTrue(process.terminated)
+
+    async def test_sudo_search_allows_many_short_lines_in_one_chunk(self):
+        import app.services.file as file_service_module
+
+        class Stream:
+            def __init__(self, chunks):
+                self.chunks = iter(chunks)
+
+            async def read(self, size=-1):
+                return next(self.chunks, b"")
+
+        class Process:
+            def __init__(self):
+                self.returncode = None
+                self.stdout = Stream([b"target\n" * 4, b""])
+                self.stderr = Stream([])
+                self.terminated = False
+
+            def terminate(self):
+                self.terminated = True
+                self.returncode = 0
+
+            async def wait(self):
+                self.returncode = 0
+                return self.returncode
+
+        process = Process()
+        with patch.object(file_service_module, "MAX_PENDING_BYTES", 8), \
+                patch.object(file_service_module.asyncio, "create_subprocess_exec", return_value=process):
+            result = await FileService().search_in_file("/tmp/short-lines.txt", "target", sudo=True)
+
+        self.assertEqual(result.line_numbers, [0, 1, 2, 3])
+        self.assertFalse(result.truncated)
+        self.assertFalse(process.terminated)
+
+    async def test_write_preserves_existing_file_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            filepath = Path(directory, "mode.txt")
+            filepath.write_text("old", encoding="utf-8")
+            filepath.chmod(0o640)
+            await FileService().write_file(str(filepath), "new")
+            self.assertEqual(stat.S_IMODE(filepath.stat().st_mode), 0o640)
+
+    async def test_upload_preserves_existing_file_mode(self):
+        class Upload:
+            def __init__(self):
+                self.file = __import__("io").BytesIO(b"new")
+
+        with tempfile.TemporaryDirectory() as directory:
+            filepath = Path(directory, "upload.txt")
+            filepath.write_text("old", encoding="utf-8")
+            filepath.chmod(0o640)
+            await FileService.upload_file(Upload(), str(filepath))
+            self.assertEqual(stat.S_IMODE(filepath.stat().st_mode), 0o640)
+
+    async def test_find_files_rejects_parent_directory_pattern(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(BadRequestException):
+                await FileService.find_files(directory, "../*")
+
+    async def test_sudo_read_terminates_process_when_request_is_cancelled(self):
+        read_started = asyncio.Event()
+
+        class Stream:
+            async def read(self, size=-1):
+                read_started.set()
+                await asyncio.Event().wait()
+
+        class Process:
+            def __init__(self):
+                self.returncode = None
+                self.stdout = Stream()
+                class EmptyStream:
+                    async def read(self, size=-1):
+                        return b""
+
+                self.stderr = EmptyStream()
+                self.terminated = False
+
+            def terminate(self):
+                self.terminated = True
+                self.returncode = -15
+
+            async def wait(self):
+                self.returncode = -15
+                return self.returncode
+
+        process = Process()
+        with patch("app.services.file.asyncio.create_subprocess_exec", return_value=process):
+            request = asyncio.create_task(FileService.read_file("/tmp/cancelled.txt", sudo=True))
+            await read_started.wait()
+            request.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await request
+
+        self.assertTrue(process.terminated)
+
+    async def test_sudo_write_terminates_process_when_request_is_cancelled(self):
+        class Process:
+            def __init__(self):
+                self.returncode = None
+                self.terminated = False
+
+            async def communicate(self, data):
+                raise asyncio.CancelledError
+
+            def terminate(self):
+                self.terminated = True
+                self.returncode = -15
+
+            async def wait(self):
+                self.returncode = -15
+
+        process = Process()
+        with patch("app.services.file.asyncio.create_subprocess_exec", return_value=process):
+            with self.assertRaises(asyncio.CancelledError):
+                await FileService().write_file("/tmp/cancelled.txt", "content", sudo=True)
+
+        self.assertTrue(process.terminated)
+
+    async def test_sudo_delete_terminates_process_when_request_is_cancelled(self):
+        class Process:
+            def __init__(self):
+                self.returncode = None
+                self.terminated = False
+
+            async def communicate(self):
+                raise asyncio.CancelledError
+
+            def terminate(self):
+                self.terminated = True
+                self.returncode = -15
+
+            async def wait(self):
+                self.returncode = -15
+
+        process = Process()
+        with patch("app.services.file.asyncio.create_subprocess_exec", return_value=process):
+            with self.assertRaises(asyncio.CancelledError):
+                await FileService().delete_file("/tmp/cancelled.txt", sudo=True)
+
+        self.assertTrue(process.terminated)
 
     async def test_write_input_preserves_bad_request_error(self):
         service = ShellService()

@@ -80,6 +80,7 @@ class ShellService:
                     now - last_access > SESSION_IDLE_SECONDS
                     and shell is not None
                     and shell.process.returncode is not None
+                    and not self._process_group_alive(shell.process_group_id)
             ):
                 stale_ids.append(session_id)
         for session_id in stale_ids:
@@ -264,20 +265,70 @@ class ShellService:
 
 
     @staticmethod
-    def _terminate_process_tree(process: asyncio.subprocess.Process) -> None:
-        """终止进程及其派生的整组子进程（start_new_session 使 bash 成为组长）。"""
+    def _process_group_alive(process_group_id: Optional[int]) -> bool:
+        """检查进程组是否仍存在；组长退出后仍需依此清理后台派生进程。"""
+        if process_group_id is None or process_group_id <= 0:
+            return False
         try:
-            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+            os.killpg(process_group_id, 0)
         except (ProcessLookupError, PermissionError):
-            process.terminate()
+            return False
+        return True
 
     @staticmethod
-    def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
+    def _get_process_group_id(process: asyncio.subprocess.Process) -> Optional[int]:
+        """创建进程后立即保存进程组 ID，避免组长退出后无法定位派生进程。"""
+        # _create_process 使用 start_new_session=True，子进程会以自身 PID 创建新进程组。
+        # 直接记录 PID 不依赖组长仍存活，避免短命命令退出与 os.getpgid 间的竞态。
+        pid = getattr(process, "pid", None)
+        return pid if isinstance(pid, int) and pid > 0 else None
+
+    @staticmethod
+    def _terminate_process_tree(
+            process: asyncio.subprocess.Process,
+            process_group_id: Optional[int] = None,
+    ) -> None:
+        """终止进程及其派生的整组子进程（start_new_session 使 bash 成为组长）。"""
+        try:
+            process_group_id = process_group_id or os.getpgid(process.pid)
+            os.killpg(process_group_id, signal.SIGTERM)
+            return
+        except ProcessLookupError:
+            # 进程可能已切换到新的进程组；回退到主进程信号，已退出时忽略竞态。
+            try:
+                process.terminate()
+            except ProcessLookupError:
+                pass
+            return
+        except PermissionError:
+            pass
+        try:
+            process.terminate()
+        except ProcessLookupError:
+            pass
+
+    @staticmethod
+    def _kill_process_tree(
+            process: asyncio.subprocess.Process,
+            process_group_id: Optional[int] = None,
+    ) -> None:
         """强制杀死整组进程。"""
         try:
-            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
+            process_group_id = process_group_id or os.getpgid(process.pid)
+            os.killpg(process_group_id, signal.SIGKILL)
+            return
+        except ProcessLookupError:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            return
+        except PermissionError:
+            pass
+        try:
             process.kill()
+        except ProcessLookupError:
+            pass
 
     async def wait_process(self, session_id: str, seconds: Optional[int] = None) -> ShellWaitResult:
         """等待指定会话当前进程退出，等待过程不占用会话锁。"""
@@ -419,8 +470,10 @@ class ShellService:
                 # 4.创建一个新的进程
                 logger.debug(f"创建一个新的Shell会话: {session_id}")
                 process = await self._create_process(exec_dir, command)
+                process_group_id = self._get_process_group_id(process)
                 self.active_shells[session_id] = Shell(
                     process=process,
+                    process_group_id=process_group_id,
                     exec_dir=exec_dir,
                     output="",
                     console_records=[ConsoleRecord(ps1=ps1, command=command, output="")],
@@ -434,26 +487,20 @@ class ShellService:
                 shell = self.active_shells[session_id]
                 old_process = shell.process
 
-                # 7.判断旧进程是否还在运行，如果是则先停止旧进程在执行新命令
-                if old_process.returncode is None:
+                # 7.主进程已退出时，仍需检查后台派生进程是否留在原进程组。
+                if old_process.returncode is None or self._process_group_alive(shell.process_group_id):
                     logger.debug(f"正在终止会话中的上一个进程: {session_id}")
-                    try:
-                        # 8.结束旧进程组并优雅等待1s
-                        self._terminate_process_tree(old_process)
-                        await asyncio.wait_for(old_process.wait(), timeout=1)
-                    except Exception as e:
-                        # 9.结束旧进程出现错误并记录日志调用kill强制关闭进程
-                        logger.warning(f"强制终止Shell会话中的进程 {session_id} 失败: {str(e)}")
-                        self._kill_process_tree(old_process)
-                        await old_process.wait()
+                    await self._terminate_and_wait(old_process, shell.process_group_id)
 
                 await self._stop_output_reader(session_id)
 
                 # 10.关闭之后创建一个新的进程
                 process = await self._create_process(exec_dir, command)
+                process_group_id = self._get_process_group_id(process)
 
                 # 11.更新会话信息
                 shell.process = process
+                shell.process_group_id = process_group_id
                 shell.exec_dir = exec_dir
                 shell.output = ""
                 shell.console_records.append(ConsoleRecord(ps1=ps1, command=command, output=""))
@@ -559,13 +606,14 @@ class ShellService:
             if shell is None:
                 raise NotFoundException(f"Shell会话不存在: {session_id}")
             process = shell.process
+            process_group_id = shell.process_group_id
             self._touch_session(session_id)
 
         status = "already_terminated"
         try:
-            if process.returncode is None:
+            if process.returncode is None or self._process_group_alive(process_group_id):
                 status = "terminated"
-                await self._terminate_and_wait(process)
+                await self._terminate_and_wait(process, process_group_id)
             result = ShellKillResult(status=status, returncode=process.returncode)
         except Exception as e:
             logger.error(f"关闭进程失败: {str(e)}", exc_info=True)
@@ -578,12 +626,29 @@ class ShellService:
                 await self._stop_output_reader(session_id)
         return result
 
-    async def _terminate_and_wait(self, process: asyncio.subprocess.Process) -> None:
+    async def _terminate_and_wait(
+            self,
+            process: asyncio.subprocess.Process,
+            process_group_id: Optional[int] = None,
+    ) -> None:
         """优雅终止进程，超时后强杀并确保 wait 完成。"""
-        self._terminate_process_tree(process)
+        self._terminate_process_tree(process, process_group_id)
+        wait_task = None
         try:
-            await asyncio.wait_for(process.wait(), timeout=3)
+            if process.returncode is None:
+                wait_task = asyncio.create_task(process.wait())
+                await asyncio.wait_for(asyncio.shield(wait_task), timeout=3)
         except asyncio.TimeoutError:
             logger.warning("优雅终止进程超时，执行强制终止")
-            self._kill_process_tree(process)
-            await process.wait()
+        finally:
+            # 主进程结束后不再额外等待整组进程；仍存活的派生进程立即强杀，
+            # 避免后台任务让 kill/shutdown 平白增加第二个超时窗口。
+            group_alive = (
+                process_group_id is not None
+                and self._process_group_alive(process_group_id)
+            )
+            if group_alive or (process_group_id is None and process.returncode is None):
+                logger.warning("进程组优雅终止未完成，执行强制终止")
+                self._kill_process_tree(process, process_group_id)
+            if wait_task is not None and not wait_task.done():
+                await wait_task

@@ -21,6 +21,7 @@ class ConsoleRecord(BaseModel):
 class Shell(BaseModel):
     """Shell会话模型"""
     process: asyncio.subprocess.Process = Field(..., description="会话中的子进程")
+    process_group_id: Optional[int] = Field(default=None, description="会话进程组 ID")
     exec_dir: str = Field(..., description="会话执行目录")
     output: str = Field(..., description="会话输出")
     console_records: List[ConsoleRecord] = Field(default_factory=list, description="Shell会话中的控制记录列表")

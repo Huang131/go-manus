@@ -38,7 +38,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             content=Response(
                 code=e.status_code,
                 msg=e.msg,
-                data={}
+                data=e.data if e.data is not None else {}
             ).model_dump(),
         )
 

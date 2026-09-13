@@ -11,6 +11,7 @@ import itertools
 import logging
 import os.path
 import re
+import stat
 import shutil
 import tempfile
 from contextlib import asynccontextmanager
@@ -123,12 +124,21 @@ class FileService:
         """停止达到读取上限的子进程，避免 terminate 后永久等待。"""
         if process.returncode is not None:
             return
-        process.terminate()
+        try:
+            process.terminate()
+        except ProcessLookupError:
+            return
         try:
             await asyncio.wait_for(process.wait(), timeout=PROCESS_TERMINATE_TIMEOUT)
         except asyncio.TimeoutError:
-            process.kill()
-            await process.wait()
+            try:
+                process.kill()
+            except ProcessLookupError:
+                return
+            try:
+                await process.wait()
+            except ProcessLookupError:
+                pass
 
     @classmethod
     async def read_file(
@@ -166,18 +176,23 @@ class FileService:
                     stderr=asyncio.subprocess.PIPE,
                 )
 
-                content, truncated = await cls._read_stream(
-                    process.stdout, max_length, start_line, end_line
-                )
-                if truncated:
-                    await cls._stop_process(process)
-                stderr = await process.stderr.read() if process.stderr else b""
-                if process.returncode is None:
-                    await process.wait()
-                # 主动停止 cat 是达到返回上限的正常路径，不能误报为读取失败。
-                if process.returncode != 0 and not truncated:
-                    raise BadRequestException(f"阅读文件失败: {stderr.decode(errors='replace')}")
-                return FileReadResult(filepath=filepath, content=content, truncated=truncated)
+                try:
+                    content, truncated, stopped_early = await cls._read_stream(
+                        process.stdout, max_length, start_line, end_line
+                    )
+                    if truncated or stopped_early:
+                        await asyncio.shield(cls._stop_process(process))
+                    elif process.returncode is None:
+                        await process.wait()
+                    stderr = await process.stderr.read() if process.stderr else b""
+                    # 主动停止 cat 是达到读取范围或上限的正常路径，不能误报为失败。
+                    if process.returncode != 0 and not (truncated or stopped_early):
+                        raise BadRequestException(f"阅读文件失败: {stderr.decode(errors='replace')}")
+                    return FileReadResult(filepath=filepath, content=content, truncated=truncated)
+                finally:
+                    # CancelledError 不属于 Exception，必须在 finally 中清理 sudo 子进程。
+                    if process.returncode is None:
+                        await asyncio.shield(cls._stop_process(process))
             else:
                 cls._ensure_regular_file(filepath)
                 def read_lines() -> tuple[str, bool]:
@@ -257,14 +272,15 @@ class FileService:
 
     @staticmethod
     async def _read_stream(stream, max_length: Optional[int], start_line: Optional[int],
-                           end_line: Optional[int]) -> tuple[str, bool]:
+                           end_line: Optional[int]) -> tuple[str, bool, bool]:
         """按固定块读取 sudo 输出，避免超长单行触发 readline 缓冲上限。"""
         if stream is None:
-            return "", False
+            return "", False, False
         start = start_line or 0
         parts, length, bytes_seen, index = [], 0, 0, 0
         pending = ""
         truncated = False
+        stopped_early = False
         while True:
             raw = await stream.read(READ_CHUNK_BYTES)
             if not raw:
@@ -291,6 +307,7 @@ class FileService:
                     length += len(addition)
                 index += 1
             if truncated or (end_line is not None and index >= end_line):
+                stopped_early = not truncated and end_line is not None and index >= end_line
                 break
             if len(pending.encode("utf-8")) > MAX_PENDING_BYTES:
                 truncated = True
@@ -304,7 +321,7 @@ class FileService:
                 truncated = True
             else:
                 parts.append(addition)
-        return "".join(parts) + ("(truncated)" if truncated else ""), truncated
+        return "".join(parts) + ("(truncated)" if truncated else ""), truncated, stopped_early
 
     async def write_file(
             self,
@@ -351,19 +368,26 @@ class FileService:
                     stderr=asyncio.subprocess.PIPE,
                 )
 
-                # 等待子进程执行完毕
-                stdout, stderr = await process.communicate(content.encode("utf-8"))
-                bytes_written = len(content.encode("utf-8"))
+                try:
+                    # 等待子进程执行完毕
+                    stdout, stderr = await process.communicate(content.encode("utf-8"))
+                    bytes_written = len(content.encode("utf-8"))
 
-                # 检测子进程是否正常执行
-                if process.returncode != 0:
-                    raise BadRequestException(f"文件内容写入失败: {stderr.decode()}")
+                    # 检测子进程是否正常执行
+                    if process.returncode != 0:
+                        raise BadRequestException(f"文件内容写入失败: {stderr.decode()}")
+                finally:
+                    if process.returncode is None:
+                        await asyncio.shield(self._stop_process(process))
 
             else:
                 # 非 sudo 写入先落同目录临时文件，完成后原子替换目标文件。
                 parent_dir = os.path.dirname(filepath)
                 if parent_dir:
                     os.makedirs(parent_dir, exist_ok=True)
+                existing_mode = None
+                if os.path.exists(filepath):
+                    existing_mode = stat.S_IMODE(os.stat(filepath).st_mode)
                 fd, temp_path = tempfile.mkstemp(prefix=".write-", dir=parent_dir or ".")
                 os.close(fd)
 
@@ -378,6 +402,8 @@ class FileService:
                     return len(encoded)
 
                 bytes_written = await asyncio.to_thread(async_write_file)
+                if existing_mode is not None:
+                    os.chmod(temp_path, existing_mode)
                 os.replace(temp_path, filepath)
                 temp_path = None
 
@@ -396,6 +422,13 @@ class FileService:
             if isinstance(e, BadRequestException):
                 raise
             raise AppException(f"文件内容写入失败: {str(e)}")
+        finally:
+            # 取消请求不会进入 except Exception，仍需清理未替换的临时文件。
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                except FileNotFoundError:
+                    pass
 
     async def replace_in_file(
             self,
@@ -469,38 +502,52 @@ class FileService:
             bytes_seen = 0
             index = 0
             pending = ""
-            while process.stdout:
-                raw = await process.stdout.read(READ_CHUNK_BYTES)
-                if not raw:
-                    break
-                bytes_seen += len(raw)
-                if bytes_seen > MAX_READ_BYTES:
-                    truncated = True
-                    await self._stop_process(process)
-                    break
-                pending += raw.decode("utf-8", errors="replace")
-                while "\n" in pending and not truncated:
-                    line, pending = pending.split("\n", 1)
-                    line = line.rstrip("\r")
-                    if pattern.search(line):
+            try:
+                while process.stdout:
+                    raw = await process.stdout.read(READ_CHUNK_BYTES)
+                    if not raw:
+                        break
+                    bytes_seen += len(raw)
+                    if bytes_seen > MAX_READ_BYTES:
+                        truncated = True
+                        await asyncio.shield(self._stop_process(process))
+                        break
+                    pending += raw.decode("utf-8", errors="replace")
+                    while "\n" in pending and not truncated:
+                        line, pending = pending.split("\n", 1)
+                        if len(line.encode("utf-8")) > MAX_PENDING_BYTES:
+                            truncated = True
+                            await asyncio.shield(self._stop_process(process))
+                            break
+                        line = line.rstrip("\r")
+                        if pattern.search(line):
+                            if len(matches) >= MAX_SEARCH_MATCHES:
+                                truncated = True
+                                await asyncio.shield(self._stop_process(process))
+                                break
+                            matches.append(line)
+                            line_numbers.append(index)
+                        index += 1
+                    if len(pending.encode("utf-8")) > MAX_PENDING_BYTES:
+                        truncated = True
+                        await asyncio.shield(self._stop_process(process))
+                        break
+                if not truncated and pending:
+                    if pattern.search(pending.rstrip("\r")):
                         if len(matches) >= MAX_SEARCH_MATCHES:
                             truncated = True
-                            await self._stop_process(process)
-                            break
-                        matches.append(line)
-                        line_numbers.append(index)
-                    index += 1
-            if not truncated and pending:
-                if pattern.search(pending.rstrip("\r")):
-                    if len(matches) >= MAX_SEARCH_MATCHES:
-                        truncated = True
-                    else:
-                        matches.append(pending.rstrip("\r"))
-                        line_numbers.append(index)
-            await process.wait()
-            if process.returncode != 0 and not truncated:
-                stderr = await process.stderr.read() if process.stderr else b""
-                raise BadRequestException(f"搜索文件失败: {stderr.decode(errors='replace')}")
+                        else:
+                            matches.append(pending.rstrip("\r"))
+                            line_numbers.append(index)
+                if process.returncode is None:
+                    await process.wait()
+                if process.returncode != 0 and not truncated:
+                    stderr = await process.stderr.read() if process.stderr else b""
+                    raise BadRequestException(f"搜索文件失败: {stderr.decode(errors='replace')}")
+            finally:
+                # 取消或异常退出时，确保 sudo cat 不会遗留。
+                if process.returncode is None:
+                    await asyncio.shield(self._stop_process(process))
 
         return FileSearchResult(
             filepath=filepath,
@@ -515,6 +562,9 @@ class FileService:
         # 0.glob 必须是相对模式：以 / 开头会 join 出目录逃逸（如 /etc/**）
         if os.path.isabs(glob_pattern):
             raise BadRequestException("glob_pattern 必须是相对路径")
+        normalized_pattern = glob_pattern.replace("\\", "/")
+        if any(part == ".." for part in normalized_pattern.split("/")):
+            raise BadRequestException("glob_pattern 不允许包含父目录")
 
         # 1.检测下传递进来的目录是否存在
         cls._ensure_directory(dir_path)
@@ -544,6 +594,9 @@ class FileService:
             # 2.确保上传文件所在的目录存在
             parent_dir = os.path.dirname(filepath) or "."
             os.makedirs(parent_dir, exist_ok=True)
+            existing_mode = None
+            if os.path.exists(filepath):
+                existing_mode = stat.S_IMODE(os.stat(filepath).st_mode)
             fd, temp_path = tempfile.mkstemp(prefix=".upload-", dir=parent_dir)
             os.close(fd)
 
@@ -564,6 +617,8 @@ class FileService:
 
             # 4.使用asyncio子线程完成函数调用
             await asyncio.to_thread(async_write_file)
+            if existing_mode is not None:
+                os.chmod(temp_path, existing_mode)
             os.replace(temp_path, filepath)
             temp_path = None
 
@@ -582,6 +637,12 @@ class FileService:
             if isinstance(e, BadRequestException):
                 raise
             raise AppException(f"上传文件到沙箱出错: {str(e)}")
+        finally:
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                except FileNotFoundError:
+                    pass
 
     @classmethod
     async def ensure_file(cls, filepath: str) -> None:
@@ -609,9 +670,13 @@ class FileService:
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
                     )
-                    _, stderr = await process.communicate()
-                    if process.returncode != 0:
-                        raise NotFoundException(f"删除文件失败: {stderr.decode(errors='replace').strip()}")
+                    try:
+                        _, stderr = await process.communicate()
+                        if process.returncode != 0:
+                            raise NotFoundException(f"删除文件失败: {stderr.decode(errors='replace').strip()}")
+                    finally:
+                        if process.returncode is None:
+                            await asyncio.shield(self._stop_process(process))
                 else:
                     await asyncio.to_thread(os.remove, filepath)
                 return FileDeleteResult(filepath=filepath, deleted=True)
