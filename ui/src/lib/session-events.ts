@@ -161,7 +161,23 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
             });
           }
         } else if (msg.role === "assistant") {
-          // 所有 assistant 消息都直接添加，不去重
+          // 按 message_id 去重：重连重放或 delta+message 并发到达时，
+          // 同一条回复只渲染一次（替换既有项而非追加）
+          const mid = msg.message_id;
+          if (mid) {
+            let dupIdx = -1;
+            for (let i = list.length - 1; i >= 0; i--) {
+              const item = list[i];
+              if (item.kind === "assistant" && (item.data as ChatMessage).message_id === mid) {
+                dupIdx = i;
+                break;
+              }
+            }
+            if (dupIdx >= 0) {
+              list[dupIdx] = { ...list[dupIdx], data: msg };
+              break;
+            }
+          }
           list.push({
             kind: "assistant",
             id: stableId("assistant", messageIndex++, String(list.length)),

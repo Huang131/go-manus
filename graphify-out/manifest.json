@@ -2182,8 +2182,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/ui/src/lib/session-events.ts": {
-    "mtime": 1789299851.02945,
-    "ast_hash": "3ee1c1e61ad715fd4d62996af93867ae",
+    "mtime": 1789310486.7229993,
+    "ast_hash": "59fe8d603028bfa83cbd9095888a3730",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/ui/src/lib/api/file.ts": {
@@ -2212,8 +2212,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/ui/src/lib/api/fetch.ts": {
-    "mtime": 1789304141.6094685,
-    "ast_hash": "267a2cdba6adaae749d4d1478361cd33",
+    "mtime": 1789310486.7208223,
+    "ast_hash": "afc740dabd25679ee3d766a051255b6d",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/sandbox/app/__init__.py": {
@@ -2267,8 +2267,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/sandbox/app/services/shell.py": {
-    "mtime": 1789303814.682319,
-    "ast_hash": "b3197b83178a6fcef6141837dba6ec7f",
+    "mtime": 1789310548.647655,
+    "ast_hash": "68a3f60fa7e5df840732555cfa2edec0",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/sandbox/app/services/__init__.py": {
@@ -2392,8 +2392,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/api/migrations/002_create_files.sql": {
-    "mtime": 1789309834.2772243,
-    "ast_hash": "e0a2ca311bb4412d7f53c6e09888b9ab",
+    "mtime": 1789310258.957,
+    "ast_hash": "aa2f2ddccdd63aa434e321d655dcaf2d",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/api/migrations/001_create_sessions.sql": {
@@ -3067,8 +3067,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/api/internal/service/file_service.go": {
-    "mtime": 1789307635.4846783,
-    "ast_hash": "c003def81bf49b68ea05e31e4d1ad395",
+    "mtime": 1789310259.373775,
+    "ast_hash": "110b90f6d6e948bf4773d1cf65c2abfc",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/api/internal/service/file_cleanup_constants.go": {
@@ -3247,8 +3247,8 @@
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/docs/CODE_REVIEW_2026-09-11.md": {
-    "mtime": 1789308185.000031,
-    "ast_hash": "ea1995c9c1d351a44f0eee5954252819",
+    "mtime": 1789310663.2706692,
+    "ast_hash": "809da75be56cd07c565a8814cb880382",
     "semantic_hash": ""
   },
   "/Users/huang/GolandProjects/study/go-manus/docs/FUNCTIONAL_COMPARISON.md": {

@@ -246,19 +246,6 @@ class ShellService:
         logger.info(f"创建一个新的Shell会话ID: {session_id}")
         return session_id
 
-    def get_console_records(self, session_id: str) -> List[ConsoleRecord]:
-        """从指定会话中获取控制台记录"""
-        # 1.判断下传递的会话是否存在
-        logger.debug(f"正在获取Shell会话的控制台记录: {session_id}")
-        self._cleanup_stale_sessions()
-        if session_id not in self.active_shells:
-            logger.error(f"Shell会话不存在: {session_id}")
-            raise NotFoundException(f"Shell会话不存在: {session_id}")
-
-        # 2.获取原始的控制台记录列表
-        self._touch_session(session_id)
-        return self._get_console_records_unlocked(session_id)
-
     def _get_console_records_unlocked(self, session_id: str) -> List[ConsoleRecord]:
         """读取控制台记录的内部实现，调用方需确保会话状态不会并发变更。"""
         console_records = self.active_shells[session_id].console_records

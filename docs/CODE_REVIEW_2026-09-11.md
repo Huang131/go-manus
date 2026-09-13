@@ -115,3 +115,15 @@ P2：UnsetDefault 不进 defaultMu；Delete 事务外读过期 IsDefault；Creat
 - UploadFile 流式 TeeReader 计算 sha256；同会话同内容复用既有记录（含并发唯一索引兜底）
 - 004 占位 GPT-4 INSERT 移除：env 种子（seedDefaultModelFromEnv）成为初始模型唯一来源，开发库已验证生效
 - sandbox 测试套件容器内跑通：56 passed（运行方式见上）
+
+
+---
+
+# 增量修复 2026-09-13（第四批小项）
+
+- fetch.ts：外部 signal 与超时 controller 合并（AbortSignal 联动，外部中止不再被覆盖）
+- fetch.ts：skipErrorHandler 只返回信封 data 字段（修类型陷阱，调用方拿到的才是 T）
+- session-events.ts：assistant message 按 message_id 去重（重连重放/delta+message 并发不再渲染两条）
+- sandbox：删除无锁死代码 get_console_records（调用方均走 _unlocked 版本）
+
+仍开放（维持原优先级）：timeline O(n²) 增量化、manus-settings 多文件拆分、SSE_STREAM_END 魔法字符串类型化、sandbox 增量 delta 协议、read_file budget 计数含跳过前缀、drain 超时 500→4xx、tests/ 打进镜像。

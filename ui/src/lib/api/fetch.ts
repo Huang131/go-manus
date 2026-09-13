@@ -87,6 +87,17 @@ function fetchWithTimeout(
       reject(new ApiError(408, "请求超时"));
     }, timeout);
 
+    // 合并调用方传入的 signal：外部中止也要能取消请求，
+    // 不能被超时 controller 的 signal 覆盖掉
+    const externalSignal = options?.signal;
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        controller.abort();
+      } else {
+        externalSignal.addEventListener("abort", () => controller.abort(), { once: true });
+      }
+    }
+
     fetch(url, {
       ...options,
       signal: controller.signal,
@@ -148,7 +159,9 @@ export async function request<T = unknown>(
     // 处理 HTTP 错误状态码
     if (!response.ok) {
       if (skipErrorHandler) {
-        return parseResponse<T>(response) as Promise<T>;
+        // 只取信封的 data 字段返回，调用方拿到的才是声明 T 而非整个 ApiResponse
+        const envelope = await parseResponse<{ data?: T }>(response);
+        return (envelope?.data ?? (envelope as unknown as T));
       }
       await handleErrorResponse(response);
     }
