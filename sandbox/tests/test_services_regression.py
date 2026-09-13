@@ -25,10 +25,27 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         kill_result = await service.kill_process("test-session")
         self.assertIsNotNone(kill_result.returncode)
 
+    async def test_read_output_is_not_blocked_by_process_wait(self):
+        service = ShellService()
+        execution = asyncio.create_task(
+            service.exec_command("concurrent-session", tempfile.gettempdir(), "sleep 2")
+        )
+        await asyncio.sleep(0.1)
+        started = time.monotonic()
+        result = await service.read_shell_output("concurrent-session")
+        elapsed = time.monotonic() - started
+        self.assertEqual(result.session_id, "concurrent-session")
+        self.assertLess(elapsed, 1.0)
+        await execution
+        await service.kill_process("concurrent-session")
+
     async def test_sudo_read_waits_for_process_and_supports_special_path(self):
         process = AsyncMock()
         process.returncode = 0
-        process.communicate.return_value = (b"hello", b"")
+        process.stdout = AsyncMock()
+        process.stdout.readline.side_effect = [b"hello\n", b""]
+        process.stderr = AsyncMock()
+        process.stderr.read.return_value = b""
         with patch("app.services.file.asyncio.create_subprocess_exec", return_value=process) as create:
             result = await FileService.read_file("/tmp/path with 'quote'.txt", sudo=True)
         self.assertIsInstance(result, FileReadResult)
@@ -37,7 +54,7 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        process.communicate.assert_awaited_once()
+        process.wait.assert_awaited_once()
 
     async def test_relative_path_write_does_not_create_empty_directory(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -163,6 +180,42 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(file_service_module, "MAX_READ_BYTES", 0):
                 with self.assertRaises(BadRequestException):
                     await FileService.read_file(file.name)
+
+    async def test_read_file_streams_and_marks_truncated_content(self):
+        import app.services.file as file_service_module
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as file:
+            file.write("abcdefgh\n" * 4)
+            filepath = file.name
+        self.addCleanup(Path(filepath).unlink, missing_ok=True)
+        with patch.object(file_service_module, "MAX_READ_BYTES", 1024):
+            result = await FileService.read_file(filepath, max_length=10)
+        self.assertTrue(result.truncated)
+        self.assertTrue(result.content.endswith("(truncated)"))
+        self.assertLessEqual(len(result.content), 21)
+
+    async def test_search_streams_until_match_limit(self):
+        import app.services.file as file_service_module
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as file:
+            file.write("target\n" * 5)
+            filepath = file.name
+        self.addCleanup(Path(filepath).unlink, missing_ok=True)
+        with patch.object(file_service_module, "MAX_SEARCH_MATCHES", 2):
+            result = await FileService().search_in_file(filepath, "target")
+        self.assertEqual(result.line_numbers, [0, 1])
+        self.assertTrue(result.truncated)
+
+    async def test_replace_rejects_truncated_source(self):
+        import app.services.file as file_service_module
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as file:
+            file.write("content\n" * 4)
+            filepath = file.name
+        self.addCleanup(Path(filepath).unlink, missing_ok=True)
+        with patch.object(file_service_module, "MAX_READ_BYTES", 8):
+            with self.assertRaises(BadRequestException):
+                await FileService().replace_in_file(filepath, "content", "changed")
 
     async def test_find_files_rejects_file_as_directory(self):
         with tempfile.NamedTemporaryFile() as file:

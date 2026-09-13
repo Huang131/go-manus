@@ -266,25 +266,22 @@ class ShellService:
             process.kill()
 
     async def wait_process(self, session_id: str, seconds: Optional[int] = None) -> ShellWaitResult:
-        """按会话串行等待进程退出。"""
+        """等待指定会话当前进程退出，等待过程不占用会话锁。"""
         self._cleanup_stale_sessions()
         async with self._get_session_lock(session_id):
-            return await self._wait_process_unlocked(session_id, seconds)
+            shell = self.active_shells.get(session_id)
+            if shell is None:
+                raise NotFoundException(f"Shell会话不存在: {session_id}")
+            process = shell.process
+            self._touch_session(session_id)
+        return await self._wait_for_process(session_id, process, seconds)
 
-    async def _wait_process_unlocked(self, session_id: str, seconds: Optional[int] = None) -> ShellWaitResult:
-        """等待进程退出的内部实现，供已持有会话锁的流程调用。"""
+    async def _wait_for_process(self, session_id: str, process: asyncio.subprocess.Process,
+                                seconds: Optional[int] = None) -> ShellWaitResult:
+        """等待已捕获的进程引用，避免等待期间会话切换导致串台。"""
         # 1.判断下传递的会话是否存在
         logger.debug(f"正在Shell会话中等待进程: {session_id}, 超时: {seconds}s")
         self._cleanup_stale_sessions()
-        if session_id not in self.active_shells:
-            logger.error(f"Shell会话不存在: {session_id}")
-            raise NotFoundException(f"Shell会话不存在: {session_id}")
-
-        # 2.获取会话和子进程
-        shell = self.active_shells[session_id]
-        self._touch_session(session_id)
-        process = shell.process
-
         try:
             # 3.判断是否设置seconds
             seconds = 60 if seconds is None or seconds <= 0 else seconds
@@ -292,7 +289,8 @@ class ShellService:
 
             # 3.1 等待该会话的输出读取器消费完管道尾部（EOF），否则立刻读
             # console/output 可能截掉最后一截输出（读取器尚未轮转完）
-            reader_task = self.reader_tasks.get(session_id)
+            shell = self.active_shells.get(session_id)
+            reader_task = self.reader_tasks.get(session_id) if shell and shell.process is process else None
             if reader_task and not reader_task.done():
                 try:
                     await asyncio.wait_for(asyncio.shield(reader_task), timeout=2)
@@ -352,17 +350,34 @@ class ShellService:
             exec_dir: Optional[str],
             command: str,
     ) -> ShellExecuteResult:
-        """按会话串行执行命令，避免并发请求相互替换进程。"""
+        """串行切换会话进程，但不在锁内等待命令完成。"""
         self._cleanup_stale_sessions()
         async with self._get_session_lock(session_id):
-            return await self._exec_command_unlocked(session_id, exec_dir, command)
+            process = await self._exec_command_unlocked(session_id, exec_dir, command)
+
+        try:
+            wait_result = await self._wait_for_process(session_id, process, seconds=5)
+            async with self._get_session_lock(session_id):
+                shell = self.active_shells.get(session_id)
+                if shell is None or shell.process is not process:
+                    return ShellExecuteResult(session_id=session_id, command=command, status="running")
+                if wait_result.returncode is not None:
+                    view_result = self._read_shell_output_unlocked(session_id)
+                    return ShellExecuteResult(session_id=session_id, command=command,
+                                              status="completed", returncode=wait_result.returncode,
+                                              output=view_result.output)
+        except BadRequestException:
+            logger.warning(f"进程在会话超时后仍在运行: {session_id}")
+        except Exception as exc:
+            logger.warning(f"等待进程时出现异常: {exc}")
+        return ShellExecuteResult(session_id=session_id, command=command, status="running")
 
     async def _exec_command_unlocked(
             self,
             session_id: str,
             exec_dir: Optional[str],
             command: str,
-    ) -> ShellExecuteResult:
+    ) -> asyncio.subprocess.Process:
         """传递会话id+执行目录+命令在沙箱中执行后返回"""
         # 1.记录日志并判断执行目录是否存在
         logger.info(f"正在会话 {session_id} 中执行命令: {command}")
@@ -427,40 +442,7 @@ class ShellService:
                 # 12.创建后台输出读取器，不等待进程结束。
                 self._start_output_reader_task(session_id, process)
 
-            try:
-
-                # 13.尝试等待子进程执行(最多等待5s)
-                logger.debug(f"正在等待会话中的进程完成: {session_id}")
-                wait_result = await self._wait_process_unlocked(session_id, seconds=5)
-
-                # 14.判断返回代码是否非空(已结束)则同步返回执行结果
-                if wait_result.returncode is not None:
-                    # 15.记录日志并查看结果
-                    logger.debug(f"Shell会话进程已结束, 代码: {wait_result.returncode}")
-                    view_result = self._read_shell_output_unlocked(session_id)
-
-                    return ShellExecuteResult(
-                        session_id=session_id,
-                        command=command,
-                        status="completed",
-                        returncode=wait_result.returncode,
-                        output=view_result.output,
-                    )
-            except BadRequestException as _:
-                # 16.等待超时，记录日志不做额外处理让命令在后台继续运行
-                logger.warning(f"进程在会话超时后仍在运行: {session_id}")
-                pass
-            except Exception as e:
-                # 17.其他异常忽略并让程序继续进行
-                logger.warning(f"等待进程时出现异常: {str(e)}")
-                pass
-
-            # 18.返回正在等待Shell执行结果
-            return ShellExecuteResult(
-                session_id=session_id,
-                command=command,
-                status="running",
-            )
+            return process
         except Exception as e:
             # 19.执行过程中出现异常并记录日志后返回自定义异常
             logger.error(f"命令执行失败: {str(e)}", exc_info=True)

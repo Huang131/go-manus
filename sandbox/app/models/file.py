@@ -14,6 +14,7 @@ class FileReadResult(BaseModel):
     """文件读取结果"""
     filepath: str = Field(..., description="要读取的文件绝对路径")
     content: str = Field(..., description="读取的文件内容")
+    truncated: bool = Field(default=False, description="内容是否因读取上限而截断")
 
 
 class FileWriteResult(BaseModel):

@@ -61,16 +61,10 @@ class FileService:
             raise NotFoundException(f"目录不存在或不是目录: {dir_path}")
 
     @staticmethod
-    def _ensure_read_size(filepath: str) -> None:
-        """读取前限制文件大小，避免 max_length 只限制响应却无法保护内存。"""
-        try:
-            size = os.path.getsize(filepath)
-        except OSError as exc:
-            raise NotFoundException(f"无法获取文件大小: {filepath}") from exc
-        if size > MAX_READ_BYTES:
-            raise BadRequestException(
-                f"文件超过可读取上限 {MAX_READ_BYTES // (1024 * 1024)} MiB"
-            )
+    def _validate_read_limit() -> None:
+        """校验全局读取上限；具体文件按流式读取，超限时返回截断结果。"""
+        if MAX_READ_BYTES < 1:
+            raise BadRequestException("读取上限必须大于0")
 
     @classmethod
     async def read_file(
@@ -90,6 +84,7 @@ class FileService:
                 raise BadRequestException("行号不能小于0")
             if start_line is not None and end_line is not None and start_line > end_line:
                 raise BadRequestException("起始行不能大于结束行")
+            cls._validate_read_limit()
             # 1.检测在当前权限下能否获取该文件
             if not os.path.isfile(filepath) and not sudo:
                 logger.error(f"要读取的文件不存在或无权限: {filepath}")
@@ -100,9 +95,6 @@ class FileService:
 
             # 3.判断是否为sudo，如果是sudo系统则使用命令行的形式读取文件
             if sudo:
-                # 路径可因权限不可见；可见时先限制大小，避免 sudo cat 返回超大内容。
-                if os.path.isfile(filepath):
-                    cls._ensure_read_size(filepath)
                 # 使用参数数组传递路径，避免空格和引号破坏 shell 命令。
                 process = await asyncio.create_subprocess_exec(
                     "sudo", "cat", filepath,
@@ -110,47 +102,95 @@ class FileService:
                     stderr=asyncio.subprocess.PIPE,
                 )
 
-                # 5.读取子进程的输出，并等待子进程结束
-                stdout, stderr = await process.communicate()
-
-                # 6.判断子进程的状态是否正常结束
-                if process.returncode != 0:
-                    raise BadRequestException(f"阅读文件失败: {stderr.decode()}")
-
-                # 7.读取输出内容
-                content = stdout.decode(encoding, errors="replace")
+                content, truncated = await cls._read_stream(
+                    process.stdout, max_length, start_line, end_line
+                )
+                if truncated and process.returncode is None:
+                    process.terminate()
+                stderr = await process.stderr.read() if process.stderr else b""
+                await process.wait()
+                # 主动停止 cat 是达到返回上限的正常路径，不能误报为读取失败。
+                if process.returncode != 0 and not truncated:
+                    raise BadRequestException(f"阅读文件失败: {stderr.decode(errors='replace')}")
+                return FileReadResult(filepath=filepath, content=content, truncated=truncated)
             else:
                 cls._ensure_regular_file(filepath)
-                cls._ensure_read_size(filepath)
-                # 8.创建一个内部读取函数
-                def async_read_file() -> str:
+                def read_lines() -> tuple[str, bool]:
                     try:
-                        with open(filepath, "r", encoding=encoding) as f:
-                            return f.read()
-                    except Exception as async_read_file_exception:
-                        raise AppException(msg=f"读取文件失败: {str(async_read_file_exception)}")
-
-                # 9.使用asyncio创建线程读取文件
-                content = await asyncio.to_thread(async_read_file)
-
-            # 10.判断是否传递了读取范围
-            if start_line is not None or end_line is not None:
-                # 11.将内容切割成行，并且提取指定范围行号的数据
-                lines = content.splitlines()
-                start = start_line if start_line is not None else 0
-                end = end_line if end_line is not None else len(lines)
-                content = "\n".join(lines[start:end])
-
-            # 12.裁切下数据长度
-            if max_length is not None and 0 < max_length < len(content):
-                content = content[:max_length] + "(truncated)"
-
-            return FileReadResult(filepath=filepath, content=content)
+                        with open(filepath, "r", encoding=encoding) as stream:
+                            return cls._collect_lines(stream, max_length, start_line, end_line)
+                    except Exception as exc:
+                        raise AppException(msg=f"读取文件失败: {exc}") from exc
+                content, truncated = await asyncio.to_thread(read_lines)
+                return FileReadResult(filepath=filepath, content=content, truncated=truncated)
         except Exception as e:
             # 13.判断异常类型执行不同操作
             if isinstance(e, BadRequestException) or isinstance(e, AppException):
                 raise
             raise AppException(f"文件读取失败: {str(e)}")
+
+    @staticmethod
+    def _collect_lines(stream, max_length: Optional[int], start_line: Optional[int],
+                       end_line: Optional[int]) -> tuple[str, bool]:
+        """逐行收集范围内内容，任何上限命中后立即停止读取。"""
+        start = start_line or 0
+        parts = []
+        length = 0
+        bytes_seen = 0
+        truncated = False
+        for index, line in enumerate(stream):
+            bytes_seen += len(line.encode("utf-8"))
+            if bytes_seen > MAX_READ_BYTES:
+                truncated = True
+                break
+            if index < start:
+                continue
+            if end_line is not None and index >= end_line:
+                break
+            value = line.rstrip("\r\n")
+            separator = "\n" if parts else ""
+            addition = separator + value
+            if max_length is not None and length + len(addition) > max_length:
+                remaining = max_length - length
+                if remaining > 0:
+                    parts.append(addition[:remaining])
+                truncated = True
+                break
+            parts.append(addition)
+            length += len(addition)
+        return "".join(parts) + ("(truncated)" if truncated else ""), truncated
+
+    @staticmethod
+    async def _read_stream(stream, max_length: Optional[int], start_line: Optional[int],
+                           end_line: Optional[int]) -> tuple[str, bool]:
+        """异步逐行读取 sudo 子进程输出，避免 communicate 一次性加载。"""
+        if stream is None:
+            return "", False
+        start = start_line or 0
+        parts, length, bytes_seen, truncated = [], 0, 0, False
+        for index in itertools.count():
+            raw = await stream.readline()
+            if not raw:
+                break
+            bytes_seen += len(raw)
+            if bytes_seen > MAX_READ_BYTES:
+                truncated = True
+                break
+            if index < start:
+                continue
+            if end_line is not None and index >= end_line:
+                break
+            value = raw.decode("utf-8", errors="replace").rstrip("\r\n")
+            addition = ("\n" if parts else "") + value
+            if max_length is not None and length + len(addition) > max_length:
+                remaining = max_length - length
+                if remaining > 0:
+                    parts.append(addition[:remaining])
+                truncated = True
+                break
+            parts.append(addition)
+            length += len(addition)
+        return "".join(parts) + ("(truncated)" if truncated else ""), truncated
 
     @classmethod
     async def write_file(
@@ -243,6 +283,10 @@ class FileService:
         """根据传递的数据替换文件内指定的内容"""
         # 1.调用服务获取对应的文件内容
         file_read_result = await self.read_file(filepath=filepath, sudo=sudo, max_length=None)
+        if file_read_result.truncated:
+            raise BadRequestException(
+                f"文件超过可替换上限 {MAX_READ_BYTES // (1024 * 1024)} MiB"
+            )
         content = file_read_result.content
 
         # 2.计算old_str出现的次数，只有出现次数>0才需要替换
@@ -269,35 +313,61 @@ class FileService:
             sudo: bool = False,
     ) -> FileSearchResult:
         """根据传递的文件路径+匹配规则查询文件内符合的内容"""
-        # 1.调用服务获取对应的文件内容
-        file_read_result = await self.read_file(filepath=filepath, sudo=sudo, max_length=None)
-        content = file_read_result.content
-
-        # 2.将读取的内容拆分成每一行
-        lines = content.splitlines()
-        matches = []
-        line_numbers = []
-        truncated = False
-
-        # 3.将外部传递的regex转换为正则
+        matches, line_numbers = [], []
         try:
             pattern = re.compile(regex)
         except Exception as e:
             raise BadRequestException(f"传递正则表达式[{regex}]出错: {str(e)}")
-
-        # 4.创建一个异步函数，使用子线程方式执行避免长时间io阻塞
-        def async_matches():
-            nonlocal matches, line_numbers, truncated
-            for idx, line in enumerate(lines):
+        if not sudo:
+            self._ensure_regular_file(filepath)
+            self._validate_read_limit()
+            def scan() -> bool:
+                truncated = False
+                bytes_seen = 0
+                with open(filepath, "r", encoding="utf-8") as stream:
+                    for index, line in enumerate(stream):
+                        bytes_seen += len(line.encode("utf-8"))
+                        if bytes_seen > MAX_READ_BYTES:
+                            truncated = True
+                            break
+                        if pattern.search(line.rstrip("\r\n")):
+                            if len(matches) >= MAX_SEARCH_MATCHES:
+                                return True
+                            matches.append(line.rstrip("\r\n"))
+                            line_numbers.append(index)
+                return truncated
+            truncated = await asyncio.to_thread(scan)
+        else:
+            process = await asyncio.create_subprocess_exec(
+                "sudo", "cat", filepath,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            truncated = False
+            bytes_seen = 0
+            index = 0
+            while process.stdout:
+                raw = await process.stdout.readline()
+                if not raw:
+                    break
+                bytes_seen += len(raw)
+                if bytes_seen > MAX_READ_BYTES:
+                    truncated = True
+                    process.terminate()
+                    break
+                line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
                 if pattern.search(line):
                     if len(matches) >= MAX_SEARCH_MATCHES:
                         truncated = True
+                        process.terminate()
                         break
                     matches.append(line)
-                    line_numbers.append(idx)
-
-        # 5.使用asyncio创建子线程并调用
-        await asyncio.to_thread(async_matches)
+                    line_numbers.append(index)
+                index += 1
+            await process.wait()
+            if process.returncode != 0 and not truncated:
+                stderr = await process.stderr.read() if process.stderr else b""
+                raise BadRequestException(f"搜索文件失败: {stderr.decode(errors='replace')}")
 
         return FileSearchResult(
             filepath=filepath,
