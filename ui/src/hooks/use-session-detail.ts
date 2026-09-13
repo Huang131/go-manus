@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { sessionApi } from '@/lib/api/session'
+import { sessionApi, StreamEndError } from '@/lib/api/session'
 import { normalizeEvent, normalizeEvents } from '@/lib/session-events'
 import type { SessionDetail, SSEEventData, SessionFile } from '@/lib/api/types'
 
@@ -143,7 +143,7 @@ export function useSessionDetail(
           return
         }
         // 流正常结束（服务端关闭连接），延迟重连
-        if (err.message === 'SSE_STREAM_END') {
+        if (err instanceof StreamEndError) {
           emptyStreamCleanupRef.current = null
           emptyStreamTimerRef.current = setTimeout(() => {
             if (!emptyStreamCleanupRef.current && !isSendMessageRef.current) {
@@ -330,7 +330,7 @@ export function useSessionDetail(
             return
           }
           // 流正常结束（服务端关闭连接），重置状态并启动空流监听后续事件
-          if (err.message === 'SSE_STREAM_END') {
+          if (err instanceof StreamEndError) {
             setStreaming(false)
             isSendMessageRef.current = false
             if (messageStreamCleanupRef.current) {

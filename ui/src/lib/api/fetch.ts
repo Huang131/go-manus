@@ -161,7 +161,10 @@ export async function request<T = unknown>(
       if (skipErrorHandler) {
         // 只取信封的 data 字段返回，调用方拿到的才是声明 T 而非整个 ApiResponse
         const envelope = await parseResponse<{ data?: T }>(response);
-        return (envelope?.data ?? (envelope as unknown as T));
+        if (envelope && envelope.data != null) {
+          return envelope.data as T;
+        }
+        return envelope as unknown as T;
       }
       await handleErrorResponse(response);
     }

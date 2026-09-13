@@ -245,3 +245,6 @@ rebuild-sandbox:
 	@echo "重建沙箱服务..."
 	docker buildx build --load -f sandbox/Dockerfile -t go-manus-sandbox:latest sandbox
 	docker compose up -d --no-deps --force-recreate sandbox
+# 运行 sandbox 容器内的回归测试（56 个：服务级 + ASGI 端点级）
+test-sandbox:
+	docker compose exec -T sandbox /venv/bin/python -m pytest tests/ -q

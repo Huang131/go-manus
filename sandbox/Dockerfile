@@ -75,7 +75,8 @@ ENV UV_PROJECT_ENVIRONMENT="/venv"
 COPY pyproject.toml uv.lock ./
 
 # 使用 uv sync 安装依赖 (--frozen 使用锁文件，--no-dev 不安装开发依赖)
-RUN uv sync --frozen --no-dev
+# pytest 用于容器内回归测试（tests/ 已随 COPY . . 进入镜像）
+RUN uv sync --frozen --no-dev && uv pip install --python /venv/bin/python pytest
 
 # ============================================================
 # 阶段5: 复制代码和配置

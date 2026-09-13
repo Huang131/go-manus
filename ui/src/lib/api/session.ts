@@ -1,4 +1,12 @@
 import { get, post, createSSEStream, parseSSEStream } from "./fetch";
+
+/** 流正常结束（服务端关闭连接）的标记错误：上层用 instanceof 判断，不再比对消息字符串 */
+export class StreamEndError extends Error {
+  constructor() {
+    super("SSE_STREAM_END");
+    this.name = "StreamEndError";
+  }
+}
 import type {
   Session,
   SessionDetail,
@@ -89,7 +97,7 @@ export const sessionApi = {
 
         // 流正常结束（服务端关闭连接），通知上层以便重连
         if (!controller.signal.aborted && onError && !parseError) {
-          onError(new Error("SSE 流已结束"));
+          onError(new StreamEndError());
         }
       } catch (error) {
         if (!controller.signal.aborted && onError) {
@@ -173,7 +181,7 @@ export const sessionApi = {
 
         // 流正常结束（服务端关闭连接），通知上层以便重连或状态恢复
         if (!controller.signal.aborted && onError && !parseError) {
-          onError(new Error("SSE_STREAM_END"));
+          onError(new StreamEndError());
         }
       } catch (error) {
         // 忽略 AbortError，这是正常的连接中止

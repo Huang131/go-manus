@@ -55,5 +55,5 @@ export type {
 // 模块 API
 export { configApi } from "./config";
 export { fileApi } from "./file";
-export { sessionApi } from "./session";
+export { sessionApi, StreamEndError } from "./session";
 

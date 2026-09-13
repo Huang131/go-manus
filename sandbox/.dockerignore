@@ -41,6 +41,5 @@ docs/
 README.md
 
 # Test files
-tests/
 test/
 *_test.py

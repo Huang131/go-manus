@@ -174,7 +174,7 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
               }
             }
             if (dupIdx >= 0) {
-              list[dupIdx] = { ...list[dupIdx], data: msg };
+              list[dupIdx] = { ...list[dupIdx], data: msg } as TimelineItem;
               break;
             }
           }
