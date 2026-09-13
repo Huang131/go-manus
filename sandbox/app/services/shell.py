@@ -524,16 +524,16 @@ class ShellService:
             # 6.将字符串编码为字节流(发送给进程使用)
             input_data = text_to_send.encode(encoding)
 
-            # 7.记录日志/输出(直接使用原始字符串，不从input_data编码，避免编码不统一的情况)
+            # 7.向子进程写入数据，成功后再记录回显，避免失败输入污染输出。
+            process.stdin.write(input_data)
+            await asyncio.wait_for(process.stdin.drain(), timeout=5)
+
+            # 8.记录日志/输出(直接使用原始字符串，不从input_data编码，避免编码不统一的情况)
             log_text = input_text + ("\n" if press_enter else "")
             shell.output = self._append_output(shell.output, log_text)
             if shell.console_records:
                 record = shell.console_records[-1]
                 record.output = self._append_output(record.output, log_text)
-
-            # 8.向子进程写入数据
-            process.stdin.write(input_data)
-            await asyncio.wait_for(process.stdin.drain(), timeout=5)
 
             # 9.记录日志并返回写入结果
             logger.info("成功向子进程写入数据")

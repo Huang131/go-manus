@@ -13,7 +13,9 @@ import os.path
 import re
 import shutil
 import tempfile
-from typing import Dict, Iterator, Optional
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from typing import AsyncIterator, Dict, Iterator, Optional
 
 from fastapi import UploadFile
 
@@ -42,6 +44,29 @@ MAX_WRITE_BYTES = 10 * 1024 * 1024
 MAX_READ_BYTES = 100 * 1024 * 1024
 PROCESS_TERMINATE_TIMEOUT = 1
 READ_CHUNK_BYTES = 64 * 1024
+MAX_PENDING_BYTES = 1024 * 1024
+
+
+@dataclass
+class _WriteLockEntry:
+    """按路径管理写锁及引用数，空闲条目可从注册表移除。"""
+    lock: asyncio.Lock
+    references: int = 0
+
+
+@dataclass(frozen=True)
+class _LineChunk:
+    """文件流的一段逻辑行；truncated 表示单行超过内存上限。"""
+    text: str
+    truncated: bool = False
+
+
+def _truncate_utf8(text: str, max_bytes: int) -> str:
+    """按 UTF-8 字节上限截断文本，避免多字节字符被切成非法序列。"""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    return encoded[:max_bytes].decode("utf-8", errors="ignore")
 
 
 class FileService:
@@ -51,11 +76,29 @@ class FileService:
         # 服务无状态，保留显式构造函数便于 FastAPI 依赖注入和后续扩展。
         super().__init__()
         # 仅串行化同一文件的写入，不影响不同文件并发处理。
-        self._write_locks: Dict[str, asyncio.Lock] = {}
+        self._write_locks: Dict[str, _WriteLockEntry] = {}
 
-    def _get_write_lock(self, filepath: str) -> asyncio.Lock:
-        """获取目标文件锁，避免并发 append 读取同一旧快照后互相覆盖。"""
-        return self._write_locks.setdefault(filepath, asyncio.Lock())
+    @asynccontextmanager
+    async def _write_lock(self, filepath: str) -> AsyncIterator[None]:
+        """获取路径锁并在最后一个使用者离开后回收条目。"""
+        entry = self._write_locks.get(filepath)
+        if entry is None:
+            entry = _WriteLockEntry(lock=asyncio.Lock())
+            self._write_locks[filepath] = entry
+        entry.references += 1
+        acquired = False
+        try:
+            await entry.lock.acquire()
+            acquired = True
+            yield
+        finally:
+            if acquired:
+                entry.lock.release()
+            entry.references -= 1
+            # 只有没有等待者且锁已释放时才能删除，避免并发请求拿到不同的锁。
+            if entry.references == 0 and not entry.lock.locked():
+                if self._write_locks.get(filepath) is entry:
+                    self._write_locks.pop(filepath, None)
 
     @staticmethod
     def _ensure_regular_file(filepath: str) -> None:
@@ -153,7 +196,7 @@ class FileService:
             raise AppException(f"文件读取失败: {str(e)}")
 
     @staticmethod
-    def _collect_lines(lines: Iterator[str], max_length: Optional[int], start_line: Optional[int],
+    def _collect_lines(lines: Iterator[_LineChunk], max_length: Optional[int], start_line: Optional[int],
                        end_line: Optional[int]) -> tuple[str, bool]:
         """逐行收集范围内内容，任何上限命中后立即停止读取。"""
         start = start_line or 0
@@ -161,9 +204,10 @@ class FileService:
         length = 0
         bytes_seen = 0
         truncated = False
-        for index, line in enumerate(lines):
+        for index, chunk in enumerate(lines):
+            line = chunk.text
             bytes_seen += len(line.encode("utf-8"))
-            if bytes_seen > MAX_READ_BYTES:
+            if bytes_seen > MAX_READ_BYTES or chunk.truncated:
                 truncated = True
                 break
             if index < start:
@@ -184,8 +228,8 @@ class FileService:
         return "".join(parts) + ("(truncated)" if truncated else ""), truncated
 
     @staticmethod
-    def _iter_file_lines(filepath: str) -> Iterator[str]:
-        """按固定块解码文件，避免超长单行一次性占满内存。"""
+    def _iter_file_lines(filepath: str) -> Iterator[_LineChunk]:
+        """按固定块解码文件，超长无换行内容达到上限即截断。"""
         import codecs
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         pending = ""
@@ -197,14 +241,19 @@ class FileService:
                 pending += decoder.decode(chunk)
                 while "\n" in pending:
                     line, pending = pending.split("\n", 1)
-                    yield line + "\n"
-                # 没有换行符的超长内容也不能无限累积；交给上层按读取上限截断。
-                if len(pending.encode("utf-8")) > MAX_READ_BYTES:
-                    yield pending
+                    if len(line.encode("utf-8")) > MAX_PENDING_BYTES:
+                        yield _LineChunk(_truncate_utf8(line, MAX_PENDING_BYTES), truncated=True)
+                        return
+                    yield _LineChunk(line + "\n")
+                if len(pending.encode("utf-8")) > MAX_PENDING_BYTES:
+                    yield _LineChunk(_truncate_utf8(pending, MAX_PENDING_BYTES), truncated=True)
                     return
         pending += decoder.decode(b"", final=True)
         if pending:
-            yield pending
+            if len(pending.encode("utf-8")) > MAX_PENDING_BYTES:
+                yield _LineChunk(_truncate_utf8(pending, MAX_PENDING_BYTES), truncated=True)
+            else:
+                yield _LineChunk(pending)
 
     @staticmethod
     async def _read_stream(stream, max_length: Optional[int], start_line: Optional[int],
@@ -227,6 +276,9 @@ class FileService:
             pending += raw.decode("utf-8", errors="replace")
             while "\n" in pending:
                 line, pending = pending.split("\n", 1)
+                if len(line.encode("utf-8")) > MAX_PENDING_BYTES:
+                    truncated = True
+                    break
                 if index >= start and (end_line is None or index < end_line):
                     addition = ("\n" if parts else "") + line.rstrip("\r")
                     if max_length is not None and length + len(addition) > max_length:
@@ -239,6 +291,9 @@ class FileService:
                     length += len(addition)
                 index += 1
             if truncated or (end_line is not None and index >= end_line):
+                break
+            if len(pending.encode("utf-8")) > MAX_PENDING_BYTES:
+                truncated = True
                 break
         if not truncated and pending and (end_line is None or index < end_line):
             addition = ("\n" if parts else "") + pending.rstrip("\r")
@@ -261,8 +316,7 @@ class FileService:
             sudo: bool = False,
     ) -> FileWriteResult:
         """根据传递的文件路径+内容向指定文件写入内容"""
-        lock = self._get_write_lock(filepath)
-        async with lock:
+        async with self._write_lock(filepath):
             return await self._write_file_locked(
                 filepath, content, append, leading_newline, trailing_newline, sudo
             )
@@ -352,7 +406,7 @@ class FileService:
     ) -> FileReplaceResult:
         """根据传递的数据替换文件内指定的内容"""
         # 读取和写回必须处于同一把锁内，否则并发 append 可能被旧快照覆盖。
-        async with self._get_write_lock(filepath):
+        async with self._write_lock(filepath):
             file_read_result = await self.read_file(filepath=filepath, sudo=sudo, max_length=None)
             if file_read_result.truncated:
                 raise BadRequestException(
@@ -389,16 +443,20 @@ class FileService:
             def scan() -> bool:
                 truncated = False
                 bytes_seen = 0
-                for index, line in enumerate(self._iter_file_lines(filepath)):
-                        bytes_seen += len(line.encode("utf-8"))
-                        if bytes_seen > MAX_READ_BYTES:
-                            truncated = True
-                            break
-                        if pattern.search(line.rstrip("\r\n")):
-                            if len(matches) >= MAX_SEARCH_MATCHES:
-                                return True
-                            matches.append(line.rstrip("\r\n"))
-                            line_numbers.append(index)
+                for index, chunk in enumerate(self._iter_file_lines(filepath)):
+                    line = chunk.text
+                    bytes_seen += len(line.encode("utf-8"))
+                    if bytes_seen > MAX_READ_BYTES:
+                        truncated = True
+                        break
+                    if pattern.search(line.rstrip("\r\n")):
+                        if len(matches) >= MAX_SEARCH_MATCHES:
+                            return True
+                        matches.append(line.rstrip("\r\n"))
+                        line_numbers.append(index)
+                    if chunk.truncated:
+                        truncated = True
+                        break
                 return truncated
             truncated = await asyncio.to_thread(scan)
         else:
@@ -541,22 +599,22 @@ class FileService:
     async def delete_file(self, filepath: str, sudo: bool = False) -> FileDeleteResult:
         """根据传递的路径+sudo删除指定文件"""
         # sudo 模式下普通用户可能无法看到文件，交给 rm 返回权限和不存在错误。
-        if not sudo:
-            await self.ensure_file(filepath)
-
         try:
-            if sudo:
-                process = await asyncio.create_subprocess_exec(
-                    "sudo", "rm", "--", filepath,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                _, stderr = await process.communicate()
-                if process.returncode != 0:
-                    raise NotFoundException(f"删除文件失败: {stderr.decode(errors='replace').strip()}")
-            else:
-                os.remove(filepath)
-            return FileDeleteResult(filepath=filepath, deleted=True)
+            async with self._write_lock(filepath):
+                if not sudo:
+                    await self.ensure_file(filepath)
+                if sudo:
+                    process = await asyncio.create_subprocess_exec(
+                        "sudo", "rm", "--", filepath,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    _, stderr = await process.communicate()
+                    if process.returncode != 0:
+                        raise NotFoundException(f"删除文件失败: {stderr.decode(errors='replace').strip()}")
+                else:
+                    await asyncio.to_thread(os.remove, filepath)
+                return FileDeleteResult(filepath=filepath, deleted=True)
         except Exception as e:
             logger.error(f"删除文件{filepath}失败: {str(e)}")
             if isinstance(e, (BadRequestException, NotFoundException)):

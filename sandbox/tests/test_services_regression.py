@@ -3,13 +3,16 @@ import os
 import tempfile
 import time
 import unittest
+from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.interfaces.errors.exceptions import BadRequestException, NotFoundException
+from app.interfaces.errors.exceptions import AppException, BadRequestException, NotFoundException
 from app.interfaces.schemas.file import FileWriteRequest
 from app.interfaces.schemas.shell import ShellExecuteRequest, ShellWaitRequest
 from app.models.file import FileReadResult
+from app.models.shell import ConsoleRecord
 from app.services.file import FileService
 from app.services.shell import ShellService
 
@@ -112,6 +115,55 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(BadRequestException):
             await service.write_shell_input("write-error-session", "input", True)
 
+    async def test_write_input_does_not_record_when_stdin_write_fails(self):
+        class BrokenStdin:
+            def write(self, data):
+                raise BrokenPipeError("stdin closed")
+
+            async def drain(self):
+                return None
+
+        process = type("Process", (), {"returncode": None, "stdin": BrokenStdin()})()
+        service = ShellService()
+        service.active_shells["broken-stdin"] = SimpleNamespace(
+            process=process,
+            exec_dir=tempfile.gettempdir(),
+            output="existing output",
+            console_records=[ConsoleRecord(ps1="$", command="cmd", output="existing record")],
+        )
+
+        with self.assertRaises(AppException):
+            await service.write_shell_input("broken-stdin", "input", True)
+
+        shell = service.active_shells["broken-stdin"]
+        self.assertEqual(shell.output, "existing output")
+        self.assertEqual(shell.console_records[-1].output, "existing record")
+
+    async def test_extend_timeout_recovers_if_state_is_cleared_before_lock(self):
+        from app.services.supervisor import SupervisorService
+
+        service = SupervisorService.__new__(SupervisorService)
+        service.timeout_active = True
+        service.shutdown_time = datetime.now() + timedelta(minutes=1)
+        service._setup_timer = lambda minutes: None
+
+        class ConcurrentCancel:
+            async def __aenter__(self):
+                service.timeout_active = False
+                service.shutdown_time = None
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        service._state_lock = ConcurrentCancel()
+        result = await service.extend_timeout(2)
+
+        self.assertEqual(result.status, "timeout_activated")
+        self.assertTrue(result.active)
+        self.assertEqual(result.timeout_minutes, 2)
+        self.assertIsNotNone(service.shutdown_time)
+
     async def test_write_reports_utf8_byte_count(self):
         with tempfile.TemporaryDirectory() as directory:
             filepath = str(Path(directory, "utf8.txt"))
@@ -141,6 +193,53 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
             )
             content = Path(filepath).read_text(encoding="utf-8")
         self.assertEqual(sorted(content), ["a", "b"])
+        self.assertNotIn(filepath, service._write_locks)
+
+    async def test_delete_file_moves_regular_remove_to_thread(self):
+        import app.services.file as file_service_module
+
+        with tempfile.NamedTemporaryFile(delete=False) as file:
+            filepath = file.name
+        self.addCleanup(Path(filepath).unlink, missing_ok=True)
+        calls = []
+
+        async def run_in_thread(func, *args):
+            calls.append((func, args))
+            return func(*args)
+
+        with patch.object(file_service_module.asyncio, "to_thread", side_effect=run_in_thread) as to_thread:
+            result = await FileService().delete_file(filepath)
+
+        self.assertTrue(result.deleted)
+        to_thread.assert_awaited_once()
+        self.assertIs(calls[0][0], os.remove)
+        self.assertEqual(calls[0][1], (filepath,))
+
+    async def test_long_unterminated_line_is_bounded_and_truncated(self):
+        import app.services.file as file_service_module
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as file:
+            file.write("x" * 4096)
+            filepath = file.name
+        self.addCleanup(Path(filepath).unlink, missing_ok=True)
+        with patch.object(file_service_module, "MAX_PENDING_BYTES", 128):
+            result = await FileService.read_file(filepath, max_length=None)
+        self.assertTrue(result.truncated)
+        self.assertTrue(result.content.endswith("(truncated)"))
+        self.assertLessEqual(len(result.content), 128 + len("(truncated)"))
+
+    async def test_long_utf8_line_respects_byte_limit(self):
+        import app.services.file as file_service_module
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as file:
+            file.write("中" * 1000)
+            filepath = file.name
+        self.addCleanup(Path(filepath).unlink, missing_ok=True)
+        with patch.object(file_service_module, "MAX_PENDING_BYTES", 128):
+            result = await FileService.read_file(filepath, max_length=None)
+        content = result.content.removesuffix("(truncated)")
+        self.assertTrue(result.truncated)
+        self.assertLessEqual(len(content.encode("utf-8")), 128)
 
     async def test_replace_and_append_preserve_both_operations(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -319,7 +418,6 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         service.timeout_active = False
         service.shutdown_time = None
         service.shutdown_task = None
-        service.shutdown_timer = None
         service._setup_timer = lambda minutes: None
         await asyncio.gather(
             service.activate_timeout(1),
@@ -328,6 +426,23 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         status = await service.get_timeout_status()
         self.assertTrue(status.active)
         self.assertGreater(status.remaining_seconds, 0)
+
+    async def test_supervisor_cancel_invalidates_existing_timer(self):
+        from app.services.supervisor import SupervisorService
+
+        service = SupervisorService.__new__(SupervisorService)
+        service.timeout_active = True
+        service.shutdown_time = datetime.now() + timedelta(minutes=1)
+        service.shutdown_task = MagicMock()
+        shutdown_task = service.shutdown_task
+        service._timer_generation = 4
+
+        result = await service.cancel_timeout()
+
+        self.assertFalse(result.active)
+        shutdown_task.cancel.assert_called_once_with()
+        self.assertEqual(service._timer_generation, 5)
+        self.assertIsNone(service.shutdown_task)
 
     async def test_find_files_rejects_file_as_directory(self):
         with tempfile.NamedTemporaryFile() as file:
@@ -359,7 +474,6 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         service.timeout_active = False
         service.shutdown_time = None
         service.shutdown_task = None
-        service.shutdown_timer = None
         with self.assertRaises(BadRequestException):
             await service.activate_timeout(0)
 
