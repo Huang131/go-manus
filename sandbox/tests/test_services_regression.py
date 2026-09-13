@@ -39,11 +39,26 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         await execution
         await service.kill_process("concurrent-session")
 
+    async def test_read_output_is_not_blocked_while_process_is_terminated(self):
+        service = ShellService()
+        execution = asyncio.create_task(
+            service.exec_command("kill-concurrent-session", tempfile.gettempdir(), "trap '' TERM; sleep 10")
+        )
+        await asyncio.sleep(0.1)
+        termination = asyncio.create_task(service.kill_process("kill-concurrent-session"))
+        await asyncio.sleep(0.1)
+        started = time.monotonic()
+        result = await service.read_shell_output("kill-concurrent-session")
+        self.assertEqual(result.session_id, "kill-concurrent-session")
+        self.assertLess(time.monotonic() - started, 1.0)
+        await termination
+        await execution
+
     async def test_sudo_read_waits_for_process_and_supports_special_path(self):
         process = AsyncMock()
         process.returncode = 0
         process.stdout = AsyncMock()
-        process.stdout.readline.side_effect = [b"hello\n", b""]
+        process.stdout.read.side_effect = [b"hello\n", b""]
         process.stderr = AsyncMock()
         process.stderr.read.return_value = b""
         with patch("app.services.file.asyncio.create_subprocess_exec", return_value=process) as create:
@@ -54,7 +69,7 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        process.wait.assert_awaited_once()
+        process.communicate.assert_not_awaited()
 
     async def test_relative_path_write_does_not_create_empty_directory(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -87,6 +102,19 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
             filepath = str(Path(directory, "utf8.txt"))
             result = await FileService.write_file(filepath, "你好")
         self.assertEqual(result.bytes_written, len("你好".encode("utf-8")))
+
+    async def test_append_copies_existing_file_in_chunks(self):
+        import app.services.file as file_service_module
+
+        with tempfile.TemporaryDirectory() as directory:
+            filepath = str(Path(directory, "append.txt"))
+            Path(filepath).write_text("old-content", encoding="utf-8")
+            with patch.object(file_service_module.shutil, "copyfileobj", wraps=file_service_module.shutil.copyfileobj) as copy:
+                result = await FileService.write_file(filepath, "-new", append=True)
+            content = Path(filepath).read_text(encoding="utf-8")
+        self.assertEqual(result.bytes_written, 4)
+        self.assertEqual(content, "old-content-new")
+        copy.assert_called_once()
 
     async def test_search_matches_content_beyond_line_start(self):
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as file:
@@ -193,6 +221,18 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.truncated)
         self.assertTrue(result.content.endswith("(truncated)"))
         self.assertLessEqual(len(result.content), 21)
+
+    async def test_read_file_handles_a_single_line_larger_than_chunk_size(self):
+        import app.services.file as file_service_module
+
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as file:
+            file.write("x" * (file_service_module.READ_CHUNK_BYTES + 100))
+            filepath = file.name
+        self.addCleanup(Path(filepath).unlink, missing_ok=True)
+        with patch.object(file_service_module, "MAX_READ_BYTES", file_service_module.READ_CHUNK_BYTES + 200):
+            result = await FileService.read_file(filepath, max_length=100)
+        self.assertTrue(result.truncated)
+        self.assertEqual(len(result.content), 100 + len("(truncated)"))
 
     async def test_search_streams_until_match_limit(self):
         import app.services.file as file_service_module

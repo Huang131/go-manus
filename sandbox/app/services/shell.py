@@ -368,8 +368,9 @@ class ShellService:
                                               output=view_result.output)
         except BadRequestException:
             logger.warning(f"进程在会话超时后仍在运行: {session_id}")
-        except Exception as exc:
-            logger.warning(f"等待进程时出现异常: {exc}")
+        except Exception:
+            # 只有明确的等待超时才表示命令仍在运行，其他错误必须交给调用方处理。
+            raise
         return ShellExecuteResult(session_id=session_id, command=command, status="running")
 
     async def _exec_command_unlocked(
@@ -523,51 +524,38 @@ class ShellService:
             raise AppException(f"向子进程写入数据出错: {str(e)}")
 
     async def kill_process(self, session_id: str) -> ShellKillResult:
-        """按会话串行终止进程。"""
+        """获取进程后在锁外终止，保证终止期间仍可读取会话输出。"""
         self._cleanup_stale_sessions()
         async with self._get_session_lock(session_id):
-            return await self._kill_process_unlocked(session_id)
+            shell = self.active_shells.get(session_id)
+            if shell is None:
+                raise NotFoundException(f"Shell会话不存在: {session_id}")
+            process = shell.process
+            self._touch_session(session_id)
 
-    async def _kill_process_unlocked(self, session_id: str) -> ShellKillResult:
-        """根据传递的Shell会话id关闭对应进程"""
-        # 1.判断下传递的会话是否存在
-        logger.debug(f"正在终止会话中的进程: {session_id}")
-        self._cleanup_stale_sessions()
-        if session_id not in self.active_shells:
-            logger.error(f"Shell会话不存在: {session_id}")
-            raise NotFoundException(f"Shell会话不存在: {session_id}")
-
-        # 2.获取会话和子进程
-        shell = self.active_shells[session_id]
-        process = shell.process
-        self._touch_session(session_id)
-
+        status = "already_terminated"
         try:
-            # 3.检查子进程是否还在运行
             if process.returncode is None:
-                # 4.记录日志并尝试先优雅的关闭
-                logger.info(f"尝试优雅终止进程: {session_id}")
-                self._terminate_process_tree(process)
-
-                try:
-                    # 5.等待3秒时间
-                    await asyncio.wait_for(process.wait(), timeout=3)
-                except asyncio.TimeoutError as _:
-                    # 6.优雅关闭失败，则强制关闭
-                    logger.warning(f"尝试强制关闭进程: {session_id}")
-                    self._kill_process_tree(process)
-                    await process.wait()
-
-                # 7.记录日志并返回关闭结果
-                logger.info(f"进程已终止, 返回代码为: {process.returncode}")
-                await self._stop_output_reader(session_id)
-                return ShellKillResult(status="terminated", returncode=process.returncode)
-            else:
-                # 8.进程已结束无需重复关闭
-                logger.info(f"进程已终止, 返回代码为: {process.returncode}")
-                await self._stop_output_reader(session_id)
-                return ShellKillResult(status="already_terminated", returncode=process.returncode)
+                status = "terminated"
+                await self._terminate_and_wait(process)
+            result = ShellKillResult(status=status, returncode=process.returncode)
         except Exception as e:
-            # 9.记录日志并抛出异常
             logger.error(f"关闭进程失败: {str(e)}", exc_info=True)
             raise AppException(f"关闭进程失败: {str(e)}")
+
+        # 进程可能已被同一会话的新命令替换，只有身份仍一致时才能清理 reader。
+        async with self._get_session_lock(session_id):
+            shell = self.active_shells.get(session_id)
+            if shell is not None and shell.process is process:
+                await self._stop_output_reader(session_id)
+        return result
+
+    async def _terminate_and_wait(self, process: asyncio.subprocess.Process) -> None:
+        """优雅终止进程，超时后强杀并确保 wait 完成。"""
+        self._terminate_process_tree(process)
+        try:
+            await asyncio.wait_for(process.wait(), timeout=3)
+        except asyncio.TimeoutError:
+            logger.warning("优雅终止进程超时，执行强制终止")
+            self._kill_process_tree(process)
+            await process.wait()

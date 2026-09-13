@@ -11,8 +11,9 @@ import itertools
 import logging
 import os.path
 import re
+import shutil
 import tempfile
-from typing import Optional
+from typing import Iterator, Optional
 
 from fastapi import UploadFile
 
@@ -39,6 +40,8 @@ MAX_FIND_FILES = 10_000
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 MAX_WRITE_BYTES = 10 * 1024 * 1024
 MAX_READ_BYTES = 100 * 1024 * 1024
+PROCESS_TERMINATE_TIMEOUT = 1
+READ_CHUNK_BYTES = 64 * 1024
 
 
 class FileService:
@@ -65,6 +68,18 @@ class FileService:
         """校验全局读取上限；具体文件按流式读取，超限时返回截断结果。"""
         if MAX_READ_BYTES < 1:
             raise BadRequestException("读取上限必须大于0")
+
+    @staticmethod
+    async def _stop_process(process) -> None:
+        """停止达到读取上限的子进程，避免 terminate 后永久等待。"""
+        if process.returncode is not None:
+            return
+        process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=PROCESS_TERMINATE_TIMEOUT)
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.wait()
 
     @classmethod
     async def read_file(
@@ -105,10 +120,11 @@ class FileService:
                 content, truncated = await cls._read_stream(
                     process.stdout, max_length, start_line, end_line
                 )
-                if truncated and process.returncode is None:
-                    process.terminate()
+                if truncated:
+                    await cls._stop_process(process)
                 stderr = await process.stderr.read() if process.stderr else b""
-                await process.wait()
+                if process.returncode is None:
+                    await process.wait()
                 # 主动停止 cat 是达到返回上限的正常路径，不能误报为读取失败。
                 if process.returncode != 0 and not truncated:
                     raise BadRequestException(f"阅读文件失败: {stderr.decode(errors='replace')}")
@@ -117,8 +133,9 @@ class FileService:
                 cls._ensure_regular_file(filepath)
                 def read_lines() -> tuple[str, bool]:
                     try:
-                        with open(filepath, "r", encoding=encoding) as stream:
-                            return cls._collect_lines(stream, max_length, start_line, end_line)
+                        return cls._collect_lines(
+                            cls._iter_file_lines(filepath), max_length, start_line, end_line
+                        )
                     except Exception as exc:
                         raise AppException(msg=f"读取文件失败: {exc}") from exc
                 content, truncated = await asyncio.to_thread(read_lines)
@@ -130,7 +147,7 @@ class FileService:
             raise AppException(f"文件读取失败: {str(e)}")
 
     @staticmethod
-    def _collect_lines(stream, max_length: Optional[int], start_line: Optional[int],
+    def _collect_lines(lines: Iterator[str], max_length: Optional[int], start_line: Optional[int],
                        end_line: Optional[int]) -> tuple[str, bool]:
         """逐行收集范围内内容，任何上限命中后立即停止读取。"""
         start = start_line or 0
@@ -138,7 +155,7 @@ class FileService:
         length = 0
         bytes_seen = 0
         truncated = False
-        for index, line in enumerate(stream):
+        for index, line in enumerate(lines):
             bytes_seen += len(line.encode("utf-8"))
             if bytes_seen > MAX_READ_BYTES:
                 truncated = True
@@ -161,35 +178,71 @@ class FileService:
         return "".join(parts) + ("(truncated)" if truncated else ""), truncated
 
     @staticmethod
+    def _iter_file_lines(filepath: str) -> Iterator[str]:
+        """按固定块解码文件，避免超长单行一次性占满内存。"""
+        import codecs
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        pending = ""
+        with open(filepath, "rb") as stream:
+            while True:
+                chunk = stream.read(READ_CHUNK_BYTES)
+                if not chunk:
+                    break
+                pending += decoder.decode(chunk)
+                while "\n" in pending:
+                    line, pending = pending.split("\n", 1)
+                    yield line + "\n"
+                # 没有换行符的超长内容也不能无限累积；交给上层按读取上限截断。
+                if len(pending.encode("utf-8")) > MAX_READ_BYTES:
+                    yield pending
+                    return
+        pending += decoder.decode(b"", final=True)
+        if pending:
+            yield pending
+
+    @staticmethod
     async def _read_stream(stream, max_length: Optional[int], start_line: Optional[int],
                            end_line: Optional[int]) -> tuple[str, bool]:
-        """异步逐行读取 sudo 子进程输出，避免 communicate 一次性加载。"""
+        """按固定块读取 sudo 输出，避免超长单行触发 readline 缓冲上限。"""
         if stream is None:
             return "", False
         start = start_line or 0
-        parts, length, bytes_seen, truncated = [], 0, 0, False
-        for index in itertools.count():
-            raw = await stream.readline()
+        parts, length, bytes_seen, index = [], 0, 0, 0
+        pending = ""
+        truncated = False
+        while True:
+            raw = await stream.read(READ_CHUNK_BYTES)
             if not raw:
                 break
             bytes_seen += len(raw)
             if bytes_seen > MAX_READ_BYTES:
                 truncated = True
                 break
-            if index < start:
-                continue
-            if end_line is not None and index >= end_line:
+            pending += raw.decode("utf-8", errors="replace")
+            while "\n" in pending:
+                line, pending = pending.split("\n", 1)
+                if index >= start and (end_line is None or index < end_line):
+                    addition = ("\n" if parts else "") + line.rstrip("\r")
+                    if max_length is not None and length + len(addition) > max_length:
+                        remaining = max_length - length
+                        if remaining > 0:
+                            parts.append(addition[:remaining])
+                        truncated = True
+                        break
+                    parts.append(addition)
+                    length += len(addition)
+                index += 1
+            if truncated or (end_line is not None and index >= end_line):
                 break
-            value = raw.decode("utf-8", errors="replace").rstrip("\r\n")
-            addition = ("\n" if parts else "") + value
+        if not truncated and pending and (end_line is None or index < end_line):
+            addition = ("\n" if parts else "") + pending.rstrip("\r")
             if max_length is not None and length + len(addition) > max_length:
                 remaining = max_length - length
                 if remaining > 0:
                     parts.append(addition[:remaining])
                 truncated = True
-                break
-            parts.append(addition)
-            length += len(addition)
+            else:
+                parts.append(addition)
         return "".join(parts) + ("(truncated)" if truncated else ""), truncated
 
     @classmethod
@@ -228,11 +281,11 @@ class FileService:
                     stderr=asyncio.subprocess.PIPE,
                 )
 
-                # 8.等待子进程执行完毕
+                # 等待子进程执行完毕
                 stdout, stderr = await process.communicate(content.encode("utf-8"))
                 bytes_written = len(content.encode("utf-8"))
 
-                # 9.检测子进程是否正常执行
+                # 检测子进程是否正常执行
                 if process.returncode != 0:
                     raise BadRequestException(f"文件内容写入失败: {stderr.decode()}")
 
@@ -245,13 +298,14 @@ class FileService:
                 os.close(fd)
 
                 def async_write_file() -> int:
-                    existing = ""
-                    if append and os.path.exists(filepath):
-                        with open(filepath, "r", encoding="utf-8") as source:
-                            existing = source.read()
-                    with open(temp_path, "w", encoding="utf-8") as target:
-                        target.write(existing + content)
-                    return len(content.encode("utf-8"))
+                    # 追加模式也通过分块复制旧文件，避免大文件整体载入内存。
+                    with open(temp_path, "wb") as target:
+                        if append and os.path.exists(filepath):
+                            with open(filepath, "rb") as source:
+                                shutil.copyfileobj(source, target, length=READ_CHUNK_BYTES)
+                        encoded = content.encode("utf-8")
+                        target.write(encoded)
+                    return len(encoded)
 
                 bytes_written = await asyncio.to_thread(async_write_file)
                 os.replace(temp_path, filepath)
@@ -324,8 +378,7 @@ class FileService:
             def scan() -> bool:
                 truncated = False
                 bytes_seen = 0
-                with open(filepath, "r", encoding="utf-8") as stream:
-                    for index, line in enumerate(stream):
+                for index, line in enumerate(self._iter_file_lines(filepath)):
                         bytes_seen += len(line.encode("utf-8"))
                         if bytes_seen > MAX_READ_BYTES:
                             truncated = True
@@ -346,24 +399,35 @@ class FileService:
             truncated = False
             bytes_seen = 0
             index = 0
+            pending = ""
             while process.stdout:
-                raw = await process.stdout.readline()
+                raw = await process.stdout.read(READ_CHUNK_BYTES)
                 if not raw:
                     break
                 bytes_seen += len(raw)
                 if bytes_seen > MAX_READ_BYTES:
                     truncated = True
-                    process.terminate()
+                    await self._stop_process(process)
                     break
-                line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
-                if pattern.search(line):
+                pending += raw.decode("utf-8", errors="replace")
+                while "\n" in pending and not truncated:
+                    line, pending = pending.split("\n", 1)
+                    line = line.rstrip("\r")
+                    if pattern.search(line):
+                        if len(matches) >= MAX_SEARCH_MATCHES:
+                            truncated = True
+                            await self._stop_process(process)
+                            break
+                        matches.append(line)
+                        line_numbers.append(index)
+                    index += 1
+            if not truncated and pending:
+                if pattern.search(pending.rstrip("\r")):
                     if len(matches) >= MAX_SEARCH_MATCHES:
                         truncated = True
-                        process.terminate()
-                        break
-                    matches.append(line)
-                    line_numbers.append(index)
-                index += 1
+                    else:
+                        matches.append(pending.rstrip("\r"))
+                        line_numbers.append(index)
             await process.wait()
             if process.returncode != 0 and not truncated:
                 stderr = await process.stderr.read() if process.stderr else b""
