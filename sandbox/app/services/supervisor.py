@@ -172,13 +172,16 @@ class SupervisorService:
         """重启非 API 子进程，避免停止当前 HTTP 服务。"""
         try:
             processes = await self._call_rpc(self.server.supervisor.getAllProcessInfo)
-            names = [process["name"] for process in processes if process["name"] != "app"]
+            managed = [process for process in processes if process.get("name") != "app"]
             stopped = []
             started = []
-            # 先逆序停止，尽量保持显示和代理进程的依赖关系。
-            for name in reversed(names):
+            # 只停止确实运行中的进程；已停止/异常进程直接启动，避免 stopProcess 报错。
+            running = [process["name"] for process in managed
+                       if process.get("statename", "RUNNING") == "RUNNING"]
+            for name in reversed(running):
                 stopped.append(await self._call_rpc(self.server.supervisor.stopProcess, name, True))
-            for name in names:
+            for process in managed:
+                name = process["name"]
                 started.append(await self._call_rpc(self.server.supervisor.startProcess, name, True))
             return SupervisorActionResult(status="restarted", stop_result=stopped, start_result=started)
         except Exception as e:
@@ -189,7 +192,7 @@ class SupervisorService:
         """传递指定分钟，并激活定时销毁任务同时关闭自动保活"""
         # 1.获取超时分钟数
         setting = get_settings()
-        timeout_minutes = minutes or setting.server_timeout_minutes
+        timeout_minutes = setting.server_timeout_minutes if minutes is None else minutes
         if timeout_minutes is None:
             raise BadRequestException("超时时间未配置, 并且未读取到系统默认超时时间")
         if timeout_minutes <= 0:

@@ -42,7 +42,9 @@ def setup_logging() -> None:
     console_handler.setLevel(log_level)
 
     # 6.将控制台日志处理器添加到根日志处理器中
-    root_logger.addHandler(console_handler)
+    # reload 或测试环境可能重复初始化模块，避免重复输出同一条日志。
+    if not any(isinstance(handler, logging.StreamHandler) for handler in root_logger.handlers):
+        root_logger.addHandler(console_handler)
 
     root_logger.info("沙箱系统系统日志模块初始化完成")
 

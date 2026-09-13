@@ -37,13 +37,40 @@ logger = logging.getLogger(__name__)
 MAX_SEARCH_MATCHES = 10_000
 MAX_FIND_FILES = 10_000
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+MAX_WRITE_BYTES = 10 * 1024 * 1024
+MAX_READ_BYTES = 100 * 1024 * 1024
 
 
 class FileService:
     """文件沙箱服务"""
 
     def __init__(self) -> None:
-        pass
+        # 服务无状态，保留显式构造函数便于 FastAPI 依赖注入和后续扩展。
+        super().__init__()
+
+    @staticmethod
+    def _ensure_regular_file(filepath: str) -> None:
+        """文件操作只接受普通文件，避免目录被当作文件读取或删除。"""
+        if not os.path.isfile(filepath):
+            raise NotFoundException(f"文件不存在或不是普通文件: {filepath}")
+
+    @staticmethod
+    def _ensure_directory(dir_path: str) -> None:
+        """目录遍历只接受目录路径，尽早返回明确的 404。"""
+        if not os.path.isdir(dir_path):
+            raise NotFoundException(f"目录不存在或不是目录: {dir_path}")
+
+    @staticmethod
+    def _ensure_read_size(filepath: str) -> None:
+        """读取前限制文件大小，避免 max_length 只限制响应却无法保护内存。"""
+        try:
+            size = os.path.getsize(filepath)
+        except OSError as exc:
+            raise NotFoundException(f"无法获取文件大小: {filepath}") from exc
+        if size > MAX_READ_BYTES:
+            raise BadRequestException(
+                f"文件超过可读取上限 {MAX_READ_BYTES // (1024 * 1024)} MiB"
+            )
 
     @classmethod
     async def read_file(
@@ -64,7 +91,7 @@ class FileService:
             if start_line is not None and end_line is not None and start_line > end_line:
                 raise BadRequestException("起始行不能大于结束行")
             # 1.检测在当前权限下能否获取该文件
-            if not os.path.exists(filepath) and not sudo:
+            if not os.path.isfile(filepath) and not sudo:
                 logger.error(f"要读取的文件不存在或无权限: {filepath}")
                 raise NotFoundException(f"要读取的文件不存在或无权限: {filepath}")
 
@@ -73,6 +100,9 @@ class FileService:
 
             # 3.判断是否为sudo，如果是sudo系统则使用命令行的形式读取文件
             if sudo:
+                # 路径可因权限不可见；可见时先限制大小，避免 sudo cat 返回超大内容。
+                if os.path.isfile(filepath):
+                    cls._ensure_read_size(filepath)
                 # 使用参数数组传递路径，避免空格和引号破坏 shell 命令。
                 process = await asyncio.create_subprocess_exec(
                     "sudo", "cat", filepath,
@@ -90,6 +120,8 @@ class FileService:
                 # 7.读取输出内容
                 content = stdout.decode(encoding, errors="replace")
             else:
+                cls._ensure_regular_file(filepath)
+                cls._ensure_read_size(filepath)
                 # 8.创建一个内部读取函数
                 def async_read_file() -> str:
                     try:
@@ -131,12 +163,17 @@ class FileService:
             sudo: bool = False,
     ) -> FileWriteResult:
         """根据传递的文件路径+内容向指定文件写入内容"""
+        temp_path = None
         try:
             # 1.组装实际写入的内容
             if leading_newline:
                 content = "\n" + content
             if trailing_newline:
                 content = content + "\n"
+            if len(content.encode("utf-8")) > MAX_WRITE_BYTES:
+                raise BadRequestException(
+                    f"写入内容不能超过 {MAX_WRITE_BYTES // (1024 * 1024)} MiB"
+                )
 
             # 2.判断是否是sudo权限，如果是则使用命令行的形式先写入一个缓存文件，然后将缓存文件覆盖原始文件
             if sudo:
@@ -160,19 +197,25 @@ class FileService:
                     raise BadRequestException(f"文件内容写入失败: {stderr.decode()}")
 
             else:
-                # 11.非sudo使用Python方式写入，先确保文件路径存在
+                # 非 sudo 写入先落同目录临时文件，完成后原子替换目标文件。
                 parent_dir = os.path.dirname(filepath)
                 if parent_dir:
                     os.makedirs(parent_dir, exist_ok=True)
+                fd, temp_path = tempfile.mkstemp(prefix=".write-", dir=parent_dir or ".")
+                os.close(fd)
 
-                # 12.创建一个异步写入的函数
                 def async_write_file() -> int:
-                    write_mode = "a" if append else "w"
-                    with open(filepath, write_mode, encoding="utf-8") as f:
-                        return f.write(content)
+                    existing = ""
+                    if append and os.path.exists(filepath):
+                        with open(filepath, "r", encoding="utf-8") as source:
+                            existing = source.read()
+                    with open(temp_path, "w", encoding="utf-8") as target:
+                        target.write(existing + content)
+                    return len(content.encode("utf-8"))
 
-                # 13.使用asyncio创建一个子线程写入内容
                 bytes_written = await asyncio.to_thread(async_write_file)
+                os.replace(temp_path, filepath)
+                temp_path = None
 
             return FileWriteResult(
                 filepath=filepath,
@@ -180,6 +223,11 @@ class FileService:
             )
         except Exception as e:
             # 14.根据不同的错误执行不同的操作
+            if temp_path:
+                try:
+                    os.unlink(temp_path)
+                except FileNotFoundError:
+                    pass
             logger.error(f"文件内容写入失败: {str(e)}")
             if isinstance(e, BadRequestException):
                 raise
@@ -266,8 +314,7 @@ class FileService:
             raise BadRequestException("glob_pattern 必须是相对路径")
 
         # 1.检测下传递进来的目录是否存在
-        if not os.path.exists(dir_path):
-            raise NotFoundException(f"当前文件夹不存在: {dir_path}")
+        cls._ensure_directory(dir_path)
 
         # 2.定义一个异步函数使用asyncio子线程运行避免IO阻塞
         def async_glob():
@@ -336,15 +383,14 @@ class FileService:
     @classmethod
     async def ensure_file(cls, filepath: str) -> None:
         """传递filepath用于确保当前文件存在"""
-        if not os.path.exists(filepath):
-            raise NotFoundException(f"该文件不存在: {filepath}")
+        cls._ensure_regular_file(filepath)
 
     @classmethod
     async def check_file_exists(cls, filepath: str) -> FileCheckResult:
         """根据传递的路径判断文件是否存在"""
         return FileCheckResult(
             filepath=filepath,
-            exists=os.path.exists(filepath),
+            exists=os.path.isfile(filepath),
         )
 
     async def delete_file(self, filepath: str) -> FileDeleteResult:

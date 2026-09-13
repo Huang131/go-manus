@@ -36,6 +36,8 @@
 | POST | `/api/shell/read-shell-output` | 读取 Shell 输出 |
 | GET | `/api/supervisor/status` | 获取进程状态 |
 
+文件接口默认限制单次上传 100 MiB、普通写入 10 MiB、读取 100 MiB；搜索和文件查找最多返回 10,000 条结果，超过上限时响应中的 `truncated` 为 `true`。
+
 ## 本地开发
 
 推荐使用根目录 Compose 启动 sandbox。需要进入运行中的容器调试时：

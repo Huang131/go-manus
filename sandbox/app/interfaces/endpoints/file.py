@@ -121,8 +121,9 @@ async def search_in_file(
         sudo=request.sudo,
     )
 
+    suffix = "（结果已截断）" if result.truncated else ""
     return Response.success(
-        msg=f"文件内容搜索完成, 找到{len(result.matches)}处匹配内容",
+        msg=f"文件内容搜索完成, 找到{len(result.matches)}处匹配内容{suffix}",
         data=result,
     )
 
@@ -141,8 +142,9 @@ async def find_files(
         glob_pattern=request.glob_pattern or "*",
     )
 
+    suffix = "（结果已截断）" if result.truncated else ""
     return Response.success(
-        msg=f"查找完毕, 检索到{len(result.files)}个文件",
+        msg=f"查找完毕, 检索到{len(result.files)}个文件{suffix}",
         data=result,
     )
 

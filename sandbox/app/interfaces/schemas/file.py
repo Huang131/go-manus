@@ -22,7 +22,7 @@ class FileReadRequest(BaseModel):
 class FileWriteRequest(BaseModel):
     """写入文件请求结构体"""
     filepath: str = Field(..., description="要写入文件的绝对路径")
-    content: str = Field(..., description="要写入的文本内容")
+    content: str = Field(..., max_length=10 * 1024 * 1024, description="要写入的文本内容")
     append: Optional[bool] = Field(default=False, description="(可选)是否使用追加模式")
     leading_newline: Optional[bool] = Field(default=False, description="(可选)是否在内容开头添加前置空行")
     trailing_newline: Optional[bool] = Field(default=False, description="(可选)是否在内容结尾添加前置空行")

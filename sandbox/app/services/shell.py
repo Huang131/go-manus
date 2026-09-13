@@ -195,6 +195,16 @@ class ShellService:
             logger.debug(f"会话 {session_id} 的输出读取器已取消")
             raise
 
+        # 增量解码器可能还缓存着多字节字符，EOF 时必须 flush，避免末尾字符丢失。
+        tail = decoder.decode(b"", final=True)
+        if tail:
+            shell = self.active_shells.get(session_id)
+            if shell and shell.process is process:
+                shell.output = self._append_output(shell.output, tail)
+                if shell.console_records:
+                    record = shell.console_records[-1]
+                    record.output = self._append_output(record.output, tail)
+
         logger.debug(f"会话 {session_id} 的输出读取器已完成")
 
     @classmethod

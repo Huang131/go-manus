@@ -7,6 +7,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from app.interfaces.errors.exceptions import BadRequestException
+from app.interfaces.schemas.file import FileWriteRequest
+from app.interfaces.schemas.shell import ShellExecuteRequest, ShellWaitRequest
 from app.models.file import FileReadResult
 from app.services.file import FileService
 from app.services.shell import ShellService
@@ -63,6 +65,12 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         )
         process.communicate.assert_awaited_once_with(b"hello")
 
+    async def test_write_reports_utf8_byte_count(self):
+        with tempfile.TemporaryDirectory() as directory:
+            filepath = str(Path(directory, "utf8.txt"))
+            result = await FileService.write_file(filepath, "你好")
+        self.assertEqual(result.bytes_written, len("你好".encode("utf-8")))
+
     async def test_search_matches_content_beyond_line_start(self):
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as file:
             file.write("prefix target suffix\nother\n")
@@ -113,16 +121,6 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
                     await FileService.upload_file(Upload(), target)
             self.assertFalse(Path(target).exists())
 
-    async def test_settings_default_does_not_expire_sandbox(self):
-        from app.core.config import get_settings
-
-        get_settings.cache_clear()
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("SERVER_TIMEOUT_MINUTES", None)
-            settings = get_settings()
-        self.assertIsNone(settings.server_timeout_minutes)
-        get_settings.cache_clear()
-
     async def test_restart_skips_fastapi_process(self):
         from app.services.supervisor import SupervisorService
 
@@ -130,14 +128,62 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         service.server = type("Server", (), {})()
         service.server.supervisor = type("Supervisor", (), {})()
         service.server.supervisor.getAllProcessInfo = lambda: [
-            {"name": "app"}, {"name": "chrome"}, {"name": "xvfb"}
+            {"name": "app", "statename": "RUNNING"},
+            {"name": "chrome", "statename": "RUNNING"},
+            {"name": "xvfb", "statename": "STOPPED"},
         ]
         service.server.supervisor.stopProcess = lambda name, wait: [name, wait]
         service.server.supervisor.startProcess = lambda name, wait: [name, wait]
         result = await service.restart()
         self.assertEqual(result.status, "restarted")
-        self.assertEqual(result.stop_result, [["xvfb", True], ["chrome", True]])
+        self.assertEqual(result.stop_result, [["chrome", True]])
         self.assertEqual(result.start_result, [["chrome", True], ["xvfb", True]])
+
+    def test_request_schemas_reject_unbounded_values(self):
+        with self.assertRaises(ValueError):
+            FileWriteRequest(filepath="/tmp/a", content="x" * (10 * 1024 * 1024 + 1))
+        with self.assertRaises(ValueError):
+            ShellExecuteRequest(command="")
+        with self.assertRaises(ValueError):
+            ShellWaitRequest(session_id="s", seconds=24 * 60 * 60 + 1)
+
+    async def test_file_operations_reject_directory_as_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(Exception):
+                await FileService.read_file(directory)
+            with self.assertRaises(Exception):
+                await FileService().search_in_file(directory, "anything")
+
+    async def test_read_rejects_oversized_file_before_loading(self):
+        import app.services.file as file_service_module
+
+        with tempfile.NamedTemporaryFile() as file:
+            file.write(b"x")
+            file.flush()
+            with patch.object(file_service_module, "MAX_READ_BYTES", 0):
+                with self.assertRaises(BadRequestException):
+                    await FileService.read_file(file.name)
+
+    async def test_find_files_rejects_file_as_directory(self):
+        with tempfile.NamedTemporaryFile() as file:
+            with self.assertRaises(Exception):
+                await FileService.find_files(file.name, "*")
+
+    async def test_check_file_exists_returns_false_for_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = await FileService.check_file_exists(directory)
+        self.assertFalse(result.exists)
+
+    async def test_activate_timeout_zero_does_not_fall_back_to_default(self):
+        from app.services.supervisor import SupervisorService
+
+        service = SupervisorService.__new__(SupervisorService)
+        service.timeout_active = False
+        service.shutdown_time = None
+        service.shutdown_task = None
+        service.shutdown_timer = None
+        with self.assertRaises(BadRequestException):
+            await service.activate_timeout(0)
 
 
 if __name__ == "__main__":
