@@ -1,6 +1,6 @@
 'use client'
 
-import {useCallback, useEffect, useState} from 'react'
+import {useCallback} from 'react'
 import {CircuitBoard, Loader2, MoreHorizontal, Pencil, Trash} from 'lucide-react'
 import {Button} from '@/components/ui/button'
 import {
@@ -27,12 +27,6 @@ type SessionItemProps = {
  * 展示会话标题、描述、时间及操作菜单
  */
 export function SessionItem({session, isActive, onClick, onDelete, onRename}: SessionItemProps) {
-  const [mounted, setMounted] = useState(false)
-
-  useEffect(() => {
-    setMounted(true)
-  }, [])
-
   const handleClick = useCallback(() => {
     onClick(session.id)
   }, [onClick, session.id])
@@ -79,8 +73,7 @@ export function SessionItem({session, isActive, onClick, onDelete, onRename}: Se
       {/* 右侧操作区 */}
       <ItemActions className="flex flex-col pt-0.5 gap-0 self-start">
         <ItemDescription className="text-xs whitespace-nowrap">{dateLabel}</ItemDescription>
-        {mounted && (
-          <DropdownMenu>
+        <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 size="icon-xs"
@@ -105,11 +98,9 @@ export function SessionItem({session, isActive, onClick, onDelete, onRename}: Se
                 删除
               </DropdownMenuItem>
             </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+        </DropdownMenu>
       </ItemActions>
     </Item>
   )
 }
-
 

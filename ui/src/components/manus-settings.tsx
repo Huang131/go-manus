@@ -22,7 +22,15 @@ import {Badge} from '@/components/ui/badge'
 import {Switch} from '@/components/ui/switch'
 import {Textarea} from '@/components/ui/textarea'
 import {configApi} from '@/lib/api'
-import type {AgentConfig, LLMConfig, ListMCPServerItem, ListA2AServerItem} from '@/lib/api'
+import type {
+  AgentConfig,
+  LLMConfig,
+  ListMCPServerItem,
+  ListA2AServerItem,
+  MCPConfig,
+  MCPServerConfig,
+  CreateA2AServerParams,
+} from '@/lib/api'
 import {ModelConfigManager} from '@/components/model-config-manager'
 
 // ==================== 通用配置 ====================
@@ -198,6 +206,28 @@ function LLMSetting({config, onChange}: LLMSettingProps) {
   )
 }
 
+// 将常见的 mcpServers 配置格式转换为后端统一的 servers 数组。
+function normalizeMCPConfig(value: unknown): MCPConfig {
+  if (!value || typeof value !== 'object') {
+    throw new Error('MCP 配置必须是 JSON 对象')
+  }
+  const raw = value as {servers?: unknown; mcpServers?: unknown}
+  if (Array.isArray(raw.servers)) {
+    return {servers: raw.servers as MCPServerConfig[]}
+  }
+  if (!raw.mcpServers || typeof raw.mcpServers !== 'object') {
+    throw new Error('MCP 配置必须包含 servers 或 mcpServers')
+  }
+  const servers = Object.entries(raw.mcpServers as Record<string, MCPServerConfig>).map(([name, config]) => ({
+    ...config,
+    server_name: name,
+    enabled: config.enabled ?? true,
+    transport: config.transport ?? (config.command ? 'stdio' : 'streamable_http'),
+    tools: config.tools ?? [],
+  }))
+  return {servers}
+}
+
 // ==================== A2A Agent 配置 ====================
 
 type A2ASettingProps = {
@@ -246,7 +276,7 @@ function A2ASetting({servers, loading, onToggleEnabled, onDelete, onAdd}: A2ASet
                   <DialogDescription className="text-gray-500">
                     Manus 使用标准的 A2A 协议来连接远程 Agent。
                     <br/>
-                    请将您的配置粘贴到下方，然后点击"添加"即可添加 Agent。
+                    请将您的配置粘贴到下方，然后点击 &quot;添加&quot; 即可添加 Agent。
                   </DialogDescription>
                 </DialogHeader>
                 <form
@@ -425,7 +455,7 @@ function MCPSetting({servers, loading, onToggleEnabled, onDelete, onAdd}: MCPSet
                   <DialogTitle className="text-gray-700">添加新的 MCP 服务器</DialogTitle>
                   <DialogDescription className="text-gray-500">
                     Manus 使用标准的 JSON MCP 配置来创建新服务器。
-                    请将您的配置粘贴到下方，然后点击"添加"即可添加新服务器。
+                    请将您的配置粘贴到下方，然后点击 &quot;添加&quot; 即可添加新服务器。
                   </DialogDescription>
                 </DialogHeader>
                 <form
@@ -595,7 +625,7 @@ export function ManusSettings() {
     configApi
       .getMCPServers()
       .then((data) => {
-        setMcpServers(data?.mcp_servers ?? [])
+        setMcpServers(data?.servers ?? [])
       })
       .catch((err) => {
         console.error('[Settings] 获取 MCP 服务器列表失败:', err)
@@ -609,7 +639,7 @@ export function ManusSettings() {
     configApi
       .getA2AServers()
       .then((data) => {
-        setA2aServers(data?.a2a_servers ?? [])
+        setA2aServers(data?.servers ?? [])
       })
       .catch((err) => {
         console.error('[Settings] 获取 A2A 服务器列表失败:', err)
@@ -681,13 +711,13 @@ export function ManusSettings() {
 
   const handleMCPAdd = useCallback(async (configText: string): Promise<boolean> => {
     try {
-      const parsed = JSON.parse(configText)
-      await configApi.addMCPServer(parsed)
+      const config = normalizeMCPConfig(JSON.parse(configText))
+      await configApi.addMCPServer(config)
       toast.success('MCP 服务器添加成功')
       // 重新拉取列表
       try {
         const data = await configApi.getMCPServers()
-        setMcpServers(data?.mcp_servers ?? [])
+        setMcpServers(data?.servers ?? [])
       } catch { /* 忽略刷新失败 */ }
       return true
     } catch (err) {
@@ -732,12 +762,26 @@ export function ManusSettings() {
 
   const handleA2AAdd = useCallback(async (baseUrl: string): Promise<boolean> => {
     try {
-      await configApi.addA2AServer({base_url: baseUrl})
+      const url = new URL(baseUrl)
+      const config: CreateA2AServerParams = {
+        servers: [{
+          id: `a2a-${crypto.randomUUID()}`,
+          name: url.hostname,
+          description: '',
+          url: url.toString(),
+          input_modes: ['text'],
+          output_modes: ['text'],
+          streaming: false,
+          push_notifications: false,
+          enabled: true,
+        }],
+      }
+      await configApi.addA2AServer(config)
       toast.success('远程 Agent 添加成功')
       // 重新拉取列表
       try {
         const data = await configApi.getA2AServers()
-        setA2aServers(data?.a2a_servers ?? [])
+        setA2aServers(data?.servers ?? [])
       } catch { /* 忽略刷新失败 */ }
       return true
     } catch (err) {

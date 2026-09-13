@@ -28,6 +28,8 @@ import { sessionFileToAttachment } from '@/lib/session-events'
 import type { AttachmentFile } from '@/lib/session-events'
 
 export interface SessionHeaderProps {
+  /** 当前会话 ID，用于文件下载时执行归属校验 */
+  sessionId: string
   /** 任务/会话标题 */
   title?: string
   /** 此任务下的文件列表（用于「此任务中所有文件」弹窗） */
@@ -43,6 +45,7 @@ export interface SessionHeaderProps {
 }
 
 export function SessionHeader({
+  sessionId,
   title = '',
   files,
   fileListOpen,
@@ -92,7 +95,7 @@ export function SessionHeader({
     if (downloadingId) return
     setDownloadingId(file.id)
     try {
-      const blob = await fileApi.downloadFile(file.id)
+      const blob = await fileApi.downloadFile(file.id, sessionId)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -108,7 +111,7 @@ export function SessionHeader({
     } finally {
       setDownloadingId(null)
     }
-  }, [downloadingId])
+  }, [downloadingId, sessionId])
 
   const handleFileItemClick = useCallback((file: SessionFile) => {
     if (onFileClick) {

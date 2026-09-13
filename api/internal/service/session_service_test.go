@@ -383,6 +383,9 @@ func (m *mockFileRepo) ListBySessionID(ctx context.Context, sessionID string) ([
 // 实现 FileRepository 其他接口以满足编译（测试用不到）
 func (m *mockFileRepo) Create(ctx context.Context, f *model.File) error             { return nil }
 func (m *mockFileRepo) GetByID(ctx context.Context, id string) (*model.File, error) { return nil, nil }
+func (m *mockFileRepo) GetBySessionAndID(ctx context.Context, sessionID, id string) (*model.File, error) {
+	return nil, nil
+}
 func (m *mockFileRepo) GetBySessionAndFilepath(ctx context.Context, s, f string) (*model.File, error) {
 	return nil, nil
 }

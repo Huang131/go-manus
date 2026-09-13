@@ -8,6 +8,9 @@ type ToolResult struct {
 	Success bool        `json:"success"` // 工具是否执行成功
 	Message string      `json:"message"` // 状态描述或错误信息
 	Data    interface{} `json:"data"`    // 工具返回的原始数据，格式由具体工具决定
+	// StatusCode 是外部工具返回的 HTTP/业务状态码，仅供边界层映射错误，
+	// 不暴露给 Agent 事件和 API 响应，避免把传输细节泄漏到业务数据。
+	StatusCode int `json:"-"`
 }
 
 // NewToolResult 创建成功结果

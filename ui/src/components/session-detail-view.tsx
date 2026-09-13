@@ -72,6 +72,7 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
   // 上一次发送记录：失败时用于"切换 Auto 重试"
   const lastSendRef = useRef<{message: string; files: FileInfo[]; modelId?: string} | null>(null)
   const [autoRetry, setAutoRetry] = useState<{message: string; files: FileInfo[]} | null>(null)
+  const [initialMessageSentSessionId, setInitialMessageSentSessionId] = useState<string | null>(null)
 
   // 按会话持久化模型选择：刷新页面后保持该会话上次的选择（无记录则 Auto）。
   // localStorage 仅在客户端 effect 中访问，避免 SSR 水合不一致。
@@ -80,6 +81,8 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
   // 切会话时恢复该会话上次的选择（而不是无条件重置为 Auto），
   // 避免上一个会话的选模型"串"到新会话
   useEffect(() => {
+    // 会话切换时清理上一个会话的重试状态。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setAutoRetry(null)
     if (!sessionId) {
       setSelectedModelId(AUTO_MODEL_ID)
@@ -121,7 +124,6 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
   const [previewTool, setPreviewTool] = useState<ToolEvent | null>(null)
   const [vncOpen, setVncOpen] = useState(false)
   const [showJumpToBottom, setShowJumpToBottom] = useState(false)
-  const initialMessageSentRef = useRef(false)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const prevToolCountRef = useRef(0)
 
@@ -164,6 +166,8 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
     }, 0)
 
     if (toolCount > prevToolCountRef.current && latestTool) {
+      // 工具事件来自外部 SSE 流，这里同步预览面板状态是必要的。
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPreviewTool(latestTool)
       setPreviewFile(null)
       scrollContainerRef.current?.scrollTo({ top: scrollContainerRef.current.scrollHeight, behavior: 'smooth' })
@@ -202,12 +206,13 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
   useEffect(() => {
     if (
       initialMessage &&
-      !initialMessageSentRef.current &&
+      initialMessageSentSessionId !== sessionId &&
       session &&
       !loading &&
       !streaming
     ) {
-      initialMessageSentRef.current = true
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setInitialMessageSentSessionId(sessionId)
       sendMessage(initialMessage, initialAttachments || [])
         .then(() => {
           setTimeout(() => {
@@ -218,7 +223,7 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
           toast.error(e instanceof Error ? e.message : '发送消息失败')
         })
     }
-  }, [initialMessage, initialAttachments, session, loading, streaming, sendMessage, sessionId, router])
+  }, [initialMessage, initialAttachments, initialMessageSentSessionId, session, loading, streaming, sendMessage, sessionId, router])
 
   const handleSend = useCallback(
     async (message: string, uploadedFiles: FileInfo[], modelId?: string) => {
@@ -249,7 +254,7 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
     handleSend(message, files, undefined).catch(() => {
       // 重试失败已在 handleSend 内 toast，不再叠加
     })
-  }, [autoRetry, handleSend])
+  }, [autoRetry, handleModelSelect, handleSend])
 
   const handleViewAllFiles = useCallback(() => {
     refreshFiles()
@@ -356,6 +361,7 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
           <div className={`flex flex-col h-full w-full mx-auto min-w-0 px-4 ${hasPreview ? '' : 'max-w-[768px]'}`}>
             <div className="flex-shrink-0 z-10 bg-[#f8f8f7]">
               <SessionHeader
+                sessionId={sessionId}
                 title={session.title}
                 files={files}
                 fileListOpen={fileListOpen}
@@ -401,7 +407,7 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
                   />
                 ))}
 
-                {(session?.status === 'running' || (hasInitialMessage && !initialMessageSentRef.current)) && (
+                {(session?.status === 'running' || (hasInitialMessage && initialMessageSentSessionId !== sessionId)) && (
                   <div className="flex items-center gap-2 text-sm text-gray-500 py-3">
                     <Loader2 className="size-4 animate-spin" />
                     <span>正在思考中...</span>
@@ -442,7 +448,7 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
         {/* 文件预览面板 */}
         {previewFile && (
           <div className="flex-shrink-0 w-[600px] h-full animate-in slide-in-from-right duration-300">
-            <FilePreviewPanel file={previewFile} onClose={handleClosePreview} />
+            <FilePreviewPanel sessionId={sessionId} file={previewFile} onClose={handleClosePreview} />
           </div>
         )}
 

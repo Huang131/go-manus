@@ -210,6 +210,36 @@ func TestFileRepo_GetBySessionAndFilepath_NotFound(t *testing.T) {
 	assert.Nil(t, got)
 }
 
+func TestFileRepo_GetBySessionAndID_EnforcesOwnership(t *testing.T) {
+	repo := testFileRepo(t)
+	ownedSession := createSessionForTest(t)
+	otherSession := createSessionForTest(t)
+	file := &model.File{
+		ID:        "ownership-file-" + uuid.NewString(),
+		SessionID: ownedSession,
+		Filename:  "owned.txt",
+		Filepath:  "/tmp/owned.txt",
+		Key:       "files/owned.txt",
+		MimeType:  "text/plain",
+		Size:      5,
+		CreatedAt: time.Now(),
+	}
+	require.NoError(t, repo.Create(context.Background(), file))
+	t.Cleanup(func() {
+		_ = repo.Delete(context.Background(), file.ID)
+		CleanupSession(t, ownedSession)
+		CleanupSession(t, otherSession)
+	})
+
+	got, err := repo.GetBySessionAndID(context.Background(), ownedSession, file.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+
+	other, err := repo.GetBySessionAndID(context.Background(), otherSession, file.ID)
+	require.NoError(t, err)
+	assert.Nil(t, other)
+}
+
 func TestFileRepo_ListBySessionID(t *testing.T) {
 	repo := testFileRepo(t)
 	sessionID := createSessionForTest(t)

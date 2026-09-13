@@ -65,8 +65,11 @@ func SetupRoutes(engine *gin.Engine, h *Handlers) {
 			appConfig.GET("/mcp-servers", h.AppConfig.GetMCPConfig)
 			appConfig.POST("/mcp-servers", h.AppConfig.UpdateMCPConfig)
 			appConfig.POST("/mcp-servers/:server_name/delete", h.AppConfig.DeleteMCPServer)
+			appConfig.POST("/mcp-servers/:server_name/enabled", h.AppConfig.UpdateMCPServerEnabled)
 			appConfig.GET("/a2a-servers", h.AppConfig.GetA2AConfig)
 			appConfig.POST("/a2a-servers", h.AppConfig.UpdateA2AConfig)
+			appConfig.POST("/a2a-servers/:id/delete", h.AppConfig.DeleteA2AServer)
+			appConfig.POST("/a2a-servers/:id/enabled", h.AppConfig.UpdateA2AServerEnabled)
 		}
 
 		// 多模型管理

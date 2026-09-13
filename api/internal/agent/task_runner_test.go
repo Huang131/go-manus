@@ -101,13 +101,22 @@ func (r *attachmentFileRepository) GetByID(ctx context.Context, id string) (*mod
 	return r.files[id], nil
 }
 
+func (r *attachmentFileRepository) GetBySessionAndID(ctx context.Context, sessionID, id string) (*model.File, error) {
+	file := r.files[id]
+	if file == nil || file.SessionID != sessionID {
+		return nil, nil
+	}
+	return file, nil
+}
+
 func TestAgentService_ResolveMessageAttachments(t *testing.T) {
 	fileRepo := &attachmentFileRepository{
 		files: map[string]*model.File{
 			"file-1": {
-				ID:       "file-1",
-				Filename: "input.txt",
-				Key:      "files/session/file-1.txt",
+				ID:        "file-1",
+				SessionID: "session-1",
+				Filename:  "input.txt",
+				Key:       "files/session/file-1.txt",
 			},
 		},
 	}
@@ -124,6 +133,18 @@ func TestAgentService_ResolveMessageAttachments(t *testing.T) {
 	}
 	if got[0].ID != "file-1" || got[0].Key != "files/session/file-1.txt" {
 		t.Fatalf("attachment = %+v, want file-1 metadata", got[0])
+	}
+}
+
+func TestAgentService_ResolveMessageAttachmentsRejectsOtherSession(t *testing.T) {
+	fileRepo := &attachmentFileRepository{files: map[string]*model.File{
+		"file-a": {ID: "file-a", SessionID: "session-a", Key: "files/session-a/file-a"},
+	}}
+	service := &AgentService{fileRep: fileRepo}
+
+	got := service.resolveMessageAttachments(context.Background(), "session-b", []string{"file-a"})
+	if len(got) != 0 {
+		t.Fatalf("attachments = %+v, want no cross-session attachment", got)
 	}
 }
 

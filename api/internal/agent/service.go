@@ -38,6 +38,8 @@ type AgentService struct {
 	fileStorage  COSFileStorage
 	mcpTool      *MCPTool
 	a2aTool      *A2ATool
+	retiredMCP   []*MCPTool
+	retiredA2A   []*A2ATool
 	mq           external.TaskMessageQueue
 
 	// Session 与 Task 的映射（用于对接 Task 架构）
@@ -192,7 +194,7 @@ func (s *AgentService) resolveMessageAttachments(ctx context.Context, sessionID 
 			continue
 		}
 
-		file, err := s.fileRep.GetByID(ctx, fileID)
+		file, err := s.fileRep.GetBySessionAndID(ctx, sessionID, fileID)
 		if err != nil {
 			logger.WarnContext(ctx, "获取聊天附件失败",
 				logger.String("session_id", sessionID),
@@ -270,55 +272,118 @@ func (s *AgentService) Shutdown() {
 	}
 
 	// 释放工具持有的外部资源（MCP 子进程、A2A 连接）；跨进程退出前必须收口。
-	if s.mcpTool != nil {
-		if err := s.mcpTool.Cleanup(); err != nil {
-			logger.Warn("清理 MCP 工具失败", logger.Err(err))
+	// 配置热重载后的旧工具也需要一并释放。
+	s.mu.Lock()
+	mcpTools := append([]*MCPTool{s.mcpTool}, s.retiredMCP...)
+	a2aTools := append([]*A2ATool{s.a2aTool}, s.retiredA2A...)
+	s.retiredMCP = nil
+	s.retiredA2A = nil
+	s.mu.Unlock()
+	for _, tool := range mcpTools {
+		if tool != nil {
+			if err := tool.Cleanup(); err != nil {
+				logger.Warn("清理 MCP 工具失败", logger.Err(err))
+			}
 		}
 	}
-	if s.a2aTool != nil {
-		if err := s.a2aTool.Cleanup(); err != nil {
-			logger.Warn("清理 A2A 工具失败", logger.Err(err))
+	for _, tool := range a2aTools {
+		if tool != nil {
+			if err := tool.Cleanup(); err != nil {
+				logger.Warn("清理 A2A 工具失败", logger.Err(err))
+			}
 		}
 	}
 
 	logger.Info("Agent 服务已关闭")
 }
 
+// ReloadAgentConfig 原子替换后续任务使用的 Agent 配置。
+func (s *AgentService) ReloadAgentConfig(cfg *AgentConfig) {
+	if cfg == nil {
+		return
+	}
+	s.mu.Lock()
+	s.agentConfig = cfg
+	s.mu.Unlock()
+}
+
+// ReloadMCPConfig 重建 MCP 客户端，确保配置接口保存后立即生效。
+func (s *AgentService) ReloadMCPConfig(ctx context.Context, cfg *MCPConfig) error {
+	newTool := NewMCPTool()
+	if err := newTool.Initialize(ctx, cfg); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	oldTool := s.mcpTool
+	s.mcpTool = newTool
+	s.mcpConfig = cfg
+	if oldTool != nil {
+		s.retiredMCP = append(s.retiredMCP, oldTool)
+	}
+	s.mu.Unlock()
+	return nil
+}
+
+// ReloadA2AConfig 重建 A2A 客户端，确保配置接口保存后立即生效。
+func (s *AgentService) ReloadA2AConfig(ctx context.Context, cfg *A2AConfig) error {
+	newTool := NewA2ATool()
+	if err := newTool.Initialize(ctx, cfg); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	oldTool := s.a2aTool
+	s.a2aTool = newTool
+	s.a2aConfig = cfg
+	if oldTool != nil {
+		s.retiredA2A = append(s.retiredA2A, oldTool)
+	}
+	s.mu.Unlock()
+	return nil
+}
+
 // getTools 获取工具列表
 func (s *AgentService) getTools() []Tool {
+	s.mu.RLock()
+	sandbox := s.sandbox
+	browser := s.browser
+	searchEngine := s.searchEngine
+	mcpTool := s.mcpTool
+	a2aTool := s.a2aTool
+	s.mu.RUnlock()
+
 	tools := make([]Tool, 0)
 
 	// 1. Shell 工具 (依赖 sandbox)
-	if s.sandbox != nil {
-		tools = append(tools, NewShellTool(s.sandbox))
+	if sandbox != nil {
+		tools = append(tools, NewShellTool(sandbox))
 	}
 
 	// 2. File 工具 (依赖 sandbox)
-	if s.sandbox != nil {
-		tools = append(tools, NewFileTool(s.sandbox))
+	if sandbox != nil {
+		tools = append(tools, NewFileTool(sandbox))
 	}
 
 	// 3. Browser 工具 (依赖 browser)
-	if s.browser != nil {
-		tools = append(tools, NewBrowserTool(s.browser))
+	if browser != nil {
+		tools = append(tools, NewBrowserTool(browser))
 	}
 
 	// 4. Search 工具 (依赖 searchEngine)
-	if s.searchEngine != nil {
-		tools = append(tools, NewSearchTool(s.searchEngine))
+	if searchEngine != nil {
+		tools = append(tools, NewSearchTool(searchEngine))
 	}
 
 	// 5. Message 工具 (无需外部依赖)
 	tools = append(tools, NewMessageTool())
 
 	// 6. MCP 工具 (可选)
-	if s.mcpTool != nil {
-		tools = append(tools, s.mcpTool)
+	if mcpTool != nil {
+		tools = append(tools, mcpTool)
 	}
 
 	// 7. A2A 工具 (可选)
-	if s.a2aTool != nil {
-		tools = append(tools, s.a2aTool)
+	if a2aTool != nil {
+		tools = append(tools, a2aTool)
 	}
 
 	logger.Info("注册工具列表",

@@ -67,6 +67,7 @@ export type AttachmentFile = {
   extension: string;
   size: number;
   sizeLabel?: string;
+  sessionId?: string;
 };
 
 /** 从 SessionFile 转为 AttachmentFile */
@@ -76,6 +77,7 @@ export function sessionFileToAttachment(f: SessionFile): AttachmentFile {
     filename: f.filename,
     extension: f.extension,
     size: f.size,
+    sessionId: typeof f.session_id === 'string' ? f.session_id : undefined,
   };
 }
 

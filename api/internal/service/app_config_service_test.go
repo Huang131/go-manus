@@ -461,3 +461,36 @@ func TestAppConfigService_DeleteMCPServer_NotFoundWithoutConfig(t *testing.T) {
 		t.Fatal("DeleteMCPServer() error = nil, want not found")
 	}
 }
+
+func TestAppConfigService_UpdateMCPServerEnabled(t *testing.T) {
+	repo := NewMockAppConfigRepository()
+	svc := NewAppConfigService(repo)
+	if err := svc.UpdateMCPConfig(context.Background(), &model.MCPConfig{Servers: []model.MCPServer{{ServerName: "s", Enabled: false}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.UpdateMCPServerEnabled(context.Background(), "s", true); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := svc.GetMCPConfig(context.Background())
+	if err != nil || cfg == nil || !cfg.Servers[0].Enabled {
+		t.Fatalf("enabled state not persisted: cfg=%+v err=%v", cfg, err)
+	}
+}
+
+func TestAppConfigService_DeleteAndUpdateA2AServer(t *testing.T) {
+	repo := NewMockAppConfigRepository()
+	svc := NewAppConfigService(repo)
+	if err := svc.UpdateA2AConfig(context.Background(), &model.A2AConfig{Servers: []model.A2AServer{{ID: "a", URL: "http://a", Enabled: true}, {ID: "b", URL: "http://b", Enabled: true}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.UpdateA2AServerEnabled(context.Background(), "a", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeleteA2AServer(context.Background(), "b"); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := svc.GetA2AConfig(context.Background())
+	if err != nil || cfg == nil || len(cfg.Servers) != 1 || cfg.Servers[0].Enabled {
+		t.Fatalf("A2A mutation not persisted: cfg=%+v err=%v", cfg, err)
+	}
+}

@@ -97,10 +97,15 @@ type MCPConfig struct {
 // MCPServer MCP (Model Context Protocol) 服务器配置。
 // MCP 是连接 AI 模型与外部数据源/工具的标准协议。
 type MCPServer struct {
-	ServerName string   `json:"server_name"` // MCP 服务器名称，用于工具调用时的标识
-	Enabled    bool     `json:"enabled"`     // 是否启用该服务器
-	Transport  string   `json:"transport"`   // 传输协议：stdio、sse、http
-	Tools      []string `json:"tools"`       // 该服务器暴露的工具名称列表
+	ServerName string            `json:"server_name"` // MCP 服务器名称，用于工具调用时的标识
+	Enabled    bool              `json:"enabled"`     // 是否启用该服务器
+	Transport  string            `json:"transport"`   // 传输协议：stdio、sse、http
+	Tools      []string          `json:"tools"`       // 该服务器暴露的工具名称列表
+	Command    string            `json:"command,omitempty"`
+	Args       []string          `json:"args,omitempty"`
+	Env        map[string]string `json:"env,omitempty"`
+	URL        string            `json:"url,omitempty"`
+	Headers    map[string]string `json:"headers,omitempty"`
 }
 
 // A2AConfig A2A 配置
@@ -119,4 +124,5 @@ type A2AServer struct {
 	Streaming         bool     `json:"streaming"`          // 是否支持 Server-Sent Events 流式响应
 	PushNotifications bool     `json:"push_notifications"` // 是否支持主动推送通知
 	Enabled           bool     `json:"enabled"`            // 是否启用，未启用的 Agent 不会被路由到
+	URL               string   `json:"url,omitempty"`      // 远程 Agent 卡片地址
 }

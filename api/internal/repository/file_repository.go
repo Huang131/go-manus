@@ -13,6 +13,8 @@ import (
 type FileRepository interface {
 	Create(ctx context.Context, file *model.File) error
 	GetByID(ctx context.Context, id string) (*model.File, error)
+	// GetBySessionAndID 仅返回属于指定会话的文件，避免跨会话引用文件。
+	GetBySessionAndID(ctx context.Context, sessionID, id string) (*model.File, error)
 	// GetBySessionAndFilepath 根据 session_id + filepath 查重（替代旧 sessions.files JSONB 的路径去重逻辑）
 	GetBySessionAndFilepath(ctx context.Context, sessionID, filepath string) (*model.File, error)
 	// GetBySessionAndFilename 查找会话内同名的最近文件（用于上传幂等去重）
@@ -113,6 +115,20 @@ func (r *PostgresFileRepository) GetByID(ctx context.Context, id string) (*model
 	q := r.queryer()
 	query := `SELECT ` + fileColumns + ` FROM files WHERE id = $1`
 	file, err := scanFile(q.QueryRow(ctx, query, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return file, nil
+}
+
+// GetBySessionAndID 根据会话和文件 ID 查询文件，所有权约束在 SQL 边界执行。
+func (r *PostgresFileRepository) GetBySessionAndID(ctx context.Context, sessionID, id string) (*model.File, error) {
+	q := r.queryer()
+	query := `SELECT ` + fileColumns + ` FROM files WHERE session_id = $1 AND id = $2`
+	file, err := scanFile(q.QueryRow(ctx, query, sessionID, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}

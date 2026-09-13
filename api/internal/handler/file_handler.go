@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"io"
 	"net/http"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
+	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/service"
 	"github.com/Huang131/go-manus/api/pkg/logger"
 	"github.com/Huang131/go-manus/api/pkg/response"
@@ -73,7 +75,7 @@ func (h *FileHandler) Upload(c *gin.Context) {
 // GetInfo 获取文件信息
 func (h *FileHandler) GetInfo(c *gin.Context) {
 	id := c.Param("id")
-	file, err := h.service.GetFileInfo(c.Request.Context(), id)
+	file, err := h.fileInfo(c, id)
 	if err != nil {
 		response.FromError(c, err)
 		return
@@ -84,7 +86,7 @@ func (h *FileHandler) GetInfo(c *gin.Context) {
 // Download 下载文件
 func (h *FileHandler) Download(c *gin.Context) {
 	id := c.Param("id")
-	file, reader, err := h.service.DownloadFile(c.Request.Context(), id)
+	file, reader, err := h.download(c, id)
 	if err != nil {
 		response.FromError(c, err)
 		return
@@ -103,4 +105,22 @@ func (h *FileHandler) Download(c *gin.Context) {
 
 	c.Header("Content-Disposition", "attachment; filename="+file.Filename)
 	c.DataFromReader(http.StatusOK, file.Size, file.MimeType, reader, nil)
+}
+
+// fileInfo 强制使用 session_id 查询，避免文件 ID 成为跨会话资源探针。
+func (h *FileHandler) fileInfo(c *gin.Context, id string) (*model.File, error) {
+	sessionID := c.Query("session_id")
+	if sessionID == "" {
+		return nil, apperr.BadRequest("session_id is required")
+	}
+	return h.service.GetFileInfoForSession(c.Request.Context(), sessionID, id)
+}
+
+// download 强制使用 session_id 查询，所有权校验由 repository 的联合条件执行。
+func (h *FileHandler) download(c *gin.Context, id string) (*model.File, io.ReadCloser, error) {
+	sessionID := c.Query("session_id")
+	if sessionID == "" {
+		return nil, nil, apperr.BadRequest("session_id is required")
+	}
+	return h.service.DownloadFileForSession(c.Request.Context(), sessionID, id)
 }

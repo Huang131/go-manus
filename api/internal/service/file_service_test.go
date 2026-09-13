@@ -19,6 +19,9 @@ func (emptyFileRepo) GetBySessionAndFilename(ctx context.Context, sessionID, fil
 
 func (emptyFileRepo) Create(context.Context, *model.File) error            { return nil }
 func (emptyFileRepo) GetByID(context.Context, string) (*model.File, error) { return nil, nil }
+func (emptyFileRepo) GetBySessionAndID(context.Context, string, string) (*model.File, error) {
+	return nil, nil
+}
 func (emptyFileRepo) GetBySessionAndFilepath(context.Context, string, string) (*model.File, error) {
 	return nil, nil
 }
@@ -63,6 +66,12 @@ func (s *stubFileRepo) GetByID(_ context.Context, id string) (*model.File, error
 		return nil, s.getErr
 	}
 	if s.file != nil && s.file.ID == id {
+		return s.file, nil
+	}
+	return nil, nil
+}
+func (s *stubFileRepo) GetBySessionAndID(_ context.Context, sessionID, id string) (*model.File, error) {
+	if s.file != nil && s.file.ID == id && s.file.SessionID == sessionID {
 		return s.file, nil
 	}
 	return nil, nil
@@ -224,7 +233,7 @@ func TestFileServiceUploadFileRepoCreateError(t *testing.T) {
 }
 
 func TestFileServiceDownloadFileWithStorage(t *testing.T) {
-	file := &model.File{ID: "file-1", Key: "files/session-1/file-1.txt"}
+	file := &model.File{ID: "file-1", SessionID: "session-1", Key: "files/session-1/file-1.txt"}
 	repo := &stubFileRepo{file: file}
 	storage := &stubStorage{}
 	svc := NewFileService(repo, storage)
@@ -243,6 +252,31 @@ func TestFileServiceDownloadFileWithStorage(t *testing.T) {
 	content, _ := io.ReadAll(reader)
 	if string(content) != "file-content" {
 		t.Errorf("DownloadFile() content = %q, want file-content", string(content))
+	}
+}
+
+func TestFileServiceSessionScopedLookupRejectsOtherSession(t *testing.T) {
+	file := &model.File{ID: "file-1", SessionID: "session-1", Key: "key"}
+	svc := NewFileService(&stubFileRepo{file: file}, &stubStorage{})
+
+	if _, err := svc.GetFileInfoForSession(context.Background(), "session-2", "file-1"); err == nil {
+		t.Fatal("GetFileInfoForSession() error = nil, want not found")
+	}
+	if _, _, err := svc.DownloadFileForSession(context.Background(), "session-2", "file-1"); err == nil {
+		t.Fatal("DownloadFileForSession() error = nil, want not found")
+	}
+}
+
+func TestFileServiceSessionScopedLookupReturnsOwnedFile(t *testing.T) {
+	file := &model.File{ID: "file-1", SessionID: "session-1", Filename: "doc.txt", Key: "key"}
+	svc := NewFileService(&stubFileRepo{file: file}, &stubStorage{})
+
+	got, err := svc.GetFileInfoForSession(context.Background(), "session-1", "file-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != file.ID {
+		t.Fatalf("GetFileInfoForSession() = %+v, want %q", got, file.ID)
 	}
 }
 

@@ -73,7 +73,7 @@ export const configApi = {
 
   /**
    * 新增 MCP 服务配置
-   * @param config MCP 配置对象，格式为 { mcpServers: { [serverName]: MCPServerConfig } }
+   * @param config MCP 配置对象，格式为 { servers: [...] }
    */
   addMCPServer: (config: MCPConfig): Promise<void> => {
     return post<void>("/app-config/mcp-servers", config);
@@ -83,7 +83,7 @@ export const configApi = {
    * 删除 MCP 服务
    */
   deleteMCPServer: (serverName: string): Promise<void> => {
-    return post<void>(`/app-config/mcp-servers/${serverName}/delete`, {});
+    return post<void>(`/app-config/mcp-servers/${encodeURIComponent(serverName)}/delete`, {});
   },
 
   /**
@@ -94,8 +94,8 @@ export const configApi = {
     enabled: boolean
   ): Promise<void> => {
     return post<void>(
-      `/app-config/mcp-servers/${serverName}/enabled`,
-      { enabled }
+      `/app-config/mcp-servers/${encodeURIComponent(serverName)}/enabled`,
+      { enabled },
     );
   },
 
@@ -118,7 +118,7 @@ export const configApi = {
    * 删除 A2A 服务
    */
   deleteA2AServer: (a2aId: string): Promise<void> => {
-    return post<void>(`/app-config/a2a-servers/${a2aId}/delete`, {});
+    return post<void>(`/app-config/a2a-servers/${encodeURIComponent(a2aId)}/delete`, {});
   },
 
   /**
@@ -129,9 +129,8 @@ export const configApi = {
     enabled: boolean
   ): Promise<void> => {
     return post<void>(
-      `/app-config/a2a-servers/${a2aId}/enabled`,
-      { enabled }
+      `/app-config/a2a-servers/${encodeURIComponent(a2aId)}/enabled`,
+      { enabled },
     );
   },
 };
-

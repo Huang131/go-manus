@@ -10,6 +10,8 @@ import { toast } from 'sonner'
 import type { AttachmentFile } from '@/lib/session-events'
 
 export interface FilePreviewPanelProps {
+  /** 当前会话 ID，用于文件下载时执行归属校验 */
+  sessionId: string
   /** 要预览的文件信息 */
   file: AttachmentFile | null
   /** 关闭回调 */
@@ -48,7 +50,7 @@ function isSupportedFileType(extension: string): { type: 'text' | 'image' | 'uns
   return { type: 'unsupported' }
 }
 
-export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
+export function FilePreviewPanel({ file, sessionId, onClose }: FilePreviewPanelProps) {
   const [content, setContent] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -70,12 +72,12 @@ export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
     try {
       if (type === 'image') {
         // 图片类型：生成预览 URL
-        const blob = await fileApi.downloadFile(fileId)
+        const blob = await fileApi.downloadFile(fileId, sessionId)
         const url = URL.createObjectURL(blob)
         setImageUrl(url)
       } else {
         // 文本类型：读取内容
-        const blob = await fileApi.downloadFile(fileId)
+        const blob = await fileApi.downloadFile(fileId, sessionId)
         const text = await blob.text()
         setContent(text)
       }
@@ -86,14 +88,14 @@ export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [sessionId])
 
   // 下载文件
   const handleDownload = useCallback(async () => {
     if (!file) return
     
     try {
-      const blob = await fileApi.downloadFile(file.id)
+      const blob = await fileApi.downloadFile(file.id, sessionId)
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -107,7 +109,7 @@ export function FilePreviewPanel({ file, onClose }: FilePreviewPanelProps) {
       const msg = err instanceof Error ? err.message : '下载失败'
       toast.error(`下载失败: ${msg}`)
     }
-  }, [file])
+  }, [file, sessionId])
 
   // 当文件改变时加载内容
   useEffect(() => {

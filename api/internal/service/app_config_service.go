@@ -22,8 +22,11 @@ type AppConfigService interface {
 	GetMCPConfig(ctx context.Context) (*model.MCPConfig, error)
 	UpdateMCPConfig(ctx context.Context, cfg *model.MCPConfig) error
 	DeleteMCPServer(ctx context.Context, serverName string) error
+	UpdateMCPServerEnabled(ctx context.Context, serverName string, enabled bool) error
 	GetA2AConfig(ctx context.Context) (*model.A2AConfig, error)
 	UpdateA2AConfig(ctx context.Context, cfg *model.A2AConfig) error
+	DeleteA2AServer(ctx context.Context, id string) error
+	UpdateA2AServerEnabled(ctx context.Context, id string, enabled bool) error
 }
 
 // DefaultAppConfigService 应用配置服务默认实现
@@ -211,6 +214,24 @@ func (s *DefaultAppConfigService) DeleteMCPServer(ctx context.Context, serverNam
 	return s.repo.SaveConfig(ctx, appConfig)
 }
 
+// UpdateMCPServerEnabled 更新单个 MCP 服务状态，保持其他服务配置不变。
+func (s *DefaultAppConfigService) UpdateMCPServerEnabled(ctx context.Context, serverName string, enabled bool) error {
+	cfg, err := s.GetMCPConfig(ctx)
+	if err != nil {
+		return err
+	}
+	if cfg == nil {
+		return apperr.NotFound("MCP服务器不存在")
+	}
+	for i := range cfg.Servers {
+		if cfg.Servers[i].ServerName == serverName {
+			cfg.Servers[i].Enabled = enabled
+			return s.UpdateMCPConfig(ctx, cfg)
+		}
+	}
+	return apperr.NotFound("MCP服务器不存在")
+}
+
 // GetA2AConfig 获取 A2A 配置
 func (s *DefaultAppConfigService) GetA2AConfig(ctx context.Context) (*model.A2AConfig, error) {
 	cfg, err := s.repo.GetConfig(ctx, model.AppConfigTypeA2A, model.AppConfigKeyDefault)
@@ -261,4 +282,56 @@ func (s *DefaultAppConfigService) UpdateA2AConfig(ctx context.Context, cfg *mode
 		UpdatedAt:   time.Now(),
 	}
 	return s.repo.SaveConfig(ctx, appConfig)
+}
+
+// DeleteA2AServer 删除一个 A2A 服务配置。
+func (s *DefaultAppConfigService) DeleteA2AServer(ctx context.Context, id string) error {
+	cfg, err := s.GetA2AConfig(ctx)
+	if err != nil {
+		return err
+	}
+	if cfg == nil {
+		return apperr.NotFound("A2A服务器不存在")
+	}
+	filtered := make([]model.A2AServer, 0, len(cfg.Servers))
+	found := false
+	for _, server := range cfg.Servers {
+		if server.ID == id {
+			found = true
+			continue
+		}
+		filtered = append(filtered, server)
+	}
+	if !found {
+		return apperr.NotFound("A2A服务器不存在")
+	}
+	cfg.Servers = filtered
+	return s.saveA2AConfig(ctx, cfg)
+}
+
+// UpdateA2AServerEnabled 更新单个 A2A 服务状态。
+func (s *DefaultAppConfigService) UpdateA2AServerEnabled(ctx context.Context, id string, enabled bool) error {
+	cfg, err := s.GetA2AConfig(ctx)
+	if err != nil {
+		return err
+	}
+	if cfg == nil {
+		return apperr.NotFound("A2A服务器不存在")
+	}
+	for i := range cfg.Servers {
+		if cfg.Servers[i].ID == id {
+			cfg.Servers[i].Enabled = enabled
+			return s.saveA2AConfig(ctx, cfg)
+		}
+	}
+	return apperr.NotFound("A2A服务器不存在")
+}
+
+func (s *DefaultAppConfigService) saveA2AConfig(ctx context.Context, cfg *model.A2AConfig) error {
+	now := time.Now()
+	return s.repo.SaveConfig(ctx, &model.AppConfig{
+		ID: uuid.New().String(), ConfigType: model.AppConfigTypeA2A,
+		ConfigKey: model.AppConfigKeyDefault, ConfigValue: cfg,
+		CreatedAt: now, UpdatedAt: now,
+	})
 }

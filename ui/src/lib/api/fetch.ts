@@ -178,6 +178,31 @@ export async function request<T = unknown>(
   }
 }
 
+/** 下载二进制响应，同时复用统一的超时和错误 envelope 处理。 */
+export async function requestBlob(
+  endpoint: string,
+  options: RequestOptions = {},
+): Promise<Blob> {
+  const url = endpoint.startsWith("http")
+    ? endpoint
+    : `${API_CONFIG.baseURL}${endpoint}`;
+  const {
+    timeout = API_CONFIG.timeout,
+    skipErrorHandler = false,
+    headers = {},
+    ...fetchOptions
+  } = options;
+  const response = await fetchWithTimeout(url, {
+    ...fetchOptions,
+    headers,
+  }, timeout);
+  if (!response.ok) {
+    if (skipErrorHandler) return response.blob();
+    await handleErrorResponse(response);
+  }
+  return response.blob();
+}
+
 /**
  * GET 请求
  */
@@ -256,7 +281,6 @@ export function del<T = unknown>(
 export function createSSEConnection(
   endpoint: string,
   data?: unknown,
-  options?: RequestOptions
 ): EventSource {
   const url = endpoint.startsWith("http")
     ? endpoint

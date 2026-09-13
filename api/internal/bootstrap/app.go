@@ -789,7 +789,12 @@ func (a *App) initRoutes(cfg *config.Config, opts Options) {
 	sessionHandler := handler.NewSessionHandler(a.SessionService, a.AgentService, a.Sandbox)
 	fileHandler := handler.NewFileHandler(a.FileService, a.SessionService)
 	statusHandler := handler.NewStatusHandler(a.StatusService)
-	appConfigHandler := handler.NewAppConfigHandler(a.AppConfigSvc)
+	var appConfigHandler *handler.AppConfigHandler
+	if a.AgentService != nil {
+		appConfigHandler = handler.NewAppConfigHandler(a.AppConfigSvc, a.AgentService)
+	} else {
+		appConfigHandler = handler.NewAppConfigHandler(a.AppConfigSvc)
+	}
 	llmModelHandler := handler.NewLLMModelHandler(a.LLMModelSvc)
 
 	router.SetupRoutes(engine, &router.Handlers{

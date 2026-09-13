@@ -3,6 +3,7 @@ package external
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/bytedance/sonic"
 	"io"
@@ -22,7 +23,7 @@ func sandboxToolResult(resp *sandboxResponse) *model.ToolResult {
 	if resp.Code == 0 || resp.Code == 200 {
 		return model.NewToolResultWithMessage(resp.Msg, resp.Data)
 	}
-	return model.NewToolError(resp.Msg)
+	return &model.ToolResult{Message: resp.Msg, Data: resp.Data, StatusCode: resp.Code}
 }
 
 // Sandbox 沙箱服务接口
@@ -134,6 +135,24 @@ type sandboxErrorResponse struct {
 	Msg  string `json:"msg"`
 }
 
+// SandboxAPIError 保留沙箱 HTTP 与业务错误码，供 API 边界映射为正确状态。
+type SandboxAPIError struct {
+	StatusCode int
+	Code       int
+	Message    string
+	Data       map[string]interface{}
+}
+
+func (e *SandboxAPIError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Message == "" {
+		return fmt.Sprintf("sandbox API error: status=%d", e.StatusCode)
+	}
+	return fmt.Sprintf("sandbox API error: status=%d, message=%s", e.StatusCode, e.Message)
+}
+
 // doRequest 发送请求到沙箱服务
 func (c *SandboxClient) doRequest(ctx context.Context, method, action string, req *sandboxRequest) (*sandboxResponse, error) {
 	if c.address == "" {
@@ -170,7 +189,24 @@ func (c *SandboxClient) doRequest(ctx context.Context, method, action string, re
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("sandbox API error: status=%d, body=%s", resp.StatusCode, string(respBody))
+		var errorResp sandboxResponse
+		if err := sonic.Unmarshal(respBody, &errorResp); err == nil {
+			code := errorResp.Code
+			if code == 0 {
+				code = resp.StatusCode
+			}
+			return nil, &SandboxAPIError{
+				StatusCode: resp.StatusCode,
+				Code:       code,
+				Message:    errorResp.Msg,
+				Data:       errorResp.Data,
+			}
+		}
+		return nil, &SandboxAPIError{
+			StatusCode: resp.StatusCode,
+			Code:       resp.StatusCode,
+			Message:    string(respBody),
+		}
 	}
 
 	var sandboxResp sandboxResponse
@@ -179,6 +215,18 @@ func (c *SandboxClient) doRequest(ctx context.Context, method, action string, re
 	}
 
 	return &sandboxResp, nil
+}
+
+// SandboxErrorStatus 返回错误对应的 HTTP 状态，便于 handler 处理 envelope 失败。
+func SandboxErrorStatus(err error) int {
+	var apiErr *SandboxAPIError
+	if errors.As(err, &apiErr) && apiErr != nil {
+		if apiErr.StatusCode != 0 {
+			return apiErr.StatusCode
+		}
+		return apiErr.Code
+	}
+	return 0
 }
 
 // ExecCommand 执行 Shell 命令

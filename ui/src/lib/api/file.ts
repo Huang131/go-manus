@@ -1,4 +1,4 @@
-import { get, post } from "./fetch";
+import { get, post, requestBlob } from "./fetch";
 import type { FileInfo, FileUploadParams } from "./types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "/api";
@@ -28,8 +28,8 @@ export const fileApi = {
    * @param fileId 文件 ID
    * @returns 文件信息
    */
-  getFileInfo: (fileId: string): Promise<FileInfo> => {
-    return get<FileInfo>(`/files/${fileId}`);
+  getFileInfo: (fileId: string, sessionId: string): Promise<FileInfo> => {
+    return get<FileInfo>(`/files/${fileId}`, { session_id: sessionId });
   },
 
   /**
@@ -37,16 +37,11 @@ export const fileApi = {
    * @param fileId 文件 ID
    * @returns Blob 对象
    */
-  downloadFile: async (fileId: string): Promise<Blob> => {
-    const response = await fetch(
-      `${API_BASE_URL}/files/${fileId}/download`
-    );
-
-    if (!response.ok) {
-      throw new Error(`下载失败: ${response.statusText}`);
-    }
-
-    return response.blob();
+  downloadFile: (fileId: string, sessionId: string): Promise<Blob> => {
+    const params = new URLSearchParams({ session_id: sessionId });
+    return requestBlob(`/files/${fileId}/download?${params.toString()}`, {
+      method: "GET",
+    });
   },
 
   /**
@@ -54,7 +49,8 @@ export const fileApi = {
    * @param fileId 文件 ID
    * @returns 文件下载 URL
    */
-  getFileDownloadUrl: (fileId: string): string => {
-    return `${API_BASE_URL}/files/${fileId}/download`;
+  getFileDownloadUrl: (fileId: string, sessionId: string): string => {
+    const params = new URLSearchParams({ session_id: sessionId });
+    return `${API_BASE_URL}/files/${fileId}/download?${params.toString()}`;
   },
 };

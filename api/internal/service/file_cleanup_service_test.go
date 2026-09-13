@@ -51,6 +51,9 @@ func (r *cleanupRepoStub) ListBySessionID(context.Context, string) ([]*model.Fil
 
 func (r *cleanupRepoStub) Create(context.Context, *model.File) error            { return nil }
 func (r *cleanupRepoStub) GetByID(context.Context, string) (*model.File, error) { return nil, nil }
+func (r *cleanupRepoStub) GetBySessionAndID(context.Context, string, string) (*model.File, error) {
+	return nil, nil
+}
 func (r *cleanupRepoStub) GetBySessionAndFilepath(context.Context, string, string) (*model.File, error) {
 	return nil, nil
 }

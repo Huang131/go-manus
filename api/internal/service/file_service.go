@@ -22,7 +22,9 @@ var ErrStorageUnavailable = errors.New("storage unavailable")
 type FileService interface {
 	UploadFile(ctx context.Context, sessionID, filename string, reader io.Reader, size int64, contentType string) (*model.File, error)
 	DownloadFile(ctx context.Context, id string) (*model.File, io.ReadCloser, error)
+	DownloadFileForSession(ctx context.Context, sessionID, id string) (*model.File, io.ReadCloser, error)
 	GetFileInfo(ctx context.Context, id string) (*model.File, error)
+	GetFileInfoForSession(ctx context.Context, sessionID, id string) (*model.File, error)
 	DeleteFile(ctx context.Context, id string) error
 }
 
@@ -99,7 +101,18 @@ func (s *DefaultFileService) UploadFile(ctx context.Context, sessionID, filename
 
 // DownloadFile 下载文件
 func (s *DefaultFileService) DownloadFile(ctx context.Context, id string) (*model.File, io.ReadCloser, error) {
-	file, err := s.repo.GetByID(ctx, id)
+	return s.downloadFile(ctx, s.repo.GetByID, id)
+}
+
+// DownloadFileForSession 只允许下载指定会话拥有的文件。
+func (s *DefaultFileService) DownloadFileForSession(ctx context.Context, sessionID, id string) (*model.File, io.ReadCloser, error) {
+	return s.downloadFile(ctx, func(ctx context.Context, id string) (*model.File, error) {
+		return s.repo.GetBySessionAndID(ctx, sessionID, id)
+	}, id)
+}
+
+func (s *DefaultFileService) downloadFile(ctx context.Context, lookup func(context.Context, string) (*model.File, error), id string) (*model.File, io.ReadCloser, error) {
+	file, err := lookup(ctx, id)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -116,7 +129,18 @@ func (s *DefaultFileService) DownloadFile(ctx context.Context, id string) (*mode
 
 // GetFileInfo 获取文件信息
 func (s *DefaultFileService) GetFileInfo(ctx context.Context, id string) (*model.File, error) {
-	file, err := s.repo.GetByID(ctx, id)
+	return s.getFileInfo(ctx, s.repo.GetByID, id)
+}
+
+// GetFileInfoForSession 只返回指定会话拥有的文件元数据。
+func (s *DefaultFileService) GetFileInfoForSession(ctx context.Context, sessionID, id string) (*model.File, error) {
+	return s.getFileInfo(ctx, func(ctx context.Context, id string) (*model.File, error) {
+		return s.repo.GetBySessionAndID(ctx, sessionID, id)
+	}, id)
+}
+
+func (s *DefaultFileService) getFileInfo(ctx context.Context, lookup func(context.Context, string) (*model.File, error), id string) (*model.File, error) {
+	file, err := lookup(ctx, id)
 	if err != nil {
 		return nil, err
 	}

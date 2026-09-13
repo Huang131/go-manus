@@ -416,14 +416,49 @@ func (h *SessionHandler) callSandbox(c *gin.Context, sessionID, action string, c
 	}
 	result, err := call(c.Request.Context())
 	if err != nil {
-		response.FromError(c, apperr.Internal(action+": "+err.Error()))
+		response.FromError(c, sandboxAppError(action, err))
+		return
+	}
+	if result == nil {
+		response.FromError(c, sandboxResultError(action, nil))
 		return
 	}
 	if !result.Success {
-		response.FromError(c, apperr.Internal(result.Message))
+		response.FromError(c, sandboxResultError(action, result))
 		return
 	}
 	response.Success(c, result.Data)
+}
+
+func sandboxAppError(action string, err error) error {
+	statusCode := external.SandboxErrorStatus(err)
+	message := action + ": " + err.Error()
+	switch statusCode {
+	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+		return apperr.BadRequest(message)
+	case http.StatusNotFound:
+		return apperr.NotFound(message)
+	case http.StatusPreconditionFailed:
+		return apperr.FailedPrecondition(message)
+	case http.StatusRequestTimeout, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return apperr.Unavailable(message)
+	default:
+		return apperr.Internal(message)
+	}
+}
+
+func sandboxResultError(action string, result *model.ToolResult) error {
+	if result == nil {
+		return apperr.Internal(action + ": 沙箱返回空结果")
+	}
+	if result.StatusCode == 0 {
+		return apperr.Internal(result.Message)
+	}
+	return sandboxAppError(action, &external.SandboxAPIError{
+		StatusCode: result.StatusCode,
+		Code:       result.StatusCode,
+		Message:    result.Message,
+	})
 }
 
 // ReadFile 查看沙箱文件内容（对齐原项目 POST /sessions/:id/file）

@@ -86,36 +86,40 @@ export type ListMCPServerItem = {
   enabled: boolean;
   transport: MCPTransport;
   tools: string[];
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
 };
 
 /**
  * MCP 服务器列表响应
  */
 export type MCPServersData = {
-  mcp_servers: ListMCPServerItem[];
+  servers: ListMCPServerItem[];
 };
 
 /**
  * MCP 服务器配置（POST 请求体中单个服务器的配置）
  */
 export type MCPServerConfig = {
+  server_name: string;
   transport?: MCPTransport;
   enabled?: boolean;
-  description?: string | null;
-  env?: Record<string, unknown> | null;
-  command?: string | null;
-  args?: string[] | null;
-  url?: string | null;
-  headers?: Record<string, unknown> | null;
-  [key: string]: unknown;
+  tools?: string[];
+  env?: Record<string, string>;
+  command?: string;
+  args?: string[];
+  url?: string;
+  headers?: Record<string, string>;
 };
 
 /**
  * MCP 配置（POST 新增 MCP 服务的请求体）
  */
 export type MCPConfig = {
-  mcpServers: Record<string, MCPServerConfig>;
-  [key: string]: unknown;
+  servers: MCPServerConfig[];
 };
 
 /**
@@ -130,21 +134,24 @@ export type ListA2AServerItem = {
   streaming: boolean;
   push_notifications: boolean;
   enabled: boolean;
+  url?: string;
 };
 
 /**
  * A2A 服务器列表响应
  */
 export type A2AServersData = {
-  a2a_servers: ListA2AServerItem[];
+  servers: ListA2AServerItem[];
+};
+
+export type A2AConfig = {
+  servers: ListA2AServerItem[];
 };
 
 /**
  * 新增 A2A 服务器请求参数
  */
-export type CreateA2AServerParams = {
-  base_url: string;
-};
+export type CreateA2AServerParams = A2AConfig;
 
 // ==================== 文件模块类型 ====================
 

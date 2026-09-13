@@ -42,7 +42,7 @@ func TestFileAPI_Upload_Lifecycle(t *testing.T) {
 	fileID := uploadFileForTest(t, sessionID, "test.txt", fileContent)
 	defer CleanupFile(t, fileID)
 
-	infoW := getJSON(t, "/api/files/"+fileID)
+	infoW := getJSON(t, "/api/files/"+fileID+"?session_id="+sessionID)
 	assert.Equal(t, http.StatusOK, infoW.Code)
 
 	_ = parseResponse(t, infoW)
@@ -63,7 +63,7 @@ func TestFileAPI_Download_Lifecycle(t *testing.T) {
 	fileID := uploadFileForTest(t, sessionID, "download_test.txt", fileContent)
 	defer CleanupFile(t, fileID)
 
-	downloadW := getJSON(t, "/api/files/"+fileID+"/download")
+	downloadW := getJSON(t, "/api/files/"+fileID+"/download?session_id="+sessionID)
 	assert.Equal(t, http.StatusOK, downloadW.Code)
 
 	contentDisposition := downloadW.Header().Get("Content-Disposition")
@@ -89,7 +89,7 @@ func TestFileAPI_Delete_Lifecycle(t *testing.T) {
 		"DELETE 接口未实现时应返回 404，实际: %d", deleteW.Code)
 
 	// 文件仍然存在（因为 delete 未实现）
-	getW := getJSON(t, "/api/files/"+fileID)
+	getW := getJSON(t, "/api/files/"+fileID+"?session_id="+sessionID)
 	assert.Equal(t, http.StatusOK, getW.Code,
 		"删除未实现时文件 GET 应返回 200，实际: %d", getW.Code)
 }
@@ -110,7 +110,7 @@ func TestFileAPI_Rename_Lifecycle(t *testing.T) {
 
 	// 如果 rename 成功，验证文件名
 	if renameW.Code == http.StatusOK {
-		infoW := getJSON(t, "/api/files/"+fileID)
+		infoW := getJSON(t, "/api/files/"+fileID+"?session_id="+sessionID)
 		infoResp := parseResponse(t, infoW)
 		infoData := infoResp.Data.(map[string]any)
 		assert.Equal(t, "new_name.txt", infoData["filename"])
@@ -173,7 +173,7 @@ func TestFileAPI_Upload_LargeFile(t *testing.T) {
 	fileID := uploadFileForTest(t, sessionID, "large.bin", largeContent)
 	defer CleanupFile(t, fileID)
 
-	infoW := getJSON(t, "/api/files/"+fileID)
+	infoW := getJSON(t, "/api/files/"+fileID+"?session_id="+sessionID)
 
 	infoResp := parseResponse(t, infoW)
 	infoData := infoResp.Data.(map[string]any)
@@ -211,7 +211,7 @@ func TestFileAPI_Upload_MultipleFormats(t *testing.T) {
 		fileID := uploadFileForTest(t, sessionID, tc.filename, tc.content)
 		defer CleanupFile(t, fileID)
 
-		infoW := getJSON(t, "/api/files/"+fileID)
+		infoW := getJSON(t, "/api/files/"+fileID+"?session_id="+sessionID)
 		assert.Equal(t, http.StatusOK, infoW.Code, tc.filename+" 上传应该成功")
 	}
 }
