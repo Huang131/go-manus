@@ -6,7 +6,7 @@ import { getToolKind, getFriendlyToolLabel, getArg } from '@/components/tool-use
 import type { ToolKind } from '@/components/tool-use/utils'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
-import { Maximize2, Monitor, Play, Terminal, Globe, Search, FileSearch, Wrench, Bot, Sparkles, , X } from 'lucide-react'
+import { Maximize2, Monitor, Play, Terminal, Globe, Search, FileSearch, Wrench, Bot, Sparkles, X } from 'lucide-react'
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */

@@ -96,13 +96,6 @@ export function useSessionDetail(
         setStreaming(false)
       }
     }
-        setSession((prev) => prev ? { ...prev, status: 'running' } : null)
-      }
-      if (stepData.status === 'waiting') {
-        setSession((prev) => prev ? { ...prev, status: 'waiting' } : null)
-        setStreaming(false)
-      }
-    }
 
     // message_ask_user → 等待用户输入，切换为 waiting
     // chat 流中 tool_calling 事件携带原始字段 function_name（未归一化）

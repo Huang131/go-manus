@@ -24,7 +24,6 @@ import {Textarea} from '@/components/ui/textarea'
 import {configApi} from '@/lib/api'
 import type {
   AgentConfig,
-  LLMConfig,
   ListMCPServerItem,
   ListA2AServerItem,
   MCPConfig,
@@ -97,106 +96,6 @@ function CommonSetting({config, onChange}: CommonSettingProps) {
               />
               <FieldDescription className="text-xs">
                 默认情况下，每个搜索步骤包含 10 个结果。
-              </FieldDescription>
-            </Field>
-          </FieldGroup>
-        </FieldSet>
-      </FieldGroup>
-    </form>
-  )
-}
-
-// ==================== 模型提供商 ====================
-
-type LLMSettingProps = {
-  config: LLMConfig
-  onChange: (config: LLMConfig) => void
-}
-
-function LLMSetting({config, onChange}: LLMSettingProps) {
-  const handleChange = (field: keyof LLMConfig, value: string) => {
-    onChange({...config, [field]: value})
-  }
-
-  const handleNumberChange = (field: keyof LLMConfig, value: string) => {
-    const numValue = value === '' ? undefined : Number(value)
-    onChange({...config, [field]: numValue})
-  }
-
-  return (
-    <form className="w-full px-1" onSubmit={(e) => e.preventDefault()}>
-      <FieldGroup>
-        <FieldSet>
-          <FieldLegend className="text-lg font-bold text-gray-700">模型提供商</FieldLegend>
-          <FieldGroup>
-            <Field>
-              <FieldLabel htmlFor="base_url">提供商基础地址(base_url)</FieldLabel>
-              <Input
-                id="base_url"
-                type="url"
-                placeholder="请填写LLM基础URL地址"
-                value={config.base_url ?? ''}
-                onChange={(e) => handleChange('base_url', e.target.value)}
-              />
-              <FieldDescription className="text-xs">
-                请填写模型提供商的基础 url 地址，需兼容 OpenAI 格式。
-              </FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="api_key">提供商密钥</FieldLabel>
-              <Input
-                id="api_key"
-                type="password"
-                placeholder="请填写提供商API密钥"
-                value={config.api_key ?? ''}
-                onChange={(e) => handleChange('api_key', e.target.value)}
-              />
-              <FieldDescription className="text-xs">
-                请填写模型提供商密钥信息。
-              </FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="model_name">模型名</FieldLabel>
-              <Input
-                id="model_name"
-                type="text"
-                placeholder="请填写需要使用的模型名字"
-                value={config.model_name ?? ''}
-                onChange={(e) => handleChange('model_name', e.target.value)}
-              />
-              <FieldDescription className="text-xs">
-                请填写 Manus 调用的模型名字，模型必须支持工具调用、图像识别等功能。
-              </FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="temperature">温度(temperature)</FieldLabel>
-              <Input
-                id="temperature"
-                type="number"
-                placeholder="请填写模型温度"
-                value={config.temperature ?? 0.7}
-                onChange={(e) => handleNumberChange('temperature', e.target.value)}
-                min={0}
-                max={2}
-                step={0.1}
-              />
-              <FieldDescription className="text-xs">
-                温度越低，模型输出越确定、越稳定；温度越高，输出越具创造性和随机性，默认为 0.7。
-              </FieldDescription>
-            </Field>
-            <Field>
-              <FieldLabel htmlFor="max_tokens">最大输出 Token 数(max_tokens)</FieldLabel>
-              <Input
-                id="max_tokens"
-                type="number"
-                placeholder="请填写模型最大输出Token数"
-                value={config.max_tokens ?? 8192}
-                onChange={(e) => handleNumberChange('max_tokens', e.target.value)}
-                min={1}
-                max={128000}
-              />
-              <FieldDescription className="text-xs">
-                模型单次回复允许生成的最大 Token 数量，默认为 8192。
               </FieldDescription>
             </Field>
           </FieldGroup>
@@ -585,7 +484,6 @@ export function ManusSettings() {
 
   // ---- 数据 ----
   const [agentConfig, setAgentConfig] = useState<AgentConfig>({})
-  const [llmConfig, setLlmConfig] = useState<LLMConfig>({})
   const [mcpServers, setMcpServers] = useState<ListMCPServerItem[]>([])
   const [a2aServers, setA2aServers] = useState<ListA2AServerItem[]>([])
 
@@ -605,13 +503,10 @@ export function ManusSettings() {
 
     // 1. Agent + LLM 配置（通常很快）
     setLoadingConfig(true)
-    Promise.all([
-      configApi.getAgentConfig(),
-      configApi.getLLMConfig(),
-    ])
-      .then(([agent, llm]) => {
+    setLoadingConfig(true)
+    configApi.getAgentConfig()
+      .then((agent) => {
         setAgentConfig(agent)
-        setLlmConfig(llm)
       })
       .catch((err) => {
         console.error('[Settings] 获取基础配置失败:', err)
@@ -666,9 +561,6 @@ export function ManusSettings() {
       if (activeSetting === 'common-setting') {
         await configApi.updateAgentConfig(agentConfig)
         toast.success('通用配置保存成功')
-      } else if (activeSetting === 'llm-setting') {
-        await configApi.updateLLMConfig(llmConfig)
-        toast.success('模型提供商配置保存成功')
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : '保存失败'
@@ -840,7 +732,7 @@ export function ManusSettings() {
 
           {/* 右侧内容 */}
           <div className="flex-1 h-[500px] scrollbar-hide overflow-y-auto">
-            {loadingConfig && (activeSetting === 'common-setting' || activeSetting === 'llm-setting') ? (
+            {loadingConfig && activeSetting === 'common-setting' ? (
               <div className="flex justify-center items-center h-full">
                 <Loader2 className="size-6 animate-spin text-muted-foreground"/>
               </div>

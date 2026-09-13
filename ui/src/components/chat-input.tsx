@@ -1,6 +1,6 @@
 'use client'
 
-import {useState, useRef, forwardRef, useImperativeHandle, useCallback} from 'react'
+import {useState, useRef, forwardRef, useImperativeHandle, useCallback, useEffect} from 'react'
 import {cn, formatFileSize} from '@/lib/utils'
 import {AUTO_MODEL_ID, useModels} from '@/providers/models-provider'
 
@@ -50,6 +50,14 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
     }, [modelIdProp, onModelIdChange])
   const {models: allModels, loading: modelsLoading} = useModels()
   const models = allModels.filter((m) => m.is_enabled !== false)
+
+  // 持久化的 model id 失效校验：模型被删除/禁用后回落 Auto，
+  // 避免 select 显示空白、发送时才 404
+  useEffect(() => {
+    if (!modelsLoading && modelId && modelId !== AUTO_MODEL_ID && !models.some((m) => m.id === modelId)) {
+      onModelIdChange?.(AUTO_MODEL_ID)
+    }
+  }, [modelsLoading, models, modelId, onModelIdChange])
   const [uploading, setUploading] = useState(false)
     const [sending, setSending] = useState(false)
     const [inputValue, setInputValue] = useState('')
