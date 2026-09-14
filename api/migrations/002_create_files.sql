@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS files (
     extension   VARCHAR(255) NOT NULL DEFAULT '',
     mime_type   VARCHAR(255) NOT NULL DEFAULT '',
     size        BIGINT NOT NULL DEFAULT 0,
-    sha256      CHAR(64) NOT NULL DEFAULT '',
+    -- 使用变长类型，避免未计算哈希时 CHAR(64) 自动补空格污染 API 响应。
+    sha256      VARCHAR(64) NOT NULL DEFAULT '',
     -- 临时文件允许未关联会话；清理任务会按 session_id IS NULL 回收。
     session_id  VARCHAR(255),
     updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(0),

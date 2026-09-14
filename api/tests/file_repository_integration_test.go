@@ -55,6 +55,7 @@ func TestFileRepo_CreateAndGetByID(t *testing.T) {
 	require.NotNil(t, got)
 	assert.Equal(t, f.Filename, got.Filename)
 	assert.Equal(t, sessionID, got.SessionID)
+	assert.Equal(t, "", got.Sha256, "未计算哈希时应读回空字符串，而非 CHAR 定长填充的空格")
 }
 
 func TestFileRepo_GetByID_NotFoundReturnsNil(t *testing.T) {
