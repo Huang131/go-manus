@@ -46,6 +46,7 @@ export function useSessionDetail(
   const messageStreamCleanupRef = useRef<(() => void) | null>(null)
   const isSendMessageRef = useRef(false)
   const lastEventIdRef = useRef<string | null>(null)
+  const streamingDeltaIdsRef = useRef<Set<string>>(new Set())
 
   const appendEvent = useCallback((ev: SSEEventData) => {
     let evToAppend = ev
@@ -136,8 +137,12 @@ export function useSessionDetail(
   // 返回 true 表示该事件已被路由，调用方不要再 appendEvent。
   const routeStreamingDelta = useCallback((ev: SSEEventData): boolean => {
     if (ev.type !== 'message_delta') return false
-    // 增量事件不进入 events，但仍必须推进 Redis SSE 游标，否则断线重连会重复回放。
-    if (ev.streamId) lastEventIdRef.current = ev.streamId
+    // 实时流与断线重放可能交叠，按 Redis streamId 去重后再拼接增量。
+    if (ev.streamId) {
+      if (streamingDeltaIdsRef.current.has(ev.streamId)) return true
+      streamingDeltaIdsRef.current.add(ev.streamId)
+      lastEventIdRef.current = ev.streamId
+    }
     const d = ev.data as { message_id?: string; delta?: string }
     const mid = d?.message_id
     const delta = d?.delta
@@ -257,6 +262,7 @@ export function useSessionDetail(
     setEvents([])
     setLastSendError(null)
     setStreamingText(null)
+    streamingDeltaIdsRef.current.clear()
     lastEventIdRef.current = ''
     if (!sessionId) {
       setLoading(false)

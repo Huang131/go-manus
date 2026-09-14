@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS files (
     mime_type   VARCHAR(255) NOT NULL DEFAULT '',
     size        BIGINT NOT NULL DEFAULT 0,
     sha256      CHAR(64) NOT NULL DEFAULT '',
-    session_id  VARCHAR(255) NOT NULL,
+    -- 临时文件允许未关联会话；清理任务会按 session_id IS NULL 回收。
+    session_id  VARCHAR(255),
     updated_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(0)
 );
@@ -38,7 +39,7 @@ COMMENT ON COLUMN files.key IS 'MinIO 对象存储的 Key，用于上传/下载�
 COMMENT ON COLUMN files.extension IS '文件扩展名（小写），用于文件类型筛选';
 COMMENT ON COLUMN files.mime_type IS '文件的 MIME 类型，如 text/plain、image/png';
 COMMENT ON COLUMN files.size IS '文件大小（字节）';
-COMMENT ON COLUMN files.session_id IS '关联的会话 ID，一个文件只能属于一个会话';
+COMMENT ON COLUMN files.session_id IS '关联的会话 ID；临时文件可为空，由清理任务回收';
 COMMENT ON COLUMN files.updated_at IS '最后更新时间';
 COMMENT ON COLUMN files.created_at IS '创建时间（上传时间）';
 
@@ -48,4 +49,5 @@ COMMENT ON COLUMN files.created_at IS '创建时间（上传时间）';
 -- DROP INDEX IF EXISTS idx_files_extension;
 -- DROP INDEX IF EXISTS idx_files_created_at;
 -- DROP INDEX IF EXISTS idx_files_session_id;
+-- DROP INDEX IF EXISTS uq_files_session_sha256;
 -- DROP TABLE IF EXISTS files;

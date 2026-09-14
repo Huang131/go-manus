@@ -6779,6 +6779,17 @@
       "norm_label": "testbuildwithfactoriesfactoryerrorcleanedup()"
     },
     {
+      "label": "TestBuildWithFactoriesInjectsFileCleanupScheduler()",
+      "file_type": "code",
+      "source_file": "api/internal/bootstrap/app_test.go",
+      "source_location": "L192",
+      "_origin": "ast",
+      "id": "api_internal_bootstrap_app_test_testbuildwithfactoriesinjectsfilecleanupscheduler",
+      "community": 10,
+      "community_name": "app_test.go",
+      "norm_label": "testbuildwithfactoriesinjectsfilecleanupscheduler()"
+    },
+    {
       "label": "TestBuildWithFactoriesPartialInjection()",
       "file_type": "code",
       "source_file": "api/internal/bootstrap/app_test.go",
@@ -6944,6 +6955,94 @@
       "norm_label": ".stop()"
     },
     {
+      "label": "status_service_test.go",
+      "file_type": "code",
+      "source_file": "api/internal/service/status_service_test.go",
+      "source_location": "L1",
+      "_origin": "ast",
+      "id": "api_internal_service_status_service_test",
+      "community": 100,
+      "community_name": "status_service_test.go",
+      "norm_label": "status_service_test.go"
+    },
+    {
+      "label": "TestStatusService_GetHealthStatus_SkippedServicesDegraded()",
+      "file_type": "code",
+      "source_file": "api/internal/service/status_service_test.go",
+      "source_location": "L48",
+      "_origin": "ast",
+      "id": "api_internal_service_status_service_test_teststatusservice_gethealthstatus_skippedservicesdegraded",
+      "community": 100,
+      "community_name": "status_service_test.go",
+      "norm_label": "teststatusservice_gethealthstatus_skippedservicesdegraded()"
+    },
+    {
+      "label": "TestStatusService_GetHealthStatus_WrapsHealthErrors()",
+      "file_type": "code",
+      "source_file": "api/internal/service/status_service_test.go",
+      "source_location": "L63",
+      "_origin": "ast",
+      "id": "api_internal_service_status_service_test_teststatusservice_gethealthstatus_wrapshealtherrors",
+      "community": 100,
+      "community_name": "status_service_test.go",
+      "norm_label": "teststatusservice_gethealthstatus_wrapshealtherrors()"
+    },
+    {
+      "label": "TestStatusServiceUsesInjectedClock()",
+      "file_type": "code",
+      "source_file": "api/internal/service/status_service_test.go",
+      "source_location": "L14",
+      "_origin": "ast",
+      "id": "api_internal_service_status_service_test_teststatusserviceusesinjectedclock",
+      "community": 100,
+      "community_name": "status_service_test.go",
+      "norm_label": "teststatusserviceusesinjectedclock()"
+    },
+    {
+      "label": "TestToInternal()",
+      "file_type": "code",
+      "source_file": "api/internal/service/status_service_test.go",
+      "source_location": "L88",
+      "_origin": "ast",
+      "id": "api_internal_service_status_service_test_testtointernal",
+      "community": 100,
+      "community_name": "status_service_test.go",
+      "norm_label": "testtointernal()"
+    },
+    {
+      "label": "fakeOSS",
+      "file_type": "code",
+      "source_file": "api/internal/service/status_service_test.go",
+      "source_location": "L41",
+      "_origin": "ast",
+      "id": "service_fakeoss",
+      "community": 100,
+      "community_name": "status_service_test.go",
+      "norm_label": "fakeoss"
+    },
+    {
+      "label": ".Close()",
+      "file_type": "code",
+      "source_file": "api/internal/service/status_service_test.go",
+      "source_location": "L46",
+      "_origin": "ast",
+      "id": "service_fakeoss_close",
+      "community": 100,
+      "community_name": "status_service_test.go",
+      "norm_label": ".close()"
+    },
+    {
+      "label": ".HealthCheck()",
+      "file_type": "code",
+      "source_file": "api/internal/service/status_service_test.go",
+      "source_location": "L45",
+      "_origin": "ast",
+      "id": "service_fakeoss_healthcheck",
+      "community": 100,
+      "community_name": "status_service_test.go",
+      "norm_label": ".healthcheck()"
+    },
+    {
       "label": "fakePostgres",
       "file_type": "code",
       "source_file": "api/internal/service/status_service_test.go",
@@ -6951,7 +7050,7 @@
       "_origin": "ast",
       "id": "service_fakepostgres",
       "community": 100,
-      "community_name": "fakePostgres",
+      "community_name": "status_service_test.go",
       "norm_label": "fakepostgres"
     },
     {
@@ -6962,7 +7061,7 @@
       "_origin": "ast",
       "id": "service_fakepostgres_close",
       "community": 100,
-      "community_name": "fakePostgres",
+      "community_name": "status_service_test.go",
       "norm_label": ".close()"
     },
     {
@@ -6973,7 +7072,40 @@
       "_origin": "ast",
       "id": "service_fakepostgres_healthcheck",
       "community": 100,
-      "community_name": "fakePostgres",
+      "community_name": "status_service_test.go",
+      "norm_label": ".healthcheck()"
+    },
+    {
+      "label": "fakeRedis",
+      "file_type": "code",
+      "source_file": "api/internal/service/status_service_test.go",
+      "source_location": "L34",
+      "_origin": "ast",
+      "id": "service_fakeredis",
+      "community": 100,
+      "community_name": "status_service_test.go",
+      "norm_label": "fakeredis"
+    },
+    {
+      "label": ".Close()",
+      "file_type": "code",
+      "source_file": "api/internal/service/status_service_test.go",
+      "source_location": "L39",
+      "_origin": "ast",
+      "id": "service_fakeredis_close",
+      "community": 100,
+      "community_name": "status_service_test.go",
+      "norm_label": ".close()"
+    },
+    {
+      "label": ".HealthCheck()",
+      "file_type": "code",
+      "source_file": "api/internal/service/status_service_test.go",
+      "source_location": "L38",
+      "_origin": "ast",
+      "id": "service_fakeredis_healthcheck",
+      "community": 100,
+      "community_name": "status_service_test.go",
       "norm_label": ".healthcheck()"
     },
     {
@@ -9529,191 +9661,103 @@
       "norm_label": "4. \u5feb\u901f\u542f\u52a8(nginx \u7f51\u5173\u6a21\u5f0f,\u63a8\u8350)"
     },
     {
-      "label": "NewFileService()",
+      "label": "BrowserTool",
       "file_type": "code",
-      "source_file": "api/internal/service/file_service.go",
-      "source_location": "L48",
+      "source_file": "api/internal/agent/tool_browser.go",
+      "source_location": "L12",
       "_origin": "ast",
-      "id": "api_internal_service_file_service_newfileservice",
+      "id": "agent_browsertool",
       "community": 128,
-      "community_name": "NewFileService",
-      "norm_label": "newfileservice()"
+      "community_name": "BrowserTool",
+      "norm_label": "browsertool"
     },
     {
-      "label": "file_service_test.go",
+      "label": ".Description()",
       "file_type": "code",
-      "source_file": "api/internal/service/file_service_test.go",
+      "source_file": "api/internal/agent/tool_browser.go",
+      "source_location": "L27",
+      "_origin": "ast",
+      "id": "agent_browsertool_description",
+      "community": 128,
+      "community_name": "BrowserTool",
+      "norm_label": ".description()"
+    },
+    {
+      "label": ".Name()",
+      "file_type": "code",
+      "source_file": "api/internal/agent/tool_browser.go",
+      "source_location": "L22",
+      "_origin": "ast",
+      "id": "agent_browsertool_name",
+      "community": 128,
+      "community_name": "BrowserTool",
+      "norm_label": ".name()"
+    },
+    {
+      "label": ".Parameters()",
+      "file_type": "code",
+      "source_file": "api/internal/agent/tool_browser.go",
+      "source_location": "L32",
+      "_origin": "ast",
+      "id": "agent_browsertool_parameters",
+      "community": 128,
+      "community_name": "BrowserTool",
+      "norm_label": ".parameters()"
+    },
+    {
+      "label": ".ReadOnly()",
+      "file_type": "code",
+      "source_file": "api/internal/agent/tool_browser.go",
+      "source_location": "L91",
+      "_origin": "ast",
+      "id": "agent_browsertool_readonly",
+      "community": 128,
+      "community_name": "BrowserTool",
+      "norm_label": ".readonly()"
+    },
+    {
+      "label": "tool_browser.go",
+      "file_type": "code",
+      "source_file": "api/internal/agent/tool_browser.go",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "api_internal_service_file_service_test",
+      "id": "api_internal_agent_tool_browser",
       "community": 128,
-      "community_name": "NewFileService",
-      "norm_label": "file_service_test.go"
+      "community_name": "BrowserTool",
+      "norm_label": "tool_browser.go"
     },
     {
-      "label": "TestFileServiceDeleteFileDeletesStorageAndRepo()",
+      "label": "NewBrowserTool()",
       "file_type": "code",
-      "source_file": "api/internal/service/file_service_test.go",
-      "source_location": "L346",
+      "source_file": "api/internal/agent/tool_browser.go",
+      "source_location": "L17",
       "_origin": "ast",
-      "id": "api_internal_service_file_service_test_testfileservicedeletefiledeletesstorageandrepo",
+      "id": "api_internal_agent_tool_browser_newbrowsertool",
       "community": 128,
-      "community_name": "NewFileService",
-      "norm_label": "testfileservicedeletefiledeletesstorageandrepo()"
+      "community_name": "BrowserTool",
+      "norm_label": "newbrowsertool()"
     },
     {
-      "label": "TestFileServiceDeleteFileRepoError()",
+      "label": "browser.go",
       "file_type": "code",
-      "source_file": "api/internal/service/file_service_test.go",
-      "source_location": "L379",
+      "source_file": "api/internal/external/browser.go",
+      "source_location": "L1",
       "_origin": "ast",
-      "id": "api_internal_service_file_service_test_testfileservicedeletefilerepoerror",
+      "id": "api_internal_external_browser",
       "community": 128,
-      "community_name": "NewFileService",
-      "norm_label": "testfileservicedeletefilerepoerror()"
+      "community_name": "BrowserTool",
+      "norm_label": "browser.go"
     },
     {
-      "label": "TestFileServiceDeleteFileStorageError()",
+      "label": "Browser",
       "file_type": "code",
-      "source_file": "api/internal/service/file_service_test.go",
-      "source_location": "L365",
+      "source_file": "api/internal/external/browser.go",
+      "source_location": "L10",
       "_origin": "ast",
-      "id": "api_internal_service_file_service_test_testfileservicedeletefilestorageerror",
+      "id": "api_internal_external_browser_go_external_browser",
       "community": 128,
-      "community_name": "NewFileService",
-      "norm_label": "testfileservicedeletefilestorageerror()"
-    },
-    {
-      "label": "TestFileServiceDownloadFileNilStorageReturnsNilReader()",
-      "file_type": "code",
-      "source_file": "api/internal/service/file_service_test.go",
-      "source_location": "L320",
-      "_origin": "ast",
-      "id": "api_internal_service_file_service_test_testfileservicedownloadfilenilstoragereturnsnilreader",
-      "community": 128,
-      "community_name": "NewFileService",
-      "norm_label": "testfileservicedownloadfilenilstoragereturnsnilreader()"
-    },
-    {
-      "label": "TestFileServiceDownloadFileStorageError()",
-      "file_type": "code",
-      "source_file": "api/internal/service/file_service_test.go",
-      "source_location": "L309",
-      "_origin": "ast",
-      "id": "api_internal_service_file_service_test_testfileservicedownloadfilestorageerror",
-      "community": 128,
-      "community_name": "NewFileService",
-      "norm_label": "testfileservicedownloadfilestorageerror()"
-    },
-    {
-      "label": "TestFileServiceDownloadFileWithStorage()",
-      "file_type": "code",
-      "source_file": "api/internal/service/file_service_test.go",
-      "source_location": "L261",
-      "_origin": "ast",
-      "id": "api_internal_service_file_service_test_testfileservicedownloadfilewithstorage",
-      "community": 128,
-      "community_name": "NewFileService",
-      "norm_label": "testfileservicedownloadfilewithstorage()"
-    },
-    {
-      "label": "TestFileServiceGetFileInfoFound()",
-      "file_type": "code",
-      "source_file": "api/internal/service/file_service_test.go",
-      "source_location": "L333",
-      "_origin": "ast",
-      "id": "api_internal_service_file_service_test_testfileservicegetfileinfofound",
-      "community": 128,
-      "community_name": "NewFileService",
-      "norm_label": "testfileservicegetfileinfofound()"
-    },
-    {
-      "label": "TestFileServiceMissingFileReturnsNotFound()",
-      "file_type": "code",
-      "source_file": "api/internal/service/file_service_test.go",
-      "source_location": "L153",
-      "_origin": "ast",
-      "id": "api_internal_service_file_service_test_testfileservicemissingfilereturnsnotfound",
-      "community": 128,
-      "community_name": "NewFileService",
-      "norm_label": "testfileservicemissingfilereturnsnotfound()"
-    },
-    {
-      "label": "TestFileServiceSessionScopedLookupRejectsOtherSession()",
-      "file_type": "code",
-      "source_file": "api/internal/service/file_service_test.go",
-      "source_location": "L284",
-      "_origin": "ast",
-      "id": "api_internal_service_file_service_test_testfileservicesessionscopedlookuprejectsothersession",
-      "community": 128,
-      "community_name": "NewFileService",
-      "norm_label": "testfileservicesessionscopedlookuprejectsothersession()"
-    },
-    {
-      "label": "TestFileServiceSessionScopedLookupReturnsOwnedFile()",
-      "file_type": "code",
-      "source_file": "api/internal/service/file_service_test.go",
-      "source_location": "L296",
-      "_origin": "ast",
-      "id": "api_internal_service_file_service_test_testfileservicesessionscopedlookupreturnsownedfile",
-      "community": 128,
-      "community_name": "NewFileService",
-      "norm_label": "testfileservicesessionscopedlookupreturnsownedfile()"
-    },
-    {
-      "label": "TestFileServiceUploadFileNoStorageReturnsError()",
-      "file_type": "code",
-      "source_file": "api/internal/service/file_service_test.go",
-      "source_location": "L168",
-      "_origin": "ast",
-      "id": "api_internal_service_file_service_test_testfileserviceuploadfilenostoragereturnserror",
-      "community": 128,
-      "community_name": "NewFileService",
-      "norm_label": "testfileserviceuploadfilenostoragereturnserror()"
-    },
-    {
-      "label": "TestFileServiceUploadFileRepoCreateError()",
-      "file_type": "code",
-      "source_file": "api/internal/service/file_service_test.go",
-      "source_location": "L246",
-      "_origin": "ast",
-      "id": "api_internal_service_file_service_test_testfileserviceuploadfilerepocreateerror",
-      "community": 128,
-      "community_name": "NewFileService",
-      "norm_label": "testfileserviceuploadfilerepocreateerror()"
-    },
-    {
-      "label": "TestFileServiceUploadFileStorageError()",
-      "file_type": "code",
-      "source_file": "api/internal/service/file_service_test.go",
-      "source_location": "L235",
-      "_origin": "ast",
-      "id": "api_internal_service_file_service_test_testfileserviceuploadfilestorageerror",
-      "community": 128,
-      "community_name": "NewFileService",
-      "norm_label": "testfileserviceuploadfilestorageerror()"
-    },
-    {
-      "label": "TestFileServiceUploadFileSuccess()",
-      "file_type": "code",
-      "source_file": "api/internal/service/file_service_test.go",
-      "source_location": "L181",
-      "_origin": "ast",
-      "id": "api_internal_service_file_service_test_testfileserviceuploadfilesuccess",
-      "community": 128,
-      "community_name": "NewFileService",
-      "norm_label": "testfileserviceuploadfilesuccess()"
-    },
-    {
-      "label": "TestFileServiceUploadSameNameAndSizeStillChecksContent()",
-      "file_type": "code",
-      "source_file": "api/internal/service/file_service_test.go",
-      "source_location": "L218",
-      "_origin": "ast",
-      "id": "api_internal_service_file_service_test_testfileserviceuploadsamenameandsizestillcheckscontent",
-      "community": 128,
-      "community_name": "NewFileService",
-      "norm_label": "testfileserviceuploadsamenameandsizestillcheckscontent()"
+      "community_name": "BrowserTool",
+      "norm_label": "browser"
     },
     {
       "label": "llm_dynamic_test.go",
@@ -13503,37 +13547,103 @@
       "norm_label": "sync/atomic.bool"
     },
     {
-      "label": "fakeRedis",
+      "label": "app_config_repository_integration_test.go",
       "file_type": "code",
-      "source_file": "api/internal/service/status_service_test.go",
-      "source_location": "L34",
+      "source_file": "api/tests/app_config_repository_integration_test.go",
+      "source_location": "L1",
       "_origin": "ast",
-      "id": "service_fakeredis",
+      "id": "api_tests_app_config_repository_integration_test",
       "community": 160,
-      "community_name": "fakeRedis",
-      "norm_label": "fakeredis"
+      "community_name": "testAppConfigRepo",
+      "norm_label": "app_config_repository_integration_test.go"
     },
     {
-      "label": ".Close()",
+      "label": "testAppConfigRepo()",
       "file_type": "code",
-      "source_file": "api/internal/service/status_service_test.go",
-      "source_location": "L39",
+      "source_file": "api/tests/app_config_repository_integration_test.go",
+      "source_location": "L17",
       "_origin": "ast",
-      "id": "service_fakeredis_close",
+      "id": "api_tests_app_config_repository_integration_test_testappconfigrepo",
       "community": 160,
-      "community_name": "fakeRedis",
-      "norm_label": ".close()"
+      "community_name": "testAppConfigRepo",
+      "norm_label": "testappconfigrepo()"
     },
     {
-      "label": ".HealthCheck()",
+      "label": "TestAppConfigRepo_DeleteConfig()",
       "file_type": "code",
-      "source_file": "api/internal/service/status_service_test.go",
-      "source_location": "L38",
+      "source_file": "api/tests/app_config_repository_integration_test.go",
+      "source_location": "L88",
       "_origin": "ast",
-      "id": "service_fakeredis_healthcheck",
+      "id": "api_tests_app_config_repository_integration_test_testappconfigrepo_deleteconfig",
       "community": 160,
-      "community_name": "fakeRedis",
-      "norm_label": ".healthcheck()"
+      "community_name": "testAppConfigRepo",
+      "norm_label": "testappconfigrepo_deleteconfig()"
+    },
+    {
+      "label": "TestAppConfigRepo_GetConfig_NotFoundReturnsNilNil()",
+      "file_type": "code",
+      "source_file": "api/tests/app_config_repository_integration_test.go",
+      "source_location": "L21",
+      "_origin": "ast",
+      "id": "api_tests_app_config_repository_integration_test_testappconfigrepo_getconfig_notfoundreturnsnilnil",
+      "community": 160,
+      "community_name": "testAppConfigRepo",
+      "norm_label": "testappconfigrepo_getconfig_notfoundreturnsnilnil()"
+    },
+    {
+      "label": "TestAppConfigRepo_ListConfigs()",
+      "file_type": "code",
+      "source_file": "api/tests/app_config_repository_integration_test.go",
+      "source_location": "L111",
+      "_origin": "ast",
+      "id": "api_tests_app_config_repository_integration_test_testappconfigrepo_listconfigs",
+      "community": 160,
+      "community_name": "testAppConfigRepo",
+      "norm_label": "testappconfigrepo_listconfigs()"
+    },
+    {
+      "label": "TestAppConfigRepo_SaveAndGetConfig_RoundTrip()",
+      "file_type": "code",
+      "source_file": "api/tests/app_config_repository_integration_test.go",
+      "source_location": "L28",
+      "_origin": "ast",
+      "id": "api_tests_app_config_repository_integration_test_testappconfigrepo_saveandgetconfig_roundtrip",
+      "community": 160,
+      "community_name": "testAppConfigRepo",
+      "norm_label": "testappconfigrepo_saveandgetconfig_roundtrip()"
+    },
+    {
+      "label": "TestAppConfigRepo_SaveConfig_UpdateExisting()",
+      "file_type": "code",
+      "source_file": "api/tests/app_config_repository_integration_test.go",
+      "source_location": "L53",
+      "_origin": "ast",
+      "id": "api_tests_app_config_repository_integration_test_testappconfigrepo_saveconfig_updateexisting",
+      "community": 160,
+      "community_name": "testAppConfigRepo",
+      "norm_label": "testappconfigrepo_saveconfig_updateexisting()"
+    },
+    {
+      "label": "TestAppConfigRepo_WithTx_CommitsOnSuccess()",
+      "file_type": "code",
+      "source_file": "api/tests/app_config_repository_integration_test.go",
+      "source_location": "L145",
+      "_origin": "ast",
+      "id": "api_tests_app_config_repository_integration_test_testappconfigrepo_withtx_commitsonsuccess",
+      "community": 160,
+      "community_name": "testAppConfigRepo",
+      "norm_label": "testappconfigrepo_withtx_commitsonsuccess()"
+    },
+    {
+      "label": "TestAppConfigRepo_WithTx_RollsBackOnError()",
+      "file_type": "code",
+      "source_file": "api/tests/app_config_repository_integration_test.go",
+      "source_location": "L168",
+      "_origin": "ast",
+      "id": "api_tests_app_config_repository_integration_test_testappconfigrepo_withtx_rollsbackonerror",
+      "community": 160,
+      "community_name": "testAppConfigRepo",
+      "norm_label": "testappconfigrepo_withtx_rollsbackonerror()"
     },
     {
       "label": "remark-gfm",
@@ -15402,6 +15512,17 @@
       "norm_label": "tools_integration_test.go"
     },
     {
+      "label": "TestA2ATool()",
+      "file_type": "code",
+      "source_file": "api/internal/agent/tools_integration_test.go",
+      "source_location": "L435",
+      "_origin": "ast",
+      "id": "api_internal_agent_tools_integration_test_testa2atool",
+      "community": 182,
+      "community_name": "tools_integration_test.go",
+      "norm_label": "testa2atool()"
+    },
+    {
       "label": "TestFileTool()",
       "file_type": "code",
       "source_file": "api/internal/agent/tools_integration_test.go",
@@ -15554,17 +15675,6 @@
       "community": 182,
       "community_name": "tools_integration_test.go",
       "norm_label": "testshelltool_parameters()"
-    },
-    {
-      "label": "TestToolValidationRejectsMissingRequiredParameters()",
-      "file_type": "code",
-      "source_file": "api/internal/agent/tools_test.go",
-      "source_location": "L274",
-      "_origin": "ast",
-      "id": "api_internal_agent_tools_test_testtoolvalidationrejectsmissingrequiredparameters",
-      "community": 182,
-      "community_name": "tools_integration_test.go",
-      "norm_label": "testtoolvalidationrejectsmissingrequiredparameters()"
     },
     {
       "label": "loader.go",
@@ -16095,39 +16205,6 @@
       "norm_label": "\u9636\u6bb5"
     },
     {
-      "label": "NewOpenAIClient()",
-      "file_type": "code",
-      "source_file": "api/internal/external/openai_llm.go",
-      "source_location": "L53",
-      "_origin": "ast",
-      "id": "api_internal_external_openai_llm_newopenaiclient",
-      "community": 193,
-      "community_name": "NewOpenAIClient",
-      "norm_label": "newopenaiclient()"
-    },
-    {
-      "label": "newTestClient()",
-      "file_type": "code",
-      "source_file": "api/internal/external/openai_llm_test.go",
-      "source_location": "L16",
-      "_origin": "ast",
-      "id": "api_internal_external_openai_llm_test_newtestclient",
-      "community": 193,
-      "community_name": "NewOpenAIClient",
-      "norm_label": "newtestclient()"
-    },
-    {
-      "label": "TestNewOpenAIClient_DoesNotApplyGlobalTimeout()",
-      "file_type": "code",
-      "source_file": "api/internal/external/openai_llm_test.go",
-      "source_location": "L31",
-      "_origin": "ast",
-      "id": "api_internal_external_openai_llm_test_testnewopenaiclient_doesnotapplyglobaltimeout",
-      "community": 193,
-      "community_name": "NewOpenAIClient",
-      "norm_label": "testnewopenaiclient_doesnotapplyglobaltimeout()"
-    },
-    {
       "label": "runtime_config.go",
       "file_type": "code",
       "source_file": "api/internal/external/runtime_config.go",
@@ -16135,7 +16212,7 @@
       "_origin": "ast",
       "id": "api_internal_external_runtime_config",
       "community": 193,
-      "community_name": "NewOpenAIClient",
+      "community_name": "BuildRuntimeConfigFromModel",
       "norm_label": "runtime_config.go"
     },
     {
@@ -16146,7 +16223,7 @@
       "_origin": "ast",
       "id": "api_internal_external_runtime_config_buildruntimeconfigfrommodel",
       "community": 193,
-      "community_name": "NewOpenAIClient",
+      "community_name": "BuildRuntimeConfigFromModel",
       "norm_label": "buildruntimeconfigfrommodel()"
     },
     {
@@ -16157,7 +16234,7 @@
       "_origin": "ast",
       "id": "api_internal_external_runtime_config_convertrequestpolicyextra",
       "community": 193,
-      "community_name": "NewOpenAIClient",
+      "community_name": "BuildRuntimeConfigFromModel",
       "norm_label": "convertrequestpolicyextra()"
     },
     {
@@ -16168,7 +16245,7 @@
       "_origin": "ast",
       "id": "api_internal_external_runtime_config_protocolfromprovider",
       "community": 193,
-      "community_name": "NewOpenAIClient",
+      "community_name": "BuildRuntimeConfigFromModel",
       "norm_label": "protocolfromprovider()"
     },
     {
@@ -16179,7 +16256,7 @@
       "_origin": "ast",
       "id": "api_internal_external_runtime_config_runtimehealthfrommodel",
       "community": 193,
-      "community_name": "NewOpenAIClient",
+      "community_name": "BuildRuntimeConfigFromModel",
       "norm_label": "runtimehealthfrommodel()"
     },
     {
@@ -16190,7 +16267,7 @@
       "_origin": "ast",
       "id": "api_internal_external_runtime_config_runtimehealthtomodel",
       "community": 193,
-      "community_name": "NewOpenAIClient",
+      "community_name": "BuildRuntimeConfigFromModel",
       "norm_label": "runtimehealthtomodel()"
     },
     {
@@ -16201,7 +16278,7 @@
       "_origin": "ast",
       "id": "api_internal_external_runtime_config_test",
       "community": 193,
-      "community_name": "NewOpenAIClient",
+      "community_name": "BuildRuntimeConfigFromModel",
       "norm_label": "runtime_config_test.go"
     },
     {
@@ -16212,7 +16289,7 @@
       "_origin": "ast",
       "id": "api_internal_external_runtime_config_test_testbuildruntimeconfigfrommodel",
       "community": 193,
-      "community_name": "NewOpenAIClient",
+      "community_name": "BuildRuntimeConfigFromModel",
       "norm_label": "testbuildruntimeconfigfrommodel()"
     },
     {
@@ -16223,7 +16300,7 @@
       "_origin": "ast",
       "id": "api_internal_external_runtime_config_test_testprotocolfromprovider",
       "community": 193,
-      "community_name": "NewOpenAIClient",
+      "community_name": "BuildRuntimeConfigFromModel",
       "norm_label": "testprotocolfromprovider()"
     },
     {
@@ -16234,7 +16311,7 @@
       "_origin": "ast",
       "id": "api_internal_llmcore_profile",
       "community": 193,
-      "community_name": "NewOpenAIClient",
+      "community_name": "BuildRuntimeConfigFromModel",
       "norm_label": "profile.go"
     },
     {
@@ -16245,7 +16322,7 @@
       "_origin": "ast",
       "id": "api_internal_llmcore_profile_go_llmcore_costpolicy",
       "community": 193,
-      "community_name": "NewOpenAIClient",
+      "community_name": "BuildRuntimeConfigFromModel",
       "norm_label": "costpolicy"
     },
     {
@@ -16256,7 +16333,7 @@
       "_origin": "ast",
       "id": "api_internal_llmcore_profile_go_llmcore_extraparam",
       "community": 193,
-      "community_name": "NewOpenAIClient",
+      "community_name": "BuildRuntimeConfigFromModel",
       "norm_label": "extraparam"
     },
     {
@@ -16267,7 +16344,7 @@
       "_origin": "ast",
       "id": "api_internal_llmcore_profile_go_llmcore_requestpolicy",
       "community": 193,
-      "community_name": "NewOpenAIClient",
+      "community_name": "BuildRuntimeConfigFromModel",
       "norm_label": "requestpolicy"
     },
     {
@@ -16278,7 +16355,7 @@
       "_origin": "ast",
       "id": "external_anthropicclientconfig",
       "community": 193,
-      "community_name": "NewOpenAIClient",
+      "community_name": "BuildRuntimeConfigFromModel",
       "norm_label": "anthropicclientconfig"
     },
     {
@@ -16289,30 +16366,8 @@
       "_origin": "ast",
       "id": "external_llmruntimehealth",
       "community": 193,
-      "community_name": "NewOpenAIClient",
+      "community_name": "BuildRuntimeConfigFromModel",
       "norm_label": "llmruntimehealth"
-    },
-    {
-      "label": "OpenAIClientConfig",
-      "file_type": "code",
-      "source_file": "api/internal/external/openai_llm.go",
-      "source_location": "L35",
-      "_origin": "ast",
-      "id": "external_openaiclientconfig",
-      "community": 193,
-      "community_name": "NewOpenAIClient",
-      "norm_label": "openaiclientconfig"
-    },
-    {
-      "label": ".setDefaults()",
-      "file_type": "code",
-      "source_file": "api/internal/external/openai_llm.go",
-      "source_location": "L46",
-      "_origin": "ast",
-      "id": "external_openaiclientconfig_setdefaults",
-      "community": 193,
-      "community_name": "NewOpenAIClient",
-      "norm_label": ".setdefaults()"
     },
     {
       "label": "ModelCapabilities",
@@ -16322,7 +16377,7 @@
       "_origin": "ast",
       "id": "llmcore_modelcapabilities",
       "community": 193,
-      "community_name": "NewOpenAIClient",
+      "community_name": "BuildRuntimeConfigFromModel",
       "norm_label": "modelcapabilities"
     },
     {
@@ -16333,7 +16388,7 @@
       "_origin": "ast",
       "id": "llmcore_reasoningmode",
       "community": 193,
-      "community_name": "NewOpenAIClient",
+      "community_name": "BuildRuntimeConfigFromModel",
       "norm_label": "reasoningmode"
     },
     {
@@ -19703,17 +19758,6 @@
       "norm_label": "newa2atool()"
     },
     {
-      "label": "TestA2ATool()",
-      "file_type": "code",
-      "source_file": "api/internal/agent/tools_integration_test.go",
-      "source_location": "L435",
-      "_origin": "ast",
-      "id": "api_internal_agent_tools_integration_test_testa2atool",
-      "community": 26,
-      "community_name": "tools_test.go",
-      "norm_label": "testa2atool()"
-    },
-    {
       "label": "NewToolRegistry()",
       "file_type": "code",
       "source_file": "api/internal/agent/tools.go",
@@ -19899,6 +19943,17 @@
       "community": 26,
       "community_name": "tools_test.go",
       "norm_label": "testtoolregistry_register()"
+    },
+    {
+      "label": "TestToolValidationRejectsMissingRequiredParameters()",
+      "file_type": "code",
+      "source_file": "api/internal/agent/tools_test.go",
+      "source_location": "L274",
+      "_origin": "ast",
+      "id": "api_internal_agent_tools_test_testtoolvalidationrejectsmissingrequiredparameters",
+      "community": 26,
+      "community_name": "tools_test.go",
+      "norm_label": "testtoolvalidationrejectsmissingrequiredparameters()"
     },
     {
       "label": "fallback_llm_test.go",
@@ -21298,28 +21353,6 @@
       "norm_label": "\u83b7\u53d6\u8def\u5f84\u9501\u5e76\u5728\u6700\u540e\u4e00\u4e2a\u4f7f\u7528\u8005\u79bb\u5f00\u540e\u56de\u6536\u6761\u76ee\u3002"
     },
     {
-      "label": "LLMRequest",
-      "file_type": "code",
-      "source_file": "",
-      "source_location": "",
-      "_origin": "ast",
-      "id": "api_internal_external_fallback_llm_test_go_llmrequest",
-      "community": 30,
-      "community_name": "OpenAIClient",
-      "norm_label": "llmrequest"
-    },
-    {
-      "label": "streamContext()",
-      "file_type": "code",
-      "source_file": "api/internal/external/llm.go",
-      "source_location": "L38",
-      "_origin": "ast",
-      "id": "api_internal_external_llm_streamcontext",
-      "community": 30,
-      "community_name": "OpenAIClient",
-      "norm_label": "streamcontext()"
-    },
-    {
       "label": "openai_llm.go",
       "file_type": "code",
       "source_file": "api/internal/external/openai_llm.go",
@@ -21329,17 +21362,6 @@
       "community": 30,
       "community_name": "OpenAIClient",
       "norm_label": "openai_llm.go"
-    },
-    {
-      "label": "estimateCostUSD()",
-      "file_type": "code",
-      "source_file": "api/internal/external/openai_llm.go",
-      "source_location": "L526",
-      "_origin": "ast",
-      "id": "api_internal_external_openai_llm_estimatecostusd",
-      "community": 30,
-      "community_name": "OpenAIClient",
-      "norm_label": "estimatecostusd()"
     },
     {
       "label": "LLMRequest",
@@ -21353,6 +21375,17 @@
       "norm_label": "llmrequest"
     },
     {
+      "label": "NewOpenAIClient()",
+      "file_type": "code",
+      "source_file": "api/internal/external/openai_llm.go",
+      "source_location": "L53",
+      "_origin": "ast",
+      "id": "api_internal_external_openai_llm_newopenaiclient",
+      "community": 30,
+      "community_name": "OpenAIClient",
+      "norm_label": "newopenaiclient()"
+    },
+    {
       "label": "reasoningTokens()",
       "file_type": "code",
       "source_file": "api/internal/external/openai_llm.go",
@@ -21364,15 +21397,26 @@
       "norm_label": "reasoningtokens()"
     },
     {
-      "label": "sendStreamDelta()",
+      "label": "newTestClient()",
       "file_type": "code",
-      "source_file": "api/internal/external/openai_llm.go",
-      "source_location": "L474",
+      "source_file": "api/internal/external/openai_llm_test.go",
+      "source_location": "L16",
       "_origin": "ast",
-      "id": "api_internal_external_openai_llm_sendstreamdelta",
+      "id": "api_internal_external_openai_llm_test_newtestclient",
       "community": 30,
       "community_name": "OpenAIClient",
-      "norm_label": "sendstreamdelta()"
+      "norm_label": "newtestclient()"
+    },
+    {
+      "label": "TestNewOpenAIClient_DoesNotApplyGlobalTimeout()",
+      "file_type": "code",
+      "source_file": "api/internal/external/openai_llm_test.go",
+      "source_location": "L31",
+      "_origin": "ast",
+      "id": "api_internal_external_openai_llm_test_testnewopenaiclient_doesnotapplyglobaltimeout",
+      "community": 30,
+      "community_name": "OpenAIClient",
+      "norm_label": "testnewopenaiclient_doesnotapplyglobaltimeout()"
     },
     {
       "label": "toOpenAIMessages()",
@@ -21406,39 +21450,6 @@
       "community": 30,
       "community_name": "OpenAIClient",
       "norm_label": "truncatebody()"
-    },
-    {
-      "label": "LLMDelta",
-      "file_type": "code",
-      "source_file": "api/internal/llmcore/protocol.go",
-      "source_location": "L176",
-      "_origin": "ast",
-      "id": "api_internal_llmcore_protocol_go_llmcore_llmdelta",
-      "community": 30,
-      "community_name": "OpenAIClient",
-      "norm_label": "llmdelta"
-    },
-    {
-      "label": "Usage",
-      "file_type": "code",
-      "source_file": "api/internal/llmcore/protocol.go",
-      "source_location": "L207",
-      "_origin": "ast",
-      "id": "api_internal_llmcore_protocol_go_llmcore_usage",
-      "community": 30,
-      "community_name": "OpenAIClient",
-      "norm_label": "usage"
-    },
-    {
-      "label": ".readAnthropicStream()",
-      "file_type": "code",
-      "source_file": "api/internal/external/anthropic_llm.go",
-      "source_location": "L361",
-      "_origin": "ast",
-      "id": "external_anthropicclient_readanthropicstream",
-      "community": 30,
-      "community_name": "OpenAIClient",
-      "norm_label": ".readanthropicstream()"
     },
     {
       "label": "openAIChatRequest",
@@ -21551,17 +21562,6 @@
       "norm_label": ".modelname()"
     },
     {
-      "label": ".readOpenAIStream()",
-      "file_type": "code",
-      "source_file": "api/internal/external/openai_llm.go",
-      "source_location": "L406",
-      "_origin": "ast",
-      "id": "external_openaiclient_readopenaistream",
-      "community": 30,
-      "community_name": "OpenAIClient",
-      "norm_label": ".readopenaistream()"
-    },
-    {
       "label": ".Stream()",
       "file_type": "code",
       "source_file": "api/internal/external/openai_llm.go",
@@ -21582,6 +21582,28 @@
       "community": 30,
       "community_name": "OpenAIClient",
       "norm_label": ".temperature()"
+    },
+    {
+      "label": "OpenAIClientConfig",
+      "file_type": "code",
+      "source_file": "api/internal/external/openai_llm.go",
+      "source_location": "L35",
+      "_origin": "ast",
+      "id": "external_openaiclientconfig",
+      "community": 30,
+      "community_name": "OpenAIClient",
+      "norm_label": "openaiclientconfig"
+    },
+    {
+      "label": ".setDefaults()",
+      "file_type": "code",
+      "source_file": "api/internal/external/openai_llm.go",
+      "source_location": "L46",
+      "_origin": "ast",
+      "id": "external_openaiclientconfig_setdefaults",
+      "community": 30,
+      "community_name": "OpenAIClient",
+      "norm_label": ".setdefaults()"
     },
     {
       "label": "openAIFunctionCall",
@@ -21648,39 +21670,6 @@
       "community": 30,
       "community_name": "OpenAIClient",
       "norm_label": "openaitoolspec"
-    },
-    {
-      "label": "streamingStubLLM",
-      "file_type": "code",
-      "source_file": "api/internal/external/fallback_llm_test.go",
-      "source_location": "L17",
-      "_origin": "ast",
-      "id": "external_streamingstubllm",
-      "community": 30,
-      "community_name": "OpenAIClient",
-      "norm_label": "streamingstubllm"
-    },
-    {
-      "label": ".Stream()",
-      "file_type": "code",
-      "source_file": "api/internal/external/fallback_llm_test.go",
-      "source_location": "L22",
-      "_origin": "ast",
-      "id": "external_streamingstubllm_stream",
-      "community": 30,
-      "community_name": "OpenAIClient",
-      "norm_label": ".stream()"
-    },
-    {
-      "label": "context.CancelFunc",
-      "file_type": "code",
-      "source_file": "",
-      "source_location": "",
-      "_origin": "ast",
-      "id": "go_type_context_cancelfunc",
-      "community": 30,
-      "community_name": "OpenAIClient",
-      "norm_label": "context.cancelfunc"
     },
     {
       "label": "status_handler.go",
@@ -21824,17 +21813,6 @@
       "community": 303,
       "community_name": "Postgres",
       "norm_label": "newstatusservice()"
-    },
-    {
-      "label": ".initServices()",
-      "file_type": "code",
-      "source_file": "api/internal/bootstrap/app.go",
-      "source_location": "L425",
-      "_origin": "ast",
-      "id": "bootstrap_app_initservices",
-      "community": 303,
-      "community_name": "Postgres",
-      "norm_label": ".initservices()"
     },
     {
       "label": "github.com/jackc/pgx/v5/pgxpool.Pool",
@@ -22255,6 +22233,17 @@
       "norm_label": "databaseconfig"
     },
     {
+      "label": "ObjectStorageConfig",
+      "file_type": "code",
+      "source_file": "api/config/config.go",
+      "source_location": "L111",
+      "_origin": "ast",
+      "id": "api_config_config_go_config_objectstorageconfig",
+      "community": 32,
+      "community_name": "Config",
+      "norm_label": "objectstorageconfig"
+    },
+    {
       "label": "RedisConfig",
       "file_type": "code",
       "source_file": "api/config/config.go",
@@ -22319,6 +22308,17 @@
       "community": 32,
       "community_name": "Config",
       "norm_label": "testmain()"
+    },
+    {
+      "label": "Factories",
+      "file_type": "code",
+      "source_file": "api/internal/bootstrap/app.go",
+      "source_location": "L149",
+      "_origin": "ast",
+      "id": "bootstrap_factories",
+      "community": 32,
+      "community_name": "Config",
+      "norm_label": "factories"
     },
     {
       "label": "A2AAgent",
@@ -26567,6 +26567,50 @@
       "norm_label": "sandboxrequest"
     },
     {
+      "label": "LLMRequest",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "id": "api_internal_external_fallback_llm_test_go_llmrequest",
+      "community": 50,
+      "community_name": "protocol.go",
+      "norm_label": "llmrequest"
+    },
+    {
+      "label": "streamContext()",
+      "file_type": "code",
+      "source_file": "api/internal/external/llm.go",
+      "source_location": "L38",
+      "_origin": "ast",
+      "id": "api_internal_external_llm_streamcontext",
+      "community": 50,
+      "community_name": "protocol.go",
+      "norm_label": "streamcontext()"
+    },
+    {
+      "label": "estimateCostUSD()",
+      "file_type": "code",
+      "source_file": "api/internal/external/openai_llm.go",
+      "source_location": "L526",
+      "_origin": "ast",
+      "id": "api_internal_external_openai_llm_estimatecostusd",
+      "community": 50,
+      "community_name": "protocol.go",
+      "norm_label": "estimatecostusd()"
+    },
+    {
+      "label": "sendStreamDelta()",
+      "file_type": "code",
+      "source_file": "api/internal/external/openai_llm.go",
+      "source_location": "L474",
+      "_origin": "ast",
+      "id": "api_internal_external_openai_llm_sendstreamdelta",
+      "community": 50,
+      "community_name": "protocol.go",
+      "norm_label": "sendstreamdelta()"
+    },
+    {
       "label": "protocol.go",
       "file_type": "code",
       "source_file": "api/internal/llmcore/protocol.go",
@@ -26576,6 +26620,17 @@
       "community": 50,
       "community_name": "protocol.go",
       "norm_label": "protocol.go"
+    },
+    {
+      "label": "LLMDelta",
+      "file_type": "code",
+      "source_file": "api/internal/llmcore/protocol.go",
+      "source_location": "L176",
+      "_origin": "ast",
+      "id": "api_internal_llmcore_protocol_go_llmcore_llmdelta",
+      "community": 50,
+      "community_name": "protocol.go",
+      "norm_label": "llmdelta"
     },
     {
       "label": "ResponseFormat",
@@ -26598,6 +26653,72 @@
       "community": 50,
       "community_name": "protocol.go",
       "norm_label": "toolcall"
+    },
+    {
+      "label": "Usage",
+      "file_type": "code",
+      "source_file": "api/internal/llmcore/protocol.go",
+      "source_location": "L207",
+      "_origin": "ast",
+      "id": "api_internal_llmcore_protocol_go_llmcore_usage",
+      "community": 50,
+      "community_name": "protocol.go",
+      "norm_label": "usage"
+    },
+    {
+      "label": ".readAnthropicStream()",
+      "file_type": "code",
+      "source_file": "api/internal/external/anthropic_llm.go",
+      "source_location": "L361",
+      "_origin": "ast",
+      "id": "external_anthropicclient_readanthropicstream",
+      "community": 50,
+      "community_name": "protocol.go",
+      "norm_label": ".readanthropicstream()"
+    },
+    {
+      "label": ".readOpenAIStream()",
+      "file_type": "code",
+      "source_file": "api/internal/external/openai_llm.go",
+      "source_location": "L406",
+      "_origin": "ast",
+      "id": "external_openaiclient_readopenaistream",
+      "community": 50,
+      "community_name": "protocol.go",
+      "norm_label": ".readopenaistream()"
+    },
+    {
+      "label": "streamingStubLLM",
+      "file_type": "code",
+      "source_file": "api/internal/external/fallback_llm_test.go",
+      "source_location": "L17",
+      "_origin": "ast",
+      "id": "external_streamingstubllm",
+      "community": 50,
+      "community_name": "protocol.go",
+      "norm_label": "streamingstubllm"
+    },
+    {
+      "label": ".Stream()",
+      "file_type": "code",
+      "source_file": "api/internal/external/fallback_llm_test.go",
+      "source_location": "L22",
+      "_origin": "ast",
+      "id": "external_streamingstubllm_stream",
+      "community": 50,
+      "community_name": "protocol.go",
+      "norm_label": ".stream()"
+    },
+    {
+      "label": "context.CancelFunc",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "id": "go_type_context_cancelfunc",
+      "community": 50,
+      "community_name": "protocol.go",
+      "norm_label": "context.cancelfunc"
     },
     {
       "label": "AudioURL",
@@ -26688,61 +26809,6 @@
       "norm_label": "toolcallfunction"
     },
     {
-      "label": "BrowserTool",
-      "file_type": "code",
-      "source_file": "api/internal/agent/tool_browser.go",
-      "source_location": "L12",
-      "_origin": "ast",
-      "id": "agent_browsertool",
-      "community": 51,
-      "community_name": "app.go",
-      "norm_label": "browsertool"
-    },
-    {
-      "label": ".Description()",
-      "file_type": "code",
-      "source_file": "api/internal/agent/tool_browser.go",
-      "source_location": "L27",
-      "_origin": "ast",
-      "id": "agent_browsertool_description",
-      "community": 51,
-      "community_name": "app.go",
-      "norm_label": ".description()"
-    },
-    {
-      "label": ".Name()",
-      "file_type": "code",
-      "source_file": "api/internal/agent/tool_browser.go",
-      "source_location": "L22",
-      "_origin": "ast",
-      "id": "agent_browsertool_name",
-      "community": 51,
-      "community_name": "app.go",
-      "norm_label": ".name()"
-    },
-    {
-      "label": ".Parameters()",
-      "file_type": "code",
-      "source_file": "api/internal/agent/tool_browser.go",
-      "source_location": "L32",
-      "_origin": "ast",
-      "id": "agent_browsertool_parameters",
-      "community": 51,
-      "community_name": "app.go",
-      "norm_label": ".parameters()"
-    },
-    {
-      "label": ".ReadOnly()",
-      "file_type": "code",
-      "source_file": "api/internal/agent/tool_browser.go",
-      "source_location": "L91",
-      "_origin": "ast",
-      "id": "agent_browsertool_readonly",
-      "community": 51,
-      "community_name": "app.go",
-      "norm_label": ".readonly()"
-    },
-    {
       "label": "A2AAgent",
       "file_type": "code",
       "source_file": "",
@@ -26785,28 +26851,6 @@
       "community": 51,
       "community_name": "app.go",
       "norm_label": "mcpserver"
-    },
-    {
-      "label": "tool_browser.go",
-      "file_type": "code",
-      "source_file": "api/internal/agent/tool_browser.go",
-      "source_location": "L1",
-      "_origin": "ast",
-      "id": "api_internal_agent_tool_browser",
-      "community": 51,
-      "community_name": "app.go",
-      "norm_label": "tool_browser.go"
-    },
-    {
-      "label": "NewBrowserTool()",
-      "file_type": "code",
-      "source_file": "api/internal/agent/tool_browser.go",
-      "source_location": "L17",
-      "_origin": "ast",
-      "id": "api_internal_agent_tool_browser_newbrowsertool",
-      "community": 51,
-      "community_name": "app.go",
-      "norm_label": "newbrowsertool()"
     },
     {
       "label": "app.go",
@@ -26853,26 +26897,15 @@
       "norm_label": "newrepositories()"
     },
     {
-      "label": "browser.go",
+      "label": ".initServices()",
       "file_type": "code",
-      "source_file": "api/internal/external/browser.go",
-      "source_location": "L1",
+      "source_file": "api/internal/bootstrap/app.go",
+      "source_location": "L425",
       "_origin": "ast",
-      "id": "api_internal_external_browser",
+      "id": "bootstrap_app_initservices",
       "community": 51,
       "community_name": "app.go",
-      "norm_label": "browser.go"
-    },
-    {
-      "label": "Browser",
-      "file_type": "code",
-      "source_file": "api/internal/external/browser.go",
-      "source_location": "L10",
-      "_origin": "ast",
-      "id": "api_internal_external_browser_go_external_browser",
-      "community": 51,
-      "community_name": "app.go",
-      "norm_label": "browser"
+      "norm_label": ".initservices()"
     },
     {
       "label": "externalClients",
@@ -34740,28 +34773,6 @@
       "norm_label": "github.com/huang131/go-manus/api/internal/external.taskmessagequeue"
     },
     {
-      "label": "ObjectStorageConfig",
-      "file_type": "code",
-      "source_file": "api/config/config.go",
-      "source_location": "L111",
-      "_origin": "ast",
-      "id": "api_config_config_go_config_objectstorageconfig",
-      "community": 79,
-      "community_name": "OSS",
-      "norm_label": "objectstorageconfig"
-    },
-    {
-      "label": "TestBuildWithFactoriesInjectsFileCleanupScheduler()",
-      "file_type": "code",
-      "source_file": "api/internal/bootstrap/app_test.go",
-      "source_location": "L192",
-      "_origin": "ast",
-      "id": "api_internal_bootstrap_app_test_testbuildwithfactoriesinjectsfilecleanupscheduler",
-      "community": 79,
-      "community_name": "OSS",
-      "norm_label": "testbuildwithfactoriesinjectsfilecleanupscheduler()"
-    },
-    {
       "label": "oss.go",
       "file_type": "code",
       "source_file": "api/internal/infrastructure/oss.go",
@@ -34837,17 +34848,6 @@
       "community": 79,
       "community_name": "OSS",
       "norm_label": "providerdefaultendpoint()"
-    },
-    {
-      "label": "Factories",
-      "file_type": "code",
-      "source_file": "api/internal/bootstrap/app.go",
-      "source_location": "L149",
-      "_origin": "ast",
-      "id": "bootstrap_factories",
-      "community": 79,
-      "community_name": "OSS",
-      "norm_label": "factories"
     },
     {
       "label": "github.com/aws/aws-sdk-go-v2/feature/s3/manager.Uploader",
@@ -40031,158 +40031,191 @@
       "norm_label": "testsessionrepository_updatelatestmessage()"
     },
     {
-      "label": "status_service_test.go",
+      "label": "NewFileService()",
       "file_type": "code",
-      "source_file": "api/internal/service/status_service_test.go",
-      "source_location": "L1",
-      "_origin": "ast",
-      "id": "api_internal_service_status_service_test",
-      "community": 9,
-      "community_name": "testing.T",
-      "norm_label": "status_service_test.go"
-    },
-    {
-      "label": "TestStatusService_GetHealthStatus_SkippedServicesDegraded()",
-      "file_type": "code",
-      "source_file": "api/internal/service/status_service_test.go",
+      "source_file": "api/internal/service/file_service.go",
       "source_location": "L48",
       "_origin": "ast",
-      "id": "api_internal_service_status_service_test_teststatusservice_gethealthstatus_skippedservicesdegraded",
+      "id": "api_internal_service_file_service_newfileservice",
       "community": 9,
       "community_name": "testing.T",
-      "norm_label": "teststatusservice_gethealthstatus_skippedservicesdegraded()"
+      "norm_label": "newfileservice()"
     },
     {
-      "label": "TestStatusService_GetHealthStatus_WrapsHealthErrors()",
+      "label": "file_service_test.go",
       "file_type": "code",
-      "source_file": "api/internal/service/status_service_test.go",
-      "source_location": "L63",
-      "_origin": "ast",
-      "id": "api_internal_service_status_service_test_teststatusservice_gethealthstatus_wrapshealtherrors",
-      "community": 9,
-      "community_name": "testing.T",
-      "norm_label": "teststatusservice_gethealthstatus_wrapshealtherrors()"
-    },
-    {
-      "label": "TestStatusServiceUsesInjectedClock()",
-      "file_type": "code",
-      "source_file": "api/internal/service/status_service_test.go",
-      "source_location": "L14",
-      "_origin": "ast",
-      "id": "api_internal_service_status_service_test_teststatusserviceusesinjectedclock",
-      "community": 9,
-      "community_name": "testing.T",
-      "norm_label": "teststatusserviceusesinjectedclock()"
-    },
-    {
-      "label": "TestToInternal()",
-      "file_type": "code",
-      "source_file": "api/internal/service/status_service_test.go",
-      "source_location": "L88",
-      "_origin": "ast",
-      "id": "api_internal_service_status_service_test_testtointernal",
-      "community": 9,
-      "community_name": "testing.T",
-      "norm_label": "testtointernal()"
-    },
-    {
-      "label": "app_config_repository_integration_test.go",
-      "file_type": "code",
-      "source_file": "api/tests/app_config_repository_integration_test.go",
+      "source_file": "api/internal/service/file_service_test.go",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "api_tests_app_config_repository_integration_test",
+      "id": "api_internal_service_file_service_test",
       "community": 9,
       "community_name": "testing.T",
-      "norm_label": "app_config_repository_integration_test.go"
+      "norm_label": "file_service_test.go"
     },
     {
-      "label": "testAppConfigRepo()",
+      "label": "TestFileServiceDeleteFileDeletesStorageAndRepo()",
       "file_type": "code",
-      "source_file": "api/tests/app_config_repository_integration_test.go",
-      "source_location": "L17",
+      "source_file": "api/internal/service/file_service_test.go",
+      "source_location": "L346",
       "_origin": "ast",
-      "id": "api_tests_app_config_repository_integration_test_testappconfigrepo",
+      "id": "api_internal_service_file_service_test_testfileservicedeletefiledeletesstorageandrepo",
       "community": 9,
       "community_name": "testing.T",
-      "norm_label": "testappconfigrepo()"
+      "norm_label": "testfileservicedeletefiledeletesstorageandrepo()"
     },
     {
-      "label": "TestAppConfigRepo_DeleteConfig()",
+      "label": "TestFileServiceDeleteFileRepoError()",
       "file_type": "code",
-      "source_file": "api/tests/app_config_repository_integration_test.go",
-      "source_location": "L88",
+      "source_file": "api/internal/service/file_service_test.go",
+      "source_location": "L379",
       "_origin": "ast",
-      "id": "api_tests_app_config_repository_integration_test_testappconfigrepo_deleteconfig",
+      "id": "api_internal_service_file_service_test_testfileservicedeletefilerepoerror",
       "community": 9,
       "community_name": "testing.T",
-      "norm_label": "testappconfigrepo_deleteconfig()"
+      "norm_label": "testfileservicedeletefilerepoerror()"
     },
     {
-      "label": "TestAppConfigRepo_GetConfig_NotFoundReturnsNilNil()",
+      "label": "TestFileServiceDeleteFileStorageError()",
       "file_type": "code",
-      "source_file": "api/tests/app_config_repository_integration_test.go",
-      "source_location": "L21",
+      "source_file": "api/internal/service/file_service_test.go",
+      "source_location": "L365",
       "_origin": "ast",
-      "id": "api_tests_app_config_repository_integration_test_testappconfigrepo_getconfig_notfoundreturnsnilnil",
+      "id": "api_internal_service_file_service_test_testfileservicedeletefilestorageerror",
       "community": 9,
       "community_name": "testing.T",
-      "norm_label": "testappconfigrepo_getconfig_notfoundreturnsnilnil()"
+      "norm_label": "testfileservicedeletefilestorageerror()"
     },
     {
-      "label": "TestAppConfigRepo_ListConfigs()",
+      "label": "TestFileServiceDownloadFileNilStorageReturnsNilReader()",
       "file_type": "code",
-      "source_file": "api/tests/app_config_repository_integration_test.go",
-      "source_location": "L111",
+      "source_file": "api/internal/service/file_service_test.go",
+      "source_location": "L320",
       "_origin": "ast",
-      "id": "api_tests_app_config_repository_integration_test_testappconfigrepo_listconfigs",
+      "id": "api_internal_service_file_service_test_testfileservicedownloadfilenilstoragereturnsnilreader",
       "community": 9,
       "community_name": "testing.T",
-      "norm_label": "testappconfigrepo_listconfigs()"
+      "norm_label": "testfileservicedownloadfilenilstoragereturnsnilreader()"
     },
     {
-      "label": "TestAppConfigRepo_SaveAndGetConfig_RoundTrip()",
+      "label": "TestFileServiceDownloadFileStorageError()",
       "file_type": "code",
-      "source_file": "api/tests/app_config_repository_integration_test.go",
-      "source_location": "L28",
+      "source_file": "api/internal/service/file_service_test.go",
+      "source_location": "L309",
       "_origin": "ast",
-      "id": "api_tests_app_config_repository_integration_test_testappconfigrepo_saveandgetconfig_roundtrip",
+      "id": "api_internal_service_file_service_test_testfileservicedownloadfilestorageerror",
       "community": 9,
       "community_name": "testing.T",
-      "norm_label": "testappconfigrepo_saveandgetconfig_roundtrip()"
+      "norm_label": "testfileservicedownloadfilestorageerror()"
     },
     {
-      "label": "TestAppConfigRepo_SaveConfig_UpdateExisting()",
+      "label": "TestFileServiceDownloadFileWithStorage()",
       "file_type": "code",
-      "source_file": "api/tests/app_config_repository_integration_test.go",
-      "source_location": "L53",
+      "source_file": "api/internal/service/file_service_test.go",
+      "source_location": "L261",
       "_origin": "ast",
-      "id": "api_tests_app_config_repository_integration_test_testappconfigrepo_saveconfig_updateexisting",
+      "id": "api_internal_service_file_service_test_testfileservicedownloadfilewithstorage",
       "community": 9,
       "community_name": "testing.T",
-      "norm_label": "testappconfigrepo_saveconfig_updateexisting()"
+      "norm_label": "testfileservicedownloadfilewithstorage()"
     },
     {
-      "label": "TestAppConfigRepo_WithTx_CommitsOnSuccess()",
+      "label": "TestFileServiceGetFileInfoFound()",
       "file_type": "code",
-      "source_file": "api/tests/app_config_repository_integration_test.go",
-      "source_location": "L145",
+      "source_file": "api/internal/service/file_service_test.go",
+      "source_location": "L333",
       "_origin": "ast",
-      "id": "api_tests_app_config_repository_integration_test_testappconfigrepo_withtx_commitsonsuccess",
+      "id": "api_internal_service_file_service_test_testfileservicegetfileinfofound",
       "community": 9,
       "community_name": "testing.T",
-      "norm_label": "testappconfigrepo_withtx_commitsonsuccess()"
+      "norm_label": "testfileservicegetfileinfofound()"
     },
     {
-      "label": "TestAppConfigRepo_WithTx_RollsBackOnError()",
+      "label": "TestFileServiceMissingFileReturnsNotFound()",
       "file_type": "code",
-      "source_file": "api/tests/app_config_repository_integration_test.go",
+      "source_file": "api/internal/service/file_service_test.go",
+      "source_location": "L153",
+      "_origin": "ast",
+      "id": "api_internal_service_file_service_test_testfileservicemissingfilereturnsnotfound",
+      "community": 9,
+      "community_name": "testing.T",
+      "norm_label": "testfileservicemissingfilereturnsnotfound()"
+    },
+    {
+      "label": "TestFileServiceSessionScopedLookupRejectsOtherSession()",
+      "file_type": "code",
+      "source_file": "api/internal/service/file_service_test.go",
+      "source_location": "L284",
+      "_origin": "ast",
+      "id": "api_internal_service_file_service_test_testfileservicesessionscopedlookuprejectsothersession",
+      "community": 9,
+      "community_name": "testing.T",
+      "norm_label": "testfileservicesessionscopedlookuprejectsothersession()"
+    },
+    {
+      "label": "TestFileServiceSessionScopedLookupReturnsOwnedFile()",
+      "file_type": "code",
+      "source_file": "api/internal/service/file_service_test.go",
+      "source_location": "L296",
+      "_origin": "ast",
+      "id": "api_internal_service_file_service_test_testfileservicesessionscopedlookupreturnsownedfile",
+      "community": 9,
+      "community_name": "testing.T",
+      "norm_label": "testfileservicesessionscopedlookupreturnsownedfile()"
+    },
+    {
+      "label": "TestFileServiceUploadFileNoStorageReturnsError()",
+      "file_type": "code",
+      "source_file": "api/internal/service/file_service_test.go",
       "source_location": "L168",
       "_origin": "ast",
-      "id": "api_tests_app_config_repository_integration_test_testappconfigrepo_withtx_rollsbackonerror",
+      "id": "api_internal_service_file_service_test_testfileserviceuploadfilenostoragereturnserror",
       "community": 9,
       "community_name": "testing.T",
-      "norm_label": "testappconfigrepo_withtx_rollsbackonerror()"
+      "norm_label": "testfileserviceuploadfilenostoragereturnserror()"
+    },
+    {
+      "label": "TestFileServiceUploadFileRepoCreateError()",
+      "file_type": "code",
+      "source_file": "api/internal/service/file_service_test.go",
+      "source_location": "L246",
+      "_origin": "ast",
+      "id": "api_internal_service_file_service_test_testfileserviceuploadfilerepocreateerror",
+      "community": 9,
+      "community_name": "testing.T",
+      "norm_label": "testfileserviceuploadfilerepocreateerror()"
+    },
+    {
+      "label": "TestFileServiceUploadFileStorageError()",
+      "file_type": "code",
+      "source_file": "api/internal/service/file_service_test.go",
+      "source_location": "L235",
+      "_origin": "ast",
+      "id": "api_internal_service_file_service_test_testfileserviceuploadfilestorageerror",
+      "community": 9,
+      "community_name": "testing.T",
+      "norm_label": "testfileserviceuploadfilestorageerror()"
+    },
+    {
+      "label": "TestFileServiceUploadFileSuccess()",
+      "file_type": "code",
+      "source_file": "api/internal/service/file_service_test.go",
+      "source_location": "L181",
+      "_origin": "ast",
+      "id": "api_internal_service_file_service_test_testfileserviceuploadfilesuccess",
+      "community": 9,
+      "community_name": "testing.T",
+      "norm_label": "testfileserviceuploadfilesuccess()"
+    },
+    {
+      "label": "TestFileServiceUploadSameNameAndSizeStillChecksContent()",
+      "file_type": "code",
+      "source_file": "api/internal/service/file_service_test.go",
+      "source_location": "L218",
+      "_origin": "ast",
+      "id": "api_internal_service_file_service_test_testfileserviceuploadsamenameandsizestillcheckscontent",
+      "community": 9,
+      "community_name": "testing.T",
+      "norm_label": "testfileserviceuploadsamenameandsizestillcheckscontent()"
     },
     {
       "label": ".Screenshot()",
@@ -40227,39 +40260,6 @@
       "community": 9,
       "community_name": "testing.T",
       "norm_label": "testing.t"
-    },
-    {
-      "label": "fakeOSS",
-      "file_type": "code",
-      "source_file": "api/internal/service/status_service_test.go",
-      "source_location": "L41",
-      "_origin": "ast",
-      "id": "service_fakeoss",
-      "community": 9,
-      "community_name": "testing.T",
-      "norm_label": "fakeoss"
-    },
-    {
-      "label": ".Close()",
-      "file_type": "code",
-      "source_file": "api/internal/service/status_service_test.go",
-      "source_location": "L46",
-      "_origin": "ast",
-      "id": "service_fakeoss_close",
-      "community": 9,
-      "community_name": "testing.T",
-      "norm_label": ".close()"
-    },
-    {
-      "label": ".HealthCheck()",
-      "file_type": "code",
-      "source_file": "api/internal/service/status_service_test.go",
-      "source_location": "L45",
-      "_origin": "ast",
-      "id": "service_fakeoss_healthcheck",
-      "community": 9,
-      "community_name": "testing.T",
-      "norm_label": ".healthcheck()"
     },
     {
       "label": "UploadFile",
@@ -62920,7 +62920,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "ui/src/hooks/use-session-detail.ts",
-      "source_location": "L226",
+      "source_location": "L231",
       "weight": 1.0,
       "_origin": "ast",
       "source": "ui_src_hooks_use_session_detail_usesessiondetail",
@@ -62932,7 +62932,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "ui/src/hooks/use-session-detail.ts",
-      "source_location": "L53",
+      "source_location": "L54",
       "weight": 1.0,
       "_origin": "ast",
       "source": "ui_src_hooks_use_session_detail_usesessiondetail",
@@ -147269,5 +147269,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "7dc32189dcee637786653051b14c81a829fc92cb"
+  "built_at_commit": "326633b089b3302a4b86108a57103ed830a5d9b0"
 }
