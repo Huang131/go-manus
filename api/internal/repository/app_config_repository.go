@@ -35,11 +35,6 @@ func NewAppConfigRepository(db *infrastructure.Postgres) AppConfigRepository {
 	return &PostgresAppConfigRepository{db: db}
 }
 
-// NewAppConfigRepositoryWithTx 创建带事务的配置仓储
-func NewAppConfigRepositoryWithTx(tx pgx.Tx) AppConfigRepository {
-	return &PostgresAppConfigRepository{tx: tx}
-}
-
 func (r *PostgresAppConfigRepository) queryer() queryer {
 	return newQueryer(r.db, r.tx)
 }

@@ -39,11 +39,6 @@ func NewLLMModelRepository(db *infrastructure.Postgres) LLMModelRepository {
 	return &PostgresLLMModelRepository{db: db}
 }
 
-// NewLLMModelRepositoryWithTx 创建带事务的仓储
-func NewLLMModelRepositoryWithTx(tx pgx.Tx) LLMModelRepository {
-	return &PostgresLLMModelRepository{tx: tx}
-}
-
 func (r *PostgresLLMModelRepository) queryer() queryer {
 	return newQueryer(r.db, r.tx)
 }

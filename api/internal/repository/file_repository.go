@@ -13,13 +13,13 @@ import (
 type FileRepository interface {
 	Create(ctx context.Context, file *model.File) error
 	GetByID(ctx context.Context, id string) (*model.File, error)
-	// GetBySessionAndID 仅返回属于指定会话的文件，避免跨会话引用文件。
+	// 仅返回属于指定会话的文件，避免跨会话引用文件。
 	GetBySessionAndID(ctx context.Context, sessionID, id string) (*model.File, error)
-	// GetBySessionAndFilepath 根据 session_id + filepath 查重（替代旧 sessions.files JSONB 的路径去重逻辑）
+	// 根据 session_id + filepath 查重
 	GetBySessionAndFilepath(ctx context.Context, sessionID, filepath string) (*model.File, error)
-	// GetBySessionAndFilename 查找会话内同名的最近文件（用于上传幂等去重）
+	// 查找会话内同名的最近文件（用于上传幂等去重）
 	GetBySessionAndFilename(ctx context.Context, sessionID, filename string) (*model.File, error)
-	// GetBySessionAndHash 按 (session_id, sha256) 查找同内容文件（内容级去重）
+	// 按 (session_id, sha256) 查找同内容文件（内容级去重）
 	GetBySessionAndHash(ctx context.Context, sessionID, sha256 string) (*model.File, error)
 	Update(ctx context.Context, file *model.File) error
 	Delete(ctx context.Context, id string) error
@@ -47,11 +47,6 @@ type PostgresFileRepository struct {
 // NewFileRepository 创建文件仓储
 func NewFileRepository(db *infrastructure.Postgres) FileRepository {
 	return &PostgresFileRepository{db: db}
-}
-
-// NewFileRepositoryWithTx 创建带事务的文件仓储
-func NewFileRepositoryWithTx(tx pgx.Tx) FileRepository {
-	return &PostgresFileRepository{tx: tx}
 }
 
 func (r *PostgresFileRepository) queryer() queryer {

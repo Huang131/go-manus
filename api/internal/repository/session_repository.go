@@ -56,11 +56,6 @@ func NewSessionRepository(db *infrastructure.Postgres) SessionRepository {
 	return &PostgresSessionRepository{db: db}
 }
 
-// NewSessionRepositoryWithTx 创建带事务的会话仓储
-func NewSessionRepositoryWithTx(tx pgx.Tx) SessionRepository {
-	return &PostgresSessionRepository{tx: tx}
-}
-
 func (r *PostgresSessionRepository) queryer() queryer {
 	return newQueryer(r.db, r.tx)
 }
