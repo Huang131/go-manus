@@ -65,10 +65,6 @@ func (r *PostgresSessionRepository) queryer() queryer {
 	return newQueryer(r.db, r.tx)
 }
 
-// ErrSessionNotFound 会话写操作命中 0 行（不存在或已软删除）时返回，
-// 避免 UPDATE 静默成功后调用方无法感知会话缺失。
-var ErrSessionNotFound = apperr.ErrSessionNotFound
-
 // sessionSummaryColumns 是会话摘要查询的公共列（不含 events 大字段）。
 const sessionSummaryColumns = `id, COALESCE(sandbox_id, ''), COALESCE(task_id, ''), title, unread_message_count, COALESCE(latest_message, ''),
 			latest_message_at, status, created_at, updated_at`
@@ -97,7 +93,7 @@ func (r *PostgresSessionRepository) execSessionWrite(ctx context.Context, query 
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return ErrSessionNotFound
+		return apperr.ErrSessionNotFound
 	}
 	return nil
 }
