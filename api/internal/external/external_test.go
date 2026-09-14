@@ -2,6 +2,8 @@ package external
 
 import (
 	"context"
+	"encoding/base64"
+	"strings"
 	"testing"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
@@ -117,11 +119,13 @@ func TestSandboxInterface(t *testing.T) {
 
 // MockSandbox 用于测试的 Sandbox Mock 实现
 type MockSandbox struct {
-	execResult *model.ToolResult
-	execErr    error
+	execResult  *model.ToolResult
+	execErr     error
+	lastCommand string
 }
 
 func (m *MockSandbox) ExecCommand(ctx context.Context, sessionID, execDir, command string) (*model.ToolResult, error) {
+	m.lastCommand = command
 	if m.execErr != nil {
 		return nil, m.execErr
 	}
@@ -132,6 +136,24 @@ func (m *MockSandbox) ExecCommand(ctx context.Context, sessionID, execDir, comma
 		Success: true,
 		Message: "Command executed",
 	}, nil
+}
+
+func TestBrowserClientScreenshotExtractsSandboxOutput(t *testing.T) {
+	want := []byte("png-bytes")
+	sandbox := &MockSandbox{execResult: &model.ToolResult{Success: true, Data: map[string]interface{}{
+		"output": base64.StdEncoding.EncodeToString(want),
+	}}}
+	client := NewBrowserClient(sandbox)
+	got, err := client.Screenshot(context.Background(), "session-1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("Screenshot() = %q, want %q", got, want)
+	}
+	if !strings.HasPrefix(sandbox.lastCommand, "node -e '") {
+		t.Fatalf("Screenshot command = %q, want node wrapper", sandbox.lastCommand)
+	}
 }
 
 func (m *MockSandbox) ReadShellOutput(ctx context.Context, sessionID string, console bool) (*model.ToolResult, error) {
@@ -427,6 +449,19 @@ func TestBrowser_Screenshot(t *testing.T) {
 
 	if len(data) == 0 {
 		t.Error("Screenshot() should return non-empty data")
+	}
+}
+
+func TestBrowserScriptUsesNodeAndCDP(t *testing.T) {
+	script := browserScript(`await page.goto("https://example.com");`)
+	if !strings.HasPrefix(script, "node -e '") {
+		t.Fatalf("browserScript() = %q, want node command", script)
+	}
+	if !strings.Contains(script, "connectOverCDP") || !strings.Contains(script, "127.0.0.1:9222") {
+		t.Fatalf("browserScript() = %q, want sandbox CDP connection", script)
+	}
+	if strings.Contains(script, "chromium.launch") || strings.Contains(script, "browser.close") {
+		t.Fatalf("browserScript() must reuse Supervisor Chrome: %q", script)
 	}
 }
 

@@ -548,7 +548,13 @@ func (c *BrowserClient) ViewPage(ctx context.Context, sessionID string) (*model.
 
 // browserScript 连接 sandbox Supervisor 启动的 Chrome，复用现有页面，不能关闭共享 browser。
 func browserScript(operation string) string {
-	return fmt.Sprintf(`const { chromium } = require('playwright'); (async () => { const browser = await chromium.connectOverCDP('http://127.0.0.1:9222'); const contexts = browser.contexts(); const context = contexts[0] || await browser.newContext(); const pages = context.pages(); const page = pages[0] || await context.newPage(); try { %s } finally { /* Chrome 由 Supervisor 管理，不在此关闭 */ } })().catch(err => { console.error(err); process.exitCode = 1; });`, operation)
+	script := fmt.Sprintf(`const { chromium } = require('playwright'); (async () => { const browser = await chromium.connectOverCDP('http://127.0.0.1:9222'); const contexts = browser.contexts(); const context = contexts[0] || await browser.newContext(); const pages = context.pages(); const page = pages[0] || await context.newPage(); try { %s } finally { /* Chrome 由 Supervisor 管理，不在此关闭 */ } })().catch(err => { console.error(err); process.exitCode = 1; });`, operation)
+	// ExecCommand 通过 /bin/bash 执行；必须显式调用 node，并安全包裹脚本中的单引号。
+	return "node -e " + shellQuote(script)
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 // Navigate 使用浏览器导航到指定 URL
