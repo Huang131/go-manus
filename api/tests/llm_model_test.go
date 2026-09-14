@@ -205,6 +205,23 @@ func TestLLMModelAPI_CreateInvalidBody(t *testing.T) {
 	assert.NotEqual(t, http.StatusOK, w.Code, "非法 JSON 应返回非 200")
 }
 
+// TestLLMModelAPI_TestDraft_RequiresAPIKey 验证未保存配置测试会拒绝空密钥。
+func TestLLMModelAPI_TestDraft_RequiresAPIKey(t *testing.T) {
+	w := postJSON(t, "/api/llm-models/test", map[string]any{
+		"name":       "connection-test",
+		"provider":   "openai",
+		"base_url":   "https://example.test/v1",
+		"model_name": "demo",
+	})
+	assertStatus(t, w, http.StatusBadRequest)
+}
+
+// TestLLMModelAPI_TestSaved_NotFound 验证测试不存在的已保存模型返回 404。
+func TestLLMModelAPI_TestSaved_NotFound(t *testing.T) {
+	w := postJSON(t, "/api/llm-models/00000000-0000-0000-0000-000000000000/test", nil)
+	assertStatus(t, w, http.StatusNotFound)
+}
+
 // TestLLMModelAPI_GetNotFound 测试不存在的 id
 func TestLLMModelAPI_GetNotFound(t *testing.T) {
 	w := getJSON(t, "/api/llm-models/00000000-0000-0000-0000-000000000000")

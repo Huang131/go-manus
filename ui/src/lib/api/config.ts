@@ -8,6 +8,7 @@ import type {
   CreateA2AServerParams,
   LLMModel,
   LLMModelsData,
+  LLMModelTestResponse,
 } from "./types";
 
 /**
@@ -48,6 +49,12 @@ export const configApi = {
   },
   setDefaultLLMModel: (id: string): Promise<void> => {
     return post<void>(`/llm-models/${id}/default`, {});
+  },
+  testLLMModel: (m: Partial<LLMModel>): Promise<LLMModelTestResponse> => {
+    return post<LLMModelTestResponse>("/llm-models/test", m);
+  },
+  testSavedLLMModel: (id: string): Promise<LLMModelTestResponse> => {
+    return post<LLMModelTestResponse>(`/llm-models/${id}/test`, {});
   },
 
   /**

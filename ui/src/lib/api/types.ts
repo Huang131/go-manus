@@ -69,6 +69,15 @@ export type LLMModelsData = {
 };
 
 /**
+ * 模型连接测试结果
+ */
+export type LLMModelTestResponse = {
+  model_name: string;
+  latency_ms: number;
+  content: string;
+};
+
+/**
  * Agent 通用配置
  */
 export type AgentConfig = {

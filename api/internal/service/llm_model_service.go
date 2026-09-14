@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
+	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
 )
@@ -28,25 +30,36 @@ type LLMModelService interface {
 	UnsetDefault(ctx context.Context) error
 	// GetDefaultForAgent 启动读取：default 优先，否则第一个 enabled。
 	GetDefaultForAgent(ctx context.Context) (*model.LLMModel, error)
+	Test(ctx context.Context, m *model.LLMModel) (*model.LLMModelTestResponse, error)
 }
 
 // DefaultLLMModelService 默认实现
 type DefaultLLMModelService struct {
-	repo      repository.LLMModelRepository
-	defaultMu sync.Mutex
+	repo       repository.LLMModelRepository
+	defaultMu  sync.Mutex
+	llmFactory external.LLMClientFactory
 }
 
 // NewLLMModelService 创建多模型服务
 func NewLLMModelService(repo repository.LLMModelRepository) LLMModelService {
-	return &DefaultLLMModelService{repo: repo}
+	return &DefaultLLMModelService{repo: repo, llmFactory: external.NewLLMClient}
+}
+
+// NewLLMModelServiceWithLLMFactory 允许测试注入客户端，避免测试依赖外部网络。
+func NewLLMModelServiceWithLLMFactory(repo repository.LLMModelRepository, factory external.LLMClientFactory) LLMModelService {
+	if factory == nil {
+		factory = external.NewLLMClient
+	}
+	return &DefaultLLMModelService{repo: repo, llmFactory: factory}
 }
 
 // 业务错误
 var (
-	ErrModelNotFound     = apperr.NotFound("模型不存在")
-	ErrModelNameRequired = apperr.BadRequest("name/provider/base_url/model_name 不能为空")
-	ErrModelConflict     = apperr.Conflict("同名同 provider+url+model 已存在")
-	ErrModelDisabled     = apperr.FailedPrecondition("不能将停用的模型设为默认，请先启用")
+	ErrModelNotFound       = apperr.NotFound("模型不存在")
+	ErrModelNameRequired   = apperr.BadRequest("name/provider/base_url/model_name 不能为空")
+	ErrModelConflict       = apperr.Conflict("同名同 provider+url+model 已存在")
+	ErrModelDisabled       = apperr.FailedPrecondition("不能将停用的模型设为默认，请先启用")
+	ErrModelAPIKeyRequired = apperr.BadRequest("API Key 不能为空")
 )
 
 // validateRequired 校验必填字段
@@ -278,4 +291,70 @@ func (s *DefaultLLMModelService) GetDefaultForAgent(ctx context.Context) (*model
 		return first, nil
 	}
 	return nil, apperr.Unavailable("no LLM model available: please add and enable at least one model in settings")
+}
+
+// Test 使用临时配置发起最小文本请求，验证地址、密钥和模型是否可用。
+// 该调用不保存配置，也不携带工具或结构化输出约束，避免把配置测试误判为业务调用。
+func (s *DefaultLLMModelService) Test(ctx context.Context, m *model.LLMModel) (*model.LLMModelTestResponse, error) {
+	if m == nil {
+		return nil, ErrModelNameRequired
+	}
+	if err := validateRequired(m); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(m.APIKey) == "" {
+		return nil, ErrModelAPIKeyRequired
+	}
+
+	start := time.Now()
+	client := s.llmFactory(external.BuildRuntimeConfigFromModel(m, 15))
+	if client == nil {
+		return nil, apperr.Unavailable("模型客户端初始化失败")
+	}
+	resp, err := client.Invoke(ctx, &external.LLMRequest{Messages: []llmcore.Message{
+		{Role: llmcore.RoleUser, ContentText: "连接测试：请只回复连接成功。"},
+	}})
+	if err != nil {
+		return nil, mapModelTestError(err)
+	}
+	if resp == nil {
+		return nil, apperr.Unavailable("模型未返回响应")
+	}
+	return &model.LLMModelTestResponse{
+		ModelName: m.ModelName,
+		LatencyMS: time.Since(start).Milliseconds(),
+		Content:   truncateModelTestContent(resp.Message.ContentText),
+	}, nil
+}
+
+func truncateModelTestContent(content string) string {
+	const maxRunes = 500
+	runes := []rune(content)
+	if len(runes) <= maxRunes {
+		return content
+	}
+	return string(runes[:maxRunes]) + "..."
+}
+
+func mapModelTestError(err error) error {
+	var providerErr *llmcore.ProviderError
+	if !errors.As(err, &providerErr) {
+		return apperr.Wrap(apperr.KindUnavailable, "模型连接失败", err)
+	}
+	msg := providerErr.Message
+	if msg == "" {
+		msg = "模型连接失败"
+	}
+	switch providerErr.Kind {
+	case llmcore.KindAuth:
+		return apperr.Unauthorized("模型认证失败: " + msg)
+	case llmcore.KindNotFound:
+		return apperr.NotFound("模型不存在: " + msg)
+	case llmcore.KindBadRequest:
+		return apperr.BadRequest("模型请求不兼容: " + msg)
+	case llmcore.KindRateLimit, llmcore.KindNetwork, llmcore.KindTimeout, llmcore.KindServer:
+		return apperr.Wrap(apperr.KindUnavailable, "模型暂时不可用: "+msg, err)
+	default:
+		return apperr.Wrap(apperr.KindInternal, "模型连接失败: "+msg, err)
+	}
 }

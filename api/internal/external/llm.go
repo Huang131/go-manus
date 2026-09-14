@@ -201,3 +201,8 @@ func defaultLLMClientFactory(cfg *LLMRuntimeConfig) LLM {
 		return NewOpenAIClient(runtimeConfigToOpenAIClientConfig(cfg))
 	}
 }
+
+// NewLLMClient 根据运行时配置创建协议适配器，供配置测试等边界服务复用。
+func NewLLMClient(cfg *LLMRuntimeConfig) LLM {
+	return defaultLLMClientFactory(cfg)
+}

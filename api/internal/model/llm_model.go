@@ -212,6 +212,13 @@ type LLMModelListResponse struct {
 	Models []*LLMModelResponse `json:"models"`
 }
 
+// LLMModelTestResponse 是模型连接测试结果，不包含 API Key 或推理内容。
+type LLMModelTestResponse struct {
+	ModelName string `json:"model_name"`
+	LatencyMS int64  `json:"latency_ms"`
+	Content   string `json:"content"`
+}
+
 // DefaultCapabilities 新建模型时的能力画像兜底
 // 取"主流 OpenAI 兼容模型都具备的能力子集"
 func DefaultCapabilities() ModelCapabilities {

@@ -116,3 +116,33 @@ func (h *LLMModelHandler) UnsetDefault(c *gin.Context) {
 	}
 	response.Success(c, nil)
 }
+
+// TestDraft 测试尚未保存的模型配置。
+func (h *LLMModelHandler) TestDraft(c *gin.Context) {
+	var req model.LLMModelRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.FromError(c, err)
+		return
+	}
+	result, err := h.svc.Test(c.Request.Context(), req.ToModel())
+	if err != nil {
+		response.FromError(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+// TestSaved 测试数据库中已保存的模型配置，避免前端读取密钥。
+func (h *LLMModelHandler) TestSaved(c *gin.Context) {
+	m, err := h.svc.GetByID(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		response.FromError(c, err)
+		return
+	}
+	result, err := h.svc.Test(c.Request.Context(), m)
+	if err != nil {
+		response.FromError(c, err)
+		return
+	}
+	response.Success(c, result)
+}

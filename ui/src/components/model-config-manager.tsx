@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { useModels } from '@/providers/models-provider'
-import { Loader2, Pencil, Plus, Star, Trash2 } from 'lucide-react'
+import { CheckCircle2, FlaskConical, Loader2, Pencil, Plus, Star, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -47,6 +47,7 @@ export function ModelConfigManager() {
   const [mode, setMode] = useState<Mode>(null)
   const [draft, setDraft] = useState<Partial<LLMModel>>(emptyDraft)
   const [saving, setSaving] = useState(false)
+  const [testingConnection, setTestingConnection] = useState<string | null>(null)
 
   const openCreate = () => {
     setDraft({ ...emptyDraft })
@@ -65,6 +66,11 @@ export function ModelConfigManager() {
       toast.error('名称 / 提供商 / 地址 / 模型名 必填')
       return
     }
+    // 新增或显式更换密钥时，保存前先确认上游可用，避免写入明显失效的配置。
+    if (mode === 'create' || draft.api_key?.trim()) {
+      const tested = await testDraftConnection()
+      if (!tested) return
+    }
     setSaving(true)
     try {
       if (mode === 'create') {
@@ -81,6 +87,44 @@ export function ModelConfigManager() {
       toast.error(msg)
     } finally {
       setSaving(false)
+    }
+  }
+
+  const testDraftConnection = async (): Promise<boolean> => {
+    if (!draft.name || !draft.provider || !draft.base_url || !draft.model_name) {
+      toast.error('名称 / 提供商 / 地址 / 模型名 必填')
+      return false
+    }
+    if (!draft.api_key?.trim()) {
+      toast.error(mode === 'edit' ? '编辑时请填写新的 API Key，或测试列表中的已保存配置' : '请输入 API Key')
+      return false
+    }
+    setTestingConnection('draft')
+    try {
+      const result = await configApi.testLLMModel(draft)
+      toast.success(`连接成功：${result.model_name}，${result.latency_ms} ms${result.content ? `，返回：${result.content}` : ''}`)
+      return true
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '模型连接测试失败')
+      return false
+    } finally {
+      setTestingConnection(null)
+    }
+  }
+
+  const handleTestDraft = async () => {
+    await testDraftConnection()
+  }
+
+  const handleTestSaved = async (m: LLMModel) => {
+    setTestingConnection(m.id)
+    try {
+      const result = await configApi.testSavedLLMModel(m.id)
+      toast.success(`连接成功：${result.model_name}，${result.latency_ms} ms${result.content ? `，返回：${result.content}` : ''}`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '模型连接测试失败')
+    } finally {
+      setTestingConnection(null)
     }
   }
 
@@ -157,7 +201,18 @@ export function ModelConfigManager() {
               <Switch
                 checked={m.is_enabled}
                 onCheckedChange={(v) => handleToggleEnabled(m, v)}
+                disabled={testingConnection !== null}
               />
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="cursor-pointer"
+                onClick={() => handleTestSaved(m)}
+                title="测试连接"
+                disabled={testingConnection !== null}
+              >
+                {testingConnection === m.id ? <Loader2 className="animate-spin" /> : <FlaskConical />}
+              </Button>
               {!m.is_default && (
                 <Button
                   variant="ghost"
@@ -165,6 +220,7 @@ export function ModelConfigManager() {
                   className="cursor-pointer"
                   onClick={() => handleSetDefault(m)}
                   title="设为默认"
+                  disabled={testingConnection !== null}
                 >
                   <Star />
                 </Button>
@@ -175,6 +231,7 @@ export function ModelConfigManager() {
                 className="cursor-pointer"
                 onClick={() => openEdit(m)}
                 title="编辑"
+                disabled={testingConnection !== null}
               >
                 <Pencil />
               </Button>
@@ -184,7 +241,7 @@ export function ModelConfigManager() {
                 className="cursor-pointer"
                 onClick={() => handleDelete(m)}
                 title="删除"
-                disabled={m.is_default}
+                disabled={m.is_default || testingConnection !== null}
               >
                 <Trash2 />
               </Button>
@@ -285,10 +342,20 @@ export function ModelConfigManager() {
           </form>
           <DialogFooter>
             <DialogClose asChild>
-              <Button variant="outline" className="cursor-pointer" disabled={saving}>取消</Button>
+              <Button variant="outline" className="cursor-pointer" disabled={saving || testingConnection !== null}>取消</Button>
             </DialogClose>
-            <Button className="cursor-pointer" onClick={handleSave} disabled={saving}>
-              {saving && <Loader2 className="animate-spin" />}
+            <Button
+              type="button"
+              variant="outline"
+              className="cursor-pointer"
+              onClick={handleTestDraft}
+              disabled={saving || testingConnection !== null}
+            >
+              {testingConnection === 'draft' ? <Loader2 className="animate-spin" /> : <FlaskConical />}
+              测试连接
+            </Button>
+            <Button className="cursor-pointer" onClick={handleSave} disabled={saving || testingConnection !== null}>
+              {saving ? <Loader2 className="animate-spin" /> : <CheckCircle2 />}
               保存
             </Button>
           </DialogFooter>

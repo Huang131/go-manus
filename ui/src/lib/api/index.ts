@@ -29,6 +29,7 @@ export type {
   MCPServersData,
   LLMModel,
   LLMModelsData,
+  LLMModelTestResponse,
   ListA2AServerItem,
   A2AServersData,
   CreateA2AServerParams,
@@ -56,4 +57,3 @@ export type {
 export { configApi } from "./config";
 export { fileApi } from "./file";
 export { sessionApi, StreamEndError } from "./session";
-
