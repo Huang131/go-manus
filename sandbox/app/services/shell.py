@@ -178,12 +178,21 @@ class ShellService:
     # 增量清洗若在转义序列中间切边界，会把 \x1b[3 之类碎片残留在输出里。
     _TRAILING_PARTIAL_ESC = re.compile(r"\x1b\[[0-9;=?]*$")
 
+    def _append_console_output(self, shell, output: str) -> None:
+        """追加当前命令输出并维护字节预算，避免每个输出块重复扫描历史记录。"""
+        if not shell.console_records:
+            return
+        record = shell.console_records[-1]
+        previous = record.output
+        record.output = self._append_output(previous, output)
+        shell._console_bytes += len(record.output.encode("utf-8")) - len(previous.encode("utf-8"))
+        self._trim_console_budget(shell)
+
     def _trim_console_budget(self, shell) -> None:
         """控制台记录总预算：超出时丢弃最旧记录，防长会话内存无限增长。"""
-        total = sum(len(r.output.encode("utf-8")) for r in shell.console_records)
-        while shell.console_records and total > self._CONSOLE_BUDGET_BYTES:
+        while shell.console_records and shell._console_bytes > self._CONSOLE_BUDGET_BYTES:
             removed = shell.console_records.pop(0)
-            total -= len(removed.output.encode("utf-8"))
+            shell._console_bytes -= len(removed.output.encode("utf-8"))
 
     async def _start_output_reader(self, session_id: str, process: asyncio.subprocess.Process) -> None:
         """启动协程以连续读取进程输出并将其存储到会话中"""
@@ -211,10 +220,7 @@ class ShellService:
                         if shell and shell.process is process:
                         # 7.更新会话输出和控制台记录
                             shell.output = self._append_output(shell.output, output)
-                            if shell.console_records:
-                                record = shell.console_records[-1]
-                                record.output = self._append_output(record.output, output)
-                                self._trim_console_budget(shell)
+                            self._append_console_output(shell, output)
                     except Exception as e:
                         logger.error(f"读取进程输出时错误: {str(e)}")
                         break
@@ -230,10 +236,7 @@ class ShellService:
             shell = self.active_shells.get(session_id)
             if shell and shell.process is process:
                 shell.output = self._append_output(shell.output, tail)
-                if shell.console_records:
-                    record = shell.console_records[-1]
-                    record.output = self._append_output(record.output, tail)
-                    self._trim_console_budget(shell)
+                self._append_console_output(shell, tail)
 
         logger.debug(f"会话 {session_id} 的输出读取器已完成")
 
@@ -538,7 +541,8 @@ class ShellService:
                 shell.output = ""
                 shell.console_records.append(ConsoleRecord(ps1=ps1, command=command, output=""))
                 if len(shell.console_records) > MAX_CONSOLE_RECORDS:
-                    shell.console_records = shell.console_records[-MAX_CONSOLE_RECORDS:]
+                    removed = shell.console_records.pop(0)
+                    shell._console_bytes -= len(removed.output.encode("utf-8"))
 
                 # 12.创建后台输出读取器，不等待进程结束。
                 self._start_output_reader_task(session_id, process)
@@ -614,10 +618,7 @@ class ShellService:
             # 8.记录日志/输出(直接使用原始字符串，不从input_data编码，避免编码不统一的情况)
             log_text = input_text + ("\n" if press_enter else "")
             shell.output = self._append_output(shell.output, log_text)
-            if shell.console_records:
-                record = shell.console_records[-1]
-                record.output = self._append_output(record.output, log_text)
-                self._trim_console_budget(shell)
+            self._append_console_output(shell, log_text)
 
             # 9.记录日志并返回写入结果
             logger.info("成功向子进程写入数据")

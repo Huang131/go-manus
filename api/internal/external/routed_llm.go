@@ -139,9 +139,41 @@ func (r *RoutedLLM) Stream(ctx context.Context, req *LLMRequest) (<-chan llmcore
 		if !cfg.Profile.Capabilities.SupportsStreaming && hasCapabilityProfile(cfg) {
 			continue
 		}
-		return streaming.Stream(ctx, req)
+		ch, streamErr := streaming.Stream(ctx, req)
+		if streamErr != nil {
+			r.RecordFailure(configKey(cfg), streamErr, 0)
+			r.persistHealthAsync(cfg)
+			return nil, streamErr
+		}
+		return r.trackStream(ctx, cfg, ch), nil
 	}
 	return nil, errors.New("no streaming llm model available")
+}
+
+func (r *RoutedLLM) trackStream(ctx context.Context, cfg *LLMRuntimeConfig, input <-chan llmcore.LLMDelta) <-chan llmcore.LLMDelta {
+	output := make(chan llmcore.LLMDelta)
+	go func() {
+		start := time.Now()
+		defer close(output)
+		for {
+			select {
+			case <-ctx.Done():
+				// 调用方主动取消不代表供应商故障，不污染健康统计。
+				return
+			case delta, ok := <-input:
+				if !ok {
+					r.RecordSuccess(configKey(cfg), time.Since(start))
+					r.persistHealthAsync(cfg)
+					return
+				}
+				select {
+				case output <- delta:
+				case <-ctx.Done():
+				}
+			}
+		}
+	}()
+	return output
 }
 
 func hasCapabilityProfile(cfg *LLMRuntimeConfig) bool {
@@ -333,6 +365,9 @@ func (r *RoutedLLM) persistHealthAsync(cfg *LLMRuntimeConfig) {
 	id := cfg.Profile.ID
 	r.mu.Unlock()
 	if !ok {
+		r.mu.Lock()
+		delete(r.healthPersisting, key)
+		r.mu.Unlock()
 		return
 	}
 
@@ -340,7 +375,11 @@ func (r *RoutedLLM) persistHealthAsync(cfg *LLMRuntimeConfig) {
 		defer func() {
 			r.mu.Lock()
 			delete(r.healthPersisting, key)
+			dirty := r.health[key] != health
 			r.mu.Unlock()
+			if dirty {
+				r.persistHealthAsync(cfg)
+			}
 		}()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

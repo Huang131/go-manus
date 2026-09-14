@@ -32,6 +32,7 @@ class Shell(BaseModel):
     exec_dir: str = Field(..., description="会话执行目录")
     output: str = Field(..., description="会话输出")
     console_records: List[ConsoleRecord] = Field(default_factory=list, description="Shell会话中的控制记录列表")
+    _console_bytes: int = PrivateAttr(default=0)
 
     # pydantic v2提供的写法，如果是v1可以通过创建一个内部类，名字为Config来解决
     model_config = ConfigDict(

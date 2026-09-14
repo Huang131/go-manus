@@ -471,10 +471,10 @@ func (a *App) initLLM(cfg *config.Config, opts Options) external.LLM {
 		ToolCallTimeout: cfg.LLM.ToolCallTimeout,
 	}
 
-	// 创建路由器
-	routed := external.NewRoutedLLMFromSingleProvider(
+	// 创建路由器：目录返回全部启用模型，Auto 才能真正执行多模型排序与 fallback。
+	routed := external.NewRoutedLLM(
 		// provider 函数：从数据库动态获取模型配置
-		func(ctx context.Context) (*external.LLMRuntimeConfig, error) {
+		func(ctx context.Context) ([]*external.LLMRuntimeConfig, error) {
 			if a.Postgres != nil && a.repos.llmModel != nil {
 				// 优先级 1：请求上下文指定的 model_id。
 				// 用户明确选定的模型粘性路由：不存在/被禁用时显式报错，
@@ -487,20 +487,19 @@ func (a *App) initLLM(cfg *config.Config, opts Options) external.LLM {
 					if chosen == nil || !chosen.IsEnabled {
 						return nil, fmt.Errorf("%w: %s", external.ErrModelNotAvailable, mid)
 					}
-					return external.BuildRuntimeConfigFromModel(chosen, cfg.LLM.ToolCallTimeout), nil
+					return []*external.LLMRuntimeConfig{external.BuildRuntimeConfigFromModel(chosen, cfg.LLM.ToolCallTimeout)}, nil
 				}
-				// 优先级 2：默认模型
-				if def, err := a.repos.llmModel.GetDefault(ctx); err != nil {
-					logger.Warn("failed to get default model", logger.Err(err))
-				} else if def != nil && def.IsEnabled {
-					return external.BuildRuntimeConfigFromModel(def, cfg.LLM.ToolCallTimeout), nil
+				models, err := a.repos.llmModel.List(ctx)
+				if err != nil {
+					return nil, err
 				}
-				// 优先级 3：第一个启用的模型
-				if first, err := a.repos.llmModel.GetFirstEnabled(ctx); err != nil {
-					logger.Warn("failed to get first enabled model", logger.Err(err))
-				} else if first != nil {
-					return external.BuildRuntimeConfigFromModel(first, cfg.LLM.ToolCallTimeout), nil
+				configs := make([]*external.LLMRuntimeConfig, 0, len(models))
+				for _, item := range models {
+					if item != nil && item.IsEnabled {
+						configs = append(configs, external.BuildRuntimeConfigFromModel(item, cfg.LLM.ToolCallTimeout))
+					}
 				}
+				return configs, nil
 			}
 			return nil, nil
 		}, fallbackLLMCfg, nil)

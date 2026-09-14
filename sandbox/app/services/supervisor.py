@@ -35,23 +35,27 @@ class UnixStreamHTTPConnection(http.client.HTTPConnection):
         """构造函数，完成连接处理器初始化"""
         http.client.HTTPConnection.__init__(self, host, timeout)
         self.socket_path = socket_path
+        self.timeout = timeout
 
     def connect(self) -> None:
         """重写连接方法，欺骗xml-rpc库让其觉得自己正在进行网络连接"""
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        if self.timeout is not None:
+            self.sock.settimeout(self.timeout)
         self.sock.connect(self.socket_path)
 
 
 class UnixStreamTransport(xmlrpc.client.Transport):
     """基于Unix流传输层的适配器/转换器"""
 
-    def __init__(self, socket_path: str) -> None:
+    def __init__(self, socket_path: str, timeout=None) -> None:
         """构造函数，完成传输适配器的初始化"""
         xmlrpc.client.Transport.__init__(self)
         self.socket_path = socket_path
+        self.timeout = timeout
 
     def make_connection(self, host) -> http.client.HTTPConnection:
-        return UnixStreamHTTPConnection(host, self.socket_path)
+        return UnixStreamHTTPConnection(host, self.socket_path, self.timeout)
 
 
 class SupervisorService:
@@ -160,7 +164,7 @@ class SupervisorService:
         try:
             self.server = xmlrpc.client.ServerProxy(
                 "http://localhost",
-                transport=UnixStreamTransport(self.rpc_url),
+                transport=UnixStreamTransport(self.rpc_url, timeout=8),
             )
         except Exception as e:
             logger.error(f"连接Supervisor服务失败: {str(e)}")

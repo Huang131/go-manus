@@ -47,16 +47,17 @@ func (r emptyFileRepo) WithTx(ctx context.Context, fn func(repository.FileReposi
 
 // stubFileRepo 可配置的文件仓储 stub
 type stubFileRepo struct {
-	file       *model.File // GetByID 返回值
-	getErr     error
-	createErr  error
-	deleteErr  error
-	createdKey string // 记录 Create 收到的文件 Key
-	deletedID  string // 记录 Delete 收到的 ID
+	file           *model.File // GetByID 返回值
+	getErr         error
+	createErr      error
+	deleteErr      error
+	createdKey     string // 记录 Create 收到的文件 Key
+	deletedID      string // 记录 Delete 收到的 ID
+	existingByName *model.File
 }
 
 func (s *stubFileRepo) GetBySessionAndFilename(ctx context.Context, sessionID, filename string) (*model.File, error) {
-	return nil, nil
+	return s.existingByName, nil
 }
 
 func (s *stubFileRepo) GetBySessionAndHash(ctx context.Context, sessionID, sha256 string) (*model.File, error) {
@@ -211,6 +212,23 @@ func TestFileServiceUploadFileSuccess(t *testing.T) {
 	}
 	if repo.createdKey != file.Key {
 		t.Errorf("repo.Create filepath = %q, want %q", repo.createdKey, file.Key)
+	}
+}
+
+func TestFileServiceUploadSameNameAndSizeStillChecksContent(t *testing.T) {
+	repo := &stubFileRepo{existingByName: &model.File{ID: "old", Size: 5}}
+	storage := &stubStorage{}
+	svc := NewFileService(repo, storage)
+
+	file, err := svc.UploadFile(context.Background(), "session-1", "doc.txt", strings.NewReader("hello"), 5, "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file.ID == "old" {
+		t.Fatal("same name and size must not reuse an existing file before hashing content")
+	}
+	if storage.uploadedKey == "" {
+		t.Fatal("content must be uploaded so its hash can be verified")
 	}
 }
 

@@ -76,6 +76,12 @@ func (s *DefaultAppConfigService) GetLLMConfig(ctx context.Context) (*model.LLMC
 
 // UpdateLLMConfig 更新 LLM 配置 (如果 api_key 为空则保留旧值)
 func (s *DefaultAppConfigService) UpdateLLMConfig(ctx context.Context, cfg *model.LLMConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.updateLLMConfig(ctx, cfg)
+}
+
+func (s *DefaultAppConfigService) updateLLMConfig(ctx context.Context, cfg *model.LLMConfig) error {
 	if cfg == nil {
 		return apperr.BadRequest("LLM配置不能为空")
 	}
@@ -119,6 +125,12 @@ func (s *DefaultAppConfigService) GetAgentConfig(ctx context.Context) (*model.Ag
 
 // UpdateAgentConfig 更新 Agent 配置
 func (s *DefaultAppConfigService) UpdateAgentConfig(ctx context.Context, cfg *model.AgentConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.saveAgentConfig(ctx, cfg)
+}
+
+func (s *DefaultAppConfigService) saveAgentConfig(ctx context.Context, cfg *model.AgentConfig) error {
 	appConfig := &model.AppConfig{
 		ID:          uuid.New().String(),
 		ConfigType:  model.AppConfigTypeAgent,
@@ -148,6 +160,12 @@ func (s *DefaultAppConfigService) GetMCPConfig(ctx context.Context) (*model.MCPC
 
 // UpdateMCPConfig 更新 MCP 配置 (合并服务器列表)
 func (s *DefaultAppConfigService) UpdateMCPConfig(ctx context.Context, cfg *model.MCPConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.updateMCPConfig(ctx, cfg)
+}
+
+func (s *DefaultAppConfigService) updateMCPConfig(ctx context.Context, cfg *model.MCPConfig) error {
 	if cfg == nil {
 		return apperr.BadRequest("MCP配置不能为空")
 	}
@@ -184,6 +202,12 @@ func (s *DefaultAppConfigService) UpdateMCPConfig(ctx context.Context, cfg *mode
 
 // DeleteMCPServer 删除 MCP 服务器
 func (s *DefaultAppConfigService) DeleteMCPServer(ctx context.Context, serverName string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.deleteMCPServer(ctx, serverName)
+}
+
+func (s *DefaultAppConfigService) deleteMCPServer(ctx context.Context, serverName string) error {
 	cfg, err := s.GetMCPConfig(ctx)
 	if err != nil {
 		return err
@@ -220,6 +244,12 @@ func (s *DefaultAppConfigService) DeleteMCPServer(ctx context.Context, serverNam
 
 // UpdateMCPServerEnabled 更新单个 MCP 服务状态，保持其他服务配置不变。
 func (s *DefaultAppConfigService) UpdateMCPServerEnabled(ctx context.Context, serverName string, enabled bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.updateMCPServerEnabled(ctx, serverName, enabled)
+}
+
+func (s *DefaultAppConfigService) updateMCPServerEnabled(ctx context.Context, serverName string, enabled bool) error {
 	cfg, err := s.GetMCPConfig(ctx)
 	if err != nil {
 		return err
@@ -230,7 +260,7 @@ func (s *DefaultAppConfigService) UpdateMCPServerEnabled(ctx context.Context, se
 	for i := range cfg.Servers {
 		if cfg.Servers[i].ServerName == serverName {
 			cfg.Servers[i].Enabled = enabled
-			return s.UpdateMCPConfig(ctx, cfg)
+			return s.updateMCPConfig(ctx, cfg)
 		}
 	}
 	return apperr.NotFound("MCP服务器不存在")
@@ -254,6 +284,12 @@ func (s *DefaultAppConfigService) GetA2AConfig(ctx context.Context) (*model.A2AC
 
 // UpdateA2AConfig 更新 A2A 配置
 func (s *DefaultAppConfigService) UpdateA2AConfig(ctx context.Context, cfg *model.A2AConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.updateA2AConfig(ctx, cfg)
+}
+
+func (s *DefaultAppConfigService) updateA2AConfig(ctx context.Context, cfg *model.A2AConfig) error {
 	if cfg == nil {
 		return apperr.BadRequest("A2A配置不能为空")
 	}
@@ -290,6 +326,12 @@ func (s *DefaultAppConfigService) UpdateA2AConfig(ctx context.Context, cfg *mode
 
 // DeleteA2AServer 删除一个 A2A 服务配置。
 func (s *DefaultAppConfigService) DeleteA2AServer(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.deleteA2AServer(ctx, id)
+}
+
+func (s *DefaultAppConfigService) deleteA2AServer(ctx context.Context, id string) error {
 	cfg, err := s.GetA2AConfig(ctx)
 	if err != nil {
 		return err
@@ -315,6 +357,12 @@ func (s *DefaultAppConfigService) DeleteA2AServer(ctx context.Context, id string
 
 // UpdateA2AServerEnabled 更新单个 A2A 服务状态。
 func (s *DefaultAppConfigService) UpdateA2AServerEnabled(ctx context.Context, id string, enabled bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.updateA2AServerEnabled(ctx, id, enabled)
+}
+
+func (s *DefaultAppConfigService) updateA2AServerEnabled(ctx context.Context, id string, enabled bool) error {
 	cfg, err := s.GetA2AConfig(ctx)
 	if err != nil {
 		return err

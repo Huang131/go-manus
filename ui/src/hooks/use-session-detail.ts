@@ -136,6 +136,8 @@ export function useSessionDetail(
   // 返回 true 表示该事件已被路由，调用方不要再 appendEvent。
   const routeStreamingDelta = useCallback((ev: SSEEventData): boolean => {
     if (ev.type !== 'message_delta') return false
+    // 增量事件不进入 events，但仍必须推进 Redis SSE 游标，否则断线重连会重复回放。
+    if (ev.streamId) lastEventIdRef.current = ev.streamId
     const d = ev.data as { message_id?: string; delta?: string }
     const mid = d?.message_id
     const delta = d?.delta

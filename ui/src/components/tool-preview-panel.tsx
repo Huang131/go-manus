@@ -122,7 +122,9 @@ function ShellPreview({ tool }: { tool: ToolEvent }) {
 
 function BrowserPreview({ tool, onOpenVNC }: { tool: ToolEvent; onOpenVNC?: () => void }) {
   const content = getToolContent(tool)
-  const screenshot = typeof content?.screenshot === 'string' ? content.screenshot : null
+  const screenshot = typeof content?.screenshot === 'string'
+    ? content.screenshot
+    : typeof content?.screenshot_data === 'string' ? content.screenshot_data : null
   const url = getArg(tool.args, 'url', 'href', 'link')
 
   return (

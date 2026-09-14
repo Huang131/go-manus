@@ -64,7 +64,7 @@ const fileColumns = `id, session_id, filename, filepath, key, extension, mime_ty
 // scanFile 把一行结果映射为 *model.File，供 QueryRow 与 Query 行迭代共用。
 func scanFile(s rowScanner) (*model.File, error) {
 	var f model.File
-	if err := s.Scan(&f.ID, &f.SessionID, &f.Filename, &f.Filepath, &f.Key, &f.Extension, &f.MimeType, &f.Size, &f.CreatedAt); err != nil {
+	if err := s.Scan(&f.ID, &f.SessionID, &f.Filename, &f.Filepath, &f.Key, &f.Extension, &f.MimeType, &f.Size, &f.Sha256, &f.CreatedAt); err != nil {
 		return nil, err
 	}
 	return &f, nil
@@ -74,7 +74,7 @@ func scanFile(s rowScanner) (*model.File, error) {
 func (r *PostgresFileRepository) Create(ctx context.Context, file *model.File) error {
 	q := r.queryer()
 	query := `
-		INSERT INTO files (id, session_id, filename, filepath, key, extension, mime_type, size, created_at)
+		INSERT INTO files (id, session_id, filename, filepath, key, extension, mime_type, size, sha256, created_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 	`
 	_, err := q.Exec(ctx, query,
@@ -207,7 +207,7 @@ func (r *PostgresFileRepository) WithTx(ctx context.Context, fn func(repo FileRe
 func (r *PostgresFileRepository) GetExpiredFiles(ctx context.Context, expireDuration string, limit int64) ([]*model.File, error) {
 	q := r.queryer()
 	query := `
-		SELECT f.id, f.session_id, f.filename, f.filepath, f.key, f.extension, f.mime_type, f.size, f.created_at
+		SELECT f.id, f.session_id, f.filename, f.filepath, f.key, f.extension, f.mime_type, f.size, f.sha256, f.created_at
 		FROM files f
 		LEFT JOIN sessions s ON f.session_id = s.id
 		WHERE f.created_at < NOW() - $1::interval

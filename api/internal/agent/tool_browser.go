@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 
 	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -123,7 +124,8 @@ func (t *BrowserTool) Invoke(ctx context.Context, params map[string]interface{})
 			return model.NewToolError(err.Error()), err
 		}
 		return model.NewToolResult(map[string]interface{}{
-			"screenshot_data": data,
+			// UI 预览统一消费 screenshot，并带上可直接嵌入 img 的 MIME 前缀。
+			"screenshot": "data:image/png;base64," + base64.StdEncoding.EncodeToString(data),
 		}), nil
 
 	case BrowserActionClick:
