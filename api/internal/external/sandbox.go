@@ -543,7 +543,29 @@ func NewBrowserClient(sandbox Sandbox) *BrowserClient {
 // ViewPage 获取当前浏览器的页面内容
 func (c *BrowserClient) ViewPage(ctx context.Context, sessionID string) (*model.ToolResult, error) {
 	script := browserScript(`console.log(await page.content());`)
-	return c.sandbox.ExecCommand(ctx, sessionID, "", script)
+	return c.browserExec(ctx, sessionID, script)
+}
+
+func (c *BrowserClient) browserExec(ctx context.Context, sessionID, script string) (*model.ToolResult, error) {
+	result, err := c.sandbox.ExecCommand(ctx, sessionID, "", script)
+	if err != nil || result == nil || !result.Success {
+		return result, err
+	}
+	if data, ok := result.Data.(map[string]interface{}); !ok || data["status"] != "running" {
+		return result, nil
+	}
+	seconds := 10
+	if _, err = c.sandbox.WaitProcess(ctx, sessionID, &seconds); err != nil {
+		return model.NewToolError(err.Error()), err
+	}
+	output, err := c.sandbox.ReadShellOutput(ctx, sessionID, false)
+	if err != nil {
+		return model.NewToolError(err.Error()), err
+	}
+	if output == nil || !output.Success {
+		return output, fmt.Errorf("browser command output unavailable")
+	}
+	return &model.ToolResult{Success: true, Message: output.Message, Data: map[string]interface{}{"output": output.Message}}, nil
 }
 
 // browserScript 连接 sandbox Supervisor 启动的 Chrome，复用现有页面，不能关闭共享 browser。
@@ -560,7 +582,7 @@ func shellQuote(value string) string {
 // Navigate 使用浏览器导航到指定 URL
 func (c *BrowserClient) Navigate(ctx context.Context, sessionID, url string) (*model.ToolResult, error) {
 	script := browserScript(fmt.Sprintf(`await page.goto(%s);`, jsString(url)))
-	return c.sandbox.ExecCommand(ctx, sessionID, "", script)
+	return c.browserExec(ctx, sessionID, script)
 }
 
 // jsString 把 Go 字符串安全序列化为 JS 字符串字面量（含引号）。
@@ -590,7 +612,7 @@ func (c *BrowserClient) Click(ctx context.Context, sessionID string, index *int,
 	} else {
 		return model.NewToolError("either index or coordinates required"), fmt.Errorf("either index or coordinates required")
 	}
-	return c.sandbox.ExecCommand(ctx, sessionID, "", script)
+	return c.browserExec(ctx, sessionID, script)
 }
 
 // Input 在输入框中输入文本
@@ -611,25 +633,25 @@ func (c *BrowserClient) Input(ctx context.Context, sessionID, text string, press
 	} else {
 		return model.NewToolError("either index or coordinates required"), fmt.Errorf("either index or coordinates required")
 	}
-	return c.sandbox.ExecCommand(ctx, sessionID, "", script)
+	return c.browserExec(ctx, sessionID, script)
 }
 
 // MoveMouse 移动鼠标到指定坐标
 func (c *BrowserClient) MoveMouse(ctx context.Context, sessionID string, coordinateX, coordinateY float64) (*model.ToolResult, error) {
 	script := browserScript(fmt.Sprintf(`await page.mouse.move(%f, %f);`, coordinateX, coordinateY))
-	return c.sandbox.ExecCommand(ctx, sessionID, "", script)
+	return c.browserExec(ctx, sessionID, script)
 }
 
 // PressKey 模拟按键
 func (c *BrowserClient) PressKey(ctx context.Context, sessionID, key string) (*model.ToolResult, error) {
 	script := browserScript(fmt.Sprintf(`await page.keyboard.press(%s);`, jsString(key)))
-	return c.sandbox.ExecCommand(ctx, sessionID, "", script)
+	return c.browserExec(ctx, sessionID, script)
 }
 
 // SelectOption 在下拉菜单中选择选项
 func (c *BrowserClient) SelectOption(ctx context.Context, sessionID string, index, option int) (*model.ToolResult, error) {
 	script := browserScript(fmt.Sprintf(`await page.locator('select').nth(%d).selectOption({ index: %d });`, index, option))
-	return c.sandbox.ExecCommand(ctx, sessionID, "", script)
+	return c.browserExec(ctx, sessionID, script)
 }
 
 // ScrollUp 向上滚动浏览器
@@ -640,7 +662,7 @@ func (c *BrowserClient) ScrollUp(ctx context.Context, sessionID string, toTop *b
 	} else {
 		script = browserScript(`await page.evaluate(() => window.scrollBy(0, -window.innerHeight));`)
 	}
-	return c.sandbox.ExecCommand(ctx, sessionID, "", script)
+	return c.browserExec(ctx, sessionID, script)
 }
 
 // ScrollDown 向下滚动浏览器
@@ -651,7 +673,7 @@ func (c *BrowserClient) ScrollDown(ctx context.Context, sessionID string, toDown
 	} else {
 		script = browserScript(`await page.evaluate(() => window.scrollBy(0, window.innerHeight));`)
 	}
-	return c.sandbox.ExecCommand(ctx, sessionID, "", script)
+	return c.browserExec(ctx, sessionID, script)
 }
 
 // Screenshot 对当前页面截图
@@ -662,7 +684,7 @@ func (c *BrowserClient) Screenshot(ctx context.Context, sessionID string, fullPa
 	} else {
 		script = browserScript(`const screenshot = await page.screenshot(); console.log(Buffer.from(screenshot).toString('base64'));`)
 	}
-	result, err := c.sandbox.ExecCommand(ctx, sessionID, "", script)
+	result, err := c.browserExec(ctx, sessionID, script)
 	if err != nil {
 		return nil, err
 	}
@@ -688,7 +710,7 @@ func (c *BrowserClient) Screenshot(ctx context.Context, sessionID string, fullPa
 // 风险边界由沙箱隔离保证。
 func (c *BrowserClient) ConsoleExec(ctx context.Context, sessionID, javascript string) (*model.ToolResult, error) {
 	script := browserScript(fmt.Sprintf(`await page.evaluate(() => { %s });`, javascript))
-	return c.sandbox.ExecCommand(ctx, sessionID, "", script)
+	return c.browserExec(ctx, sessionID, script)
 }
 
 // ConsoleView 获取控制台输出
