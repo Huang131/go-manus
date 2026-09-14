@@ -26,6 +26,9 @@ CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sessions_task_id ON sessions(task_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_deleted_at ON sessions(deleted_at);  -- 用于文件清理查询
 
+-- 活跃会话列表查询优化：部分索引，只索引未删除的会话
+CREATE INDEX IF NOT EXISTS idx_sessions_active_list ON sessions (latest_message_at DESC NULLS LAST, created_at DESC, id DESC) WHERE deleted_at IS NULL;
+
 -- ============================================================
 -- 字段注释
 -- ============================================================
