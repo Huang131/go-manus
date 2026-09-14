@@ -145,6 +145,12 @@ func (r *RoutedLLM) Stream(ctx context.Context, req *LLMRequest) (<-chan llmcore
 			r.persistHealthAsync(cfg)
 			return nil, streamErr
 		}
+		if ch == nil {
+			err := errors.New("streaming llm returned nil channel")
+			r.RecordFailure(configKey(cfg), err, 0)
+			r.persistHealthAsync(cfg)
+			return nil, err
+		}
 		return r.trackStream(ctx, cfg, ch), nil
 	}
 	return nil, errors.New("no streaming llm model available")
@@ -346,12 +352,16 @@ func (r *RoutedLLM) persistHealth(ctx context.Context, cfg *LLMRuntimeConfig) {
 // persistHealthAsync 异步持久化健康快照：LLM 调用热路径不再同步写 DB。
 // 同一模型的并发持久化按 modelKey 去重（inFlight 集合），失败仅告警。
 func (r *RoutedLLM) persistHealthAsync(cfg *LLMRuntimeConfig) {
-	if cfg == nil || r.store == nil {
+	if cfg == nil {
 		return
 	}
 	key := configKey(cfg)
 
 	r.mu.Lock()
+	if r.store == nil {
+		r.mu.Unlock()
+		return
+	}
 	if r.healthPersisting == nil {
 		r.healthPersisting = make(map[string]bool)
 	}
