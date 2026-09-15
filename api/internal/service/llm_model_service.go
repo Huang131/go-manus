@@ -317,6 +317,10 @@ func (s *DefaultLLMModelService) SetDefault(ctx context.Context, id string) erro
 			if isUniqueViolation(err) {
 				return ErrModelConflict
 			}
+			if errors.Is(err, pgx.ErrNoRows) {
+				// SetDefault 影响 0 行：GetByID 校验后模型被并发删除
+				return ErrModelNotFound
+			}
 			return err
 		}
 		// 触发部分 unique 索引兜底

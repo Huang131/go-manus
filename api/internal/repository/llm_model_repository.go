@@ -249,9 +249,16 @@ func (r *PostgresLLMModelRepository) ClearDefault(ctx context.Context) error {
 }
 
 // SetDefault 把指定 id 设为 default。
+// id 不存在（校验后被并发删除）时返回 pgx.ErrNoRows：
 func (r *PostgresLLMModelRepository) SetDefault(ctx context.Context, id string) error {
-	_, err := r.queryer().Exec(ctx, `UPDATE llm_models SET is_default = TRUE, updated_at = $1 WHERE id = $2`, time.Now(), id)
-	return err
+	tag, err := r.queryer().Exec(ctx, `UPDATE llm_models SET is_default = TRUE, updated_at = $1 WHERE id = $2`, time.Now(), id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }
 
 // WithTx 事务

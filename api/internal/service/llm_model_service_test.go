@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
@@ -23,6 +24,7 @@ type MockLLMModelRepository struct {
 	getDefaultErr error
 	createErr     error
 	updateErr     error
+	setDefaultErr error
 }
 
 func NewMockLLMModelRepository() *MockLLMModelRepository {
@@ -47,6 +49,9 @@ func (m *MockLLMModelRepository) Create(ctx context.Context, mm *model.LLMModel)
 func (m *MockLLMModelRepository) Update(ctx context.Context, mm *model.LLMModel) error {
 	if m.updateErr != nil {
 		return m.updateErr
+	}
+	if _, ok := m.models[mm.ID]; !ok {
+		return pgx.ErrNoRows // 对齐真实仓储：id 不存在（并发删除）→ ErrNoRows
 	}
 	mm.UpdatedAt = time.Now()
 	m.models[mm.ID] = mm
@@ -110,6 +115,47 @@ func TestLLMModelService_Update_PreservesRepositoryError(t *testing.T) {
 	}
 }
 
+// TestLLMModelService_Update_ConcurrentlyDeletedMapsToNotFound 校验通过后模型被并发删除：
+// 事务内 UPDATE 影响 0 行（pgx.ErrNoRows），应映射为 404 而非 500。
+func TestLLMModelService_Update_ConcurrentlyDeletedMapsToNotFound(t *testing.T) {
+	repo := NewMockLLMModelRepository()
+	svc := NewLLMModelService(repo)
+	m, err := svc.Create(context.Background(), &model.LLMModel{
+		Name: "model", Provider: "provider", BaseURL: "https://example.test", ModelName: "m",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.updateErr = pgx.ErrNoRows
+	_, err = svc.Update(context.Background(), &model.LLMModel{
+		ID: m.ID, Name: "model", Provider: "provider", BaseURL: "https://example.test", ModelName: "m",
+	})
+	if !errors.Is(err, ErrModelNotFound) {
+		t.Fatalf("Update() error = %v, want ErrModelNotFound", err)
+	}
+}
+
+// TestLLMModelService_SetDefault_ConcurrentlyDeletedMapsToNotFound GetByID 校验后模型被并发删除：
+// 事务内 SetDefault 影响 0 行，应映射为 404，而非静默成功把表留在"无默认"状态。
+func TestLLMModelService_SetDefault_ConcurrentlyDeletedMapsToNotFound(t *testing.T) {
+	repo := NewMockLLMModelRepository()
+	svc := NewLLMModelService(repo)
+	svc.Create(context.Background(), &model.LLMModel{
+		Name: "first", Provider: "p", BaseURL: "https://u1", ModelName: "m1", IsEnabled: true,
+	})
+	second, err := svc.Create(context.Background(), &model.LLMModel{
+		Name: "second", Provider: "p", BaseURL: "https://u2", ModelName: "m2", IsEnabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.setDefaultErr = pgx.ErrNoRows
+	err = svc.SetDefault(context.Background(), second.ID)
+	if !errors.Is(err, ErrModelNotFound) {
+		t.Fatalf("SetDefault() error = %v, want ErrModelNotFound", err)
+	}
+}
+
 func (m *MockLLMModelRepository) Delete(ctx context.Context, id string) error {
 	delete(m.models, id)
 	if m.defaultID == id {
@@ -167,10 +213,15 @@ func (m *MockLLMModelRepository) ClearDefault(ctx context.Context) error {
 }
 
 func (m *MockLLMModelRepository) SetDefault(ctx context.Context, id string) error {
-	if mm, ok := m.models[id]; ok {
-		mm.IsDefault = true
-		m.defaultID = id
+	if m.setDefaultErr != nil {
+		return m.setDefaultErr
 	}
+	mm, ok := m.models[id]
+	if !ok {
+		return pgx.ErrNoRows // 对齐真实仓储：id 不存在（并发删除）→ ErrNoRows
+	}
+	mm.IsDefault = true
+	m.defaultID = id
 	return nil
 }
 
