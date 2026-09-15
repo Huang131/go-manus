@@ -1,5 +1,7 @@
 # 部署指南
 
+> 当前部署事实以仓库中的 `docker-compose.yml`、环境变量示例和本文件为准；历史排障记录请见 [`archive/`](./archive/)。
+
 ## 1. 部署方式
 
 统一使用 [docker-compose.yml](docker-compose.yml)，通过 nginx 网关统一接入前端、API 和沙箱服务，适用于标准部署、演示和小规模生产。

@@ -75,7 +75,7 @@ type Tool interface {
 
 ### 第一阶段：理解 Agent 基础
 
-1. 阅读 [Agent 核心架构](./docs/AGENT_ARCHITECTURE.md)
+1. 阅读 [当前架构总览](./docs/ARCHITECTURE.md)
 2. 理解 ReAct 循环：`api/internal/agent/react_agent.go`
 3. 理解规划流程：`api/internal/agent/planner_react_flow.go`
 
@@ -86,13 +86,15 @@ type Tool interface {
 
 ### 第三阶段：理解外部集成
 
-1. LLM 接口抽象：`api/internal/external/llm.go`
+1. 阅读 [LLM 集成与 Planner 契约](./docs/LLM_INTEGRATION.md)
+2. LLM 接口抽象：`api/internal/external/llm.go`
 2. 沙箱服务通信：`api/internal/external/sandbox.go`
 3. 浏览器自动化：`api/internal/external/browser.go`
 
 ### 第四阶段：部署和扩展
 
 1. 阅读 [部署指南](./docs/DEPLOYMENT.md)
+2. 阅读 [维护状态](./docs/MAINTENANCE_STATUS.md)
 2. 理解服务架构和依赖关系
 3. 根据需求扩展功能
 

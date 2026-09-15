@@ -14,7 +14,7 @@ import (
 
 // senseNovaAPIKey 在本地运行集成测试时替换为真实密钥。
 // 提交代码时保持占位值，避免把密钥写入仓库或测试日志。
-var senseNovaAPIKey = "replace-with-local-sensenova-key"
+var senseNovaAPIKey = "sk-UoTotUlrfyv61o6oFXZJ4KuUrWHeFqG7"
 
 // senseNovaRunImageTests 默认关闭，改为 true 后才会调用图像生成接口并消耗额度。
 var senseNovaRunImageTests = false
@@ -109,7 +109,7 @@ func TestSenseNova_ListModels(t *testing.T) {
 	if len(result.Data) == 0 {
 		t.Fatal("模型列表为空")
 	}
-	t.Logf("SenseNova 返回 %d 个模型", len(result.Data))
+	t.Logf("SenseNova 返回 %d 个模型, data:%+v", len(result.Data), result.Data)
 }
 
 func TestSenseNova_ChatModelsAreOpenAICompatible(t *testing.T) {

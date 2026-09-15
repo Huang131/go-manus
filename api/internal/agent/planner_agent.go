@@ -60,7 +60,6 @@ func (a *PlannerAgent) CreatePlan(ctx context.Context, input *TaskInput) (*model
 	// 调用 LLM（与原项目对齐：planner 阶段强制 JSON 输出，抑制 CoT 泄露）
 	resp, _, err := a.invokeWithEmptyRetry(ctx, &external.LLMRequest{
 		Messages: messages,
-		Tools:    a.GetToolsForLLM(),
 		ResponseFormat: &llmcore.ResponseFormat{
 			Type: llmcore.ResponseFormatJSONObject,
 		},
@@ -153,7 +152,6 @@ func (a *PlannerAgent) UpdatePlan(ctx context.Context, plan *model.Plan, complet
 	// 调用 LLM（planner 阶段强制 JSON 输出，与原项目对齐）
 	resp, _, err := a.invokeWithEmptyRetry(ctx, &external.LLMRequest{
 		Messages: messages,
-		Tools:    a.GetToolsForLLM(),
 		ResponseFormat: &llmcore.ResponseFormat{
 			Type: llmcore.ResponseFormatJSONObject,
 		},
