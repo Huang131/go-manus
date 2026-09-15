@@ -10,10 +10,6 @@ import (
 	"github.com/Huang131/go-manus/api/internal/model"
 )
 
-type mockRuntimeHealthStore struct {
-	updates map[string]modelRuntimeHealthSnapshot
-}
-
 type streamingStubLLM struct {
 	*stubLLM
 	deltas []llmcore.LLMDelta
@@ -26,25 +22,6 @@ func (s *streamingStubLLM) Stream(context.Context, *LLMRequest) (<-chan llmcore.
 	}
 	close(ch)
 	return ch, nil
-}
-
-type modelRuntimeHealthSnapshot struct {
-	status           model.HealthState
-	recentFailures   int
-	averageLatencyMS int
-}
-
-func newMockRuntimeHealthStore() *mockRuntimeHealthStore {
-	return &mockRuntimeHealthStore{updates: make(map[string]modelRuntimeHealthSnapshot)}
-}
-
-func (m *mockRuntimeHealthStore) UpdateRuntimeHealth(ctx context.Context, id string, health model.RuntimeHealth) error {
-	m.updates[id] = modelRuntimeHealthSnapshot{
-		status:           health.Status,
-		recentFailures:   health.RecentFailures,
-		averageLatencyMS: health.AverageLatencyMS,
-	}
-	return nil
 }
 
 func TestRoutedLLM_FallbackOnRateLimit(t *testing.T) {
@@ -440,61 +417,6 @@ func TestRoutedLLM_RecordFailureUpdatesRuntimeHealth(t *testing.T) {
 	}
 }
 
-func TestRoutedLLM_PersistRuntimeHealth(t *testing.T) {
-	store := newMockRuntimeHealthStore()
-	router := NewRoutedLLM(
-		func(ctx context.Context) ([]*LLMRuntimeConfig, error) {
-			return []*LLMRuntimeConfig{
-				{
-					Profile: llmcore.ModelProfile{
-						ID:           "model-1",
-						Protocol:     llmcore.ProtocolOpenAICompat,
-						Capabilities: openAITextProfile().Capabilities,
-					},
-					ModelName: "model-1",
-				},
-			}, nil
-		},
-		nil,
-		func(cfg *LLMRuntimeConfig) LLM {
-			return &stubLLM{
-				name: cfg.ModelName,
-				invoke: func(ctx context.Context, req *LLMRequest) (*llmcore.LLMResponse, error) {
-					return &llmcore.LLMResponse{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: "ok"}}, nil
-				},
-			}
-		},
-	)
-	router.SetHealthStore(store)
-
-	_, err := router.Invoke(context.Background(), &LLMRequest{
-		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hello"}},
-	})
-	if err != nil {
-		t.Fatalf("Invoke: %v", err)
-	}
-	// persistHealth 已异步化（去抖）：轮询等待在途持久化完成
-	var got modelRuntimeHealthSnapshot
-	var ok bool
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		got, ok = store.updates["model-1"]
-		if ok {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("expected runtime health to be persisted (async)")
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-	if got.status != model.HealthStateHealthy {
-		t.Fatalf("status = %s, want healthy", got.status)
-	}
-	if got.averageLatencyMS <= 0 {
-		t.Fatalf("average latency = %d, want positive", got.averageLatencyMS)
-	}
-}
-
 func openAITextProfile() llmcore.ModelProfile {
 	return llmcore.ModelProfile{
 		Protocol: llmcore.ProtocolOpenAICompat,
@@ -512,34 +434,27 @@ func openAITextProfile() llmcore.ModelProfile {
 // 健康状态记录与衰减逻辑单元测试
 // ============================================================================
 
-// getHealth 读取内部健康快照（测试辅助）
-func (r *RoutedLLM) getHealth(modelKey string) LLMRuntimeHealth {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.health[modelKey]
-}
-
 func TestRoutedLLM_RecordFailureEscalatesToUnhealthy(t *testing.T) {
 	router := NewRoutedLLM(nil, nil, nil)
 	const key = "model-x"
 
 	// 第 1 次失败：degraded, failures=1
 	router.RecordFailure(key, nil, 10*time.Millisecond)
-	h := router.getHealth(key)
+	h := router.GetHealth(key)
 	if h.Status != model.HealthStateDegraded || h.RecentFailures != 1 {
 		t.Fatalf("after 1st failure: status=%s failures=%d, want degraded/1", h.Status, h.RecentFailures)
 	}
 
 	// 第 2 次失败：仍 degraded, failures=2
 	router.RecordFailure(key, nil, 10*time.Millisecond)
-	h = router.getHealth(key)
+	h = router.GetHealth(key)
 	if h.Status != model.HealthStateDegraded || h.RecentFailures != 2 {
 		t.Fatalf("after 2nd failure: status=%s failures=%d, want degraded/2", h.Status, h.RecentFailures)
 	}
 
 	// 第 3 次失败：升级为 unhealthy, failures=3
 	router.RecordFailure(key, nil, 10*time.Millisecond)
-	h = router.getHealth(key)
+	h = router.GetHealth(key)
 	if h.Status != model.HealthStateUnhealthy || h.RecentFailures != 3 {
 		t.Fatalf("after 3rd failure: status=%s failures=%d, want unhealthy/3", h.Status, h.RecentFailures)
 	}
@@ -555,14 +470,14 @@ func TestRoutedLLM_RecordSuccessDecaysFailuresAndRecovers(t *testing.T) {
 
 	// 第 1 次成功：failures 衰减到 1，仍 degraded
 	router.RecordSuccess(key, 50*time.Millisecond)
-	h := router.getHealth(key)
+	h := router.GetHealth(key)
 	if h.RecentFailures != 1 || h.Status != model.HealthStateDegraded {
 		t.Fatalf("after 1st success: status=%s failures=%d, want degraded/1", h.Status, h.RecentFailures)
 	}
 
 	// 第 2 次成功：failures 归零，恢复 healthy
 	router.RecordSuccess(key, 50*time.Millisecond)
-	h = router.getHealth(key)
+	h = router.GetHealth(key)
 	if h.RecentFailures != 0 || h.Status != model.HealthStateHealthy {
 		t.Fatalf("after 2nd success: status=%s failures=%d, want healthy/0", h.Status, h.RecentFailures)
 	}
@@ -574,14 +489,14 @@ func TestRoutedLLM_RecordSuccessTracksLatency(t *testing.T) {
 
 	// 首次成功：延迟直接记录（10ms）
 	router.RecordSuccess(key, 10*time.Millisecond)
-	h := router.getHealth(key)
+	h := router.GetHealth(key)
 	if h.AverageLatencyMS != 10 {
 		t.Fatalf("first latency = %d, want 10", h.AverageLatencyMS)
 	}
 
 	// 第二次成功：滑动平均 (10+30)/2 = 20
 	router.RecordSuccess(key, 30*time.Millisecond)
-	h = router.getHealth(key)
+	h = router.GetHealth(key)
 	if h.AverageLatencyMS != 20 {
 		t.Fatalf("second latency = %d, want 20", h.AverageLatencyMS)
 	}
@@ -676,38 +591,6 @@ func TestRoutedLLM_PlanPrefersFewerFailuresOnSameStatus(t *testing.T) {
 	}
 	if plan[0].ModelName != "fewer-failures" {
 		t.Fatalf("plan[0] = %s, want fewer-failures", plan[0].ModelName)
-	}
-}
-
-// ============================================================================
-// persistHealth 边界单元测试
-// ============================================================================
-
-func TestRoutedLLM_PersistHealthSkipsModelsOnlyInMemory(t *testing.T) {
-	// Profile.ID 为空的模型不持久化（configKey 回退到 ModelName，但 persistHealth 明确要求 Profile.ID）
-	store := newMockRuntimeHealthStore()
-	router := NewRoutedLLM(
-		func(ctx context.Context) ([]*LLMRuntimeConfig, error) {
-			return []*LLMRuntimeConfig{
-				{Profile: openAITextProfile(), ModelName: "no-profile-id"},
-			}, nil
-		},
-		nil,
-		func(cfg *LLMRuntimeConfig) LLM {
-			return &stubLLM{name: cfg.ModelName}
-		},
-	)
-	router.SetHealthStore(store)
-
-	_, err := router.Invoke(context.Background(), &LLMRequest{
-		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hello"}},
-	})
-	if err != nil {
-		t.Fatalf("Invoke: %v", err)
-	}
-
-	if len(store.updates) != 0 {
-		t.Fatalf("store updates = %v, want empty (no Profile.ID should skip persistence)", store.updates)
 	}
 }
 

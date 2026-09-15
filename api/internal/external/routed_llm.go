@@ -13,26 +13,19 @@ import (
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
-// RuntimeHealthStore 持久化运行时健康快照的最小接口。
-type RuntimeHealthStore interface {
-	UpdateRuntimeHealth(ctx context.Context, id string, health model.RuntimeHealth) error
-}
-
 // ModelCatalogProvider 返回可路由的模型候选列表。
 // 控制面把模型画像、请求策略、成本策略都收口到这里，运行时路由器只消费这一层。
 type ModelCatalogProvider func(ctx context.Context) ([]*LLMRuntimeConfig, error)
 
 // RoutedLLM 负责主模型选择、fallback、以及最小的路由约束。
 // 它不做协议转换，只决定“用哪个模型执行一次请求”。
+// 健康快照只在内存维护（重启即归零）：路由信号是瞬态属性，不落库。
 type RoutedLLM struct {
 	catalog  ModelCatalogProvider
 	fallback *LLMRuntimeConfig
 	factory  LLMClientFactory
 	mu       sync.RWMutex
 	health   map[string]LLMRuntimeHealth
-	store    RuntimeHealthStore
-	// healthPersisting 记录在途的健康持久化（按 modelKey 去抖）
-	healthPersisting map[string]bool
 }
 
 var _ StreamingLLM = (*RoutedLLM)(nil)
@@ -60,11 +53,27 @@ func NewRoutedLLM(catalog ModelCatalogProvider, fallback *LLMRuntimeConfig, fact
 	}
 }
 
-// SetHealthStore 设置运行时健康持久化目标。
-func (r *RoutedLLM) SetHealthStore(store RuntimeHealthStore) {
+// InvalidateHealth 清除模型在内存中的运行时健康快照。
+// 配置编辑/删除后调用：模型配置已变，旧快照不再可信（编辑即新模型），
+// 后续调用从零开始重新积累。
+func (r *RoutedLLM) InvalidateHealth(id string) {
+	if id == "" {
+		return
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.store = store
+	delete(r.health, id)
+}
+
+// GetHealth 读取模型的实时运行健康快照，无记录时返回零值。
+// 供 API 层展示实时状态；与路由排序消费同一份内存数据。
+func (r *RoutedLLM) GetHealth(id string) LLMRuntimeHealth {
+	if id == "" {
+		return LLMRuntimeHealth{}
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.health[id]
 }
 
 // NewRoutedLLMFromSingleProvider 兼容只提供单个候选的老入口。
@@ -97,11 +106,9 @@ func (r *RoutedLLM) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMRe
 		latency := time.Since(start)
 		if err == nil {
 			r.RecordSuccess(configKey(cfg), latency)
-			r.persistHealthAsync(cfg)
 			return resp, nil
 		}
 		r.RecordFailure(configKey(cfg), err, latency)
-		r.persistHealthAsync(cfg)
 		lastErr = err
 		if idx == 0 {
 			if pe, ok := err.(*llmcore.ProviderError); ok && pe.Fallbackable && canFallbackAfterToolUse(req) {
@@ -142,13 +149,11 @@ func (r *RoutedLLM) Stream(ctx context.Context, req *LLMRequest) (<-chan llmcore
 		ch, streamErr := streaming.Stream(ctx, req)
 		if streamErr != nil {
 			r.RecordFailure(configKey(cfg), streamErr, 0)
-			r.persistHealthAsync(cfg)
 			return nil, streamErr
 		}
 		if ch == nil {
 			err := errors.New("streaming llm returned nil channel")
 			r.RecordFailure(configKey(cfg), err, 0)
-			r.persistHealthAsync(cfg)
 			return nil, err
 		}
 		return r.trackStream(ctx, cfg, ch), nil
@@ -169,7 +174,6 @@ func (r *RoutedLLM) trackStream(ctx context.Context, cfg *LLMRuntimeConfig, inpu
 			case delta, ok := <-input:
 				if !ok {
 					r.RecordSuccess(configKey(cfg), time.Since(start))
-					r.persistHealthAsync(cfg)
 					return
 				}
 				select {
@@ -204,9 +208,12 @@ func (r *RoutedLLM) plan(ctx context.Context, req *LLMRequest) ([]*LLMRuntimeCon
 			logger.Warn("模型目录获取失败，降级使用 fallback 配置", logger.Err(err))
 		} else if len(cfgs) > 0 {
 			catalog = cfgs
+			// 目录条目每次调用都是新构建的对象，注入健康快照不会竞写共享状态。
+			// 注意只对目录条目注入：fallback 是共享单例，并发 plan 只持读锁，
+			// 对它写 Health 会引入数据竞态（且单候选场景排序无意义）。
+			r.applyStoredHealth(catalog)
 		}
 	}
-	r.applyStoredHealth(catalog)
 	if len(catalog) == 0 {
 		return []*LLMRuntimeConfig{r.fallback}, nil
 	}
@@ -316,7 +323,11 @@ func (r *RoutedLLM) RecordFailure(modelKey string, err error, latency time.Durat
 	defer r.mu.Unlock()
 
 	health := r.health[modelKey]
-	health.AverageLatencyMS = updateLatencyMS(health.AverageLatencyMS, latency)
+	// latency<=0 表示本次失败没有可用耗时（如 Stream 建流即失败），
+	// 跳过 EMA 更新，避免被钳到 1ms 后把失败模型显得"更快"。
+	if latency > 0 {
+		health.AverageLatencyMS = updateLatencyMS(health.AverageLatencyMS, latency)
+	}
 	health.RecentFailures++
 	switch {
 	case health.RecentFailures >= 3:
@@ -326,79 +337,6 @@ func (r *RoutedLLM) RecordFailure(modelKey string, err error, latency time.Durat
 	}
 	r.health[modelKey] = health
 	_ = err
-}
-
-func (r *RoutedLLM) persistHealth(ctx context.Context, cfg *LLMRuntimeConfig) {
-	if cfg == nil || cfg.Profile.ID == "" {
-		return
-	}
-
-	r.mu.RLock()
-	health := r.health[configKey(cfg)]
-	store := r.store
-	r.mu.RUnlock()
-
-	if store == nil {
-		return
-	}
-
-	if err := store.UpdateRuntimeHealth(ctx, cfg.Profile.ID, runtimeHealthToModel(health)); err != nil {
-		logger.WarnContext(ctx, "persist llm runtime health failed",
-			logger.String("model_id", cfg.Profile.ID),
-			logger.Err(err))
-	}
-}
-
-// persistHealthAsync 异步持久化健康快照：LLM 调用热路径不再同步写 DB。
-// 同一模型的并发持久化按 modelKey 去重（inFlight 集合），失败仅告警。
-func (r *RoutedLLM) persistHealthAsync(cfg *LLMRuntimeConfig) {
-	if cfg == nil {
-		return
-	}
-	key := configKey(cfg)
-
-	r.mu.Lock()
-	if r.store == nil {
-		r.mu.Unlock()
-		return
-	}
-	if r.healthPersisting == nil {
-		r.healthPersisting = make(map[string]bool)
-	}
-	if r.healthPersisting[key] {
-		r.mu.Unlock()
-		return // 已有同模型的持久化在途，健康状态由后续调用继续更新
-	}
-	r.healthPersisting[key] = true
-	// 取 RecordSuccess/RecordFailure 刚写回的内存健康（cfg.Health 是 plan 时的旧快照）
-	health, ok := r.health[key]
-	id := cfg.Profile.ID
-	r.mu.Unlock()
-	if !ok {
-		r.mu.Lock()
-		delete(r.healthPersisting, key)
-		r.mu.Unlock()
-		return
-	}
-
-	go func() {
-		defer func() {
-			r.mu.Lock()
-			delete(r.healthPersisting, key)
-			dirty := r.health[key] != health
-			r.mu.Unlock()
-			if dirty {
-				r.persistHealthAsync(cfg)
-			}
-		}()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := r.store.UpdateRuntimeHealth(ctx, id, runtimeHealthToModel(health)); err != nil {
-			logger.Warn("persist llm runtime health failed",
-				logger.String("model_id", id),
-				logger.Err(err))
-		}
-	}()
 }
 
 func (r *RoutedLLM) applyStoredHealth(catalog []*LLMRuntimeConfig) {

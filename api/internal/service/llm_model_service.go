@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
@@ -17,13 +18,24 @@ import (
 	"github.com/Huang131/go-manus/api/internal/repository"
 )
 
+// HealthInvalidator 失效路由器内存健康缓存的最小接口。
+// *external.RoutedLLM 实现了它；编辑/删除模型后调用，使“编辑即新模型”立即生效。
+type HealthInvalidator interface {
+	InvalidateHealth(id string)
+}
+
+// RuntimeHealthReader 读取路由器内存中的实时健康快照的最小接口。
+// *external.RoutedLLM 实现了它；API 层展示实时健康状态时调用。
+type RuntimeHealthReader interface {
+	GetHealth(id string) external.LLMRuntimeHealth
+}
+
 // LLMModelService 多模型服务接口
 type LLMModelService interface {
 	List(ctx context.Context) ([]*model.LLMModel, error)
 	GetByID(ctx context.Context, id string) (*model.LLMModel, error)
 	Create(ctx context.Context, m *model.LLMModel) (*model.LLMModel, error)
 	Update(ctx context.Context, m *model.LLMModel) (*model.LLMModel, error)
-	UpdateRuntimeHealth(ctx context.Context, id string, health model.RuntimeHealth) error
 	Delete(ctx context.Context, id string) error
 	SetDefault(ctx context.Context, id string) error
 	// UnsetDefault 取消默认模型（允许系统处于"无默认"状态，agent 启动时降级到第一个 enabled）
@@ -31,13 +43,22 @@ type LLMModelService interface {
 	// GetDefaultForAgent 启动读取：default 优先，否则第一个 enabled。
 	GetDefaultForAgent(ctx context.Context) (*model.LLMModel, error)
 	Test(ctx context.Context, m *model.LLMModel) (*model.LLMModelTestResponse, error)
+	// GetRuntimeHealth 读取模型的实时运行健康快照（路由器内存数据，重启归零）。
+	// 模型不存在返回 ErrModelNotFound；无调用记录时返回零值健康。
+	GetRuntimeHealth(ctx context.Context, id string) (*model.RuntimeHealth, error)
+	// SetHealthInvalidator 注入路由器内存健康缓存失效器（编辑/删除模型时触发）。
+	SetHealthInvalidator(inv HealthInvalidator)
+	// SetRuntimeHealthReader 注入路由器实时健康读取器（bootstrap 创建 RoutedLLM 后调用）。
+	SetRuntimeHealthReader(reader RuntimeHealthReader)
 }
 
 // DefaultLLMModelService 默认实现
 type DefaultLLMModelService struct {
-	repo       repository.LLMModelRepository
-	defaultMu  sync.Mutex
-	llmFactory external.LLMClientFactory
+	repo              repository.LLMModelRepository
+	defaultMu         sync.Mutex
+	llmFactory        external.LLMClientFactory
+	healthInvalidator HealthInvalidator
+	healthReader      RuntimeHealthReader
 }
 
 // NewLLMModelService 创建多模型服务
@@ -51,6 +72,45 @@ func NewLLMModelServiceWithLLMFactory(repo repository.LLMModelRepository, factor
 		factory = external.NewLLMClient
 	}
 	return &DefaultLLMModelService{repo: repo, llmFactory: factory}
+}
+
+// SetHealthInvalidator 注入运行时健康缓存失效器。
+// bootstrap 在创建 RoutedLLM 后调用：编辑/删除模型时同步清掉内存健康快照。
+func (s *DefaultLLMModelService) SetHealthInvalidator(inv HealthInvalidator) {
+	s.healthInvalidator = inv
+}
+
+// invalidateHealth 失效指定模型的内存健康快照（未注入失效器时为 no-op）。
+func (s *DefaultLLMModelService) invalidateHealth(id string) {
+	if s.healthInvalidator != nil {
+		s.healthInvalidator.InvalidateHealth(id)
+	}
+}
+
+// SetRuntimeHealthReader 注入路由器实时健康读取器。
+// bootstrap 在创建 RoutedLLM 后调用：API 层据此返回内存中的实时健康状态。
+func (s *DefaultLLMModelService) SetRuntimeHealthReader(reader RuntimeHealthReader) {
+	s.healthReader = reader
+}
+
+// GetRuntimeHealth 读取模型的实时运行健康快照。
+// 健康数据只存路由器内存（重启归零）：模型无调用记录时返回零值，前端据此显示"暂无数据"。
+func (s *DefaultLLMModelService) GetRuntimeHealth(ctx context.Context, id string) (*model.RuntimeHealth, error) {
+	m, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if m == nil {
+		return nil, ErrModelNotFound
+	}
+	health := model.RuntimeHealth{}
+	if s.healthReader != nil {
+		h := s.healthReader.GetHealth(id)
+		health.Status = h.Status
+		health.RecentFailures = h.RecentFailures
+		health.AverageLatencyMS = h.AverageLatencyMS
+	}
+	return &health, nil
 }
 
 // 业务错误
@@ -170,6 +230,9 @@ func (s *DefaultLLMModelService) Update(ctx context.Context, m *model.LLMModel) 
 	m.SortOrder = old.SortOrder
 	m.UpdatedAt = time.Now()
 
+	// 编辑即新模型：失效路由器内存中的健康缓存，后续调用从零重新积累。
+	s.invalidateHealth(m.ID)
+
 	err = s.repo.WithTx(ctx, func(r repository.LLMModelRepository) error {
 		if m.IsDefault && !old.IsDefault {
 			if err := r.ClearDefault(ctx); err != nil {
@@ -179,6 +242,10 @@ func (s *DefaultLLMModelService) Update(ctx context.Context, m *model.LLMModel) 
 		if err := r.Update(ctx, m); err != nil {
 			if isUniqueViolation(err) {
 				return ErrModelConflict
+			}
+			if errors.Is(err, pgx.ErrNoRows) {
+				// UPDATE 影响 0 行：校验通过后模型被并发删除
+				return ErrModelNotFound
 			}
 			return err
 		}
@@ -200,19 +267,6 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
-// UpdateRuntimeHealth 仅更新运行时健康快照。
-func (s *DefaultLLMModelService) UpdateRuntimeHealth(ctx context.Context, id string, health model.RuntimeHealth) error {
-	m, err := s.repo.GetByID(ctx, id)
-	if err != nil {
-		return err
-	}
-	if m == nil {
-		return ErrModelNotFound
-	}
-	m.RuntimeHealth = health
-	return s.repo.UpdateRuntimeHealth(ctx, id, health)
-}
-
 // Delete 删除（允许删除默认模型；agent 启动时会降级到第一个 enabled）
 func (s *DefaultLLMModelService) Delete(ctx context.Context, id string) error {
 	m, err := s.repo.GetByID(ctx, id)
@@ -222,6 +276,8 @@ func (s *DefaultLLMModelService) Delete(ctx context.Context, id string) error {
 	if m == nil {
 		return ErrModelNotFound
 	}
+	// 模型即将删除：同步失效内存健康缓存，避免路由器残留已删除模型的 entry。
+	s.invalidateHealth(id)
 	return s.repo.WithTx(ctx, func(r repository.LLMModelRepository) error {
 		// 如果是 default，先清掉 default 标记（事务内原子）
 		if m.IsDefault {

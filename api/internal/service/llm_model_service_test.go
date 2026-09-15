@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
+	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
 )
@@ -107,13 +108,6 @@ func TestLLMModelService_Update_PreservesRepositoryError(t *testing.T) {
 	if err == nil || err.Error() != "database unavailable" {
 		t.Fatalf("Update() error = %v, want repository error", err)
 	}
-}
-
-func (m *MockLLMModelRepository) UpdateRuntimeHealth(ctx context.Context, id string, health model.RuntimeHealth) error {
-	if mm, ok := m.models[id]; ok {
-		mm.RuntimeHealth = health
-	}
-	return nil
 }
 
 func (m *MockLLMModelRepository) Delete(ctx context.Context, id string) error {
@@ -302,27 +296,6 @@ func TestLLMModelService_GetDefaultForAgent_DefaultEnabled(t *testing.T) {
 	}
 }
 
-func TestLLMModelService_UpdateRuntimeHealth(t *testing.T) {
-	repo := NewMockLLMModelRepository()
-	svc := NewLLMModelService(repo)
-	m, _ := svc.Create(context.Background(), &model.LLMModel{
-		Name: "m", Provider: "p", BaseURL: "u", ModelName: "mn", IsEnabled: true,
-	})
-
-	err := svc.UpdateRuntimeHealth(context.Background(), m.ID, model.RuntimeHealth{
-		Status:           "degraded",
-		RecentFailures:   2,
-		AverageLatencyMS: 321,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	cur, _ := repo.GetByID(context.Background(), m.ID)
-	if cur == nil || cur.RuntimeHealth.Status != "degraded" {
-		t.Fatalf("runtime health = %+v", cur.RuntimeHealth)
-	}
-}
-
 func TestLLMModelService_GetDefaultForAgent_DefaultDisabledFallback(t *testing.T) {
 	repo := NewMockLLMModelRepository()
 	svc := NewLLMModelService(repo)
@@ -451,5 +424,56 @@ func TestLLMModelService_UnsetDefault_ClearsDefaultFlag(t *testing.T) {
 	}
 	if def != nil {
 		t.Fatalf("GetDefault() after UnsetDefault() = %v, want nil", def)
+	}
+}
+
+// stubRuntimeHealthReader 注入固定健康快照的读取器
+type stubRuntimeHealthReader struct {
+	health external.LLMRuntimeHealth
+}
+
+func (s *stubRuntimeHealthReader) GetHealth(id string) external.LLMRuntimeHealth {
+	return s.health
+}
+
+func TestLLMModelService_GetRuntimeHealth(t *testing.T) {
+	repo := NewMockLLMModelRepository()
+	svc := NewLLMModelService(repo)
+	m, err := svc.Create(context.Background(), &model.LLMModel{
+		Name: "h", Provider: "p", BaseURL: "u", ModelName: "mn",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 未注入 reader：模型存在，返回零值健康
+	h, err := svc.GetRuntimeHealth(context.Background(), m.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Status != "" || h.RecentFailures != 0 || h.AverageLatencyMS != 0 {
+		t.Fatalf("without reader: got %+v, want zero health", h)
+	}
+
+	// 注入 reader：返回路由器内存中的实时值
+	svc.SetRuntimeHealthReader(&stubRuntimeHealthReader{
+		health: external.LLMRuntimeHealth{
+			Status:           model.HealthStateDegraded,
+			RecentFailures:   2,
+			AverageLatencyMS: 350,
+		},
+	})
+	h, err = svc.GetRuntimeHealth(context.Background(), m.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Status != model.HealthStateDegraded || h.RecentFailures != 2 || h.AverageLatencyMS != 350 {
+		t.Fatalf("with reader: got %+v, want degraded/2/350", h)
+	}
+
+	// 模型不存在：ErrModelNotFound
+	_, err = svc.GetRuntimeHealth(context.Background(), "missing-id")
+	if !errors.Is(err, ErrModelNotFound) {
+		t.Fatalf("err = %v, want ErrModelNotFound", err)
 	}
 }

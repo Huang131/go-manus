@@ -504,9 +504,12 @@ func (a *App) initLLM(cfg *config.Config, opts Options) external.LLM {
 			return nil, nil
 		}, fallbackLLMCfg, nil)
 
-	// 设置健康状态持久化（写入数据库）
-	if a.Postgres != nil {
-		routed.SetHealthStore(a.repos.llmModel)
+	// 把路由器的内存健康缓存入口注入模型服务：
+	// - 失效器：编辑/删除模型后立即作废旧健康快照（编辑即新模型）。
+	// - 读取器：API 层返回内存中的实时健康状态（GET /api/llm-models/:id/health）。
+	if a.LLMModelSvc != nil {
+		a.LLMModelSvc.SetHealthInvalidator(routed)
+		a.LLMModelSvc.SetRuntimeHealthReader(routed)
 	}
 	return routed
 }

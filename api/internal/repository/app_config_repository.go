@@ -39,29 +39,33 @@ func (r *PostgresAppConfigRepository) queryer() queryer {
 	return newQueryer(r.db, r.tx)
 }
 
+// appConfigColumns 是 app_configs 表的标准查询列，集中定义避免各方法重复列举。
+const appConfigColumns = `id, config_type, config_key, config_value, created_at, updated_at`
+
+// scanAppConfig 把一行结果映射为 *model.AppConfig，供 QueryRow 与 Query 行迭代共用。
+// JSONB 驱动直接返回原始 JSON，服务层统一负责反序列化为具体配置类型。
+func scanAppConfig(s rowScanner) (*model.AppConfig, error) {
+	var c model.AppConfig
+	var configValueJSON []byte
+	if err := s.Scan(&c.ID, &c.ConfigType, &c.ConfigKey, &configValueJSON, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		return nil, err
+	}
+	c.ConfigValue = configValueJSON
+	return &c, nil
+}
+
 // GetConfig 获取配置
 func (r *PostgresAppConfigRepository) GetConfig(ctx context.Context, configType model.AppConfigType, configKey string) (*model.AppConfig, error) {
 	q := r.queryer()
-	query := `
-		SELECT id, config_type, config_key, config_value, created_at, updated_at
-		FROM app_configs WHERE config_type = $1 AND config_key = $2
-	`
-	var config model.AppConfig
-	var configValueJSON []byte
-	err := q.QueryRow(ctx, query, configType, configKey).Scan(
-		&config.ID, &config.ConfigType, &config.ConfigKey,
-		&configValueJSON, &config.CreatedAt, &config.UpdatedAt,
-	)
+	query := `SELECT ` + appConfigColumns + ` FROM app_configs WHERE config_type = $1 AND config_key = $2`
+	config, err := scanAppConfig(q.QueryRow(ctx, query, configType, configKey))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil // 配置不存在，返回 nil
+	}
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil // 配置不存在，返回 nil
-		}
 		return nil, err
 	}
-
-	// JSONB 驱动直接返回原始 JSON，服务层统一负责反序列化为具体配置类型。
-	config.ConfigValue = configValueJSON
-	return &config, nil
+	return config, nil
 }
 
 // SaveConfig 保存配置
@@ -73,9 +77,9 @@ func (r *PostgresAppConfigRepository) SaveConfig(ctx context.Context, config *mo
 	}
 
 	query := `
-		INSERT INTO app_configs (id, config_type, config_key, config_value, created_at, updated_at)
+		INSERT INTO app_configs (` + appConfigColumns + `)
 		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (config_type, config_key) 
+		ON CONFLICT (config_type, config_key)
 		DO UPDATE SET config_value = $4, updated_at = $6
 	`
 	_, err = q.Exec(ctx, query,
@@ -109,59 +113,23 @@ func (r *PostgresAppConfigRepository) DeleteConfig(ctx context.Context, configTy
 // ListConfigs 获取指定类型的配置列表
 func (r *PostgresAppConfigRepository) ListConfigs(ctx context.Context, configType model.AppConfigType) ([]*model.AppConfig, error) {
 	q := r.queryer()
-	query := `
-		SELECT id, config_type, config_key, config_value, created_at, updated_at
-		FROM app_configs WHERE config_type = $1
-	`
+	query := `SELECT ` + appConfigColumns + ` FROM app_configs WHERE config_type = $1`
 	rows, err := q.Query(ctx, query, configType)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var configs []*model.AppConfig
-	for rows.Next() {
-		var c model.AppConfig
-		var configValueJSON []byte
-		if err := rows.Scan(&c.ID, &c.ConfigType, &c.ConfigKey, &configValueJSON, &c.CreatedAt, &c.UpdatedAt); err != nil {
-			return nil, err
-		}
-		c.ConfigValue = configValueJSON
-		configs = append(configs, &c)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return configs, nil
+	return collectRows(rows, scanAppConfig)
 }
 
 // ListAllConfigs 获取所有配置
 func (r *PostgresAppConfigRepository) ListAllConfigs(ctx context.Context) ([]*model.AppConfig, error) {
 	q := r.queryer()
-	query := `
-		SELECT id, config_type, config_key, config_value, created_at, updated_at
-		FROM app_configs
-	`
+	query := `SELECT ` + appConfigColumns + ` FROM app_configs`
 	rows, err := q.Query(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var configs []*model.AppConfig
-	for rows.Next() {
-		var c model.AppConfig
-		var configValueJSON []byte
-		if err := rows.Scan(&c.ID, &c.ConfigType, &c.ConfigKey, &configValueJSON, &c.CreatedAt, &c.UpdatedAt); err != nil {
-			return nil, err
-		}
-		c.ConfigValue = configValueJSON
-		configs = append(configs, &c)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return configs, nil
+	return collectRows(rows, scanAppConfig)
 }
 
 // WithTx 在事务中执行操作

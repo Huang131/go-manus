@@ -109,7 +109,6 @@ func BuildRuntimeConfigFromModel(m *model.LLMModel, toolCallTimeout int) *LLMRun
 		Temperature:     effectiveTemperature,
 		MaxTokens:       effectiveMaxTokens,
 		ToolCallTimeout: toolCallTimeout,
-		Health:          runtimeHealthFromModel(m.RuntimeHealth),
 	}
 }
 
@@ -143,29 +142,5 @@ func runtimeConfigToOpenAIClientConfig(cfg *LLMRuntimeConfig) *OpenAIClientConfi
 		ToolCallTimeout: cfg.ToolCallTimeout,
 		RequestPolicy:   cfg.Profile.RequestPolicy,
 		CostPolicy:      cfg.Profile.CostPolicy,
-	}
-}
-
-func runtimeHealthFromModel(h model.RuntimeHealth) LLMRuntimeHealth {
-	status := h.Status
-	if status == "" {
-		status = model.HealthStateHealthy
-	}
-	return LLMRuntimeHealth{
-		Status:           status,
-		RecentFailures:   h.RecentFailures,
-		AverageLatencyMS: h.AverageLatencyMS,
-	}
-}
-
-func runtimeHealthToModel(h LLMRuntimeHealth) model.RuntimeHealth {
-	status := h.Status
-	if status == "" {
-		status = model.HealthStateHealthy
-	}
-	return model.RuntimeHealth{
-		Status:           status,
-		RecentFailures:   h.RecentFailures,
-		AverageLatencyMS: h.AverageLatencyMS,
 	}
 }

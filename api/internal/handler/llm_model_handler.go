@@ -56,6 +56,17 @@ func (h *LLMModelHandler) GetDefault(c *gin.Context) {
 	response.Success(c, model.NewLLMModelResponse(m))
 }
 
+// GetRuntimeHealth 读取模型的实时运行健康快照（路由器内存数据，重启归零）。
+// 实时状态从这里取。模型无调用记录时返回零值，前端显示"暂无数据"。
+func (h *LLMModelHandler) GetRuntimeHealth(c *gin.Context) {
+	health, err := h.svc.GetRuntimeHealth(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		response.FromError(c, err)
+		return
+	}
+	response.Success(c, health)
+}
+
 // Create 新增
 func (h *LLMModelHandler) Create(c *gin.Context) {
 	var req model.LLMModelRequest

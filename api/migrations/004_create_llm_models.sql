@@ -20,7 +20,6 @@ CREATE TABLE IF NOT EXISTS llm_models (
     capabilities    JSONB NOT NULL DEFAULT '{}'::jsonb,
     request_policy  JSONB NOT NULL DEFAULT '{}'::jsonb,
     cost_policy     JSONB NOT NULL DEFAULT '{}'::jsonb,
-    runtime_health  JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     CONSTRAINT uq_llm_models_provider_url_model UNIQUE (provider, base_url, model_name)
@@ -51,7 +50,6 @@ COMMENT ON COLUMN llm_models.sort_order IS '排序权重，数值越小排越前
 COMMENT ON COLUMN llm_models.capabilities IS '模型能力画像 JSON：supports_tool_calls=支持工具调用, supports_vision=支持图片, supports_streaming=支持流式响应';
 COMMENT ON COLUMN llm_models.request_policy IS '请求侧策略 JSON，存储不同 Provider 特有的请求参数';
 COMMENT ON COLUMN llm_models.cost_policy IS '成本策略 JSON：input_price=输入价格$/百万token, output_price=输出价格$/百万token';
-COMMENT ON COLUMN llm_models.runtime_health IS '运行时健康快照 JSON：status=健康状态, recent_failures=最近失败次数, average_latency_ms=平均延迟';
 COMMENT ON COLUMN llm_models.created_at IS '创建时间';
 COMMENT ON COLUMN llm_models.updated_at IS '最后更新时间';
 
@@ -71,7 +69,7 @@ BEGIN
     INSERT INTO llm_models (
         id, name, provider, base_url, api_key, model_name,
         temperature, max_tokens, tags, is_default, is_enabled, sort_order,
-        capabilities, request_policy, cost_policy, runtime_health
+        capabilities, request_policy, cost_policy
     ) VALUES (
         gen_random_uuid()::TEXT,
         'GPT-4',
@@ -90,8 +88,7 @@ BEGIN
           "supports_streaming": true, "supports_vision": false, "supports_reasoning": false,
           "max_context_tokens": 128000, "max_output_tokens": 8192}'::jsonb,
         '{}'::jsonb,
-        '{"input_price": 30, "output_price": 60}'::jsonb,
-        '{"status": "healthy", "recent_failures": 0, "average_latency_ms": 0}'::jsonb
+        '{"input_price": 30, "output_price": 60}'::jsonb
     )
     ON CONFLICT (provider, base_url, model_name) DO NOTHING;
 END $$;

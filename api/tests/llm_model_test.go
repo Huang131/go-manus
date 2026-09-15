@@ -239,28 +239,6 @@ func TestLLMModelAPI_GetDefault_NoModel(t *testing.T) {
 	assert.NotEqual(t, http.StatusInternalServerError, w.Code, "不应返回 500")
 }
 
-// TestLLMModelAPI_UpdateRuntimeHealth 测试运行时健康上报
-// handler 未暴露该端点，故走 repo 层直接更新，再用 HTTP GET 验证
-func TestLLMModelAPI_UpdateRuntimeHealth(t *testing.T) {
-	modelID := createLLMModelForTest(t, "health-check")
-	defer CleanupLLMModel(t, modelID)
-
-	repo := repository.NewLLMModelRepository(testDB)
-	ctx, cancel := NewTestContext()
-	defer cancel()
-	health := model.RuntimeHealth{Status: "degraded", RecentFailures: 3, AverageLatencyMS: 1200}
-	assert.NoError(t, repo.UpdateRuntimeHealth(ctx, modelID, health), "repo.UpdateRuntimeHealth 应成功")
-
-	w := getJSON(t, "/api/llm-models/"+modelID)
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	resp := parseResponse(t, w)
-	got := resp.Data.(map[string]any)["runtime_health"].(map[string]any)
-	assert.Equal(t, "degraded", got["status"])
-	assert.Equal(t, float64(3), got["recent_failures"])
-	assert.Equal(t, float64(1200), got["average_latency_ms"])
-}
-
 // TestLLMModelAPI_SetDefault_Migration 测试 default 切换会清掉旧 default
 // 先 set A，再 set B，A.is_default 应自动变 false，B.is_default 应为 true
 func TestLLMModelAPI_SetDefault_Migration(t *testing.T) {

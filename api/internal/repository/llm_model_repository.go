@@ -17,7 +17,6 @@ import (
 type LLMModelRepository interface {
 	Create(ctx context.Context, m *model.LLMModel) error
 	Update(ctx context.Context, m *model.LLMModel) error
-	UpdateRuntimeHealth(ctx context.Context, id string, health model.RuntimeHealth) error
 	Delete(ctx context.Context, id string) error
 	GetByID(ctx context.Context, id string) (*model.LLMModel, error)
 	GetDefault(ctx context.Context) (*model.LLMModel, error)
@@ -43,18 +42,18 @@ func (r *PostgresLLMModelRepository) queryer() queryer {
 	return newQueryer(r.db, r.tx)
 }
 
-// 阶段 0 新增：capabilities/request_policy/cost_policy/runtime_health 四个 JSONB 列
+// capabilities/request_policy/cost_policy 三个 JSONB 列；运行时健康只在内存维护，不落库。
 const llmModelColumns = `id, name, provider, base_url, api_key, model_name,
 	temperature, max_tokens, tags, is_default, is_enabled, sort_order,
-	capabilities, request_policy, cost_policy, runtime_health,
+	capabilities, request_policy, cost_policy,
 	created_at, updated_at`
 
-func scanLLMModel(row pgx.Row, m *model.LLMModel) error {
-	var tagsJSON, capJSON, reqJSON, costJSON, healthJSON []byte
+func scanLLMModel(row rowScanner, m *model.LLMModel) error {
+	var tagsJSON, capJSON, reqJSON, costJSON []byte
 	if err := row.Scan(
 		&m.ID, &m.Name, &m.Provider, &m.BaseURL, &m.APIKey, &m.ModelName,
 		&m.Temperature, &m.MaxTokens, &tagsJSON, &m.IsDefault, &m.IsEnabled,
-		&m.SortOrder, &capJSON, &reqJSON, &costJSON, &healthJSON,
+		&m.SortOrder, &capJSON, &reqJSON, &costJSON,
 		&m.CreatedAt, &m.UpdatedAt,
 	); err != nil {
 		return err
@@ -82,16 +81,10 @@ func scanLLMModel(row pgx.Row, m *model.LLMModel) error {
 			return fmt.Errorf("decode model cost policy: %w", err)
 		}
 	}
-	if len(healthJSON) > 0 {
-		if err := sonic.Unmarshal(healthJSON, &m.RuntimeHealth); err != nil {
-			return fmt.Errorf("decode model runtime health: %w", err)
-		}
-	}
 	return nil
 }
 
-// capabilitiesToJSON / requestPolicyToJSON / costPolicyToJSON / runtimeHealthToJSON
-// 用法：写入 DB 前调用，返回 []byte 给 pgx
+// modelJSON 把模型的一个 JSONB 字段编码为 []byte（写入 DB 前调用）。
 func modelJSON(field string, value any) ([]byte, error) {
 	b, err := sonic.Marshal(value)
 	if err != nil {
@@ -100,34 +93,39 @@ func modelJSON(field string, value any) ([]byte, error) {
 	return b, nil
 }
 
-// runtimeHealthToJSON 保留仓储内部测试和已有调用的便捷封装。
-func runtimeHealthToJSON(h model.RuntimeHealth) ([]byte, error) {
-	return modelJSON("runtime health", h)
+// modelJSONColumns 模型全部 JSONB 列的编码结果。
+// 具名字段与 SQL 占位符一一对应，避免魔法下标错位（下标错位编译期不报错）。
+type modelJSONColumns struct {
+	tags          []byte
+	capabilities  []byte
+	requestPolicy []byte
+	costPolicy    []byte
 }
 
-func modelJSONFields(m *model.LLMModel) ([][]byte, error) {
-	values := []struct {
+func encodeModelJSONColumns(m *model.LLMModel) (modelJSONColumns, error) {
+	var c modelJSONColumns
+	for _, f := range []struct {
 		name  string
 		value any
+		dst   *[]byte
 	}{
-		{"tags", m.Tags}, {"capabilities", m.Capabilities},
-		{"request policy", m.RequestPolicy}, {"cost policy", m.CostPolicy},
-		{"runtime health", m.RuntimeHealth},
-	}
-	encoded := make([][]byte, 0, len(values))
-	for _, value := range values {
-		b, err := modelJSON(value.name, value.value)
+		{"tags", m.Tags, &c.tags},
+		{"capabilities", m.Capabilities, &c.capabilities},
+		{"request policy", m.RequestPolicy, &c.requestPolicy},
+		{"cost policy", m.CostPolicy, &c.costPolicy},
+	} {
+		b, err := modelJSON(f.name, f.value)
 		if err != nil {
-			return nil, err
+			return modelJSONColumns{}, err
 		}
-		encoded = append(encoded, b)
+		*f.dst = b
 	}
-	return encoded, nil
+	return c, nil
 }
 
 // Create 新增
 func (r *PostgresLLMModelRepository) Create(ctx context.Context, m *model.LLMModel) error {
-	fields, err := modelJSONFields(m)
+	f, err := encodeModelJSONColumns(m)
 	if err != nil {
 		return err
 	}
@@ -138,54 +136,46 @@ func (r *PostgresLLMModelRepository) Create(ctx context.Context, m *model.LLMMod
 	m.UpdatedAt = now
 	_, err = r.queryer().Exec(ctx, `
 		INSERT INTO llm_models (`+llmModelColumns+`)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
 	`,
 		m.ID, m.Name, m.Provider, m.BaseURL, m.APIKey, m.ModelName,
-		m.Temperature, m.MaxTokens, fields[0], m.IsDefault, m.IsEnabled,
+		m.Temperature, m.MaxTokens, f.tags, m.IsDefault, m.IsEnabled,
 		m.SortOrder,
-		fields[1], fields[2], fields[3], fields[4],
+		f.capabilities, f.requestPolicy, f.costPolicy,
 		m.CreatedAt, m.UpdatedAt,
 	)
 	return err
 }
 
-// Update 更新
+// Update 更新；id 不存在（校验后被并发删除）时返回 pgx.ErrNoRows。
 func (r *PostgresLLMModelRepository) Update(ctx context.Context, m *model.LLMModel) error {
-	fields, err := modelJSONFields(m)
+	f, err := encodeModelJSONColumns(m)
 	if err != nil {
 		return err
 	}
 	m.UpdatedAt = time.Now()
-	_, err = r.queryer().Exec(ctx, `
+	tag, err := r.queryer().Exec(ctx, `
 		UPDATE llm_models SET
 			name = $2, provider = $3, base_url = $4, api_key = $5, model_name = $6,
 			temperature = $7, max_tokens = $8, tags = $9, is_default = $10,
 			is_enabled = $11, sort_order = $12,
-			capabilities = $13, request_policy = $14, cost_policy = $15, runtime_health = $16,
-			updated_at = $17
+			capabilities = $13, request_policy = $14, cost_policy = $15,
+			updated_at = $16
 	WHERE id = $1
 	`,
 		m.ID, m.Name, m.Provider, m.BaseURL, m.APIKey, m.ModelName,
-		m.Temperature, m.MaxTokens, fields[0], m.IsDefault, m.IsEnabled,
+		m.Temperature, m.MaxTokens, f.tags, m.IsDefault, m.IsEnabled,
 		m.SortOrder,
-		fields[1], fields[2], fields[3], fields[4],
+		f.capabilities, f.requestPolicy, f.costPolicy,
 		m.UpdatedAt,
 	)
-	return err
-}
-
-// UpdateRuntimeHealth 只更新运行时健康快照，避免健康打点覆盖模型配置。
-func (r *PostgresLLMModelRepository) UpdateRuntimeHealth(ctx context.Context, id string, health model.RuntimeHealth) error {
-	healthJSON, err := modelJSON("runtime health", health)
 	if err != nil {
 		return err
 	}
-	_, err = r.queryer().Exec(ctx, `
-		UPDATE llm_models
-		SET runtime_health = $2, updated_at = $3
-		WHERE id = $1
-	`, id, healthJSON, time.Now())
-	return err
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }
 
 // Delete 删除
@@ -243,20 +233,13 @@ func (r *PostgresLLMModelRepository) List(ctx context.Context) ([]*model.LLMMode
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var out []*model.LLMModel
-	for rows.Next() {
+	return collectRows(rows, func(row rowScanner) (*model.LLMModel, error) {
 		var m model.LLMModel
-		if err := scanLLMModel(rows, &m); err != nil {
+		if err := scanLLMModel(row, &m); err != nil {
 			return nil, err
 		}
-		out = append(out, &m)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
+		return &m, nil
+	})
 }
 
 // ClearDefault 清空所有 default。

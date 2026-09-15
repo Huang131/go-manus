@@ -149,14 +149,21 @@ func (r *PostgresFileRepository) GetBySessionAndID(ctx context.Context, sessionI
 	return file, nil
 }
 
-// Update 更新文件记录
+// Update 更新文件记录（filename/filepath）。
+// 目标不存在时返回 pgx.ErrNoRows，避免对不存在的 id 静默报告成功。
 func (r *PostgresFileRepository) Update(ctx context.Context, file *model.File) error {
 	q := r.queryer()
 	query := `
 		UPDATE files SET filename = $2, filepath = $3 WHERE id = $1
 	`
-	_, err := q.Exec(ctx, query, file.ID, file.Filename, file.Filepath)
-	return err
+	tag, err := q.Exec(ctx, query, file.ID, file.Filename, file.Filepath)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+	return nil
 }
 
 // Delete 删除文件记录

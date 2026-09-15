@@ -59,11 +59,6 @@ func newTestModel() *model.LLMModel {
 			OutputPricePerMTokens: 0.6,
 			Currency:              "USD",
 		},
-		RuntimeHealth: model.RuntimeHealth{
-			Status:           model.HealthStateHealthy,
-			RecentFailures:   0,
-			AverageLatencyMS: 500,
-		},
 	}
 }
 
@@ -92,7 +87,6 @@ func TestLLMModelRepo_CreateAndGetByID(t *testing.T) {
 	assert.True(t, got.IsEnabled)
 	assert.Equal(t, m.Capabilities.SupportsToolCalls, got.Capabilities.SupportsToolCalls)
 	assert.Equal(t, m.CostPolicy.Currency, got.CostPolicy.Currency)
-	assert.Equal(t, m.RuntimeHealth.Status, got.RuntimeHealth.Status)
 }
 
 // ===== GetByID Not Found =====
@@ -136,31 +130,6 @@ func TestLLMModelRepo_Update(t *testing.T) {
 	assert.False(t, got.IsEnabled)
 	assert.False(t, got.Capabilities.SupportsText)
 	assert.Equal(t, 0.2, got.CostPolicy.InputPricePerMTokens)
-}
-
-// ===== UpdateRuntimeHealth =====
-
-func TestLLMModelRepo_UpdateRuntimeHealth(t *testing.T) {
-	repo := testLLMModelRepo(t)
-	m := newTestModel()
-	err := repo.Create(context.Background(), m)
-	require.NoError(t, err)
-	t.Cleanup(func() { cleanupLLMModel(t, m.ID) })
-
-	newHealth := model.RuntimeHealth{
-		Status:           model.HealthStateDegraded,
-		RecentFailures:   5,
-		AverageLatencyMS: 3000,
-	}
-	err = repo.UpdateRuntimeHealth(context.Background(), m.ID, newHealth)
-	require.NoError(t, err)
-
-	got, err := repo.GetByID(context.Background(), m.ID)
-	require.NoError(t, err)
-	require.NotNil(t, got)
-	assert.Equal(t, model.HealthStateDegraded, got.RuntimeHealth.Status)
-	assert.Equal(t, 5, got.RuntimeHealth.RecentFailures)
-	assert.Equal(t, 3000, got.RuntimeHealth.AverageLatencyMS)
 }
 
 // ===== Delete =====
