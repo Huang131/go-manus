@@ -8,9 +8,14 @@ import (
 func TestSearchClients_UseConfiguredTimeout(t *testing.T) {
 	const timeout = 7 * time.Second
 
-	bing := NewBingSearchClientWithTimeout("key", timeout)
-	if bing.httpClient.Timeout != timeout {
-		t.Fatalf("bing timeout = %s, want %s", bing.httpClient.Timeout, timeout)
+	tavily := NewTavilySearchClientWithTimeout("key", timeout)
+	if tavily.httpClient.Timeout != timeout {
+		t.Fatalf("tavily timeout = %s, want %s", tavily.httpClient.Timeout, timeout)
+	}
+
+	bocha := NewBochaSearchClientWithTimeout("key", timeout)
+	if bocha.httpClient.Timeout != timeout {
+		t.Fatalf("bocha timeout = %s, want %s", bocha.httpClient.Timeout, timeout)
 	}
 
 	google := NewGoogleSearchClientWithTimeout("key", timeout)
@@ -20,9 +25,14 @@ func TestSearchClients_UseConfiguredTimeout(t *testing.T) {
 }
 
 func TestSearchClients_InvalidTimeoutUsesDefault(t *testing.T) {
-	bing := NewBingSearchClientWithTimeout("key", 0)
-	if bing.httpClient.Timeout != 30*time.Second {
-		t.Fatalf("bing timeout = %s, want 30s", bing.httpClient.Timeout)
+	tavily := NewTavilySearchClientWithTimeout("key", 0)
+	if tavily.httpClient.Timeout != 30*time.Second {
+		t.Fatalf("tavily timeout = %s, want 30s", tavily.httpClient.Timeout)
+	}
+
+	bocha := NewBochaSearchClientWithTimeout("key", -time.Second)
+	if bocha.httpClient.Timeout != 30*time.Second {
+		t.Fatalf("bocha timeout = %s, want 30s", bocha.httpClient.Timeout)
 	}
 
 	google := NewGoogleSearchClientWithTimeout("key", -time.Second)

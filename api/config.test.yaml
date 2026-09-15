@@ -63,9 +63,10 @@ llm:
   max_tokens: 4096
 
 search:
-  provider: "bing"
+  provider: "tavily"
   http_timeout: 30
-  bing_api_key: ""
+  tavily_api_key: ""
+  bocha_api_key: ""
   google_api_key: ""
   search_engine_id: ""
 

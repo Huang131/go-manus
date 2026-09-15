@@ -159,9 +159,10 @@ type LLMConfig struct {
 
 // SearchConfig 搜索配置
 type SearchConfig struct {
-	Provider       string `mapstructure:"provider"` // "bing" or "google"
-	BingAPIKey     string `mapstructure:"bing_api_key"`
+	Provider       string `mapstructure:"provider"` // "tavily" | "bocha" | "google"
 	GoogleAPIKey   string `mapstructure:"google_api_key"`
+	TavilyAPIKey   string `mapstructure:"tavily_api_key"`
+	BochaAPIKey    string `mapstructure:"bocha_api_key"`
 	SearchEngineID string `mapstructure:"search_engine_id"`              // Google Custom Search Engine ID
 	HTTPTimeout    int    `mapstructure:"http_timeout" validate:"gte=0"` // 搜索 HTTP 请求超时（秒）
 }

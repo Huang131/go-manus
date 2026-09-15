@@ -609,11 +609,13 @@ func (a *App) initExternalClients(cfg *config.Config, opts Options) *externalCli
 	}
 
 	// Search 搜索引擎（可选，需要配置 API Key）
-	if opts.EnableSearch && (cfg.Search.BingAPIKey != "" || cfg.Search.GoogleAPIKey != "") {
+	if opts.EnableSearch && (cfg.Search.TavilyAPIKey != "" || cfg.Search.BochaAPIKey != "" ||
+		cfg.Search.GoogleAPIKey != "") {
 		clients.search = external.NewSearchEngine(&external.SearchConfig{
 			Provider:       cfg.Search.Provider,
-			BingAPIKey:     cfg.Search.BingAPIKey,
 			GoogleAPIKey:   cfg.Search.GoogleAPIKey,
+			TavilyAPIKey:   cfg.Search.TavilyAPIKey,
+			BochaAPIKey:    cfg.Search.BochaAPIKey,
 			SearchEngineID: cfg.Search.SearchEngineID,
 			HTTPTimeout:    cfg.Search.HTTPTimeout,
 		})
