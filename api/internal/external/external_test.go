@@ -29,7 +29,7 @@ func (m *MockLLM) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMResp
 	return &llmcore.LLMResponse{
 		ID: "mock-response",
 		Message: llmcore.Message{
-			Role:        llmcore.RoleAssistant,
+			Role:        model.RoleAssistant,
 			ContentText: m.invokeResult,
 		},
 	}, nil
@@ -55,7 +55,7 @@ func TestLLM_Invoke(t *testing.T) {
 
 	req := &LLMRequest{
 		Messages: []llmcore.Message{
-			{Role: llmcore.RoleUser, ContentText: "Hello, how are you?"},
+			{Role: model.RoleUser, ContentText: "Hello, how are you?"},
 		},
 	}
 
@@ -81,7 +81,7 @@ func TestLLM_Invoke_WithError(t *testing.T) {
 
 	req := &LLMRequest{
 		Messages: []llmcore.Message{
-			{Role: llmcore.RoleUser, ContentText: "Hello"},
+			{Role: model.RoleUser, ContentText: "Hello"},
 		},
 	}
 

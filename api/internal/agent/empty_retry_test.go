@@ -7,6 +7,7 @@ import (
 
 	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 // mockLLM 用于测试的 LLM mock。
@@ -55,16 +56,16 @@ func (m *mockLLM) MaxTokens() int       { return 0 }
 func TestBaseAgent_InvokeWithEmptyRetry(t *testing.T) {
 	mock := &mockLLM{
 		responses: []*llmcore.LLMResponse{
-			{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: ""}},                  // 第 1 次：空内容
-			{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: ""}},                  // 第 2 次：仍然空
-			{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: `{"hello":"world"}`}}, // 第 3 次：成功
+			{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: ""}},                  // 第 1 次：空内容
+			{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: ""}},                  // 第 2 次：仍然空
+			{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: `{"hello":"world"}`}}, // 第 3 次：成功
 		},
 	}
 
 	agent := NewBaseAgent("test", "session-1", DefaultAgentConfig(), mock, nil)
 
 	resp, attempts, err := agent.invokeWithEmptyRetry(context.Background(), &external.LLMRequest{
-		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hi"}},
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
 	}, 3)
 	if err != nil {
 		t.Fatalf("invokeWithEmptyRetry() error = %v", err)
@@ -83,7 +84,7 @@ func TestBaseAgent_InvokeWithEmptyRetry(t *testing.T) {
 	second := mock.calls[1]
 	found := false
 	for _, msg := range second.Messages {
-		if msg.Role == llmcore.RoleUser && msg.ContentText == "AI 无响应内容，请继续。" {
+		if msg.Role == model.RoleUser && msg.ContentText == "AI 无响应内容，请继续。" {
 			found = true
 			break
 		}
@@ -97,14 +98,14 @@ func TestBaseAgent_InvokeWithEmptyRetry(t *testing.T) {
 func TestBaseAgent_InvokeWithEmptyRetry_AllEmpty(t *testing.T) {
 	mock := &mockLLM{
 		responses: []*llmcore.LLMResponse{
-			{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: ""}},
-			{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: ""}},
+			{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: ""}},
+			{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: ""}},
 		},
 	}
 	agent := NewBaseAgent("test", "session-1", DefaultAgentConfig(), mock, nil)
 
 	_, _, err := agent.invokeWithEmptyRetry(context.Background(), &external.LLMRequest{
-		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hi"}},
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
 	}, 2)
 	if err == nil {
 		t.Error("expected error when all responses are empty")
@@ -115,13 +116,13 @@ func TestBaseAgent_InvokeWithEmptyRetry_AllEmpty(t *testing.T) {
 func TestBaseAgent_InvokeWithEmptyRetry_FirstSuccess(t *testing.T) {
 	mock := &mockLLM{
 		responses: []*llmcore.LLMResponse{
-			{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: `{"ok":true}`}},
+			{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: `{"ok":true}`}},
 		},
 	}
 	agent := NewBaseAgent("test", "session-1", DefaultAgentConfig(), mock, nil)
 
 	resp, attempts, err := agent.invokeWithEmptyRetry(context.Background(), &external.LLMRequest{
-		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hi"}},
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
 	}, 3)
 	if err != nil {
 		t.Fatalf("error = %v", err)

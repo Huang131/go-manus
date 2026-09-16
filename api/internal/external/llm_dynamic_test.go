@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 type stubLLM struct {
@@ -16,7 +17,7 @@ func (s *stubLLM) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMResp
 	if s.invoke != nil {
 		return s.invoke(ctx, req)
 	}
-	return &llmcore.LLMResponse{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: s.name}}, nil
+	return &llmcore.LLMResponse{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: s.name}}, nil
 }
 
 func (s *stubLLM) ModelName() string    { return s.name }

@@ -1,6 +1,10 @@
 package llmcore
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Huang131/go-manus/api/internal/model"
+)
 
 // TestCanFallbackTo_ProtocolMismatch
 // 业务期望：OpenAI <-> Anthropic 不能 fallback
@@ -122,8 +126,8 @@ func TestIsKind(t *testing.T) {
 	}
 }
 
-func fullCaps() ModelCapabilities {
-	return ModelCapabilities{
+func fullCaps() model.ModelCapabilities {
+	return model.ModelCapabilities{
 		SupportsText:                   true,
 		SupportsToolCalls:              true,
 		SupportsStructuredOutput:       true,

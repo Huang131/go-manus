@@ -126,10 +126,10 @@ func (a *BaseAgent) buildConversationMessages(systemPrompt, query string) []llmc
 	memoryMessages := a.memory.GetMessages()
 	messages := make([]llmcore.Message, 0, len(memoryMessages)+2)
 	if systemPrompt != "" {
-		messages = append(messages, llmcore.Message{Role: llmcore.RoleSystem, ContentText: systemPrompt})
+		messages = append(messages, llmcore.Message{Role: model.RoleSystem, ContentText: systemPrompt})
 	}
 	messages = append(messages, memoryMessages...)
-	messages = append(messages, llmcore.Message{Role: llmcore.RoleUser, ContentText: query})
+	messages = append(messages, llmcore.Message{Role: model.RoleUser, ContentText: query})
 	return messages
 }
 
@@ -202,8 +202,8 @@ func (a *BaseAgent) invokeWithEmptyRetry(ctx context.Context, req *external.LLMR
 			lastErr = err
 			// LLM 错误：注入空 assistant + 重试提示，然后继续
 			current.Messages = append(current.Messages,
-				llmcore.Message{Role: llmcore.RoleAssistant, ContentText: ""},
-				llmcore.Message{Role: llmcore.RoleUser, ContentText: "AI 无响应内容，请继续。"},
+				llmcore.Message{Role: model.RoleAssistant, ContentText: ""},
+				llmcore.Message{Role: model.RoleUser, ContentText: "AI 无响应内容，请继续。"},
 			)
 			continue
 		}
@@ -216,8 +216,8 @@ func (a *BaseAgent) invokeWithEmptyRetry(ctx context.Context, req *external.LLMR
 			logger.String("agent", a.name),
 			logger.Int("attempt", attempt))
 		current.Messages = append(current.Messages,
-			llmcore.Message{Role: llmcore.RoleAssistant, ContentText: ""},
-			llmcore.Message{Role: llmcore.RoleUser, ContentText: "AI 无响应内容，请继续。"},
+			llmcore.Message{Role: model.RoleAssistant, ContentText: ""},
+			llmcore.Message{Role: model.RoleUser, ContentText: "AI 无响应内容，请继续。"},
 		)
 	}
 
@@ -348,8 +348,8 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 
 				// 添加空回复到历史
 				messages = append(messages,
-					llmcore.Message{Role: llmcore.RoleAssistant, ContentText: ""},
-					llmcore.Message{Role: llmcore.RoleUser, ContentText: "AI 无响应内容，请继续。"},
+					llmcore.Message{Role: model.RoleAssistant, ContentText: ""},
+					llmcore.Message{Role: model.RoleUser, ContentText: "AI 无响应内容，请继续。"},
 				)
 
 				llmReq = &external.LLMRequest{
@@ -372,7 +372,7 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 		if len(resp.Message.ToolCalls) > 0 {
 			// 4a. 把 assistant + tool_calls 写回历史
 			assistantMsg := llmcore.Message{
-				Role:        llmcore.RoleAssistant,
+				Role:        model.RoleAssistant,
 				ContentText: resp.Message.ContentText,
 				ToolCalls:   resp.Message.ToolCalls,
 				Reasoning:   resp.Message.Reasoning,
@@ -397,7 +397,7 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 						logger.Err(err))
 					// 添加错误结果到历史，继续循环
 					messages = append(messages, llmcore.Message{
-						Role:        llmcore.RoleTool,
+						Role:        model.RoleTool,
 						ToolCallID:  tc.ID,
 						ContentText: fmt.Sprintf(`{"success": false, "message": "%s"}`, err.Error()),
 					})
@@ -408,7 +408,7 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 				if result.WaitForUser {
 					// 将工具结果添加到历史
 					messages = append(messages, llmcore.Message{
-						Role:        llmcore.RoleTool,
+						Role:        model.RoleTool,
 						ToolCallID:  result.ToolCallID,
 						ContentText: result.Result.JSON(),
 					})
@@ -433,7 +433,7 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 
 				// 将工具结果添加到历史
 				messages = append(messages, llmcore.Message{
-					Role:        llmcore.RoleTool,
+					Role:        model.RoleTool,
 					ToolCallID:  result.ToolCallID,
 					ContentText: result.Result.JSON(),
 				})
@@ -449,15 +449,15 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 
 			// 添加空回复到历史
 			messages = append(messages,
-				llmcore.Message{Role: llmcore.RoleAssistant, ContentText: ""},
-				llmcore.Message{Role: llmcore.RoleUser, ContentText: "AI 无响应内容，请继续。"},
+				llmcore.Message{Role: model.RoleAssistant, ContentText: ""},
+				llmcore.Message{Role: model.RoleUser, ContentText: "AI 无响应内容，请继续。"},
 			)
 			continue
 		}
 
 		// 6. 有有效内容，添加到最后并返回
 		messages = append(messages, llmcore.Message{
-			Role:        llmcore.RoleAssistant,
+			Role:        model.RoleAssistant,
 			ContentText: resp.Message.ContentText,
 			Reasoning:   resp.Message.Reasoning,
 		})

@@ -64,7 +64,7 @@ func BuildRuntimeConfigFromModel(m *model.LLMModel, toolCallTimeout int) *LLMRun
 	policy := llmcore.RequestPolicy{
 		DefaultTemperature: m.RequestPolicy.DefaultTemperature,
 		DefaultMaxTokens:   m.RequestPolicy.DefaultMaxTokens,
-		ReasoningMode:      llmcore.ReasoningMode(m.RequestPolicy.ReasoningMode),
+		ReasoningMode:      m.RequestPolicy.ReasoningMode,
 		Extra:              convertRequestPolicyExtra(m.RequestPolicy.Extra),
 	}
 	effectiveTemperature := m.Temperature
@@ -75,7 +75,7 @@ func BuildRuntimeConfigFromModel(m *model.LLMModel, toolCallTimeout int) *LLMRun
 	if effectiveMaxTokens == 0 && policy.DefaultMaxTokens != nil {
 		effectiveMaxTokens = *policy.DefaultMaxTokens
 	}
-	costPolicy := llmcore.CostPolicy{
+	costPolicy := model.CostPolicy{
 		InputPricePerMTokens:  m.CostPolicy.InputPricePerMTokens,
 		OutputPricePerMTokens: m.CostPolicy.OutputPricePerMTokens,
 		Currency:              m.CostPolicy.Currency,
@@ -88,7 +88,7 @@ func BuildRuntimeConfigFromModel(m *model.LLMModel, toolCallTimeout int) *LLMRun
 			BaseURL:   m.BaseURL,
 			APIKey:    m.APIKey,
 			ModelName: m.ModelName,
-			Capabilities: llmcore.ModelCapabilities{
+			Capabilities: model.ModelCapabilities{
 				SupportsText:                   m.Capabilities.SupportsText,
 				SupportsToolCalls:              m.Capabilities.SupportsToolCalls,
 				SupportsStructuredOutput:       m.Capabilities.SupportsStructuredOutput,

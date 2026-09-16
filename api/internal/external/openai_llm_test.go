@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 // newTestClient 构造一个 baseURL 指向 test server 的 OpenAIClient
@@ -63,7 +64,7 @@ func TestOpenAIClient_StreamProducesDeltas(t *testing.T) {
 	})
 
 	deltas, err := c.Stream(context.Background(), &LLMRequest{
-		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hi"}},
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
 	})
 	if err != nil {
 		t.Fatalf("Stream() error = %v", err)
@@ -203,7 +204,7 @@ func TestOpenAIClient_ContentOnly(t *testing.T) {
 	})
 	resp, err := c.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
-			{Role: llmcore.RoleUser, ContentText: "hi"},
+			{Role: model.RoleUser, ContentText: "hi"},
 		},
 	})
 	if err != nil {
@@ -269,7 +270,7 @@ func TestOpenAIClient_RequestWireFormat(t *testing.T) {
 	})
 	_, err := c.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
-			{Role: llmcore.RoleUser, ContentText: "hello"},
+			{Role: model.RoleUser, ContentText: "hello"},
 		},
 		Tools: []llmcore.ToolSpec{
 			{
@@ -321,7 +322,7 @@ func TestOpenAIClient_ReasoningOnly_NoContentLeak(t *testing.T) {
 	})
 	resp, err := c.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
-			{Role: llmcore.RoleUser, ContentText: "hi"},
+			{Role: model.RoleUser, ContentText: "hi"},
 		},
 	})
 	if err != nil {
@@ -364,7 +365,7 @@ func TestOpenAIClient_ContentAndReasoning_Separated(t *testing.T) {
 	})
 	resp, err := c.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
-			{Role: llmcore.RoleUser, ContentText: "hi"},
+			{Role: model.RoleUser, ContentText: "hi"},
 		},
 	})
 	if err != nil {
@@ -405,7 +406,7 @@ func TestOpenAIClient_ReasoningAltField(t *testing.T) {
 	})
 	resp, err := c.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
-			{Role: llmcore.RoleUser, ContentText: "hi"},
+			{Role: model.RoleUser, ContentText: "hi"},
 		},
 	})
 	if err != nil {
@@ -454,7 +455,7 @@ func TestOpenAIClient_ToolCall(t *testing.T) {
 	})
 	resp, err := c.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
-			{Role: llmcore.RoleUser, ContentText: "上海天气"},
+			{Role: model.RoleUser, ContentText: "上海天气"},
 		},
 		Tools: []llmcore.ToolSpec{
 			{
@@ -516,13 +517,13 @@ func TestOpenAIClient_RequestPolicyAndCost(t *testing.T) {
 	c.requestPolicy = llmcore.RequestPolicy{
 		DefaultTemperature: &temp,
 		DefaultMaxTokens:   &maxTokens,
-		ReasoningMode:      llmcore.ReasoningOff,
+		ReasoningMode:      model.ReasoningOff,
 		Extra: map[string]llmcore.ExtraParam{
 			"reasoning_effort": {Kind: "json", Raw: []byte(`"high"`)},
 			"bad_param":        {Kind: "json", Raw: []byte(`"leak"`)},
 		},
 	}
-	c.costPolicy = llmcore.CostPolicy{
+	c.costPolicy = model.CostPolicy{
 		InputPricePerMTokens:  1,
 		OutputPricePerMTokens: 2,
 		Currency:              "USD",
@@ -530,7 +531,7 @@ func TestOpenAIClient_RequestPolicyAndCost(t *testing.T) {
 
 	resp, err := c.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
-			{Role: llmcore.RoleUser, ContentText: "hello"},
+			{Role: model.RoleUser, ContentText: "hello"},
 		},
 	})
 	if err != nil {
@@ -571,7 +572,7 @@ func TestOpenAIClient_401_Auth(t *testing.T) {
 	})
 	_, err := c.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
-			{Role: llmcore.RoleUser, ContentText: "hi"},
+			{Role: model.RoleUser, ContentText: "hi"},
 		},
 	})
 	if err == nil {
@@ -605,7 +606,7 @@ func TestOpenAIClient_429_RateLimit(t *testing.T) {
 	})
 	_, err := c.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
-			{Role: llmcore.RoleUser, ContentText: "hi"},
+			{Role: model.RoleUser, ContentText: "hi"},
 		},
 	})
 	if err == nil {
@@ -633,7 +634,7 @@ func TestOpenAIClient_5xx_Server(t *testing.T) {
 	})
 	_, err := c.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
-			{Role: llmcore.RoleUser, ContentText: "hi"},
+			{Role: model.RoleUser, ContentText: "hi"},
 		},
 	})
 	if err == nil {
@@ -660,7 +661,7 @@ func TestOpenAIClient_ProtocolError_NotFallbackable(t *testing.T) {
 	})
 	_, err := c.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
-			{Role: llmcore.RoleUser, ContentText: "hi"},
+			{Role: model.RoleUser, ContentText: "hi"},
 		},
 	})
 	if err == nil {

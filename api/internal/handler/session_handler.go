@@ -269,7 +269,7 @@ func (h *SessionHandler) Chat(c *gin.Context) {
 // 并推送用户消息回显（让前端立即展示）与 task_id 事件。
 func (h *SessionHandler) sendMessage(c *gin.Context, sessionID string, req *chatRequest) (string, error) {
 	msg := &llmcore.Message{
-		Role:        llmcore.RoleUser,
+		Role:        model.RoleUser,
 		ContentText: *req.Message,
 		Attachments: req.Attachments,
 	}
@@ -282,7 +282,7 @@ func (h *SessionHandler) sendMessage(c *gin.Context, sessionID string, req *chat
 
 	userPayload, err := sonic.Marshal(&model.MessageEvent{
 		Type:    model.EventTypeMessage,
-		Role:    string(msg.Role),
+		Role:    msg.Role,
 		Message: msg.ContentText,
 	})
 	if err != nil {

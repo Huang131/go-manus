@@ -372,7 +372,7 @@ func (s *DefaultLLMModelService) Test(ctx context.Context, m *model.LLMModel) (*
 		return nil, apperr.Unavailable("模型客户端初始化失败")
 	}
 	resp, err := client.Invoke(ctx, &external.LLMRequest{Messages: []llmcore.Message{
-		{Role: llmcore.RoleUser, ContentText: "连接测试：请只回复连接成功。"},
+		{Role: model.RoleUser, ContentText: "连接测试：请只回复连接成功。"},
 	}})
 	if err != nil {
 		return nil, mapModelTestError(err)

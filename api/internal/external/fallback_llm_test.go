@@ -32,7 +32,7 @@ func TestRoutedLLM_FallbackOnRateLimit(t *testing.T) {
 				{
 					Profile: llmcore.ModelProfile{
 						Protocol: llmcore.ProtocolOpenAICompat,
-						Capabilities: llmcore.ModelCapabilities{
+						Capabilities: model.ModelCapabilities{
 							SupportsText:      true,
 							SupportsToolCalls: true,
 							SupportsStreaming: true,
@@ -45,7 +45,7 @@ func TestRoutedLLM_FallbackOnRateLimit(t *testing.T) {
 				{
 					Profile: llmcore.ModelProfile{
 						Protocol: llmcore.ProtocolOpenAICompat,
-						Capabilities: llmcore.ModelCapabilities{
+						Capabilities: model.ModelCapabilities{
 							SupportsText:      true,
 							SupportsToolCalls: true,
 							SupportsStreaming: true,
@@ -66,14 +66,14 @@ func TestRoutedLLM_FallbackOnRateLimit(t *testing.T) {
 					if cfg.ModelName == "primary" {
 						return nil, llmcore.NewProviderError(llmcore.KindRateLimit, "openai_compat", cfg.ModelName, "rate limit")
 					}
-					return &llmcore.LLMResponse{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: cfg.ModelName}}, nil
+					return &llmcore.LLMResponse{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: cfg.ModelName}}, nil
 				},
 			}
 		},
 	)
 
 	resp, err := router.Invoke(context.Background(), &LLMRequest{
-		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hello"}},
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hello"}},
 	})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
@@ -152,7 +152,7 @@ func TestRoutedLLM_PreferHealthyCandidate(t *testing.T) {
 	)
 
 	resp, err := router.Invoke(context.Background(), &LLMRequest{
-		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hello"}},
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hello"}},
 	})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
@@ -173,7 +173,7 @@ func TestRoutedLLM_DoNotFallbackAcrossProtocol(t *testing.T) {
 				{
 					Profile: llmcore.ModelProfile{
 						Protocol: llmcore.ProtocolAnthropic,
-						Capabilities: llmcore.ModelCapabilities{
+						Capabilities: model.ModelCapabilities{
 							SupportsText:      true,
 							SupportsToolCalls: true,
 							SupportsStreaming: true,
@@ -186,7 +186,7 @@ func TestRoutedLLM_DoNotFallbackAcrossProtocol(t *testing.T) {
 				{
 					Profile: llmcore.ModelProfile{
 						Protocol: llmcore.ProtocolOpenAICompat,
-						Capabilities: llmcore.ModelCapabilities{
+						Capabilities: model.ModelCapabilities{
 							SupportsText:      true,
 							SupportsToolCalls: true,
 							SupportsStreaming: true,
@@ -211,7 +211,7 @@ func TestRoutedLLM_DoNotFallbackAcrossProtocol(t *testing.T) {
 	)
 
 	_, err := router.Invoke(context.Background(), &LLMRequest{
-		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hello"}},
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hello"}},
 	})
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -232,7 +232,7 @@ func TestRoutedLLM_DoNotFallbackAfterToolUseSideEffect(t *testing.T) {
 				{
 					Profile: llmcore.ModelProfile{
 						Protocol: llmcore.ProtocolOpenAICompat,
-						Capabilities: llmcore.ModelCapabilities{
+						Capabilities: model.ModelCapabilities{
 							SupportsText:      true,
 							SupportsToolCalls: true,
 							SupportsStreaming: true,
@@ -245,7 +245,7 @@ func TestRoutedLLM_DoNotFallbackAfterToolUseSideEffect(t *testing.T) {
 				{
 					Profile: llmcore.ModelProfile{
 						Protocol: llmcore.ProtocolOpenAICompat,
-						Capabilities: llmcore.ModelCapabilities{
+						Capabilities: model.ModelCapabilities{
 							SupportsText:      true,
 							SupportsToolCalls: true,
 							SupportsStreaming: true,
@@ -271,8 +271,8 @@ func TestRoutedLLM_DoNotFallbackAfterToolUseSideEffect(t *testing.T) {
 
 	_, err := router.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
-			{Role: llmcore.RoleUser, ContentText: "hello"},
-			{Role: llmcore.RoleTool, Name: "shell", ContentText: "result"},
+			{Role: model.RoleUser, ContentText: "hello"},
+			{Role: model.RoleTool, Name: "shell", ContentText: "result"},
 		},
 		Tools: []llmcore.ToolSpec{
 			{
@@ -327,7 +327,7 @@ func TestRoutedLLM_AllowFallbackBeforeToolExecution(t *testing.T) {
 	_, err := router.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
 			{
-				Role:      llmcore.RoleAssistant,
+				Role:      model.RoleAssistant,
 				ToolCalls: []llmcore.ToolCall{{ID: "tool-1", Type: "function", Function: llmcore.ToolCallFunction{Name: "shell", Arguments: "{}"}}},
 			},
 		},
@@ -373,7 +373,7 @@ func TestRoutedLLM_RecordSuccessUpdatesRuntimeHealth(t *testing.T) {
 
 	router.RecordSuccess("fast", 10*time.Millisecond)
 	resp, err := router.Invoke(context.Background(), &LLMRequest{
-		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hello"}},
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hello"}},
 	})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
@@ -407,7 +407,7 @@ func TestRoutedLLM_RecordFailureUpdatesRuntimeHealth(t *testing.T) {
 
 	router.RecordFailure("primary", llmcore.NewProviderError(llmcore.KindServer, "openai_compat", "primary", "server error"), 20*time.Millisecond)
 	resp, err := router.Invoke(context.Background(), &LLMRequest{
-		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hello"}},
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hello"}},
 	})
 	if err != nil {
 		t.Fatalf("Invoke: %v", err)
@@ -420,7 +420,7 @@ func TestRoutedLLM_RecordFailureUpdatesRuntimeHealth(t *testing.T) {
 func openAITextProfile() llmcore.ModelProfile {
 	return llmcore.ModelProfile{
 		Protocol: llmcore.ProtocolOpenAICompat,
-		Capabilities: llmcore.ModelCapabilities{
+		Capabilities: model.ModelCapabilities{
 			SupportsText:      true,
 			SupportsToolCalls: true,
 			SupportsStreaming: true,

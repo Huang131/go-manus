@@ -1,5 +1,7 @@
 package llmcore
 
+import "github.com/Huang131/go-manus/api/internal/model"
+
 // ProviderProtocol 上游 provider 协议分类
 // Adapter 选择就是基于这个字段
 type ProviderProtocol string
@@ -35,43 +37,18 @@ type ModelProfile struct {
 	ModelName string `json:"model_name"`
 
 	// Capabilities 能力画像
-	Capabilities ModelCapabilities `json:"capabilities"`
+	Capabilities model.ModelCapabilities `json:"capabilities"`
 	// RequestPolicy 请求策略
 	RequestPolicy RequestPolicy `json:"request_policy"`
 	// CostPolicy 成本策略
-	CostPolicy CostPolicy `json:"cost_policy"`
+	CostPolicy model.CostPolicy `json:"cost_policy"`
 }
-
-// ModelCapabilities 模型能力画像（与 model.ModelCapabilities 字段对齐，但放 llmcore 包内避免循环依赖）
-type ModelCapabilities struct {
-	SupportsText                   bool `json:"supports_text"`
-	SupportsToolCalls              bool `json:"supports_tool_calls"`
-	SupportsStructuredOutput       bool `json:"supports_structured_output"`
-	SupportsJSONMode               bool `json:"supports_json_mode"`
-	SupportsStrictStructuredOutput bool `json:"supports_strict_structured_output"`
-	SupportsStreaming              bool `json:"supports_streaming"`
-	SupportsVision                 bool `json:"supports_vision"`
-	SupportsReasoning              bool `json:"supports_reasoning"`
-
-	MaxContextTokens int `json:"max_context_tokens"`
-	MaxOutputTokens  int `json:"max_output_tokens"`
-}
-
-// ReasoningMode 思考模式档位
-type ReasoningMode string
-
-const (
-	ReasoningAuto ReasoningMode = "auto"
-	ReasoningOff  ReasoningMode = "off"
-	ReasoningLow  ReasoningMode = "low"
-	ReasoningHigh ReasoningMode = "high"
-)
 
 // RequestPolicy 请求侧策略
 type RequestPolicy struct {
-	DefaultTemperature *float64      `json:"default_temperature,omitempty"`
-	DefaultMaxTokens   *int          `json:"default_max_tokens,omitempty"`
-	ReasoningMode      ReasoningMode `json:"reasoning_mode"`
+	DefaultTemperature *float64            `json:"default_temperature,omitempty"`
+	DefaultMaxTokens   *int                `json:"default_max_tokens,omitempty"`
+	ReasoningMode      model.ReasoningMode `json:"reasoning_mode"`
 	// Extra provider 白名单参数
 	// Adapter 必须按自身 allowlist 解析，**不允许原样透传**
 	Extra map[string]ExtraParam `json:"extra,omitempty"`
@@ -84,11 +61,4 @@ type ExtraParam struct {
 	// Adapter 收到 Extra 时按 Kind 反序列化
 	Kind string `json:"kind"`
 	Raw  []byte `json:"raw"`
-}
-
-// CostPolicy 成本策略
-type CostPolicy struct {
-	InputPricePerMTokens  float64 `json:"input_price_per_m_tokens"`
-	OutputPricePerMTokens float64 `json:"output_price_per_m_tokens"`
-	Currency              string  `json:"currency"`
 }

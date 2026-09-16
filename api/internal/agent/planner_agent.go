@@ -53,8 +53,8 @@ func (a *PlannerAgent) CreatePlan(ctx context.Context, input *TaskInput) (*model
 
 	// 构建消息历史（阶段 1d：改 llmcore.Message 强类型）
 	messages := []llmcore.Message{
-		{Role: llmcore.RoleSystem, ContentText: systemPrompt},
-		{Role: llmcore.RoleUser, ContentText: prompt},
+		{Role: model.RoleSystem, ContentText: systemPrompt},
+		{Role: model.RoleUser, ContentText: prompt},
 	}
 
 	// 调用 LLM（与原项目对齐：planner 阶段强制 JSON 输出，抑制 CoT 泄露）
@@ -145,8 +145,8 @@ func (a *PlannerAgent) UpdatePlan(ctx context.Context, plan *model.Plan, complet
 
 	// 构建消息历史（阶段 1d：改 llmcore.Message 强类型）
 	messages := []llmcore.Message{
-		{Role: llmcore.RoleSystem, ContentText: systemPrompt},
-		{Role: llmcore.RoleUser, ContentText: prompt},
+		{Role: model.RoleSystem, ContentText: systemPrompt},
+		{Role: model.RoleUser, ContentText: prompt},
 	}
 
 	// 调用 LLM（planner 阶段强制 JSON 输出，与原项目对齐）

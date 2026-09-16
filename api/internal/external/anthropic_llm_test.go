@@ -12,6 +12,7 @@ import (
 	"github.com/bytedance/sonic"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 // newAnthropicTestClient 创建使用 mock transport 的 Anthropic 客户端，
@@ -121,18 +122,18 @@ func TestAnthropicClient_ToolUseRequestWire(t *testing.T) {
 
 	_, err := c.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{
-			{Role: llmcore.RoleSystem, ContentText: "你是助手"},
-			{Role: llmcore.RoleUser, ContentText: "查一下北京天气"},
+			{Role: model.RoleSystem, ContentText: "你是助手"},
+			{Role: model.RoleUser, ContentText: "查一下北京天气"},
 			{
-				Role:        llmcore.RoleAssistant,
+				Role:        model.RoleAssistant,
 				ContentText: "我来查询",
 				ToolCalls: []llmcore.ToolCall{
 					{ID: "call-1", Type: "function", Function: llmcore.ToolCallFunction{Name: "search", Arguments: `{"query":"北京天气"}`}},
 				},
 			},
 			// 连续两条 tool 消息：应合并进同一条 user 消息（角色交替约束）
-			{Role: llmcore.RoleTool, ToolCallID: "call-1", ContentText: `{"temp":"26C"}`},
-			{Role: llmcore.RoleTool, ToolCallID: "call-1", ContentText: `{"extra":"data"}`},
+			{Role: model.RoleTool, ToolCallID: "call-1", ContentText: `{"temp":"26C"}`},
+			{Role: model.RoleTool, ToolCallID: "call-1", ContentText: `{"extra":"data"}`},
 		},
 		Tools: []llmcore.ToolSpec{
 			{Type: "function", Function: llmcore.ToolSpecFunction{
@@ -221,7 +222,7 @@ func TestAnthropicClient_ResponseBlocks(t *testing.T) {
 	})
 
 	resp, err := c.Invoke(context.Background(), &LLMRequest{
-		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "天气如何"}},
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "天气如何"}},
 	})
 	if err != nil {
 		t.Fatalf("Invoke() error = %v", err)
@@ -260,7 +261,7 @@ func TestAnthropicClient_TextOnlyWire(t *testing.T) {
 	})
 
 	resp, err := c.Invoke(context.Background(), &LLMRequest{
-		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hi"}},
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
 	})
 	if err != nil {
 		t.Fatalf("Invoke() error = %v", err)
@@ -337,7 +338,7 @@ func TestAnthropicClient_HTTPErrorClassification(t *testing.T) {
 				return anthropicErrorResponse(tt.status), nil
 			}))
 			_, err := c.Invoke(context.Background(), &LLMRequest{
-				Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hi"}},
+				Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
 			})
 			if err == nil {
 				t.Fatal("expected error, got nil")
@@ -370,7 +371,7 @@ func TestAnthropicClient_NetworkError(t *testing.T) {
 		return nil, errors.New("dial tcp: connection refused")
 	}))
 	_, err := c.Invoke(context.Background(), &LLMRequest{
-		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hi"}},
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
 	})
 	if !llmcore.IsKind(err, llmcore.KindNetwork) {
 		t.Fatalf("error kind = %v, want KindNetwork", errKind(err))
@@ -396,7 +397,7 @@ func TestAnthropicClient_ToolCallTimeout(t *testing.T) {
 	})
 
 	_, err := c.Invoke(context.Background(), &LLMRequest{
-		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hi"}},
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
 		Tools: []llmcore.ToolSpec{{
 			Type:     llmcore.ToolTypeFunction,
 			Function: llmcore.ToolSpecFunction{Name: "search"},
@@ -420,7 +421,7 @@ func TestAnthropicClient_ProtocolError_NotFallbackable(t *testing.T) {
 		}, nil
 	}))
 	_, err := c.Invoke(context.Background(), &LLMRequest{
-		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hi"}},
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
 	})
 	pe, ok := err.(*llmcore.ProviderError)
 	if !ok {
@@ -437,7 +438,7 @@ func TestAnthropicClient_StreamHTTPError(t *testing.T) {
 		return anthropicErrorResponse(http.StatusTooManyRequests), nil
 	}))
 	_, err := c.Stream(context.Background(), &LLMRequest{
-		Messages: []llmcore.Message{{Role: llmcore.RoleUser, ContentText: "hi"}},
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
 	})
 	if !llmcore.IsKind(err, llmcore.KindRateLimit) {
 		t.Fatalf("error kind = %v, want KindRateLimit", errKind(err))

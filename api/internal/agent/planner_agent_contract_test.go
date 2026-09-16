@@ -6,11 +6,12 @@ import (
 	"testing"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 func TestPlanner_CreatePlanUsesStructuredRequestWithoutTools(t *testing.T) {
 	mock := &mockLLM{responses: []*llmcore.LLMResponse{{Message: llmcore.Message{
-		Role:        llmcore.RoleAssistant,
+		Role:        model.RoleAssistant,
 		ContentText: `{"message":"可以计算","goal":"回答计算问题","title":"计算","language":"zh-CN","steps":[{"id":"step_1","description":"计算 1+3+4"}]}`,
 	}}}}
 	planner := NewPlannerAgent("s", DefaultAgentConfig(), mock, nil)
@@ -31,7 +32,7 @@ func TestPlanner_CreatePlanUsesStructuredRequestWithoutTools(t *testing.T) {
 
 func TestPlanner_CreatePlanRejectsNonJSONContent(t *testing.T) {
 	mock := &mockLLM{responses: []*llmcore.LLMResponse{{Message: llmcore.Message{
-		Role:        llmcore.RoleAssistant,
+		Role:        model.RoleAssistant,
 		ContentText: "8",
 	}}}}
 	planner := NewPlannerAgent("s", DefaultAgentConfig(), mock, nil)

@@ -139,8 +139,8 @@ func TestSessionRepo_SaveAndGetMemory_RoundTrip(t *testing.T) {
 	defer CleanupSession(t, sessionID)
 
 	messages := []llmcore.Message{
-		{Role: llmcore.RoleUser, ContentText: "test message content"},
-		{Role: llmcore.RoleAssistant, ContentText: "assistant response"},
+		{Role: model.RoleUser, ContentText: "test message content"},
+		{Role: model.RoleAssistant, ContentText: "assistant response"},
 	}
 
 	err := repo.SaveMemory(context.Background(), sessionID, "planner", messages)
@@ -150,7 +150,7 @@ func TestSessionRepo_SaveAndGetMemory_RoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, got, 2)
 	assert.Equal(t, "test message content", got[0].ContentText)
-	assert.Equal(t, llmcore.RoleUser, got[0].Role)
+	assert.Equal(t, model.RoleUser, got[0].Role)
 	assert.Equal(t, "assistant response", got[1].ContentText)
 }
 

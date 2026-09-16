@@ -130,7 +130,7 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *llmc
 	// 构建用户消息事件（DB 事件与 Redis 输入共用同一份，避免两种形状重复序列化）
 	msgEvent := &model.MessageEvent{
 		Type:    model.EventTypeMessage,
-		Role:    string(message.Role),
+		Role:    message.Role,
 		Message: message.ContentText,
 	}
 	if len(message.Attachments) > 0 {

@@ -14,6 +14,7 @@ import (
 	"github.com/bytedance/sonic"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 // OpenAIClient OpenAI 兼容 API 客户端
@@ -25,7 +26,7 @@ type OpenAIClient struct {
 	maxTokens       int
 	toolCallTimeout time.Duration // tool calling 请求超时
 	requestPolicy   llmcore.RequestPolicy
-	costPolicy      llmcore.CostPolicy
+	costPolicy      model.CostPolicy
 	httpClient      *http.Client
 }
 
@@ -40,7 +41,7 @@ type OpenAIClientConfig struct {
 	MaxTokens       int                   `mapstructure:"max_tokens"`
 	ToolCallTimeout int                   `mapstructure:"tool_call_timeout"` // tool calling 请求超时秒数，默认 15
 	RequestPolicy   llmcore.RequestPolicy `mapstructure:"request_policy"`
-	CostPolicy      llmcore.CostPolicy    `mapstructure:"cost_policy"`
+	CostPolicy      model.CostPolicy      `mapstructure:"cost_policy"`
 }
 
 func (c *OpenAIClientConfig) setDefaults() {
@@ -293,7 +294,7 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LL
 		ID:    chatResp.ID,
 		Model: chatResp.Model,
 		Message: llmcore.Message{
-			Role:        llmcore.RoleAssistant,
+			Role:        model.RoleAssistant,
 			ContentText: choice.Message.Content,
 			Reasoning:   reasoning,
 			ToolCalls:   toolCalls,
@@ -496,13 +497,13 @@ func (c *OpenAIClient) effectiveMaxTokens() int {
 
 func (c *OpenAIClient) effectiveReasoningEffort() *string {
 	switch c.requestPolicy.ReasoningMode {
-	case llmcore.ReasoningOff:
+	case model.ReasoningOff:
 		v := "none"
 		return &v
-	case llmcore.ReasoningLow:
+	case model.ReasoningLow:
 		v := "low"
 		return &v
-	case llmcore.ReasoningHigh:
+	case model.ReasoningHigh:
 		v := "high"
 		return &v
 	}
@@ -523,7 +524,7 @@ func reasoningTokens(topLevel, details int) int {
 	return topLevel
 }
 
-func estimateCostUSD(policy llmcore.CostPolicy, usage llmcore.Usage) float64 {
+func estimateCostUSD(policy model.CostPolicy, usage llmcore.Usage) float64 {
 	if policy.InputPricePerMTokens == 0 && policy.OutputPricePerMTokens == 0 {
 		return 0
 	}

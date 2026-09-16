@@ -191,7 +191,7 @@ func TestPlannerReActFlow_InvokeContext(t *testing.T) {
 
 	input := &TaskInput{
 		Message: llmcore.Message{
-			Role:        llmcore.RoleUser,
+			Role:        model.RoleUser,
 			ContentText: "test message",
 		},
 	}
@@ -221,7 +221,7 @@ func (m *mockLLMForTest) Invoke(ctx context.Context, req *external.LLMRequest) (
 	return &llmcore.LLMResponse{
 		ID: "mock-response",
 		Message: llmcore.Message{
-			Role:        llmcore.RoleAssistant,
+			Role:        model.RoleAssistant,
 			ContentText: m.response,
 		},
 	}, nil

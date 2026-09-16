@@ -79,7 +79,7 @@ func TestAgentServiceChatUsesDetachedContextForMessagePersistence(t *testing.T) 
 	requestCtx, cancel := context.WithCancel(requestCtx)
 	cancel()
 
-	_, err := svc.Chat(requestCtx, "session-1", &llmcore.Message{Role: llmcore.RoleUser, ContentText: "hello"})
+	_, err := svc.Chat(requestCtx, "session-1", &llmcore.Message{Role: model.RoleUser, ContentText: "hello"})
 	if err != nil {
 		t.Fatalf("Chat() error = %v", err)
 	}

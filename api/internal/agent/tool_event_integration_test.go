@@ -260,10 +260,10 @@ func TestToolCallingEvents_SSEStream(t *testing.T) {
 	mock := &mockLLM{
 		responses: []*llmcore.LLMResponse{
 			// planner.CreatePlan
-			{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: `{"message":"已制定计划","goal":"测试工具调用","title":"工具调用集成测试","language":"zh","steps":[{"id":"s1","description":"调用测试工具"}]}`}},
+			{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: `{"message":"已制定计划","goal":"测试工具调用","title":"工具调用集成测试","language":"zh","steps":[{"id":"s1","description":"调用测试工具"}]}`}},
 			// react.BaseAgent.Invoke 第一轮：要求调用 test_tool
 			{Message: llmcore.Message{
-				Role:        llmcore.RoleAssistant,
+				Role:        model.RoleAssistant,
 				ContentText: "",
 				ToolCalls: []llmcore.ToolCall{{
 					ID:   "call-1",
@@ -275,9 +275,9 @@ func TestToolCallingEvents_SSEStream(t *testing.T) {
 				}},
 			}},
 			// react.BaseAgent.Invoke 第二轮：工具执行后的最终结果
-			{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: `{"success":true,"result":"测试工具执行成功"}`}},
+			{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: `{"success":true,"result":"测试工具执行成功"}`}},
 			// react.Summarize
-			{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: `{"message":"任务总结","attachments":[]}`}},
+			{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: `{"message":"任务总结","attachments":[]}`}},
 		},
 	}
 
@@ -305,7 +305,7 @@ func TestToolCallingEvents_SSEStream(t *testing.T) {
 	// 4. 模拟 SSE 消费端：与 handler 的 GetTaskEvents 相同，用 GetOutput 轮询 output_stream
 	msgEvent := &model.MessageEvent{
 		Type:    model.EventTypeMessage,
-		Role:    "user",
+		Role:    model.RoleUser,
 		Message: "请调用测试工具",
 	}
 	if _, err := task.PutInput(ctx, msgEvent); err != nil {
@@ -404,10 +404,10 @@ func TestToolCallingEvents_SSEStream_Failure(t *testing.T) {
 	mock := &mockLLM{
 		responses: []*llmcore.LLMResponse{
 			// planner.CreatePlan
-			{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: `{"message":"已制定计划","goal":"测试失败工具","title":"失败测试","language":"zh","steps":[{"id":"s1","description":"调用会失败的测试工具"}]}`}},
+			{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: `{"message":"已制定计划","goal":"测试失败工具","title":"失败测试","language":"zh","steps":[{"id":"s1","description":"调用会失败的测试工具"}]}`}},
 			// react.BaseAgent.Invoke：要求调用 failing_tool
 			{Message: llmcore.Message{
-				Role:        llmcore.RoleAssistant,
+				Role:        model.RoleAssistant,
 				ContentText: "",
 				ToolCalls: []llmcore.ToolCall{{
 					ID:   "call-fail-1",
@@ -419,9 +419,9 @@ func TestToolCallingEvents_SSEStream_Failure(t *testing.T) {
 				}},
 			}},
 			// react.BaseAgent.Invoke：工具失败后的最终结果
-			{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: `{"success":false,"result":"工具执行失败，请重试"}`}},
+			{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: `{"success":false,"result":"工具执行失败，请重试"}`}},
 			// react.Summarize
-			{Message: llmcore.Message{Role: llmcore.RoleAssistant, ContentText: `{"message":"任务失败总结","attachments":[]}`}},
+			{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: `{"message":"任务失败总结","attachments":[]}`}},
 		},
 	}
 
@@ -446,7 +446,7 @@ func TestToolCallingEvents_SSEStream_Failure(t *testing.T) {
 
 	msgEvent := &model.MessageEvent{
 		Type:    model.EventTypeMessage,
-		Role:    "user",
+		Role:    model.RoleUser,
 		Message: "请调用会失败的测试工具",
 	}
 	if _, err := task.PutInput(ctx, msgEvent); err != nil {

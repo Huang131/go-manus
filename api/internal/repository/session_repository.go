@@ -242,7 +242,7 @@ func (r *PostgresSessionRepository) AppendEvent(ctx context.Context, id string, 
 		var msgEvent model.MessageEvent
 		if err := sonic.Unmarshal(event.Data, &msgEvent); err == nil {
 			message = msgEvent.Message
-			isAssistantReply = msgEvent.Role == "assistant"
+			isAssistantReply = msgEvent.Role == model.RoleAssistant
 		}
 	}
 
@@ -299,11 +299,11 @@ func (r *PostgresSessionRepository) SaveMemory(ctx context.Context, id string, a
 	}
 	query := `
 		UPDATE sessions SET
-			memories = JSONB_SET(COALESCE(memories, '{}'::jsonb), $2::text[], $3),
+			memories = JSONB_SET(COALESCE(memories, '{}'::jsonb), ARRAY[$2], $3),
 			updated_at = NOW()
 		WHERE id = $1 AND deleted_at IS NULL
 	`
-	return r.execSessionWrite(ctx, query, id, "{"+agentName+"}", memoryJSON)
+	return r.execSessionWrite(ctx, query, id, agentName, memoryJSON)
 }
 
 // UpdateTitle 更新会话标题

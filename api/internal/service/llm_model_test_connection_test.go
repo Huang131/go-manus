@@ -25,7 +25,7 @@ func (c *connectionTestLLM) MaxTokens() int       { return 256 }
 func TestLLMModelService_Test_SendsMinimalRequestAndReturnsLatency(t *testing.T) {
 	svc := NewLLMModelServiceWithLLMFactory(NewMockLLMModelRepository(), func(_ *external.LLMRuntimeConfig) external.LLM {
 		return &connectionTestLLM{invoke: func(req *external.LLMRequest) (*llmcore.LLMResponse, error) {
-			if len(req.Messages) != 1 || req.Messages[0].Role != llmcore.RoleUser || req.Messages[0].ContentText == "" {
+			if len(req.Messages) != 1 || req.Messages[0].Role != model.RoleUser || req.Messages[0].ContentText == "" {
 				t.Errorf("unexpected connection request: %+v", req)
 			}
 			if len(req.Tools) != 0 || req.ResponseFormat != nil {

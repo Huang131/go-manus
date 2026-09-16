@@ -1,5 +1,7 @@
 package llmcore
 
+import "github.com/Huang131/go-manus/api/internal/model"
+
 // CanFallbackTo 判断 candidate profile 是否可作为 fallback 替换 current profile
 //
 // 严格规则（对应 MULTI_LLM_ADAPTER_DESIGN.md 阶段 2 修订意见）：
@@ -52,7 +54,7 @@ func CanFallbackAfterToolUse(executedTools []ToolSpec) bool {
 // 区别：
 //   - "candidate 满足 current"  → candidate 有 current 全部能力（可多不可少）
 //   - "candidate 等价 current"  → 能力字段完全一致（防止 unexpected behavior）
-func capabilitiesEquivalent(a, b ModelCapabilities) bool {
+func capabilitiesEquivalent(a, b model.ModelCapabilities) bool {
 	if a.SupportsText != b.SupportsText {
 		return false
 	}

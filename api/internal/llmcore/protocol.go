@@ -10,6 +10,8 @@
 //   - 业务侧看到的是 external 包，但底下的 wire format 是 llmcore
 package llmcore
 
+import "github.com/Huang131/go-manus/api/internal/model"
+
 // 通用 LLM 协议值，供业务层和各适配器共享。
 const (
 	ToolTypeFunction         = "function"
@@ -45,20 +47,10 @@ type AudioURL struct {
 	URL string `json:"url"`
 }
 
-// MessageRole 消息角色
-type MessageRole string
-
-const (
-	RoleSystem    MessageRole = "system"
-	RoleUser      MessageRole = "user"
-	RoleAssistant MessageRole = "assistant"
-	RoleTool      MessageRole = "tool"
-)
-
 // Message 统一消息结构
 // Assistant 的 ToolCalls / Reasoning 字段允许为空
 type Message struct {
-	Role MessageRole `json:"role"`
+	Role model.MessageRole `json:"role"`
 	// ContentText 纯文本消息用这个字段（最常见）
 	ContentText string `json:"content_text,omitempty"`
 	// ContentParts 多模态消息用这个字段

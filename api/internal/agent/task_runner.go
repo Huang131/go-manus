@@ -213,7 +213,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 		// 转换为 Flow 需要的任务输入
 		input := &TaskInput{
 			Message: llmcore.Message{
-				Role:        llmcore.MessageRole(inputEvent.Role),
+				Role:        inputEvent.Role,
 				ContentText: inputEvent.Message,
 				Attachments: attachments,
 			},

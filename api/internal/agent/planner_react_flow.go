@@ -192,7 +192,7 @@ func (f *PlannerReActFlow) handlePlanning(ctx context.Context, input *TaskInput,
 	// 与原项目对齐：把 plan.message 作为 assistant 消息发出。
 	// 配合 json_object 模式 + 中文 prompt，planner 输出的 planMsg 已经是结构化中文，
 	// 不会再泄露英文 CoT。
-	if !f.emitEvent(ctx, ch, model.NewMessageEvent("assistant", planMsg)) ||
+	if !f.emitEvent(ctx, ch, model.NewMessageEvent(model.RoleAssistant, planMsg)) ||
 		!f.emitEvent(ctx, ch, model.NewPlanEvent(*plan, model.PlanEventStatusCreated)) {
 		return true
 	}
@@ -244,7 +244,7 @@ func (f *PlannerReActFlow) handleExecuting(ctx context.Context, input *TaskInput
 			f.setPlan(plan)
 			logger.InfoContext(ctx, "ReActAgent 等待用户输入",
 				logger.String("question", step.UserQuestion))
-			if !f.emitEvent(ctx, ch, model.NewMessageEvent("assistant", step.UserQuestion)) ||
+			if !f.emitEvent(ctx, ch, model.NewMessageEvent(model.RoleAssistant, step.UserQuestion)) ||
 				!f.emitEvent(ctx, ch, model.NewWaitEvent()) {
 				return true
 			}
@@ -265,7 +265,7 @@ func (f *PlannerReActFlow) handleExecuting(ctx context.Context, input *TaskInput
 
 		// 发送步骤结果消息
 		if step.Result != "" {
-			if !f.emitEvent(ctx, ch, model.NewMessageEvent("assistant", step.Result)) {
+			if !f.emitEvent(ctx, ch, model.NewMessageEvent(model.RoleAssistant, step.Result)) {
 				return true
 			}
 		}
@@ -341,7 +341,7 @@ func (f *PlannerReActFlow) handleSummarizing(ctx context.Context, ch chan<- mode
 		if err != nil {
 			logger.WarnContext(ctx, "ReActAgent 总结任务失败", logger.Err(err))
 		} else {
-			if !emitted && !f.emitEvent(ctx, ch, model.NewMessageEvent("assistant", summary)) {
+			if !emitted && !f.emitEvent(ctx, ch, model.NewMessageEvent(model.RoleAssistant, summary)) {
 				return true
 			}
 			for _, att := range attachments {

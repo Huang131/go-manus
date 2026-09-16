@@ -1,5 +1,7 @@
 package llmcore
 
+import "github.com/Huang131/go-manus/api/internal/model"
+
 // NormalizeResponse 归一化上游响应
 // 把各种"看起来很相似但 field 不一样"的响应抹平到统一形状
 // 这是 Adapter 之外的一个独立纯函数，方便单测覆盖各种异常
@@ -24,11 +26,11 @@ func NormalizeResponse(resp *LLMResponse) *LLMResponse {
 
 // MergeDeltas 把流式 delta 累积成完整 response
 // 用于在流结束时把 content 拼起来
-func MergeDeltas(model string, deltas []LLMDelta) *LLMResponse {
+func MergeDeltas(modelName string, deltas []LLMDelta) *LLMResponse {
 	resp := &LLMResponse{
-		Model:        model,
+		Model:        modelName,
 		FinishReason: FinishReasonStop,
-		Message:      Message{Role: RoleAssistant},
+		Message:      Message{Role: model.RoleAssistant},
 	}
 	var argsBuf = make(map[int]string)
 	var currentCalls []ToolCall

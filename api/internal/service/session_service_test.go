@@ -419,7 +419,7 @@ func TestSessionService_AppendEvent(t *testing.T) {
 	session, _ := svc.CreateSession(context.Background())
 
 	// 添加事件
-	msgEvent := &model.MessageEvent{Type: model.EventTypeMessage, Role: "user", Message: "Hello"}
+	msgEvent := &model.MessageEvent{Type: model.EventTypeMessage, Role: model.RoleUser, Message: "Hello"}
 	eventData, _ := sonic.Marshal(msgEvent)
 	event := &model.Event{
 		ID:        "event-1",

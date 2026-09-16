@@ -386,7 +386,7 @@ func canFallbackAfterToolUse(req *LLMRequest) bool {
 	}
 	hasExecutedTool := false
 	for _, msg := range req.Messages {
-		if msg.Role == llmcore.RoleTool {
+		if msg.Role == model.RoleTool {
 			hasExecutedTool = true
 			break
 		}

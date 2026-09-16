@@ -14,6 +14,7 @@ import (
 	"github.com/bytedance/sonic"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
+	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
@@ -28,7 +29,7 @@ type AnthropicClient struct {
 	temperature     float64
 	maxTokens       int
 	requestPolicy   llmcore.RequestPolicy
-	costPolicy      llmcore.CostPolicy
+	costPolicy      model.CostPolicy
 	httpClient      *http.Client
 	version         string        // API 版本
 	toolCallTimeout time.Duration // tool calling 请求超时
@@ -44,7 +45,7 @@ type AnthropicClientConfig struct {
 	Temperature     float64               `mapstructure:"temperature"`
 	MaxTokens       int                   `mapstructure:"max_tokens"`
 	RequestPolicy   llmcore.RequestPolicy `mapstructure:"request_policy"`
-	CostPolicy      llmcore.CostPolicy    `mapstructure:"cost_policy"`
+	CostPolicy      model.CostPolicy      `mapstructure:"cost_policy"`
 	Version         string                `mapstructure:"version"`           // API 版本，默认 "2023-06-01"
 	ToolCallTimeout int                   `mapstructure:"tool_call_timeout"` // tool calling 请求超时秒数，默认 15
 }
@@ -232,7 +233,7 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 	result := &llmcore.LLMResponse{
 		ID: anthropicResp.ID,
 		Message: llmcore.Message{
-			Role: llmcore.RoleAssistant,
+			Role: model.RoleAssistant,
 		},
 		FinishReason: anthropicResp.StopReason,
 	}
@@ -454,11 +455,11 @@ func (c *AnthropicClient) toAnthropicMessages(reqMessages []llmcore.Message) ([]
 
 	for _, msg := range reqMessages {
 		switch msg.Role {
-		case llmcore.RoleSystem:
+		case model.RoleSystem:
 			systemMessage += msg.ContentText + "\n"
 			continue
 
-		case llmcore.RoleAssistant:
+		case model.RoleAssistant:
 			if len(msg.ToolCalls) == 0 {
 				appendMessage("assistant", msg.ContentText)
 				continue
@@ -478,7 +479,7 @@ func (c *AnthropicClient) toAnthropicMessages(reqMessages []llmcore.Message) ([]
 			}
 			appendMessage("assistant", blocks)
 
-		case llmcore.RoleTool:
+		case model.RoleTool:
 			appendToolResult(AnthropicContent{
 				Type:      anthropicContentTypeToolResult,
 				ToolUseID: msg.ToolCallID,
@@ -648,11 +649,11 @@ func (c *AnthropicClient) effectiveMaxTokens() int {
 // Anthropic 要求 thinking 启用时必须带 budget_tokens，且 budget < max_tokens。
 func (c *AnthropicClient) effectiveThinking() map[string]interface{} {
 	switch c.requestPolicy.ReasoningMode {
-	case llmcore.ReasoningOff:
+	case model.ReasoningOff:
 		return map[string]interface{}{"type": anthropicThinkingTypeDisabled}
-	case llmcore.ReasoningLow, llmcore.ReasoningAuto, llmcore.ReasoningHigh:
+	case model.ReasoningLow, model.ReasoningAuto, model.ReasoningHigh:
 		budget := 2048
-		if c.requestPolicy.ReasoningMode == llmcore.ReasoningHigh {
+		if c.requestPolicy.ReasoningMode == model.ReasoningHigh {
 			budget = 8192
 		}
 		if maxTokens := c.effectiveMaxTokens(); maxTokens <= budget {

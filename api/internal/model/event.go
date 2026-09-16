@@ -39,6 +39,17 @@ const (
 	ExecutionStatusFailed    ExecutionStatus = "failed"
 )
 
+// MessageRole 消息角色
+// 属于领域共享概念（事件、LLM 协议消息、记忆等均复用），故定义在 model 层避免下游反向依赖协议包。
+type MessageRole string
+
+const (
+	RoleSystem    MessageRole = "system"
+	RoleUser      MessageRole = "user"
+	RoleAssistant MessageRole = "assistant"
+	RoleTool      MessageRole = "tool"
+)
+
 // EventType 事件类型
 type EventType string
 
@@ -95,10 +106,10 @@ func (e *Event) ToJSON() string { return toJSON(e) }
 
 // MessageEvent 消息事件
 type MessageEvent struct {
-	Type        EventType `json:"type"`
-	Role        string    `json:"role"`                  // 消息角色: user, assistant
-	Message     string    `json:"message"`               // 消息本身
-	Attachments []File    `json:"attachments,omitempty"` // 附件列表
+	Type        EventType   `json:"type"`
+	Role        MessageRole `json:"role"`                  // 消息角色: user, assistant
+	Message     string      `json:"message"`               // 消息本身
+	Attachments []File      `json:"attachments,omitempty"` // 附件列表
 }
 
 // MessageDeltaEvent 表示助手消息的一段文本增量。
@@ -298,7 +309,7 @@ func NewTitleEvent(title string) *TitleEvent {
 }
 
 // NewMessageEvent 创建消息事件
-func NewMessageEvent(role, content string) *MessageEvent {
+func NewMessageEvent(role MessageRole, content string) *MessageEvent {
 	return &MessageEvent{
 		Type:    EventTypeMessage,
 		Role:    role,

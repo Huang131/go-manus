@@ -116,12 +116,12 @@ func TestSessionRepository_Memory(t *testing.T) {
 	// 构造含 ToolCalls/Attachments 的完整消息，验证序列化往返无损
 	messages := []llmcore.Message{
 		{
-			Role:        llmcore.RoleUser,
+			Role:        model.RoleUser,
 			ContentText: "Hello",
 			Attachments: []string{"file-1", "file-2"},
 		},
 		{
-			Role:        llmcore.RoleAssistant,
+			Role:        model.RoleAssistant,
 			ContentText: "调用工具",
 			ToolCalls: []llmcore.ToolCall{
 				{
@@ -135,7 +135,7 @@ func TestSessionRepository_Memory(t *testing.T) {
 			},
 		},
 		{
-			Role:        llmcore.RoleTool,
+			Role:        model.RoleTool,
 			ContentText: `{"result":"ok"}`,
 		},
 	}

@@ -4,12 +4,13 @@ import (
 	"testing"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 func TestSimpleMemory_Add(t *testing.T) {
 	mem := NewSimpleMemory(100)
 	msg := llmcore.Message{
-		Role:        llmcore.RoleUser,
+		Role:        model.RoleUser,
 		ContentText: "Hello, world!",
 	}
 
@@ -25,8 +26,8 @@ func TestSimpleMemory_Add(t *testing.T) {
 func TestSimpleMemory_GetMessages(t *testing.T) {
 	mem := NewSimpleMemory(100)
 
-	mem.Add(llmcore.Message{Role: llmcore.RoleUser, ContentText: "Hello"})
-	mem.Add(llmcore.Message{Role: llmcore.RoleAssistant, ContentText: "Hi there"})
+	mem.Add(llmcore.Message{Role: model.RoleUser, ContentText: "Hello"})
+	mem.Add(llmcore.Message{Role: model.RoleAssistant, ContentText: "Hi there"})
 
 	messages := mem.GetMessages()
 	if len(messages) != 2 {
@@ -38,7 +39,7 @@ func TestSimpleMemory_Compact(t *testing.T) {
 	mem := NewSimpleMemory(100)
 
 	for i := 0; i < 20; i++ {
-		mem.Add(llmcore.Message{Role: llmcore.RoleUser, ContentText: "Message"})
+		mem.Add(llmcore.Message{Role: model.RoleUser, ContentText: "Message"})
 	}
 
 	if err := mem.Compact(5); err != nil {
@@ -55,8 +56,8 @@ func TestSimpleMemory_Compact(t *testing.T) {
 func TestSimpleMemory_Clear(t *testing.T) {
 	mem := NewSimpleMemory(100)
 
-	mem.Add(llmcore.Message{Role: llmcore.RoleUser, ContentText: "Hello"})
-	mem.Add(llmcore.Message{Role: llmcore.RoleAssistant, ContentText: "Hi"})
+	mem.Add(llmcore.Message{Role: model.RoleUser, ContentText: "Hello"})
+	mem.Add(llmcore.Message{Role: model.RoleAssistant, ContentText: "Hi"})
 
 	mem.Clear()
 
