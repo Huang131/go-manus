@@ -3,19 +3,14 @@ package agent
 import (
 	"context"
 	"fmt"
-	"github.com/bytedance/sonic"
-	"io"
-	"mime"
-	"path"
-	"path/filepath"
 	"sync"
 	"time"
 
-	"github.com/Huang131/go-manus/api/internal/agent/attachment"
+	"github.com/bytedance/sonic"
+
 	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
-	"github.com/Huang131/go-manus/api/internal/repository"
 	"github.com/google/uuid"
 
 	"github.com/Huang131/go-manus/api/pkg/logger"
@@ -29,26 +24,18 @@ const (
 )
 
 // AgentTaskRunner 基于 Agent 智能体的任务运行器
-// 对齐 Python 版本的 AgentTaskRunner
+// 对齐 Python 版本的 AgentTaskRunner。
+//
+// 运行器只关心"驱动 Flow 的事件循环"，会话持久化与文件/附件协作交由 SessionRuntime 承担，
+// 避免把仓储、沙箱、对象存储等依赖平铺在结构体里。
 type AgentTaskRunner struct {
-	mu          sync.Mutex
-	sessionID   string
-	config      *AgentConfig
-	llm         external.LLM
-	tools       []Tool
-	flow        *PlannerReActFlow
-	sessionRep  repository.SessionRepository
-	fileRep     repository.FileRepository
-	sandbox     external.Sandbox
-	fileStorage COSFileStorage
-	attLoader   *attachment.Loader
-}
-
-// COSFileStorage 文件存储接口（简化版）
-type COSFileStorage interface {
-	Upload(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error
-	Download(ctx context.Context, key string) (io.ReadCloser, error)
-	GetURL(ctx context.Context, key string) (string, error)
+	mu        sync.Mutex
+	sessionID string
+	config    *AgentConfig
+	llm       external.LLM
+	tools     []Tool
+	flow      *PlannerReActFlow
+	runtime   *SessionRuntime
 }
 
 // AgentTaskRunnerConfig AgentTaskRunner 配置
@@ -57,26 +44,17 @@ type AgentTaskRunnerConfig struct {
 	AgentConfig *AgentConfig
 	LLM         external.LLM
 	Tools       []Tool
-	SessionRep  repository.SessionRepository
-	FileRep     repository.FileRepository
-	Sandbox     external.Sandbox
-	FileStorage COSFileStorage
+	Runtime     *SessionRuntime
 }
 
 // NewAgentTaskRunner 创建任务运行器
 func NewAgentTaskRunner(cfg *AgentTaskRunnerConfig) *AgentTaskRunner {
 	runner := &AgentTaskRunner{
-		sessionID:   cfg.SessionID,
-		config:      cfg.AgentConfig,
-		llm:         cfg.LLM,
-		tools:       cfg.Tools,
-		sessionRep:  cfg.SessionRep,
-		fileRep:     cfg.FileRep,
-		sandbox:     cfg.Sandbox,
-		fileStorage: cfg.FileStorage,
-	}
-	if cfg.FileStorage != nil {
-		runner.attLoader = attachment.NewLoader(cfg.FileStorage)
+		sessionID: cfg.SessionID,
+		config:    cfg.AgentConfig,
+		llm:       cfg.LLM,
+		tools:     cfg.Tools,
+		runtime:   cfg.Runtime,
 	}
 
 	// 创建流程
@@ -97,7 +75,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 
 	// 首次运行，更新会话状态为运行中
 	if r.flow.GetPlan() == nil {
-		if err := r.sessionRep.UpdateStatus(ctx, r.sessionID, model.SessionStatusRunning); err != nil {
+		if err := r.runtime.UpdateStatus(ctx, model.SessionStatusRunning); err != nil {
 			logger.WarnContext(ctx, "更新会话运行状态失败",
 				logger.String("session_id", r.sessionID),
 				logger.Err(err))
@@ -191,7 +169,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 			continue
 		}
 
-		attachments, err := r.syncUserAttachmentsToSandbox(ctx, inputEvent.Attachments)
+		attachments, err := r.runtime.SyncUserAttachmentsToSandbox(ctx, inputEvent.Attachments)
 		if err != nil {
 			logger.WarnContext(ctx, "同步用户附件失败",
 				logger.String("session_id", r.sessionID),
@@ -199,15 +177,11 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 		}
 
 		// 加载附件内容到 LLM 上下文（解决"只列计划"问题）
-		var attachmentContexts []attachment.FileContext
-		if r.attLoader != nil && len(inputEvent.Attachments) > 0 {
-			contexts := r.attLoader.Load(ctx, inputEvent.Attachments, inputEvent.Message)
-			attachmentContexts = contexts
-			if len(contexts) > 0 {
-				logger.InfoContext(ctx, "已加载附件内容到 LLM 上下文",
-					logger.String("session_id", r.sessionID),
-					logger.Int("count", len(contexts)))
-			}
+		attachmentContexts := r.runtime.LoadAttachments(ctx, inputEvent.Attachments, inputEvent.Message)
+		if len(attachmentContexts) > 0 {
+			logger.InfoContext(ctx, "已加载附件内容到 LLM 上下文",
+				logger.String("session_id", r.sessionID),
+				logger.Int("count", len(attachmentContexts)))
 		}
 
 		// 转换为 Flow 需要的任务输入
@@ -290,7 +264,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 				logger.DebugContext(ctx, "跳过 delta 事件落库",
 					logger.String("task_id", task.ID()),
 					logger.String("event_id", eventID))
-			} else if err := r.sessionRep.AppendEvent(ctx, r.sessionID, baseEvent); err != nil {
+			} else if err := r.runtime.AppendEvent(ctx, baseEvent); err != nil {
 				logger.WarnContext(ctx, "添加事件到会话失败",
 					logger.String("session_id", r.sessionID),
 					logger.Err(err))
@@ -307,7 +281,7 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 				if e.Status == model.StepEventStatusCompleted && e.Step.Success {
 					// 步骤完成，同步附件文件
 					for _, filePath := range e.Step.Attachments {
-						_ = r.syncFileToStorage(ctx, filePath)
+						_ = r.runtime.SyncFileToStorage(ctx, filePath)
 					}
 				}
 			}
@@ -327,14 +301,14 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 		case FlowStatusWaiting:
 			logger.InfoContext(ctx, "Flow 等待用户输入，runner 继续监听输入流",
 				logger.String("task_id", task.ID()))
-			if err := r.sessionRep.UpdateStatus(ctx, r.sessionID, model.SessionStatusWaiting); err != nil {
+			if err := r.runtime.UpdateStatus(ctx, model.SessionStatusWaiting); err != nil {
 				logger.WarnContext(ctx, "更新会话等待状态失败",
 					logger.String("session_id", r.sessionID),
 					logger.Err(err))
 			}
 		default:
 			// 按流状态与计划结果投影会话终态（completed/failed），这是会话状态的唯一回写点。
-			if err := r.sessionRep.UpdateStatus(ctx, r.sessionID, status.ToSessionStatus(r.flow.GetPlan())); err != nil {
+			if err := r.runtime.UpdateStatus(ctx, status.ToSessionStatus(r.flow.GetPlan())); err != nil {
 				logger.WarnContext(ctx, "更新会话终态失败",
 					logger.String("session_id", r.sessionID),
 					logger.Err(err))
@@ -370,9 +344,6 @@ func (r *AgentTaskRunner) OnDone(task *RedisStreamTask) {
 	logger.Info("AgentTaskRunner 任务完成回调",
 		logger.String("task_id", task.ID()),
 		logger.String("session_id", r.sessionID))
-
-	// 可选：更新会话状态为完成
-	// _ = r.sessionRep.UpdateStatus(context.Background(), r.sessionID, model.SessionStatusCompleted)
 }
 
 // Done 返回任务是否完成
@@ -397,155 +368,4 @@ func (r *AgentTaskRunner) GetPlan() *model.Plan {
 		return nil
 	}
 	return r.flow.GetPlan()
-}
-
-// syncFileToStorage 将沙箱中的文件同步到存储。
-// 同步是尽力而为的旁路逻辑，失败只记录告警、不中断事件循环。
-func (r *AgentTaskRunner) syncFileToStorage(ctx context.Context, filePath string) error {
-	if r.fileStorage == nil || r.sandbox == nil {
-		return nil
-	}
-
-	// 从沙箱读取文件
-	result, err := r.sandbox.ReadFile(ctx, filePath, nil, nil, false, 0)
-	if err != nil {
-		logger.WarnContext(ctx, "从沙箱读取文件失败", logger.String("filepath", filePath), logger.Err(err))
-		return nil
-	}
-	if !result.Success {
-		logger.WarnContext(ctx, "从沙箱读取文件失败", logger.String("filepath", filePath), logger.String("message", result.Message))
-		return nil
-	}
-
-	// 提取文件内容
-	var content string
-	if dataMap, ok := result.Data.(map[string]interface{}); ok {
-		if c, ok := dataMap["content"].(string); ok {
-			content = c
-		}
-	}
-
-	// 对象 key 使用文件名，避免把沙箱绝对路径泄露或重复拼入对象存储路径。
-	filename := path.Base(filePath)
-	key := "agent/" + r.sessionID + "/" + filename
-	err = r.fileStorage.Upload(ctx, key, &readerWrapper{data: []byte(content)}, int64(len(content)), "text/plain")
-	if err != nil {
-		logger.WarnContext(ctx, "同步文件到存储失败", logger.String("filepath", filePath), logger.Err(err))
-		return nil
-	}
-
-	// 创建文件记录
-	extension := filepath.Ext(filename)
-	mimeType := mime.TypeByExtension(extension)
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
-	file := &model.File{
-		ID:        uuid.New().String(),
-		SessionID: r.sessionID,
-		Filename:  filename,
-		Filepath:  filePath,
-		Key:       key,
-		Extension: extension,
-		MimeType:  mimeType,
-		Size:      int64(len(content)),
-		CreatedAt: time.Now(),
-	}
-	if err := r.fileRep.Create(ctx, file); err != nil {
-		logger.WarnContext(ctx, "创建文件记录失败", logger.String("filepath", filePath), logger.Err(err))
-	}
-
-	return nil
-}
-
-// syncUserAttachmentsToSandbox 将用户上传文件同步到沙箱，并返回可供 LLM 使用的文件路径。
-// 这里不直接把 file_id 透传给模型，因为模型侧只能消费沙箱内可读路径。
-func (r *AgentTaskRunner) syncUserAttachmentsToSandbox(ctx context.Context, attachments []model.File) ([]string, error) {
-	if len(attachments) == 0 {
-		return nil, nil
-	}
-	if r.fileStorage == nil || r.sandbox == nil {
-		result := make([]string, 0, len(attachments))
-		for _, attachment := range attachments {
-			if attachment.Filepath != "" {
-				result = append(result, attachment.Filepath)
-			}
-		}
-		return result, nil
-	}
-
-	result := make([]string, 0, len(attachments))
-	for _, file := range attachments {
-		if file.ID == "" || file.Key == "" {
-			continue
-		}
-
-		reader, err := r.fileStorage.Download(ctx, file.Key)
-		if err != nil {
-			logger.WarnContext(ctx, "下载用户附件失败",
-				logger.String("session_id", r.sessionID),
-				logger.String("file_id", file.ID),
-				logger.Err(err))
-			continue
-		}
-
-		data, err := io.ReadAll(reader)
-		closeErr := reader.Close()
-		if err != nil {
-			logger.WarnContext(ctx, "读取用户附件失败",
-				logger.String("session_id", r.sessionID),
-				logger.String("file_id", file.ID),
-				logger.Err(err))
-			continue
-		}
-		if closeErr != nil {
-			logger.WarnContext(ctx, "关闭用户附件失败",
-				logger.String("session_id", r.sessionID),
-				logger.String("file_id", file.ID),
-				logger.Err(closeErr))
-		}
-
-		filename := filepath.Base(file.Filename)
-		if filename == "." || filename == string(filepath.Separator) || filename == "" {
-			filename = file.ID
-		}
-		sandboxPath := filepath.Join("/home/ubuntu/upload", r.sessionID, filename)
-		if _, err := r.sandbox.UploadFile(ctx, data, sandboxPath, filename); err != nil {
-			logger.WarnContext(ctx, "上传用户附件到沙箱失败",
-				logger.String("session_id", r.sessionID),
-				logger.String("file_id", file.ID),
-				logger.String("sandbox_path", sandboxPath),
-				logger.Err(err))
-			continue
-		}
-
-		sandboxFile := file
-		sandboxFile.Filepath = sandboxPath
-		result = append(result, sandboxFile.Filepath)
-
-		// 写入 files 表（替代旧 sessions.files JSONB），按 filepath 去重
-		if r.fileRep != nil {
-			existing, findErr := r.fileRep.GetBySessionAndFilepath(ctx, r.sessionID, sandboxFile.Filepath)
-			if findErr != nil || existing == nil {
-				_ = r.fileRep.Create(ctx, &sandboxFile)
-			}
-		}
-	}
-
-	return result, nil
-}
-
-// readerWrapper io.Reader 实现
-type readerWrapper struct {
-	data []byte
-	pos  int
-}
-
-func (r *readerWrapper) Read(p []byte) (n int, err error) {
-	if r.pos >= len(r.data) {
-		return 0, io.EOF
-	}
-	n = copy(p, r.data[r.pos:])
-	r.pos += n
-	return n, nil
 }

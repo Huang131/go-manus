@@ -30,7 +30,7 @@ func (r *stopSessionRepository) UpdateStatus(context.Context, string, model.Sess
 func TestAgentService_StopSessionReturnsStatusUpdateError(t *testing.T) {
 	wantErr := errors.New("status update failed")
 	svc := &AgentService{
-		sessionRep:    &stopSessionRepository{statusErr: wantErr},
+		repos:         Repositories{Session: &stopSessionRepository{statusErr: wantErr}},
 		taskBySession: make(map[string]*RedisStreamTask),
 	}
 
@@ -47,7 +47,7 @@ func TestAgentService_StopSessionKeepsTaskMappingUntilRunnerExits(t *testing.T) 
 	}
 	task := NewRedisStreamTask(&mockMQWrapper{}, runner)
 	svc := &AgentService{
-		sessionRep:    successfulStopSessionRepository{},
+		repos:         Repositories{Session: successfulStopSessionRepository{}},
 		taskBySession: map[string]*RedisStreamTask{"session-1": task},
 	}
 	task.SetOnFinished(func() {

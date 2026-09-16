@@ -13,7 +13,6 @@ import (
 	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
-	"github.com/Huang131/go-manus/api/internal/repository"
 
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
@@ -21,81 +20,36 @@ import (
 // taskShutdownTimeout Shutdown 时等待单个任务退出的上限。
 const taskShutdownTimeout = 10 * time.Second
 
-// AgentService Agent 服务
+// AgentService Agent 服务。
+//
+// 依赖按层收敛：数据访问走 repos，外部能力走 caps，工具组装与 MCP/A2A 生命周期
+// 交由 toolsProvider，服务本身只负责消息编排与任务生命周期。
 type AgentService struct {
-	mu           sync.RWMutex
-	sessionRep   repository.SessionRepository
-	fileRep      repository.FileRepository
-	configRep    repository.AppConfigRepository
-	llmModelRep  repository.LLMModelRepository
-	llm          external.LLM
-	sandbox      external.Sandbox
-	agentConfig  *AgentConfig
-	mcpConfig    *MCPConfig
-	a2aConfig    *A2AConfig
-	browser      external.Browser
-	searchEngine external.SearchEngine
-	fileStorage  COSFileStorage
-	mcpTool      *MCPTool
-	a2aTool      *A2ATool
-	retiredMCP   []*MCPTool
-	retiredA2A   []*A2ATool
-	mq           external.TaskMessageQueue
+	mu            sync.RWMutex
+	repos         Repositories
+	caps          Capabilities
+	agentConfig   *AgentConfig
+	toolsProvider *ToolProvider
 
 	// Session 与 Task 的映射（用于对接 Task 架构）
 	taskBySession map[string]*RedisStreamTask
 }
 
-// NewAgentService 创建 Agent 服务
+// NewAgentService 创建 Agent 服务。
 func NewAgentService(
 	ctx context.Context,
-	sessionRep repository.SessionRepository,
-	fileRep repository.FileRepository,
-	configRep repository.AppConfigRepository,
-	llmModelRep repository.LLMModelRepository,
-	llm external.LLM,
-	sandbox external.Sandbox,
+	repos Repositories,
+	caps Capabilities,
 	agentConfig *AgentConfig,
 	mcpConfig *MCPConfig,
 	a2aConfig *A2AConfig,
-	browser external.Browser,
-	searchEngine external.SearchEngine,
-	mq external.TaskMessageQueue,
-	fileStorage COSFileStorage,
 ) *AgentService {
-	// 初始化 MCP 工具
-	mcpTool := NewMCPTool()
-	if mcpConfig != nil {
-		if err := mcpTool.Initialize(ctx, mcpConfig); err != nil {
-			logger.Warn("MCP 工具初始化失败，继续启动 Agent 服务", logger.Err(err))
-		}
-	}
-
-	// 初始化 A2A 工具
-	a2aTool := NewA2ATool()
-	if a2aConfig != nil {
-		if err := a2aTool.Initialize(ctx, a2aConfig); err != nil {
-			logger.Warn("A2A 工具初始化失败，继续启动 Agent 服务", logger.Err(err))
-		}
-	}
-
 	return &AgentService{
-		sessionRep:    sessionRep,
-		fileRep:       fileRep,
-		configRep:     configRep,
-		llmModelRep:   llmModelRep,
-		llm:           llm,
-		sandbox:       sandbox,
+		repos:         repos,
+		caps:          caps,
 		agentConfig:   agentConfig,
-		mcpConfig:     mcpConfig,
-		a2aConfig:     a2aConfig,
-		browser:       browser,
-		searchEngine:  searchEngine,
-		fileStorage:   fileStorage,
-		mcpTool:       mcpTool,
-		a2aTool:       a2aTool,
+		toolsProvider: NewToolProvider(ctx, caps, mcpConfig, a2aConfig),
 		taskBySession: make(map[string]*RedisStreamTask),
-		mq:            mq,
 	}
 }
 
@@ -103,7 +57,7 @@ func NewAgentService(
 // 对齐 Python 版本的 RedisStreamTask 架构
 func (s *AgentService) Chat(ctx context.Context, sessionID string, message *llmcore.Message) (string, error) {
 	// 获取会话
-	session, err := s.sessionRep.GetByID(ctx, sessionID)
+	session, err := s.repos.Session.GetByID(ctx, sessionID)
 	if err != nil {
 		return "", fmt.Errorf("获取会话失败: %w", err)
 	}
@@ -113,8 +67,8 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *llmc
 
 	// 用户选定的模型做同步预检：不存在/被禁用时快速失败（404），
 	// 而不是任务启动后在 SSE 里才报错。Auto（空 model_id）跳过。
-	if mid := external.ModelIDFromContext(ctx); mid != "" && s.llmModelRep != nil {
-		m, err := s.llmModelRep.GetByID(ctx, mid)
+	if mid := external.ModelIDFromContext(ctx); mid != "" && s.repos.LLMModel != nil {
+		m, err := s.repos.LLMModel.GetByID(ctx, mid)
 		if err != nil {
 			return "", apperr.NotFound("所选模型不存在: " + mid)
 		}
@@ -151,12 +105,12 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *llmc
 		Data: userEventData,
 	}
 	// 用户消息和后台任务属于同一条异步链路，使用 taskCtx 避免客户端断开导致消息落库失败。
-	if err := s.sessionRep.AppendEvent(taskCtx, sessionID, userEvent); err != nil {
+	if err := s.repos.Session.AppendEvent(taskCtx, sessionID, userEvent); err != nil {
 		logger.WarnContext(ctx, "添加用户消息事件失败", logger.String("session_id", sessionID), logger.Err(err))
 	}
 
 	// 获取或创建 RedisStreamTask
-	task, err := s.getOrCreateTask(ctx, session, s.getTools())
+	task, err := s.getOrCreateTask(ctx, session, s.toolsProvider.Tools())
 	if err != nil {
 		return "", fmt.Errorf("创建任务失败: %w", err)
 	}
@@ -183,7 +137,7 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *llmc
 // resolveMessageAttachments 将 API 传入的文件 ID 解析为文件元数据。
 // 输入流携带完整文件对象，runner 才能在异步执行阶段下载并同步到沙箱。
 func (s *AgentService) resolveMessageAttachments(ctx context.Context, sessionID string, fileIDs []string) []model.File {
-	if s.fileRep == nil {
+	if s.repos.File == nil {
 		return nil
 	}
 
@@ -194,7 +148,7 @@ func (s *AgentService) resolveMessageAttachments(ctx context.Context, sessionID 
 			continue
 		}
 
-		file, err := s.fileRep.GetBySessionAndID(ctx, sessionID, fileID)
+		file, err := s.repos.File.GetBySessionAndID(ctx, sessionID, fileID)
 		if err != nil {
 			logger.WarnContext(ctx, "获取聊天附件失败",
 				logger.String("session_id", sessionID),
@@ -222,7 +176,7 @@ func (s *AgentService) StopSession(ctx context.Context, sessionID string) error 
 	}
 
 	// 更新会话状态
-	if err := s.sessionRep.UpdateStatus(ctx, sessionID, model.SessionStatusCompleted); err != nil {
+	if err := s.repos.Session.UpdateStatus(ctx, sessionID, model.SessionStatusCompleted); err != nil {
 		return fmt.Errorf("更新会话状态失败: %w", err)
 	}
 
@@ -272,26 +226,8 @@ func (s *AgentService) Shutdown() {
 	}
 
 	// 释放工具持有的外部资源（MCP 子进程、A2A 连接）；跨进程退出前必须收口。
-	// 配置热重载后的旧工具也需要一并释放。
-	s.mu.Lock()
-	mcpTools := append([]*MCPTool{s.mcpTool}, s.retiredMCP...)
-	a2aTools := append([]*A2ATool{s.a2aTool}, s.retiredA2A...)
-	s.retiredMCP = nil
-	s.retiredA2A = nil
-	s.mu.Unlock()
-	for _, tool := range mcpTools {
-		if tool != nil {
-			if err := tool.Cleanup(); err != nil {
-				logger.Warn("清理 MCP 工具失败", logger.Err(err))
-			}
-		}
-	}
-	for _, tool := range a2aTools {
-		if tool != nil {
-			if err := tool.Cleanup(); err != nil {
-				logger.Warn("清理 A2A 工具失败", logger.Err(err))
-			}
-		}
+	if s.toolsProvider != nil {
+		s.toolsProvider.Cleanup()
 	}
 
 	logger.Info("Agent 服务已关闭")
@@ -309,88 +245,12 @@ func (s *AgentService) ReloadAgentConfig(cfg *AgentConfig) {
 
 // ReloadMCPConfig 重建 MCP 客户端，确保配置接口保存后立即生效。
 func (s *AgentService) ReloadMCPConfig(ctx context.Context, cfg *MCPConfig) error {
-	newTool := NewMCPTool()
-	if err := newTool.Initialize(ctx, cfg); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	oldTool := s.mcpTool
-	s.mcpTool = newTool
-	s.mcpConfig = cfg
-	if oldTool != nil {
-		s.retiredMCP = append(s.retiredMCP, oldTool)
-	}
-	s.mu.Unlock()
-	return nil
+	return s.toolsProvider.ReloadMCPConfig(ctx, cfg)
 }
 
 // ReloadA2AConfig 重建 A2A 客户端，确保配置接口保存后立即生效。
 func (s *AgentService) ReloadA2AConfig(ctx context.Context, cfg *A2AConfig) error {
-	newTool := NewA2ATool()
-	if err := newTool.Initialize(ctx, cfg); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	oldTool := s.a2aTool
-	s.a2aTool = newTool
-	s.a2aConfig = cfg
-	if oldTool != nil {
-		s.retiredA2A = append(s.retiredA2A, oldTool)
-	}
-	s.mu.Unlock()
-	return nil
-}
-
-// getTools 获取工具列表
-func (s *AgentService) getTools() []Tool {
-	s.mu.RLock()
-	sandbox := s.sandbox
-	browser := s.browser
-	searchEngine := s.searchEngine
-	mcpTool := s.mcpTool
-	a2aTool := s.a2aTool
-	s.mu.RUnlock()
-
-	tools := make([]Tool, 0)
-
-	// 1. Shell 工具 (依赖 sandbox)
-	if sandbox != nil {
-		tools = append(tools, NewShellTool(sandbox))
-	}
-
-	// 2. File 工具 (依赖 sandbox)
-	if sandbox != nil {
-		tools = append(tools, NewFileTool(sandbox))
-	}
-
-	// 3. Browser 工具 (依赖 browser)
-	if browser != nil {
-		tools = append(tools, NewBrowserTool(browser))
-	}
-
-	// 4. Search 工具 (依赖 searchEngine)
-	if searchEngine != nil {
-		tools = append(tools, NewSearchTool(searchEngine))
-	}
-
-	// 5. Message 工具 (无需外部依赖)
-	tools = append(tools, NewMessageTool())
-
-	// 6. MCP 工具 (可选)
-	if mcpTool != nil {
-		tools = append(tools, mcpTool)
-	}
-
-	// 7. A2A 工具 (可选)
-	if a2aTool != nil {
-		tools = append(tools, a2aTool)
-	}
-
-	logger.Info("注册工具列表",
-		logger.Int("count", len(tools)),
-		logger.Any("tools", s.getToolNames(tools)))
-
-	return tools
+	return s.toolsProvider.ReloadA2AConfig(ctx, cfg)
 }
 
 // getOrCreateTask 获取或创建 RedisStreamTask
@@ -410,18 +270,16 @@ func (s *AgentService) getOrCreateTask(ctx context.Context, session *model.Sessi
 	}
 
 	// 创建新的 task
+	runtime := NewSessionRuntime(session.ID, s.repos.Session, s.repos.File, s.caps.Sandbox, s.caps.FileStorage)
 	runner := NewAgentTaskRunner(&AgentTaskRunnerConfig{
 		SessionID:   session.ID,
 		AgentConfig: s.agentConfig,
-		LLM:         s.llm,
+		LLM:         s.caps.LLM,
 		Tools:       tools,
-		SessionRep:  s.sessionRep,
-		FileRep:     s.fileRep,
-		Sandbox:     s.sandbox,
-		FileStorage: s.fileStorage,
+		Runtime:     runtime,
 	})
 
-	task := NewRedisStreamTask(s.mq, runner)
+	task := NewRedisStreamTask(s.caps.MessageQueue, runner)
 	task.SetOnFinished(func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -463,14 +321,14 @@ func (s *AgentService) GetTaskEvents(ctx context.Context, taskID string, startID
 	}
 
 	// 未注册任务必须先确认 Redis stream 存在，避免对不存在的 task 永久 BLOCK。
-	size, err := s.mq.Size(ctx, fmt.Sprintf("task:output:%s", taskID))
+	size, err := s.caps.MessageQueue.Size(ctx, fmt.Sprintf("task:output:%s", taskID))
 	if err != nil {
 		return nil, fmt.Errorf("check task stream failed: %w", err)
 	}
 	if size == 0 {
 		return nil, fmt.Errorf("task not found: %s", taskID)
 	}
-	events, err := ReadTaskOutput(ctx, s.mq, taskID, startID)
+	events, err := ReadTaskOutput(ctx, s.caps.MessageQueue, taskID, startID)
 	if err != nil {
 		logger.ErrorContext(ctx, "GetTaskEvents 获取事件失败",
 			logger.String("task_id", taskID),
@@ -502,15 +360,6 @@ func nonNilEvents(events []*model.Event) []*model.Event {
 		}
 	}
 	return result
-}
-
-// getToolNames 获取工具名称列表
-func (s *AgentService) getToolNames(tools []Tool) []string {
-	names := make([]string, len(tools))
-	for i, tool := range tools {
-		names[i] = tool.Name()
-	}
-	return names
 }
 
 // GetActiveTaskID 根据 sessionID 获取当前活跃的 task ID（用于空流续读）

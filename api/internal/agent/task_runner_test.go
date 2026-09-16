@@ -7,7 +7,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Huang131/go-manus/api/internal/agent/attachment"
 	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -67,11 +66,12 @@ func (r *chatContextSessionRepository) getAppendContext() context.Context {
 
 func TestAgentServiceChatUsesDetachedContextForMessagePersistence(t *testing.T) {
 	repo := &chatContextSessionRepository{}
+	mq := newInMemoryMessageQueue()
 	svc := &AgentService{
-		sessionRep:    repo,
-		llm:           &mockLLM{},
+		repos:         Repositories{Session: repo},
+		caps:          Capabilities{LLM: &mockLLM{}, MessageQueue: mq},
 		agentConfig:   DefaultAgentConfig(),
-		mq:            newInMemoryMessageQueue(),
+		toolsProvider: &ToolProvider{},
 		taskBySession: make(map[string]*RedisStreamTask),
 	}
 
@@ -120,7 +120,7 @@ func TestAgentService_ResolveMessageAttachments(t *testing.T) {
 			},
 		},
 	}
-	agentService := &AgentService{fileRep: fileRepo}
+	agentService := &AgentService{repos: Repositories{File: fileRepo}}
 
 	got := agentService.resolveMessageAttachments(
 		context.Background(),
@@ -140,7 +140,7 @@ func TestAgentService_ResolveMessageAttachmentsRejectsOtherSession(t *testing.T)
 	fileRepo := &attachmentFileRepository{files: map[string]*model.File{
 		"file-a": {ID: "file-a", SessionID: "session-a", Key: "files/session-a/file-a"},
 	}}
-	service := &AgentService{fileRep: fileRepo}
+	service := &AgentService{repos: Repositories{File: fileRepo}}
 
 	got := service.resolveMessageAttachments(context.Background(), "session-b", []string{"file-a"})
 	if len(got) != 0 {
@@ -233,18 +233,13 @@ func (r *generatedFileRepository) Create(ctx context.Context, file *model.File) 
 	return nil
 }
 
-func TestAgentTaskRunner_SyncFileToStorageRegistersMetadata(t *testing.T) {
+func TestSessionRuntime_SyncFileToStorageRegistersMetadata(t *testing.T) {
 	storage := &attachmentStorage{data: []byte("generated")}
 	fileRepo := &generatedFileRepository{}
-	runner := &AgentTaskRunner{
-		sessionID:   "session-1",
-		fileStorage: storage,
-		fileRep:     fileRepo,
-		sandbox:     &attachmentSandbox{data: []byte("generated")},
-	}
+	runtime := NewSessionRuntime("session-1", nil, fileRepo, &attachmentSandbox{data: []byte("generated")}, storage)
 
-	if err := runner.syncFileToStorage(context.Background(), "/tmp/report.txt"); err != nil {
-		t.Fatalf("syncFileToStorage() error = %v", err)
+	if err := runtime.SyncFileToStorage(context.Background(), "/tmp/report.txt"); err != nil {
+		t.Fatalf("SyncFileToStorage() error = %v", err)
 	}
 	if fileRepo.created == nil {
 		t.Fatal("expected generated file record")
@@ -271,16 +266,11 @@ func (s *attachmentSandbox) UploadFile(ctx context.Context, fileData []byte, fil
 	return model.NewToolResult(nil), nil
 }
 
-func TestAgentTaskRunner_SyncUserAttachmentsToSandbox(t *testing.T) {
+func TestSessionRuntime_SyncUserAttachmentsToSandbox(t *testing.T) {
 	sandbox := &attachmentSandbox{}
-	runner := &AgentTaskRunner{
-		sessionID:   "session-1",
-		fileStorage: &attachmentStorage{data: []byte("file content")},
-		attLoader:   attachment.NewLoader(&attachmentStorage{data: []byte("file content")}),
-		sandbox:     sandbox,
-	}
+	runtime := NewSessionRuntime("session-1", nil, nil, sandbox, &attachmentStorage{data: []byte("file content")})
 
-	got, err := runner.syncUserAttachmentsToSandbox(context.Background(), []model.File{
+	got, err := runtime.SyncUserAttachmentsToSandbox(context.Background(), []model.File{
 		{
 			ID:       "file-1",
 			Filename: "../../input.txt",
@@ -288,7 +278,7 @@ func TestAgentTaskRunner_SyncUserAttachmentsToSandbox(t *testing.T) {
 		},
 	})
 	if err != nil {
-		t.Fatalf("syncUserAttachmentsToSandbox() error = %v", err)
+		t.Fatalf("SyncUserAttachmentsToSandbox() error = %v", err)
 	}
 
 	wantPath := "/home/ubuntu/upload/session-1/input.txt"

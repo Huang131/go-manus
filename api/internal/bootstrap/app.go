@@ -694,8 +694,22 @@ func (a *App) initAgent(opts Options, clients *externalClients) error {
 	// 创建 Agent 服务
 	a.AgentService = agent.NewAgentService(
 		context.Background(),
-		a.repos.session, a.repos.file, a.repos.appConfig, a.repos.llmModel, clients.llm, a.Sandbox,
-		agent.DefaultAgentConfig(), clients.mcpConfig, clients.a2aConfig, clients.browser, clients.search, clients.mq, a.OSS,
+		agent.Repositories{
+			Session:  a.repos.session,
+			File:     a.repos.file,
+			LLMModel: a.repos.llmModel,
+		},
+		agent.Capabilities{
+			LLM:          clients.llm,
+			Sandbox:      a.Sandbox,
+			Browser:      clients.browser,
+			SearchEngine: clients.search,
+			FileStorage:  a.OSS,
+			MessageQueue: clients.mq,
+		},
+		agent.DefaultAgentConfig(),
+		clients.mcpConfig,
+		clients.a2aConfig,
 	)
 	a.stopHook(func() {
 		if a.AgentService != nil {

@@ -289,7 +289,7 @@ func TestToolCallingEvents_SSEStream(t *testing.T) {
 		AgentConfig: DefaultAgentConfig(),
 		LLM:         mock,
 		Tools:       []Tool{&mockEchoTool{}},
-		SessionRep:  mockRepo,
+		Runtime:     NewSessionRuntime("session-tool-event-test", mockRepo, nil, nil, nil),
 	})
 	task := NewRedisStreamTask(mq, runner)
 	defer task.Cancel()
@@ -432,7 +432,7 @@ func TestToolCallingEvents_SSEStream_Failure(t *testing.T) {
 		AgentConfig: DefaultAgentConfig(),
 		LLM:         mock,
 		Tools:       []Tool{&mockFailingTool{}},
-		SessionRep:  mockRepo,
+		Runtime:     NewSessionRuntime("session-tool-event-fail-test", mockRepo, nil, nil, nil),
 	})
 	task := NewRedisStreamTask(mq, runner)
 	defer task.Cancel()
