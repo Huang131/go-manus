@@ -18,7 +18,7 @@ func TestSearchClients_UseConfiguredTimeout(t *testing.T) {
 		t.Fatalf("bocha timeout = %s, want %s", bocha.httpClient.Timeout, timeout)
 	}
 
-	google := NewGoogleSearchClientWithTimeout("key", timeout)
+	google := NewGoogleSearchClientWithTimeout("key", "cx-engine", timeout)
 	if google.httpClient.Timeout != timeout {
 		t.Fatalf("google timeout = %s, want %s", google.httpClient.Timeout, timeout)
 	}
@@ -35,7 +35,7 @@ func TestSearchClients_InvalidTimeoutUsesDefault(t *testing.T) {
 		t.Fatalf("bocha timeout = %s, want 30s", bocha.httpClient.Timeout)
 	}
 
-	google := NewGoogleSearchClientWithTimeout("key", -time.Second)
+	google := NewGoogleSearchClientWithTimeout("key", "cx-engine", -time.Second)
 	if google.httpClient.Timeout != 30*time.Second {
 		t.Fatalf("google timeout = %s, want 30s", google.httpClient.Timeout)
 	}

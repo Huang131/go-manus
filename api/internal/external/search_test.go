@@ -152,6 +152,60 @@ func TestSearchDateRangeMapping(t *testing.T) {
 	}
 }
 
-// 确保两家客户端都实现了 SearchEngine 接口。
+// 确保各客户端都实现了 SearchEngine 接口。
 var _ SearchEngine = (*TavilySearchClient)(nil)
 var _ SearchEngine = (*BochaSearchClient)(nil)
+var _ SearchEngine = (*GoogleSearchClient)(nil)
+
+// TestGoogleSearchClient_Invoke_SendsSearchEngineID 验证 cx（Search Engine ID）被写入请求。
+// 复现并锁定历史 bug：SearchEngineID 配置后曾在工厂/客户端两层被丢弃，cx 恒为空，
+// Google Custom Search 会以 400 拒绝。
+func TestGoogleSearchClient_Invoke_SendsSearchEngineID(t *testing.T) {
+	var gotCX, gotKey, gotQ string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		gotCX = q.Get("cx")
+		gotKey = q.Get("key")
+		gotQ = q.Get("q")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"queries":{"request":[]},"searchInformation":{"totalResults":"0"},"items":[]}`))
+	}))
+	defer srv.Close()
+
+	c := NewGoogleSearchClientWithTimeout("key-foo", "my-engine-id", time.Second)
+	c.baseURL = srv.URL
+
+	res, err := c.Invoke(context.Background(), "golang", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Success {
+		t.Fatalf("unexpected failure: %s", res.Message)
+	}
+	if gotCX != "my-engine-id" {
+		t.Errorf("cx = %q, want my-engine-id（SearchEngineID 未被写入请求）", gotCX)
+	}
+	if gotKey != "key-foo" {
+		t.Errorf("key = %q, want key-foo", gotKey)
+	}
+	if gotQ != "golang" {
+		t.Errorf("q = %q, want golang", gotQ)
+	}
+}
+
+// TestGoogleSearchClient_Invoke_MissingSearchEngineID 验证 cx 缺失时在本地直接失败，
+// 而不是发出一个注定被 Google 拒绝的请求。
+func TestGoogleSearchClient_Invoke_MissingSearchEngineID(t *testing.T) {
+	c := NewGoogleSearchClientWithTimeout("key-foo", "", time.Second)
+	res, err := c.Invoke(context.Background(), "golang", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Success {
+		t.Fatal("expected failure when Search Engine ID is missing")
+	}
+	if !strings.Contains(res.Message, "Search Engine ID") {
+		t.Errorf("Message = %q, want mention Search Engine ID", res.Message)
+	}
+}

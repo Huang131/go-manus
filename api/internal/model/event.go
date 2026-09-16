@@ -81,6 +81,7 @@ const (
 	PlanEventStatusCreated   PlanEventStatus = "created"
 	PlanEventStatusUpdated   PlanEventStatus = "updated"
 	PlanEventStatusCompleted PlanEventStatus = "completed"
+	PlanEventStatusFailed    PlanEventStatus = "failed"
 )
 
 // StepEventStatus 步骤事件状态

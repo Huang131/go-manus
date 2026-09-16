@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/bytedance/sonic"
 	"io"
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/bytedance/sonic"
 
 	"github.com/Huang131/go-manus/api/internal/model"
 )
@@ -19,24 +20,31 @@ type SearchEngine interface {
 	Invoke(ctx context.Context, query string, dateRange *string) (*model.ToolResult, error)
 }
 
-// GoogleSearchClient Google 搜索客户端 (模拟实现，实际需要 Google API)
+// GoogleSearchClient Google 搜索客户端。
+// Google Custom Search 要求同时提供 apiKey 与 searchEngineID（即请求参数 cx），
+// 缺一不可；cx 为空时 Google 会以 400 拒绝请求。
 type GoogleSearchClient struct {
-	apiKey     string
-	httpClient *http.Client
+	apiKey         string
+	searchEngineID string
+	baseURL        string
+	httpClient     *http.Client
 }
 
 // NewGoogleSearchClient 创建 Google 搜索客户端
-func NewGoogleSearchClient(apiKey string) *GoogleSearchClient {
-	return NewGoogleSearchClientWithTimeout(apiKey, 30*time.Second)
+func NewGoogleSearchClient(apiKey, searchEngineID string) *GoogleSearchClient {
+	return NewGoogleSearchClientWithTimeout(apiKey, searchEngineID, 30*time.Second)
 }
 
 // NewGoogleSearchClientWithTimeout 创建带请求超时的 Google 客户端。
-func NewGoogleSearchClientWithTimeout(apiKey string, timeout time.Duration) *GoogleSearchClient {
+// baseURL 预置为 Google Custom Search 端点，测试中可覆盖为 httptest 地址。
+func NewGoogleSearchClientWithTimeout(apiKey, searchEngineID string, timeout time.Duration) *GoogleSearchClient {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
 	return &GoogleSearchClient{
-		apiKey: apiKey,
+		apiKey:         apiKey,
+		searchEngineID: searchEngineID,
+		baseURL:        "https://www.googleapis.com/customsearch/v1",
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
@@ -48,19 +56,21 @@ func (c *GoogleSearchClient) Invoke(ctx context.Context, query string, dateRange
 	if c.apiKey == "" {
 		return model.NewToolError("Google API key not configured"), nil
 	}
+	if c.searchEngineID == "" {
+		return model.NewToolError("Google Search Engine ID not configured"), nil
+	}
 
 	// 构建请求 URL
-	baseURL := "https://www.googleapis.com/customsearch/v1"
 	params := url.Values{}
 	params.Set("key", c.apiKey)
 	params.Set("q", query)
-	params.Set("cx", "") // 需要设置 Search Engine ID
+	params.Set("cx", c.searchEngineID)
 	params.Set("hl", "zh-CN")
 	if dateRange != nil {
 		params.Set("dateRestrict", *dateRange)
 	}
 
-	reqURL := fmt.Sprintf("%s?%s", baseURL, params.Encode())
+	reqURL := fmt.Sprintf("%s?%s", c.baseURL, params.Encode())
 
 	// 创建请求
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
@@ -427,7 +437,7 @@ func NewSearchEngine(cfg *SearchConfig) SearchEngine {
 	case "bocha":
 		return NewBochaSearchClientWithTimeout(cfg.BochaAPIKey, timeout)
 	case "google":
-		return NewGoogleSearchClientWithTimeout(cfg.GoogleAPIKey, timeout)
+		return NewGoogleSearchClientWithTimeout(cfg.GoogleAPIKey, cfg.SearchEngineID, timeout)
 	default:
 		return NewTavilySearchClientWithTimeout(cfg.TavilyAPIKey, timeout)
 	}
