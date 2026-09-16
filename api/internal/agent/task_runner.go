@@ -298,8 +298,9 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 
 			// 处理不同类型的事件
 			switch e := event.(type) {
-			case *model.PlanEvent:
-				// 计划完成事件不改会话状态：终态统一由 DoneEvent 处理（成功与失败路径都会收尾）
+			case *model.PlanEvent, *model.DoneEvent:
+				// 会话状态统一在事件循环结束后的收尾 switch 里，由 flow 状态投影回写，
+				// 不在 PlanEvent/DoneEvent 两处重复判断 success/failed 语义。
 			case *model.ErrorEvent:
 				logger.ErrorContext(ctx, "Agent 运行出错", logger.String("error", e.Message))
 			case *model.StepEvent:
@@ -308,13 +309,6 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 					for _, filePath := range e.Step.Attachments {
 						_ = r.syncFileToStorage(ctx, filePath)
 					}
-				}
-			case *model.DoneEvent:
-				// 流终态（正常完成与出错收尾都会发出）：回写会话状态，避免 session 永远卡 Running
-				if err := r.sessionRep.UpdateStatus(ctx, r.sessionID, model.SessionStatusCompleted); err != nil {
-					logger.WarnContext(ctx, "更新会话完成状态失败",
-						logger.String("session_id", r.sessionID),
-						logger.Err(err))
 				}
 			}
 
@@ -326,16 +320,28 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 
 		// Flow goroutine 已退出（事件通道关闭）。按流状态决定 runner 去向：
 		//   - Waiting：上一轮在等用户输入，继续留在循环里 Pop 下一条消息（task 保持活跃）
-		//   - Completed/Idle：本轮任务已到终态，退出 runner 触发 task 完成清理链
+		//   - Completed/Failed/Idle：本轮任务已到终态，退出 runner 触发 task 完成清理链
 		//     （onDone -> destroy -> registry 摘除 -> 短 TTL），否则 task 永远不算完成
-		switch r.flow.GetStatus() {
+		status := r.flow.GetStatus()
+		switch status {
 		case FlowStatusWaiting:
 			logger.InfoContext(ctx, "Flow 等待用户输入，runner 继续监听输入流",
 				logger.String("task_id", task.ID()))
+			if err := r.sessionRep.UpdateStatus(ctx, r.sessionID, model.SessionStatusWaiting); err != nil {
+				logger.WarnContext(ctx, "更新会话等待状态失败",
+					logger.String("session_id", r.sessionID),
+					logger.Err(err))
+			}
 		default:
+			// 按流状态与计划结果投影会话终态（completed/failed），这是会话状态的唯一回写点。
+			if err := r.sessionRep.UpdateStatus(ctx, r.sessionID, status.ToSessionStatus(r.flow.GetPlan())); err != nil {
+				logger.WarnContext(ctx, "更新会话终态失败",
+					logger.String("session_id", r.sessionID),
+					logger.Err(err))
+			}
 			logger.InfoContext(ctx, "Flow 已到终态，runner 退出",
 				logger.String("task_id", task.ID()),
-				logger.String("flow_status", string(r.flow.GetStatus())))
+				logger.String("flow_status", string(status)))
 			return nil
 		}
 	}

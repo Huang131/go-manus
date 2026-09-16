@@ -14,6 +14,7 @@ const (
 	SessionStatusRunning   SessionStatus = "running"
 	SessionStatusWaiting   SessionStatus = "waiting"
 	SessionStatusCompleted SessionStatus = "completed"
+	SessionStatusFailed    SessionStatus = "failed"
 )
 
 // Session 会话模型，对应一次用户与 Agent 的交互任务。

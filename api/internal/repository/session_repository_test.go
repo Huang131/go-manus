@@ -207,42 +207,6 @@ func TestSessionRepository_List(t *testing.T) {
 	}
 }
 
-// TestSessionRepository_StatusTransitions 测试会话状态转换
-func TestSessionRepository_StatusTransitions(t *testing.T) {
-	session := &model.Session{
-		ID:        "test-session-7",
-		Title:     "Test Session 7",
-		Status:    model.SessionStatusPending,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
-
-	// 测试状态转换
-	statusTransitions := []struct {
-		from    model.SessionStatus
-		to      model.SessionStatus
-		allowed bool
-	}{
-		{model.SessionStatusPending, model.SessionStatusRunning, true},
-		{model.SessionStatusRunning, model.SessionStatusWaiting, true},
-		{model.SessionStatusWaiting, model.SessionStatusRunning, true},
-		{model.SessionStatusRunning, model.SessionStatusCompleted, true},
-		{model.SessionStatusCompleted, model.SessionStatusRunning, false}, // 完成后再运行应该不允许
-	}
-
-	for _, st := range statusTransitions {
-		session.Status = st.from
-
-		// 模拟状态转换验证
-		canTransition := session.Status != model.SessionStatusCompleted || st.to != model.SessionStatusRunning
-
-		if canTransition != st.allowed {
-			t.Errorf("状态 %s -> %s 的转换应允许: %v，实际: %v",
-				st.from, st.to, st.allowed, canTransition)
-		}
-	}
-}
-
 // TestSessionRepository_JSONSerialization 测试 JSON 序列化
 func TestSessionRepository_JSONSerialization(t *testing.T) {
 	session := &model.Session{

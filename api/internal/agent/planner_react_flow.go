@@ -141,6 +141,8 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 				stop = f.handleSummarizing(ctx, ch)
 			case FlowStatusCompleted:
 				stop = f.handleCompleted(ctx, ch)
+			case FlowStatusFailed:
+				stop = f.handleFailed(ctx, ch)
 			default:
 				logger.ErrorContext(ctx, "PlannerReActFlow 遇到未知状态，终止执行",
 					logger.String("status", string(status)))
@@ -179,7 +181,7 @@ func (f *PlannerReActFlow) handlePlanning(ctx context.Context, input *TaskInput,
 		if !f.emitEvent(ctx, ch, model.NewErrorEvent(err.Error())) {
 			return true
 		}
-		f.setStatus(FlowStatusCompleted)
+		f.setStatus(FlowStatusFailed)
 		return false
 	}
 
@@ -214,7 +216,7 @@ func (f *PlannerReActFlow) handleExecuting(ctx context.Context, input *TaskInput
 		if !f.emitEvent(ctx, ch, model.NewErrorEvent("计划为空，无法执行")) {
 			return true
 		}
-		f.setStatus(FlowStatusCompleted)
+		f.setStatus(FlowStatusFailed)
 		return false
 	}
 
@@ -302,7 +304,7 @@ func (f *PlannerReActFlow) handleWaiting() bool {
 func (f *PlannerReActFlow) handleUpdating(ctx context.Context, ch chan<- model.BaseEvent) bool {
 	plan := f.planSnapshot()
 	if plan == nil {
-		f.setStatus(FlowStatusCompleted)
+		f.setStatus(FlowStatusFailed)
 		return false
 	}
 	step := plan.GetNextStep()
@@ -359,37 +361,55 @@ func (f *PlannerReActFlow) handleSummarizing(ctx context.Context, ch chan<- mode
 			logger.String("session_id", f.sessionID))
 	}
 
-	f.setStatus(FlowStatusCompleted)
+	// 总结完成后按计划结果选择终态：含失败步骤进入 failed，否则 completed。
+	if planHasFailedStep(plan) {
+		f.setStatus(FlowStatusFailed)
+	} else {
+		f.setStatus(FlowStatusCompleted)
+	}
 	return false
 }
 
-// handleCompleted 标记计划完成并发出终态事件；该状态必定终止流
+// handleCompleted 标记计划成功完成并发出终态事件；该状态必定终止流
 func (f *PlannerReActFlow) handleCompleted(ctx context.Context, ch chan<- model.BaseEvent) bool {
 	if plan := f.planSnapshot(); plan != nil {
-		if planHasFailedStep(plan) {
-			plan.Status = model.ExecutionStatusFailed
-			f.setPlan(plan)
-			if !f.emitEvent(ctx, ch, model.NewPlanEvent(*plan, model.PlanEventStatusFailed)) {
-				return true
-			}
-		} else {
-			plan.Status = model.ExecutionStatusCompleted
-			f.setPlan(plan)
-			if !f.emitEvent(ctx, ch, model.NewPlanEvent(*plan, model.PlanEventStatusCompleted)) {
-				return true
-			}
+		plan.Status = model.ExecutionStatusCompleted
+		f.setPlan(plan)
+		if !f.emitEvent(ctx, ch, model.NewPlanEvent(*plan, model.PlanEventStatusCompleted)) {
+			return true
 		}
 	}
+	return f.finish(ctx, ch)
+}
+
+// handleFailed 标记计划失败并发出终态事件；该状态必定终止流
+func (f *PlannerReActFlow) handleFailed(ctx context.Context, ch chan<- model.BaseEvent) bool {
+	if plan := f.planSnapshot(); plan != nil {
+		plan.Status = model.ExecutionStatusFailed
+		f.setPlan(plan)
+		if !f.emitEvent(ctx, ch, model.NewPlanEvent(*plan, model.PlanEventStatusFailed)) {
+			return true
+		}
+	}
+	return f.finish(ctx, ch)
+}
+
+// finish 发出流结束事件并记录日志，是 completed/failed 两条终态路径的公共收尾。
+func (f *PlannerReActFlow) finish(ctx context.Context, ch chan<- model.BaseEvent) bool {
 	if !f.emitEvent(ctx, ch, model.NewDoneEvent()) {
 		return true
 	}
-	logger.InfoContext(ctx, "PlannerReActFlow 执行完成",
-		logger.String("session_id", f.sessionID))
+	logger.InfoContext(ctx, "PlannerReActFlow 执行结束",
+		logger.String("session_id", f.sessionID),
+		logger.String("flow_status", string(f.currentStatus())))
 	return true
 }
 
 // planHasFailedStep 判断计划中是否存在执行失败的步骤，用于决定终态是 completed 还是 failed。
 func planHasFailedStep(p *model.Plan) bool {
+	if p == nil {
+		return false
+	}
 	for i := range p.Steps {
 		if p.Steps[i].Status == model.ExecutionStatusFailed {
 			return true
@@ -402,7 +422,7 @@ func planHasFailedStep(p *model.Plan) bool {
 func (f *PlannerReActFlow) Done() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.status == FlowStatusCompleted || f.status == FlowStatusIdle
+	return f.status == FlowStatusCompleted || f.status == FlowStatusFailed || f.status == FlowStatusIdle
 }
 
 // GetStatus 返回当前状态
