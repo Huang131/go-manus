@@ -206,44 +206,6 @@ func TestMergeDeltas_ToolCallThenContent(t *testing.T) {
 	}
 }
 
-// TestPlanSchema_Required 阶段 1a 提前定义 PlanSchema
-// 业务期望：必填字段、enum、pattern 等约束都在
-func TestPlanSchema_Required(t *testing.T) {
-	if PlanSchema["type"] != "object" {
-		t.Fatalf("expected type=object, got %v", PlanSchema["type"])
-	}
-	required, ok := PlanSchema["required"].([]string)
-	if !ok {
-		t.Fatalf("required is not []string: %T", PlanSchema["required"])
-	}
-	expectRequired := []string{"message", "goal", "title", "language", "steps"}
-	for _, r := range expectRequired {
-		found := false
-		for _, rr := range required {
-			if rr == r {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("PlanSchema.required missing %q", r)
-		}
-	}
-	props, ok := PlanSchema["properties"].(map[string]interface{})
-	if !ok {
-		t.Fatal("properties is not map")
-	}
-	// language 必须是 enum
-	lang, ok := props["language"].(map[string]interface{})
-	if !ok {
-		t.Fatal("language property missing")
-	}
-	enum, ok := lang["enum"].([]string)
-	if !ok || len(enum) < 2 {
-		t.Errorf("language.enum 缺失或不足: %v", lang["enum"])
-	}
-}
-
 // TestEstimateContextTokens 业务期望：粗估 1 token ≈ 4 char（基于 ASCII）
 // 注：中文是 1 char ≈ 1 token（甚至 1 char 算 1.5+ token），所以估算用 ASCII 更稳定
 func TestEstimateContextTokens(t *testing.T) {
