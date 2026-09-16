@@ -34,10 +34,11 @@ type rowScanner interface {
 // “Query → defer Close → for Next{scan;append} → rows.Err()” 样板。
 //
 // scan 通常直接传仓储的 scanXxx（如 scanFile），其入参为 rowScanner，
-// pgx.Rows 天然满足该接口。返回的切片在无数据时为 nil。
+// pgx.Rows 天然满足该接口。返回的切片在无数据时为空切片（非 nil），
+// 避免上层直接 JSON 序列化时把空结果输出为 null 而非 []。
 func collectRows[T any](rows pgx.Rows, scan func(rowScanner) (T, error)) ([]T, error) {
 	defer rows.Close()
-	var out []T
+	out := make([]T, 0)
 	for rows.Next() {
 		item, err := scan(rows)
 		if err != nil {

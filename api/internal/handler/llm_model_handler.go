@@ -25,9 +25,6 @@ func (h *LLMModelHandler) List(c *gin.Context) {
 		response.FromError(c, err)
 		return
 	}
-	if items == nil {
-		items = []*model.LLMModel{}
-	}
 	models := make([]*model.LLMModelResponse, 0, len(items))
 	for _, item := range items {
 		models = append(models, model.NewLLMModelResponse(item))
