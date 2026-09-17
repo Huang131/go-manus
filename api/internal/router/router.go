@@ -58,8 +58,6 @@ func SetupRoutes(engine *gin.Engine, h *Handlers) {
 		// 配置模块（对齐原项目：/app-config/mcp-servers、/a2a-servers）
 		appConfig := api.Group("/app-config")
 		{
-			appConfig.GET("/llm", h.AppConfig.GetLLMConfig)
-			appConfig.POST("/llm", h.AppConfig.UpdateLLMConfig)
 			appConfig.GET("/agent", h.AppConfig.GetAgentConfig)
 			appConfig.POST("/agent", h.AppConfig.UpdateAgentConfig)
 			appConfig.GET("/mcp-servers", h.AppConfig.GetMCPConfig)

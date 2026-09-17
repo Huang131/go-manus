@@ -741,8 +741,11 @@ func (a *App) initSchedulers(cfg *config.Config, opts Options, factories Factori
 		return nil
 	}
 
-	// 创建文件清理服务
+	// 创建文件清理服务，并注入给 FileService 以共享同一实例，保证统计一致。
 	fileCleanupService := service.NewFileCleanupService(a.repos.file, a.OSS)
+	if fs, ok := a.FileService.(*service.DefaultFileService); ok {
+		fs.SetCleanupService(fileCleanupService)
+	}
 
 	// 创建调度器
 	cleanupScheduler := factories.NewFileCleanupScheduler(

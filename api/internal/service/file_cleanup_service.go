@@ -11,6 +11,13 @@ import (
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
+const (
+	// firstCleanupDelay 首次清理的延迟时间，留出系统启动完成的时间窗口。
+	firstCleanupDelay = 5 * time.Minute
+	// cleanupTimeout 单次清理操作的超时时间。
+	cleanupTimeout = 5 * time.Minute
+)
+
 // SchedulerRunner 表示可启动和停止的后台调度器。
 type SchedulerRunner interface {
 	Start()
@@ -297,9 +304,7 @@ func (s *FileCleanupScheduler) cleanup() {
 // DefaultFileService 添加清理相关方法
 // CleanExpiredFiles 清理过期文件（便捷方法）
 func (s *DefaultFileService) CleanExpiredFiles(ctx context.Context, expireDuration string, batchSize int) (int, error) {
-	// 创建一个临时的清理服务
-	cleanupService := NewFileCleanupService(s.repo, s.storage)
-	return cleanupService.CleanExpiredFiles(ctx, expireDuration, batchSize)
+	return s.cleanupService.CleanExpiredFiles(ctx, expireDuration, batchSize)
 }
 
 // GetExpiredFileCount 获取过期文件数量（便捷方法）

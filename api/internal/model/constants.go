@@ -4,7 +4,6 @@ package model
 type AppConfigType string
 
 const (
-	AppConfigTypeLLM   AppConfigType = "llm"
 	AppConfigTypeAgent AppConfigType = "agent"
 	AppConfigTypeMCP   AppConfigType = "mcp"
 	AppConfigTypeA2A   AppConfigType = "a2a"

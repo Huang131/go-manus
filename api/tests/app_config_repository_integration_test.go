@@ -20,7 +20,7 @@ func testAppConfigRepo(t *testing.T) repository.AppConfigRepository {
 
 func TestAppConfigRepo_GetConfig_NotFoundReturnsNilNil(t *testing.T) {
 	repo := testAppConfigRepo(t)
-	got, err := repo.GetConfig(context.Background(), model.AppConfigTypeLLM, "non-existent-key")
+	got, err := repo.GetConfig(context.Background(), model.AppConfigTypeAgent, "non-existent-key")
 	require.NoError(t, err)
 	assert.Nil(t, got)
 }
@@ -29,7 +29,7 @@ func TestAppConfigRepo_SaveAndGetConfig_RoundTrip(t *testing.T) {
 	repo := testAppConfigRepo(t)
 	cfg := &model.AppConfig{
 		ID:          uuid.New().String(),
-		ConfigType:  model.AppConfigTypeLLM,
+		ConfigType:  model.AppConfigTypeAgent,
 		ConfigKey:   model.AppConfigKeyDefault,
 		ConfigValue: []byte(`{"api_key":"sk-test-key","model":"gpt-4"}`),
 		CreatedAt:   time.Now(),
@@ -42,7 +42,7 @@ func TestAppConfigRepo_SaveAndGetConfig_RoundTrip(t *testing.T) {
 		_ = repo.DeleteConfig(context.Background(), cfg.ConfigType, cfg.ConfigKey)
 	})
 
-	got, err := repo.GetConfig(context.Background(), model.AppConfigTypeLLM, model.AppConfigKeyDefault)
+	got, err := repo.GetConfig(context.Background(), model.AppConfigTypeAgent, model.AppConfigKeyDefault)
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	assert.Equal(t, cfg.ConfigType, got.ConfigType)
@@ -52,7 +52,7 @@ func TestAppConfigRepo_SaveAndGetConfig_RoundTrip(t *testing.T) {
 
 func TestAppConfigRepo_SaveConfig_UpdateExisting(t *testing.T) {
 	repo := testAppConfigRepo(t)
-	cfgType := model.AppConfigTypeLLM
+	cfgType := model.AppConfigTypeAgent
 	cfgKey := model.AppConfigKeyDefault
 
 	// 第一次写入
@@ -87,7 +87,7 @@ func TestAppConfigRepo_SaveConfig_UpdateExisting(t *testing.T) {
 
 func TestAppConfigRepo_DeleteConfig(t *testing.T) {
 	repo := testAppConfigRepo(t)
-	cfgType := model.AppConfigTypeLLM
+	cfgType := model.AppConfigTypeAgent
 	cfgKey := "delete-test-key"
 
 	cfg := &model.AppConfig{

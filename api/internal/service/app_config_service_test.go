@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/bytedance/sonic"
@@ -92,144 +91,6 @@ func (m *MockAppConfigRepository) WithTx(ctx context.Context, fn func(repo repos
 
 // 确保 Mock 实现正确的接口
 var _ repository.AppConfigRepository = (*MockAppConfigRepository)(nil)
-
-func TestAppConfigService_GetLLMConfig(t *testing.T) {
-	repo := NewMockAppConfigRepository()
-	svc := NewAppConfigService(repo)
-
-	// 创建 LLM 配置
-	llmConfig := &model.LLMConfig{
-		BaseURL:     "https://api.openai.com",
-		ModelName:   "gpt-4",
-		APIKey:      "test-key",
-		Temperature: 0.7,
-		MaxTokens:   4096,
-	}
-	configValue, _ := sonic.Marshal(llmConfig)
-	config := &model.AppConfig{
-		ConfigType:  "llm",
-		ConfigKey:   "default",
-		ConfigValue: configValue,
-	}
-	repo.SaveConfig(context.Background(), config)
-
-	// 获取 LLM 配置
-	retrieved, err := svc.GetLLMConfig(context.Background())
-	if err != nil {
-		t.Fatalf("GetLLMConfig() error = %v", err)
-	}
-
-	if retrieved.BaseURL != "https://api.openai.com" {
-		t.Errorf("LLMConfig.BaseURL = %s, want https://api.openai.com", retrieved.BaseURL)
-	}
-	if retrieved.ModelName != "gpt-4" {
-		t.Errorf("LLMConfig.ModelName = %s, want gpt-4", retrieved.ModelName)
-	}
-	if retrieved.APIKey != "test-key" {
-		t.Errorf("LLMConfig.APIKey = %s, want test-key", retrieved.APIKey)
-	}
-}
-
-func TestAppConfigService_GetLLMConfig_NotFound(t *testing.T) {
-	repo := NewMockAppConfigRepository()
-	svc := NewAppConfigService(repo)
-
-	llmConfig, err := svc.GetLLMConfig(context.Background())
-	if err != nil {
-		t.Fatalf("GetLLMConfig() error = %v", err)
-	}
-
-	if llmConfig != nil {
-		t.Error("GetLLMConfig() should return nil when not found")
-	}
-}
-
-func TestAppConfigService_UpdateLLMConfig(t *testing.T) {
-	repo := NewMockAppConfigRepository()
-	svc := NewAppConfigService(repo)
-
-	// 先创建默认 LLM 配置
-	llmConfig := &model.LLMConfig{
-		BaseURL:     "https://api.openai.com",
-		ModelName:   "gpt-4",
-		APIKey:      "old-key",
-		Temperature: 0.7,
-		MaxTokens:   4096,
-	}
-	configValue, _ := sonic.Marshal(llmConfig)
-	config := &model.AppConfig{
-		ConfigType:  "llm",
-		ConfigKey:   "default",
-		ConfigValue: configValue,
-	}
-	repo.SaveConfig(context.Background(), config)
-
-	// 更新配置 (api_key 为空时保留旧值)
-	newConfig := &model.LLMConfig{
-		BaseURL:     "https://api.anthropic.com",
-		ModelName:   "claude-3",
-		APIKey:      "", // 空值，不覆盖旧值
-		Temperature: 0.7,
-		MaxTokens:   8192,
-	}
-
-	err := svc.UpdateLLMConfig(context.Background(), newConfig)
-	if err != nil {
-		t.Fatalf("UpdateLLMConfig() error = %v", err)
-	}
-
-	// 验证更新后的配置
-	updated, _ := svc.GetLLMConfig(context.Background())
-	if updated.BaseURL != "https://api.anthropic.com" {
-		t.Errorf("Updated BaseURL = %s, want https://api.anthropic.com", updated.BaseURL)
-	}
-	if updated.ModelName != "claude-3" {
-		t.Errorf("Updated ModelName = %s, want claude-3", updated.ModelName)
-	}
-	if updated.APIKey != "old-key" {
-		t.Errorf("Updated APIKey = %s, want old-key (preserved)", updated.APIKey)
-	}
-	if updated.MaxTokens != 8192 {
-		t.Errorf("Updated MaxTokens = %d, want 8192", updated.MaxTokens)
-	}
-}
-
-func TestAppConfigService_UpdateLLMConfig_WithNewApiKey(t *testing.T) {
-	repo := NewMockAppConfigRepository()
-	svc := NewAppConfigService(repo)
-
-	// 先创建默认 LLM 配置
-	llmConfig := &model.LLMConfig{
-		BaseURL:   "https://api.openai.com",
-		ModelName: "gpt-4",
-		APIKey:    "old-key",
-	}
-	configValue, _ := sonic.Marshal(llmConfig)
-	config := &model.AppConfig{
-		ConfigType:  "llm",
-		ConfigKey:   "default",
-		ConfigValue: configValue,
-	}
-	repo.SaveConfig(context.Background(), config)
-
-	// 更新配置 (提供新的 api_key)
-	newConfig := &model.LLMConfig{
-		BaseURL:   "https://api.anthropic.com",
-		ModelName: "claude-3",
-		APIKey:    "new-key",
-	}
-
-	err := svc.UpdateLLMConfig(context.Background(), newConfig)
-	if err != nil {
-		t.Fatalf("UpdateLLMConfig() error = %v", err)
-	}
-
-	// 验证 api_key 已更新
-	updated, _ := svc.GetLLMConfig(context.Background())
-	if updated.APIKey != "new-key" {
-		t.Errorf("Updated APIKey = %s, want new-key", updated.APIKey)
-	}
-}
 
 func TestAppConfigService_GetAgentConfig(t *testing.T) {
 	repo := NewMockAppConfigRepository()
@@ -419,23 +280,9 @@ func TestAppConfigService_GetConfig_RepositoryError(t *testing.T) {
 	repo.getErr = errors.New("database error")
 	svc := NewAppConfigService(repo)
 
-	_, err := svc.GetLLMConfig(context.Background())
+	_, err := svc.GetMCPConfig(context.Background())
 	if err == nil {
-		t.Error("GetLLMConfig() should return error when repository fails")
-	}
-}
-
-func TestAppConfigService_UpdateLLMConfig_ReturnsExistingConfigError(t *testing.T) {
-	repo := NewMockAppConfigRepository()
-	repo.getErr = errors.New("database unavailable")
-	svc := NewAppConfigService(repo)
-
-	err := svc.UpdateLLMConfig(context.Background(), &model.LLMConfig{
-		BaseURL:   "https://example.test",
-		ModelName: "model",
-	})
-	if err == nil || !strings.Contains(err.Error(), "database unavailable") {
-		t.Fatalf("UpdateLLMConfig() error = %v, want existing config error", err)
+		t.Error("GetMCPConfig() should return error when repository fails")
 	}
 }
 

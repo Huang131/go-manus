@@ -21,7 +21,6 @@ export type {
   ExecutionStatus,
   ToolEventStatus,
   MCPTransport,
-  LLMConfig,
   AgentConfig,
   ListMCPServerItem,
   MCPServerConfig,

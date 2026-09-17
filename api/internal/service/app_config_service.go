@@ -16,8 +16,6 @@ import (
 
 // AppConfigService 应用配置服务接口
 type AppConfigService interface {
-	GetLLMConfig(ctx context.Context) (*model.LLMConfig, error)
-	UpdateLLMConfig(ctx context.Context, cfg *model.LLMConfig) error
 	GetAgentConfig(ctx context.Context) (*model.AgentConfig, error)
 	UpdateAgentConfig(ctx context.Context, cfg *model.AgentConfig) error
 	GetMCPConfig(ctx context.Context) (*model.MCPConfig, error)
@@ -33,7 +31,7 @@ type AppConfigService interface {
 // DefaultAppConfigService 应用配置服务默认实现
 type DefaultAppConfigService struct {
 	repo repository.AppConfigRepository
-	// mu 串行化配置合并写入：MCP/A2A/LLM 的更新都是读-改-写，
+	// mu 串行化配置合并写入：MCP/A2A 的更新都是读-改-写，
 	// 并发写会互相覆盖丢条目（单进程内互斥即可覆盖全部入口）
 	mu sync.Mutex
 }
@@ -61,66 +59,26 @@ func newAppConfig(configType model.AppConfigType, configKey string, value any) (
 	}, nil
 }
 
-// GetLLMConfig 获取 LLM 配置
-func (s *DefaultAppConfigService) GetLLMConfig(ctx context.Context) (*model.LLMConfig, error) {
-	cfg, err := s.repo.GetConfig(ctx, model.AppConfigTypeLLM, model.AppConfigKeyDefault)
+// getConfig 读取指定类型的默认配置并反序列化为具体结构。ConfigValue 为原始 JSON，
+// 泛型统一处理 nil 判断与反序列化，消除各 Get 方法的样板。
+func getConfig[T any](s *DefaultAppConfigService, ctx context.Context, configType model.AppConfigType) (*T, error) {
+	cfg, err := s.repo.GetConfig(ctx, configType, model.AppConfigKeyDefault)
 	if err != nil {
 		return nil, err
 	}
 	if cfg == nil {
 		return nil, nil // 配置不存在，返回 nil
 	}
-
-	var llmConfig model.LLMConfig
-	if err := sonic.Unmarshal(cfg.ConfigValue, &llmConfig); err != nil {
+	var v T
+	if err := sonic.Unmarshal(cfg.ConfigValue, &v); err != nil {
 		return nil, err
 	}
-	return &llmConfig, nil
-}
-
-// UpdateLLMConfig 更新 LLM 配置 (如果 api_key 为空则保留旧值)
-func (s *DefaultAppConfigService) UpdateLLMConfig(ctx context.Context, cfg *model.LLMConfig) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.updateLLMConfig(ctx, cfg)
-}
-
-func (s *DefaultAppConfigService) updateLLMConfig(ctx context.Context, cfg *model.LLMConfig) error {
-	if cfg == nil {
-		return apperr.BadRequest("LLM配置不能为空")
-	}
-	// 如果 api_key 为空，保留旧值
-	if cfg.APIKey == "" {
-		oldCfg, err := s.GetLLMConfig(ctx)
-		if err != nil {
-			return fmt.Errorf("读取现有 LLM 配置失败: %w", err)
-		}
-		if oldCfg != nil {
-			cfg.APIKey = oldCfg.APIKey
-		}
-	}
-
-	appConfig, err := newAppConfig(model.AppConfigTypeLLM, model.AppConfigKeyDefault, cfg)
-	if err != nil {
-		return err
-	}
-	return s.repo.SaveConfig(ctx, appConfig)
+	return &v, nil
 }
 
 // GetAgentConfig 获取 Agent 配置
 func (s *DefaultAppConfigService) GetAgentConfig(ctx context.Context) (*model.AgentConfig, error) {
-	cfg, err := s.repo.GetConfig(ctx, model.AppConfigTypeAgent, model.AppConfigKeyDefault)
-	if err != nil {
-		return nil, err
-	}
-	if cfg == nil {
-		return nil, nil // 配置不存在，返回 nil
-	}
-	var agentConfig model.AgentConfig
-	if err := sonic.Unmarshal(cfg.ConfigValue, &agentConfig); err != nil {
-		return nil, err
-	}
-	return &agentConfig, nil
+	return getConfig[model.AgentConfig](s, ctx, model.AppConfigTypeAgent)
 }
 
 // UpdateAgentConfig 更新 Agent 配置
@@ -140,18 +98,7 @@ func (s *DefaultAppConfigService) saveAgentConfig(ctx context.Context, cfg *mode
 
 // GetMCPConfig 获取 MCP 配置
 func (s *DefaultAppConfigService) GetMCPConfig(ctx context.Context) (*model.MCPConfig, error) {
-	cfg, err := s.repo.GetConfig(ctx, model.AppConfigTypeMCP, model.AppConfigKeyDefault)
-	if err != nil {
-		return nil, err
-	}
-	if cfg == nil {
-		return nil, nil // 配置不存在，返回 nil
-	}
-	var mcpConfig model.MCPConfig
-	if err := sonic.Unmarshal(cfg.ConfigValue, &mcpConfig); err != nil {
-		return nil, err
-	}
-	return &mcpConfig, nil
+	return getConfig[model.MCPConfig](s, ctx, model.AppConfigTypeMCP)
 }
 
 // UpdateMCPConfig 更新 MCP 配置 (合并服务器列表)
@@ -256,18 +203,7 @@ func (s *DefaultAppConfigService) updateMCPServerEnabled(ctx context.Context, se
 
 // GetA2AConfig 获取 A2A 配置
 func (s *DefaultAppConfigService) GetA2AConfig(ctx context.Context) (*model.A2AConfig, error) {
-	cfg, err := s.repo.GetConfig(ctx, model.AppConfigTypeA2A, model.AppConfigKeyDefault)
-	if err != nil {
-		return nil, err
-	}
-	if cfg == nil {
-		return nil, nil // 配置不存在，返回 nil
-	}
-	var a2aConfig model.A2AConfig
-	if err := sonic.Unmarshal(cfg.ConfigValue, &a2aConfig); err != nil {
-		return nil, err
-	}
-	return &a2aConfig, nil
+	return getConfig[model.A2AConfig](s, ctx, model.AppConfigTypeA2A)
 }
 
 // UpdateA2AConfig 更新 A2A 配置

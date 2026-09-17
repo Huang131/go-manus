@@ -42,6 +42,8 @@ type COSFileStorage interface {
 type DefaultFileService struct {
 	repo    repository.FileRepository
 	storage COSFileStorage
+	// cleanupService 文件清理服务，与定时调度器共享同一实例以保持统计一致。
+	cleanupService FileCleanupService
 }
 
 // NewFileService 创建文件服务
@@ -49,7 +51,14 @@ func NewFileService(repo repository.FileRepository, storage COSFileStorage) File
 	return &DefaultFileService{
 		repo:    repo,
 		storage: storage,
+		// 默认创建独立清理实例；bootstrap 会注入与调度器共享的实例覆盖它。
+		cleanupService: NewFileCleanupService(repo, storage),
 	}
+}
+
+// SetCleanupService 注入清理服务实例，用于与定时调度器共享，保证统计一致。
+func (s *DefaultFileService) SetCleanupService(cs FileCleanupService) {
+	s.cleanupService = cs
 }
 
 // UploadFile 上传文件

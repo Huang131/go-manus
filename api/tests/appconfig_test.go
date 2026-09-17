@@ -9,44 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// TestAppConfigAPI_LLMConfig_Lifecycle 测试 LLM 配置完整生命周期
-func TestAppConfigAPI_LLMConfig_Lifecycle(t *testing.T) {
-	defer CleanupAppConfig(t, "llm", "default")
-
-	// 1. Get 初始状态
-	getW := getJSON(t, "/api/app-config/llm")
-	assert.Equal(t, http.StatusOK, getW.Code)
-
-	resp := parseResponse(t, getW)
-	assert.Equal(t, 0, resp.Code)
-
-	// 2. Update 创建配置
-	updateData := map[string]any{
-		"base_url":    "https://api.test.com/v1",
-		"model_name":  "test-model",
-		"api_key":     "test-key-123",
-		"temperature": 0.9,
-		"max_tokens":  2048,
-	}
-	updW := postJSON(t, "/api/app-config/llm", updateData)
-	assert.Equal(t, http.StatusOK, updW.Code)
-
-	// 3. Get 验证更新
-	getW2 := getJSON(t, "/api/app-config/llm")
-	assert.Equal(t, http.StatusOK, getW2.Code)
-
-	resp2 := parseResponse(t, getW2)
-	assert.Equal(t, 0, resp2.Code)
-
-	data := parseResponseDataAsMap(t, getW2)
-	assert.Equal(t, "https://api.test.com/v1", data["base_url"])
-	assert.Equal(t, "test-model", data["model_name"])
-	assert.Equal(t, float64(0.9), data["temperature"])
-	assert.Equal(t, true, data["api_key_configured"])
-	_, hasAPIKey := data["api_key"]
-	assert.False(t, hasAPIKey, "LLM API response must not expose api_key")
-}
-
 // TestAppConfigAPI_AgentConfig_Lifecycle 测试 Agent 配置完整生命周期
 func TestAppConfigAPI_AgentConfig_Lifecycle(t *testing.T) {
 	defer CleanupAppConfig(t, "agent", "default")
@@ -223,12 +185,6 @@ func TestAppConfigAPI_A2AConfig_Lifecycle(t *testing.T) {
 	assert.NotNil(t, found, "should find test-a2a-1 server")
 	assert.Equal(t, "test-agent", found["name"])
 	assert.Equal(t, "A test A2A agent", found["description"])
-}
-
-// TestAppConfigAPI_InvalidJSON 测试无效 JSON
-func TestAppConfigAPI_InvalidJSON(t *testing.T) {
-	w := doRequest(t, "POST", "/api/app-config/llm", []byte("invalid json"), "application/json")
-	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
 // TestAppConfigAPI_EmptyUpdate 测试空更新

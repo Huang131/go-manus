@@ -67,23 +67,6 @@ func reloadOrFail(c *gin.Context, label string, reload func(*gin.Context) error)
 	return nil
 }
 
-// GetLLMConfig 获取 LLM 配置
-func (h *AppConfigHandler) GetLLMConfig(c *gin.Context) {
-	cfg, err := h.service.GetLLMConfig(c.Request.Context())
-	if err != nil {
-		response.FromError(c, err)
-		return
-	}
-	response.Success(c, model.NewLLMConfigResponse(cfg))
-}
-
-// UpdateLLMConfig 更新 LLM 配置
-func (h *AppConfigHandler) UpdateLLMConfig(c *gin.Context) {
-	updateConfig(c, func(ctx context.Context, req *model.LLMConfigRequest) error {
-		return h.service.UpdateLLMConfig(ctx, req.NewLLMConfig())
-	})
-}
-
 // GetAgentConfig 获取 Agent 配置
 func (h *AppConfigHandler) GetAgentConfig(c *gin.Context) {
 	getConfig(c, h.service.GetAgentConfig)
