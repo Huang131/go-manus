@@ -43,18 +43,22 @@ func NewAppConfigService(repo repository.AppConfigRepository) AppConfigService {
 	return &DefaultAppConfigService{repo: repo}
 }
 
-// unmarshalConfigValue 安全解析配置值
-func unmarshalConfigValue(data interface{}, v interface{}) error {
-	var jsonData []byte
-	switch val := data.(type) {
-	case []byte:
-		jsonData = val
-	case string:
-		jsonData = []byte(val)
-	default:
-		return apperr.BadRequest("unsupported config value type")
+// newAppConfig 构造一条待保存的配置：将具体配置序列化为原始 JSON，
+// 并集中填好 ID 与创建/更新时间，消除各 Update 方法里的样板。
+func newAppConfig(configType model.AppConfigType, configKey string, value any) (*model.AppConfig, error) {
+	raw, err := sonic.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("encode config value: %w", err)
 	}
-	return sonic.Unmarshal(jsonData, v)
+	now := time.Now()
+	return &model.AppConfig{
+		ID:          uuid.New().String(),
+		ConfigType:  configType,
+		ConfigKey:   configKey,
+		ConfigValue: raw,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}, nil
 }
 
 // GetLLMConfig 获取 LLM 配置
@@ -68,7 +72,7 @@ func (s *DefaultAppConfigService) GetLLMConfig(ctx context.Context) (*model.LLMC
 	}
 
 	var llmConfig model.LLMConfig
-	if err := unmarshalConfigValue(cfg.ConfigValue, &llmConfig); err != nil {
+	if err := sonic.Unmarshal(cfg.ConfigValue, &llmConfig); err != nil {
 		return nil, err
 	}
 	return &llmConfig, nil
@@ -96,13 +100,9 @@ func (s *DefaultAppConfigService) updateLLMConfig(ctx context.Context, cfg *mode
 		}
 	}
 
-	appConfig := &model.AppConfig{
-		ID:          uuid.New().String(),
-		ConfigType:  model.AppConfigTypeLLM,
-		ConfigKey:   model.AppConfigKeyDefault,
-		ConfigValue: cfg,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+	appConfig, err := newAppConfig(model.AppConfigTypeLLM, model.AppConfigKeyDefault, cfg)
+	if err != nil {
+		return err
 	}
 	return s.repo.SaveConfig(ctx, appConfig)
 }
@@ -117,7 +117,7 @@ func (s *DefaultAppConfigService) GetAgentConfig(ctx context.Context) (*model.Ag
 		return nil, nil // 配置不存在，返回 nil
 	}
 	var agentConfig model.AgentConfig
-	if err := unmarshalConfigValue(cfg.ConfigValue, &agentConfig); err != nil {
+	if err := sonic.Unmarshal(cfg.ConfigValue, &agentConfig); err != nil {
 		return nil, err
 	}
 	return &agentConfig, nil
@@ -131,13 +131,9 @@ func (s *DefaultAppConfigService) UpdateAgentConfig(ctx context.Context, cfg *mo
 }
 
 func (s *DefaultAppConfigService) saveAgentConfig(ctx context.Context, cfg *model.AgentConfig) error {
-	appConfig := &model.AppConfig{
-		ID:          uuid.New().String(),
-		ConfigType:  model.AppConfigTypeAgent,
-		ConfigKey:   model.AppConfigKeyDefault,
-		ConfigValue: cfg,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+	appConfig, err := newAppConfig(model.AppConfigTypeAgent, model.AppConfigKeyDefault, cfg)
+	if err != nil {
+		return err
 	}
 	return s.repo.SaveConfig(ctx, appConfig)
 }
@@ -152,7 +148,7 @@ func (s *DefaultAppConfigService) GetMCPConfig(ctx context.Context) (*model.MCPC
 		return nil, nil // 配置不存在，返回 nil
 	}
 	var mcpConfig model.MCPConfig
-	if err := unmarshalConfigValue(cfg.ConfigValue, &mcpConfig); err != nil {
+	if err := sonic.Unmarshal(cfg.ConfigValue, &mcpConfig); err != nil {
 		return nil, err
 	}
 	return &mcpConfig, nil
@@ -189,13 +185,9 @@ func (s *DefaultAppConfigService) updateMCPConfig(ctx context.Context, cfg *mode
 		}
 	}
 
-	appConfig := &model.AppConfig{
-		ID:          uuid.New().String(),
-		ConfigType:  model.AppConfigTypeMCP,
-		ConfigKey:   model.AppConfigKeyDefault,
-		ConfigValue: cfg,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+	appConfig, err := newAppConfig(model.AppConfigTypeMCP, model.AppConfigKeyDefault, cfg)
+	if err != nil {
+		return err
 	}
 	return s.repo.SaveConfig(ctx, appConfig)
 }
@@ -231,13 +223,9 @@ func (s *DefaultAppConfigService) deleteMCPServer(ctx context.Context, serverNam
 	}
 
 	cfg.Servers = newServers
-	appConfig := &model.AppConfig{
-		ID:          uuid.New().String(),
-		ConfigType:  model.AppConfigTypeMCP,
-		ConfigKey:   model.AppConfigKeyDefault,
-		ConfigValue: cfg,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+	appConfig, err := newAppConfig(model.AppConfigTypeMCP, model.AppConfigKeyDefault, cfg)
+	if err != nil {
+		return err
 	}
 	return s.repo.SaveConfig(ctx, appConfig)
 }
@@ -276,7 +264,7 @@ func (s *DefaultAppConfigService) GetA2AConfig(ctx context.Context) (*model.A2AC
 		return nil, nil // 配置不存在，返回 nil
 	}
 	var a2aConfig model.A2AConfig
-	if err := unmarshalConfigValue(cfg.ConfigValue, &a2aConfig); err != nil {
+	if err := sonic.Unmarshal(cfg.ConfigValue, &a2aConfig); err != nil {
 		return nil, err
 	}
 	return &a2aConfig, nil
@@ -313,13 +301,9 @@ func (s *DefaultAppConfigService) updateA2AConfig(ctx context.Context, cfg *mode
 		}
 	}
 
-	appConfig := &model.AppConfig{
-		ID:          uuid.New().String(),
-		ConfigType:  model.AppConfigTypeA2A,
-		ConfigKey:   model.AppConfigKeyDefault,
-		ConfigValue: cfg,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+	appConfig, err := newAppConfig(model.AppConfigTypeA2A, model.AppConfigKeyDefault, cfg)
+	if err != nil {
+		return err
 	}
 	return s.repo.SaveConfig(ctx, appConfig)
 }
@@ -380,10 +364,9 @@ func (s *DefaultAppConfigService) updateA2AServerEnabled(ctx context.Context, id
 }
 
 func (s *DefaultAppConfigService) saveA2AConfig(ctx context.Context, cfg *model.A2AConfig) error {
-	now := time.Now()
-	return s.repo.SaveConfig(ctx, &model.AppConfig{
-		ID: uuid.New().String(), ConfigType: model.AppConfigTypeA2A,
-		ConfigKey: model.AppConfigKeyDefault, ConfigValue: cfg,
-		CreatedAt: now, UpdatedAt: now,
-	})
+	appConfig, err := newAppConfig(model.AppConfigTypeA2A, model.AppConfigKeyDefault, cfg)
+	if err != nil {
+		return err
+	}
+	return s.repo.SaveConfig(ctx, appConfig)
 }

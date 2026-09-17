@@ -82,7 +82,7 @@ func TestAppConfigRepo_SaveConfig_UpdateExisting(t *testing.T) {
 	got, err := repo.GetConfig(context.Background(), cfgType, cfgKey)
 	require.NoError(t, err)
 	require.NotNil(t, got)
-	assert.JSONEq(t, `{"model":"gpt-4"}`, string(got.ConfigValue.([]byte)))
+	assert.JSONEq(t, `{"model":"gpt-4"}`, string(got.ConfigValue))
 }
 
 func TestAppConfigRepo_DeleteConfig(t *testing.T) {
@@ -134,8 +134,8 @@ func TestAppConfigRepo_ListConfigs(t *testing.T) {
 	for _, c := range list {
 		if c.ConfigKey == keys[0] || c.ConfigKey == keys[1] {
 			found++
-			if _, ok := c.ConfigValue.([]byte); !ok {
-				t.Fatalf("ListConfigs() ConfigValue type = %T, want []byte", c.ConfigValue)
+			if len(c.ConfigValue) == 0 {
+				t.Fatalf("ListConfigs() ConfigValue empty for key %s", c.ConfigKey)
 			}
 		}
 	}

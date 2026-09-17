@@ -1,16 +1,19 @@
 package model
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // AppConfig 应用配置，采用 Key-Value 存储，支持多类型配置。
 // ConfigType 区分配置领域（LLM/Agent/MCP/A2A），ConfigKey 区分同一领域下的多个配置。
 type AppConfig struct {
-	ID          string        `json:"id"`           // 唯一标识
-	ConfigType  AppConfigType `json:"config_type"`  // 配置类型：llm/agent/mcp/a2a
-	ConfigKey   string        `json:"config_key"`   // 配置键，如 "default" 表示默认配置
-	ConfigValue interface{}   `json:"config_value"` // 配置值，JSON 格式存储具体配置结构
-	CreatedAt   time.Time     `json:"created_at"`
-	UpdatedAt   time.Time     `json:"updated_at"`
+	ID          string          `json:"id"`           // 唯一标识
+	ConfigType  AppConfigType   `json:"config_type"`  // 配置类型：llm/agent/mcp/a2a
+	ConfigKey   string          `json:"config_key"`   // 配置键，如 "default" 表示默认配置
+	ConfigValue json.RawMessage `json:"config_value"` // 配置值，原始 JSON 字节，对应具体配置结构
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
 }
 
 // HealthStatus 应用健康检查结果

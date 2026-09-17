@@ -3,9 +3,6 @@ package repository
 import (
 	"context"
 	"errors"
-	"fmt"
-
-	"github.com/bytedance/sonic"
 
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -71,10 +68,6 @@ func (r *PostgresAppConfigRepository) GetConfig(ctx context.Context, configType 
 // SaveConfig 保存配置
 func (r *PostgresAppConfigRepository) SaveConfig(ctx context.Context, config *model.AppConfig) error {
 	q := r.queryer()
-	configValueJSON, err := marshalConfigValue(config.ConfigValue)
-	if err != nil {
-		return err
-	}
 
 	query := `
 		INSERT INTO app_configs (` + appConfigColumns + `)
@@ -82,24 +75,11 @@ func (r *PostgresAppConfigRepository) SaveConfig(ctx context.Context, config *mo
 		ON CONFLICT (config_type, config_key)
 		DO UPDATE SET config_value = $4, updated_at = $6
 	`
-	_, err = q.Exec(ctx, query,
+	_, err := q.Exec(ctx, query,
 		config.ID, config.ConfigType, config.ConfigKey,
-		configValueJSON, config.CreatedAt, config.UpdatedAt,
+		[]byte(config.ConfigValue), config.CreatedAt, config.UpdatedAt,
 	)
 	return err
-}
-
-// marshalConfigValue 保持 JSON 字节的原始语义，避免 sonic 将 []byte 编码成 base64 字符串。
-// 服务层传入的结构体仍由 sonic 负责序列化。
-func marshalConfigValue(value any) ([]byte, error) {
-	if raw, ok := value.([]byte); ok {
-		return raw, nil
-	}
-	data, err := sonic.Marshal(value)
-	if err != nil {
-		return nil, fmt.Errorf("encode config value: %w", err)
-	}
-	return data, nil
 }
 
 // DeleteConfig 删除配置

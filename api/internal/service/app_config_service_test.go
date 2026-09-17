@@ -32,7 +32,7 @@ func (m *MockAppConfigRepository) GetConfig(ctx context.Context, configType mode
 	}
 	for _, c := range m.configs {
 		if c.ConfigType == configType && c.ConfigKey == configKey {
-			// 存储时已经统一为 []byte，直接返回即可
+			// 存储时已经是原始 JSON 字节，直接返回即可
 			return c, nil
 		}
 	}
@@ -43,26 +43,12 @@ func (m *MockAppConfigRepository) SaveConfig(ctx context.Context, config *model.
 	if m.createErr != nil {
 		return m.createErr
 	}
-	// 如果传入的 ConfigValue 已经是 []byte（测试用例中预先 sonic.Marshal 的结果），
-	// 直接存储；否则将其 Marshal 为 []byte，模拟生产 repo 的持久化行为。
-	var storedValue []byte
-	switch v := config.ConfigValue.(type) {
-	case []byte:
-		storedValue = v
-	case nil:
-		storedValue = nil
-	default:
-		b, err := sonic.Marshal(v)
-		if err != nil {
-			return err
-		}
-		storedValue = b
-	}
+	// ConfigValue 已是原始 JSON（json.RawMessage），直接存储，模拟生产 repo 的持久化行为。
 	stored := &model.AppConfig{
 		ID:          config.ID,
 		ConfigType:  config.ConfigType,
 		ConfigKey:   config.ConfigKey,
-		ConfigValue: storedValue,
+		ConfigValue: config.ConfigValue,
 		CreatedAt:   config.CreatedAt,
 		UpdatedAt:   config.UpdatedAt,
 	}
