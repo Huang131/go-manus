@@ -103,7 +103,7 @@ func TestAnthropicClient_StreamProducesDeltas(t *testing.T) {
 	if got[3].ToolCalls[0].ArgumentsDelta != "{\"q\":\"go\"}" {
 		t.Fatalf("tool args delta = %+v", got[3])
 	}
-	if got[4].FinishReason != "tool_use" || got[4].Usage == nil || got[4].Usage.CompletionTokens != 3 {
+	if got[4].FinishReason != llmcore.FinishReasonToolCalls || got[4].Usage == nil || got[4].Usage.CompletionTokens != 3 {
 		t.Fatalf("finish delta = %+v", got[4])
 	}
 }
@@ -241,8 +241,8 @@ func TestAnthropicClient_ResponseBlocks(t *testing.T) {
 	if tc.ID != "tc-9" || tc.Function.Name != "search" || tc.Function.Arguments != `{"query":"天气"}` {
 		t.Errorf("ToolCall 解析错误: %+v", tc)
 	}
-	if resp.FinishReason != "tool_use" {
-		t.Errorf("FinishReason = %q, want tool_use", resp.FinishReason)
+	if resp.FinishReason != llmcore.FinishReasonToolCalls {
+		t.Errorf("FinishReason = %q, want %q", resp.FinishReason, llmcore.FinishReasonToolCalls)
 	}
 	if resp.Usage.PromptTokens != 20 || resp.Usage.CompletionTokens != 30 {
 		t.Errorf("Usage 错误: %+v", resp.Usage)
@@ -277,6 +277,32 @@ func TestAnthropicClient_TextOnlyWire(t *testing.T) {
 	}
 	if resp.Message.ContentText != "你好" {
 		t.Errorf("ContentText = %q, want 你好", resp.Message.ContentText)
+	}
+	if resp.FinishReason != llmcore.FinishReasonStop {
+		t.Errorf("FinishReason = %q, want %q", resp.FinishReason, llmcore.FinishReasonStop)
+	}
+}
+
+// TestNormalizeAnthropicStopReason 锁定 stop_reason → canonical 的翻译契约
+func TestNormalizeAnthropicStopReason(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "tool_use", in: "tool_use", want: llmcore.FinishReasonToolCalls},
+		{name: "end_turn", in: "end_turn", want: llmcore.FinishReasonStop},
+		{name: "stop_sequence", in: "stop_sequence", want: llmcore.FinishReasonStop},
+		{name: "max_tokens", in: "max_tokens", want: llmcore.FinishReasonLength},
+		{name: "unknown passthrough", in: "pause_turn", want: "pause_turn"},
+		{name: "empty", in: "", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeAnthropicStopReason(tt.in); got != tt.want {
+				t.Errorf("normalizeAnthropicStopReason(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
 	}
 }
 

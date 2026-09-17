@@ -1,6 +1,6 @@
 // Package llmcore 是 LLM 调用协议的"内核层"。
 //
-// 设计原则（来自 MULTI_LLM_ADAPTER_DESIGN.md）：
+// 设计原则：
 //   - 业务层（agent、orchestrator）只看到这套类型，不接触任何厂商协议
 //   - Adapter（openai/anthropic）把厂商响应归一化到这套类型
 //   - 类型设计"足够完整但不过度抽象"：先满足当前业务能落地，未来扩展以新增字段而非推倒重来
@@ -13,22 +13,25 @@ package llmcore
 import "github.com/Huang131/go-manus/api/internal/model"
 
 // 通用 LLM 协议值，供业务层和各适配器共享。
+// 这里的值都是 canonical 值：Adapter 必须把厂商原始值翻译成本组常量后再往外传，
+// 业务层不应看到任何厂商私有取值。
 const (
-	ToolTypeFunction         = "function"
-	ContentTypeText          = "text"
-	ContentTypeImageURL      = "image_url"
-	ContentTypeAudioURL      = "audio_url"
-	ResponseFormatText       = "text"
-	ResponseFormatJSONObject = "json_object"
-	ResponseFormatJSONSchema = "json_schema"
-	FinishReasonStop         = "stop"
-	FinishReasonToolCalls    = "tool_calls"
-	ExtraParamKindJSON       = "json"
+	ToolTypeFunction          = "function"
+	ContentTypeText           = "text"
+	ContentTypeImageURL       = "image_url"
+	ContentTypeAudioURL       = "audio_url"
+	ResponseFormatText        = "text"
+	ResponseFormatJSONObject  = "json_object"
+	ResponseFormatJSONSchema  = "json_schema"
+	FinishReasonStop          = "stop"
+	FinishReasonToolCalls     = "tool_calls"
+	FinishReasonLength        = "length"
+	FinishReasonContentFilter = "content_filter"
+	ExtraParamKindJSON        = "json"
 )
 
 // ContentPart 消息内容片段
 // 多模态场景下 messages[i].content 是 []ContentPart；纯文本场景下是 string
-// 为简化，V1 让 messages 元素用统一 Message.ContentText / ContentParts 两种字段
 // 由 Adapter 在转厂商格式时选择合适的形状
 type ContentPart struct {
 	Type     string      `json:"type"` // "text" / "image_url" / "audio_url" / ...
@@ -72,7 +75,7 @@ type Message struct {
 	ToolCallID string `json:"tool_call_id,omitempty"`
 }
 
-// ToolCallFunction 工具调用的函数信息（对应 OpenAI 的 function_call 结构）
+// ToolCallFunction 工具调用的函数信息（对应 OpenAI 的 tool_calls[].function 结构）
 type ToolCallFunction struct {
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"` // JSON 字符串
@@ -117,8 +120,8 @@ type LLMRequest struct {
 	Stop        []string `json:"stop,omitempty"`
 
 	// ===== 结构化输出 =====
-	// ResponseFormat 在 OpenAI 协议上是 response_format 对象
-	// 在 Anthropic 协议上由 Adapter 自行决定是否转化为 tool_use
+	// ResponseFormat 仅用于 OpenAI 兼容协议（openai_compat/gemini/custom）
+	// Anthropic 用 tool_use 实现结构化输出，由其 Adapter 自行转换
 	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
 
 	// ===== 流式 =====
@@ -150,7 +153,7 @@ type LLMResponse struct {
 	// Message 单条助手消息
 	Message Message `json:"message"`
 
-	// FinishReason "stop" / "tool_calls" / "length" / "content_filter" / "error"
+	// FinishReason canonical 终止原因，取值见 FinishReason* 常量
 	FinishReason string `json:"finish_reason"`
 
 	// Usage token 消耗
@@ -175,7 +178,7 @@ type LLMDelta struct {
 	// Index 标识是同一个 tool_call 的第几段（用于跨 chunk 拼接 arguments）
 	ToolCalls []ToolCallDelta `json:"tool_calls,omitempty"`
 
-	// FinishReason 在流结束时出现
+	// FinishReason canonical 终止原因，取值见 FinishReason* 常量（流结束时出现）
 	FinishReason string `json:"finish_reason,omitempty"`
 
 	// Usage 流结束时可能附带

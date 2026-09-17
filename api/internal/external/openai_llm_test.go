@@ -93,6 +93,28 @@ func TestOpenAIClient_StreamProducesDeltas(t *testing.T) {
 	}
 }
 
+// TestNormalizeOpenAIFinishReason 锁定 finish_reason → canonical 的翻译契约
+func TestNormalizeOpenAIFinishReason(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "legacy function_call", in: "function_call", want: llmcore.FinishReasonToolCalls},
+		{name: "canonical tool_calls", in: "tool_calls", want: llmcore.FinishReasonToolCalls},
+		{name: "canonical stop", in: "stop", want: llmcore.FinishReasonStop},
+		{name: "canonical length", in: "length", want: llmcore.FinishReasonLength},
+		{name: "empty", in: "", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeOpenAIFinishReason(tt.in); got != tt.want {
+				t.Errorf("normalizeOpenAIFinishReason(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestOpenAIClient_StreamStopsWhenContextCanceled(t *testing.T) {
 	started := make(chan struct{})
 	c := newTransportClient(t, func(r *http.Request) (*http.Response, error) {

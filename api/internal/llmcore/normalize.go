@@ -2,28 +2,6 @@ package llmcore
 
 import "github.com/Huang131/go-manus/api/internal/model"
 
-// NormalizeResponse 归一化上游响应
-// 把各种"看起来很相似但 field 不一样"的响应抹平到统一形状
-// 这是 Adapter 之外的一个独立纯函数，方便单测覆盖各种异常
-//
-// 规则（对应方案 L17-L22）：
-//   - 永远不会让 reasoning 覆盖 content
-//   - content 为空 + reasoning 有内容 → 把 reasoning 作为隐藏 metadata（不进 LLMResponse.Message.Reasoning，给用户看的是 content）
-//     业务侧再决定要不要展示
-//   - tool_calls 必须拼装完整，arguments 是 JSON 字符串
-//   - Usage.ReasoningTokens 有就保留（DeepSeek / GLM thinking 模式专用）
-func NormalizeResponse(resp *LLMResponse) *LLMResponse {
-	if resp == nil {
-		return nil
-	}
-	// 防御：ContentText 永远不应包含 reasoning 的内容
-	// 适配层错误地"reasoning → content" 兜底会被这里纠正
-	// 但已经发生的事实不追溯：只校验后续行为
-	// 这里什么都不做，因为归一化是 Adapter 的职责
-	// 此函数用作契约"参考实现"，让 Adapter 实现时按同样规则
-	return resp
-}
-
 // MergeDeltas 把流式 delta 累积成完整 response
 // 用于在流结束时把 content 拼起来
 func MergeDeltas(modelName string, deltas []LLMDelta) *LLMResponse {
@@ -80,7 +58,7 @@ func MergeDeltas(modelName string, deltas []LLMDelta) *LLMResponse {
 	}
 	resp.Message.ToolCalls = currentCalls
 
-	// finish_reason=tool_calls 才算有 tool_calls
+	// finish_reason 为 canonical 的 tool_calls 才保留工具调用
 	if !isToolCallFinishReason(resp.FinishReason) {
 		resp.Message.ToolCalls = nil
 	}
@@ -88,11 +66,11 @@ func MergeDeltas(modelName string, deltas []LLMDelta) *LLMResponse {
 	return resp
 }
 
-// NormalizeFinishReason 将不同 provider 的终止原因归一化为业务层协议。
-// Anthropic 使用 tool_use，OpenAI 兼容接口通常使用 tool_calls；
-// 业务层只应处理 FinishReasonToolCalls。
-// isToolCallFinishReason 识别各 provider 表示工具调用终止的原始值。
-// 响应仍保留 provider 原始 finish_reason，只在是否保留 ToolCalls 时做兼容判断。
+// isToolCallFinishReason 判断 canonical finish_reason 是否表示工具调用终止。
+//
+// 只接受 FinishReasonToolCalls。厂商原始值（Anthropic 的 tool_use、
+// OpenAI 旧版 function_call）由各 Adapter 在出口处翻译成 canonical 值，
+// llmcore 不感知任何厂商协议。
 func isToolCallFinishReason(reason string) bool {
-	return reason == FinishReasonToolCalls || reason == "tool_use" || reason == "function_call"
+	return reason == FinishReasonToolCalls
 }

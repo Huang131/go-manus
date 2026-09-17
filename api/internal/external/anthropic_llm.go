@@ -235,7 +235,7 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 		Message: llmcore.Message{
 			Role: model.RoleAssistant,
 		},
-		FinishReason: anthropicResp.StopReason,
+		FinishReason: normalizeAnthropicStopReason(anthropicResp.StopReason),
 	}
 
 	for i := range anthropicResp.Content {
@@ -269,6 +269,21 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 	result.CostUSD = estimateCostUSD(c.costPolicy, result.Usage)
 
 	return result, nil
+}
+
+// normalizeAnthropicStopReason 把 Anthropic 的 stop_reason 翻译为 llmcore canonical 值。
+// 未知值原样透传，保留可观测性（不猜测语义）。
+func normalizeAnthropicStopReason(raw string) string {
+	switch raw {
+	case anthropicStopReasonToolUse:
+		return llmcore.FinishReasonToolCalls
+	case anthropicStopReasonEndTurn, anthropicStopReasonStopSequence:
+		return llmcore.FinishReasonStop
+	case anthropicStopReasonMaxTokens:
+		return llmcore.FinishReasonLength
+	default:
+		return raw
+	}
 }
 
 // anthropicStreamEvent 是 Anthropic SSE 事件的通用载体。
@@ -386,26 +401,26 @@ func (c *AnthropicClient) readAnthropicStream(ctx context.Context, body io.ReadC
 		eventType = ""
 		delta := llmcore.LLMDelta{}
 		switch currentEventType {
-		case "error":
+		case anthropicEventError:
 			delta.Error = event.Error.Message
-		case "message_start":
+		case anthropicEventMessageStart:
 			// 记录 prompt token 总量，供 message_delta 组装完整 usage
 			inputTokens = event.Message.Usage.InputTokens
-		case "content_block_start":
+		case anthropicEventContentBlockStart:
 			if event.ContentBlock.Type == anthropicContentTypeToolUse {
 				delta.ToolCalls = []llmcore.ToolCallDelta{{Index: event.Index, ID: event.ContentBlock.ID, Type: llmcore.ToolTypeFunction, Name: event.ContentBlock.Name}}
 			}
-		case "content_block_delta":
+		case anthropicEventContentBlockDelta:
 			switch event.Delta.Type {
-			case "text_delta":
+			case anthropicDeltaTypeTextDelta:
 				delta.ContentText = event.Delta.Text
-			case "thinking_delta":
+			case anthropicDeltaTypeThinkingDelta:
 				delta.Reasoning = event.Delta.Thinking
-			case "input_json_delta":
+			case anthropicDeltaTypeInputJSON:
 				delta.ToolCalls = []llmcore.ToolCallDelta{{Index: event.Index, ArgumentsDelta: event.Delta.PartialJSON}}
 			}
-		case "message_delta":
-			delta.FinishReason = event.Delta.StopReason
+		case anthropicEventMessageDelta:
+			delta.FinishReason = normalizeAnthropicStopReason(event.Delta.StopReason)
 			if event.Usage != nil {
 				delta.Usage = &llmcore.Usage{
 					PromptTokens:     inputTokens,

@@ -299,7 +299,7 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LL
 			Reasoning:   reasoning,
 			ToolCalls:   toolCalls,
 		},
-		FinishReason: choice.FinishReason,
+		FinishReason: normalizeOpenAIFinishReason(choice.FinishReason),
 		Usage: llmcore.Usage{
 			PromptTokens:     chatResp.Usage.PromptTokens,
 			CompletionTokens: chatResp.Usage.CompletionTokens,
@@ -309,6 +309,16 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LL
 	}
 	out.CostUSD = estimateCostUSD(c.costPolicy, out.Usage)
 	return out, nil
+}
+
+// normalizeOpenAIFinishReason 把 OpenAI 兼容协议的 finish_reason 翻译为 llmcore canonical 值。
+// stop/tool_calls/length/content_filter 与 canonical 同名，只有旧版 function_call 需要翻译；
+// 未知值原样透传，保留可观测性。
+func normalizeOpenAIFinishReason(raw string) string {
+	if raw == openAIFinishReasonFunctionCall {
+		return llmcore.FinishReasonToolCalls
+	}
+	return raw
 }
 
 // openAIStreamChunk 是 OpenAI 兼容 SSE 的单个 data JSON。
@@ -417,7 +427,7 @@ func (c *OpenAIClient) readOpenAIStream(ctx context.Context, body io.ReadCloser,
 			continue
 		}
 		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == "[DONE]" {
+		if payload == openAISSEEndToken {
 			return
 		}
 
@@ -447,7 +457,7 @@ func (c *OpenAIClient) readOpenAIStream(ctx context.Context, body io.ReadCloser,
 			delta := llmcore.LLMDelta{
 				ContentText:  choice.Delta.Content,
 				Reasoning:    reasoning,
-				FinishReason: choice.FinishReason,
+				FinishReason: normalizeOpenAIFinishReason(choice.FinishReason),
 				Usage:        usage,
 			}
 			for _, toolCall := range choice.Delta.ToolCalls {
@@ -498,13 +508,13 @@ func (c *OpenAIClient) effectiveMaxTokens() int {
 func (c *OpenAIClient) effectiveReasoningEffort() *string {
 	switch c.requestPolicy.ReasoningMode {
 	case model.ReasoningOff:
-		v := "none"
+		v := openAIReasoningEffortNone
 		return &v
 	case model.ReasoningLow:
-		v := "low"
+		v := openAIReasoningEffortLow
 		return &v
 	case model.ReasoningHigh:
-		v := "high"
+		v := openAIReasoningEffortHigh
 		return &v
 	}
 

@@ -195,9 +195,9 @@ func (c *TavilySearchClient) Invoke(ctx context.Context, query string, dateRange
 
 	body, err := sonic.Marshal(tavilySearchRequest{
 		Query:       query,
-		SearchDepth: "basic",
+		SearchDepth: tavilySearchDepthBasic,
 		MaxResults:  10,
-		Topic:       "general",
+		Topic:       tavilyTopicGeneral,
 		TimeRange:   tavilyTimeRange(dateRange),
 	})
 	if err != nil {
@@ -389,13 +389,13 @@ func tavilyTimeRange(r *string) string {
 	}
 	switch *r {
 	case "d":
-		return "day"
+		return tavilyTimeRangeDay
 	case "w":
-		return "week"
+		return tavilyTimeRangeWeek
 	case "m":
-		return "month"
+		return tavilyTimeRangeMonth
 	case "y":
-		return "year"
+		return tavilyTimeRangeYear
 	default:
 		return ""
 	}
@@ -408,13 +408,13 @@ func bochaFreshness(r *string) string {
 	}
 	switch *r {
 	case "d":
-		return "oneDay"
+		return bochaFreshnessOneDay
 	case "w":
-		return "oneWeek"
+		return bochaFreshnessOneWeek
 	case "m":
-		return "oneMonth"
+		return bochaFreshnessOneMonth
 	case "y":
-		return "oneYear"
+		return bochaFreshnessOneYear
 	default:
 		return ""
 	}

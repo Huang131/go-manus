@@ -17,17 +17,34 @@ func TestCanFallbackTo_ProtocolMismatch(t *testing.T) {
 }
 
 // TestCanFallbackTo_ContextShrink
-// 业务期望：candidate 上下文比 current 小 → 不能 fallback
+// 业务期望：candidate 上下文比 current 小（带 SafeContextRatio）→ 不能 fallback
 func TestCanFallbackTo_ContextShrink(t *testing.T) {
 	big := fullProfile(ProtocolOpenAICompat)
 	big.Capabilities.MaxContextTokens = 200000
 	small := fullProfile(ProtocolOpenAICompat)
-	small.Capabilities.MaxContextTokens = 8000
+	small.Capabilities.MaxContextTokens = 128000 // 200000/0.8=250000，所以不能 fallback
 	if CanFallbackTo(small, big) {
-		t.Fatal("expected false: context shrink")
+		t.Fatal("expected false: context shrink beyond safe ratio")
 	}
 	if !CanFallbackTo(big, small) {
 		t.Fatal("expected true: context expand is OK")
+	}
+}
+
+// TestCanFallbackTo_MaxOutputTokensShrink
+// 业务期望：candidate MaxOutputTokens 比 current 小 → 不能 fallback（生成会截断）
+func TestCanFallbackTo_MaxOutputTokensShrink(t *testing.T) {
+	// current=4096, candidate=1024，candidate 小不能替换 current
+	current := fullProfile(ProtocolOpenAICompat)
+	current.Capabilities.MaxOutputTokens = 4096
+	candidate := fullProfile(ProtocolOpenAICompat)
+	candidate.Capabilities.MaxOutputTokens = 1024
+	if CanFallbackTo(candidate, current) {
+		t.Fatal("expected false: max_output_tokens shrink")
+	}
+	// 反向：current=4096 能替换 candidate=1024（能力更强）
+	if !CanFallbackTo(current, candidate) {
+		t.Fatal("expected true: max_output_tokens expand is OK")
 	}
 }
 

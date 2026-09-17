@@ -111,14 +111,20 @@ func TestMergeDeltas_ToolCall(t *testing.T) {
 	}
 }
 
-func TestMergeDeltasAcceptsProviderToolCallFinishReasons(t *testing.T) {
+// TestMergeDeltas_OnlyCanonicalFinishReasonKeepsToolCalls
+// 契约：llmcore 只认 canonical 的 tool_calls。
+// 厂商原始值（tool_use / function_call）必须由 Adapter 翻译后再进入本层，
+// 未翻译的原始值一律视为非工具调用终止，丢弃 ToolCalls。
+func TestMergeDeltas_OnlyCanonicalFinishReasonKeepsToolCalls(t *testing.T) {
 	tests := []struct {
-		name string
-		in   string
+		name      string
+		in        string
+		wantCalls int
 	}{
-		{name: "openai tool calls", in: "tool_calls"},
-		{name: "anthropic tool use", in: "tool_use"},
-		{name: "legacy function call", in: "function_call"},
+		{name: "canonical tool calls", in: FinishReasonToolCalls, wantCalls: 1},
+		{name: "canonical stop", in: FinishReasonStop, wantCalls: 0},
+		{name: "raw anthropic tool use", in: "tool_use", wantCalls: 0},
+		{name: "raw legacy function call", in: "function_call", wantCalls: 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -126,14 +132,17 @@ func TestMergeDeltasAcceptsProviderToolCallFinishReasons(t *testing.T) {
 				{ToolCalls: []ToolCallDelta{{Index: 0, ID: "call-1", Name: "search"}}},
 				{FinishReason: tt.in},
 			})
-			if len(resp.Message.ToolCalls) != 1 {
-				t.Fatalf("finish reason %q dropped tool call", tt.in)
+			if len(resp.Message.ToolCalls) != tt.wantCalls {
+				t.Fatalf("finish reason %q: tool calls = %d, want %d",
+					tt.in, len(resp.Message.ToolCalls), tt.wantCalls)
 			}
 		})
 	}
 }
 
-func TestMergeDeltas_AnthropicToolUseRetainsToolCall(t *testing.T) {
+// TestMergeDeltas_CanonicalToolCallsRetainsToolCall
+// 业务期望：Adapter 归一化后的 tool_calls 能完整保留拼装好的 arguments
+func TestMergeDeltas_CanonicalToolCallsRetainsToolCall(t *testing.T) {
 	resp := MergeDeltas("claude-test", []LLMDelta{
 		{ToolCalls: []ToolCallDelta{
 			{Index: 0, ID: "call-1", Type: ToolTypeFunction, Name: "search"},
@@ -141,13 +150,16 @@ func TestMergeDeltas_AnthropicToolUseRetainsToolCall(t *testing.T) {
 		{ToolCalls: []ToolCallDelta{
 			{Index: 0, ArgumentsDelta: `{"q":"go"}`},
 		}},
-		{FinishReason: "tool_use"},
+		{FinishReason: FinishReasonToolCalls},
 	})
-	if resp.FinishReason != "tool_use" {
-		t.Fatalf("finish reason = %q, want tool_use", resp.FinishReason)
+	if resp.FinishReason != FinishReasonToolCalls {
+		t.Fatalf("finish reason = %q, want %q", resp.FinishReason, FinishReasonToolCalls)
 	}
 	if len(resp.Message.ToolCalls) != 1 {
 		t.Fatalf("tool calls = %d, want 1", len(resp.Message.ToolCalls))
+	}
+	if resp.Message.ToolCalls[0].Function.Arguments != `{"q":"go"}` {
+		t.Fatalf("arguments = %q, want {\"q\":\"go\"}", resp.Message.ToolCalls[0].Function.Arguments)
 	}
 }
 
@@ -206,18 +218,42 @@ func TestMergeDeltas_ToolCallThenContent(t *testing.T) {
 	}
 }
 
-// TestEstimateContextTokens 业务期望：粗估 1 token ≈ 4 char（基于 ASCII）
-// 注：中文是 1 char ≈ 1 token（甚至 1 char 算 1.5+ token），所以估算用 ASCII 更稳定
-func TestEstimateContextTokens(t *testing.T) {
+// TestEstimateContextTokens_ASCII 业务期望：ASCII 1 token ≈ 4 chars
+func TestEstimateContextTokens_ASCII(t *testing.T) {
 	msgs := []Message{
-		{ContentText: repeat("a", 16)}, // 16 chars
-		{ContentText: repeat("b", 16)}, // 16 chars
-		{ContentText: repeat("c", 8)},  // 8 chars
+		{ContentText: repeat("a", 16)}, // 16 ASCII chars
+		{ContentText: repeat("b", 16)}, // 16 ASCII chars
+		{ContentText: repeat("c", 8)},  // 8 ASCII chars
 	}
-	// total = 40 chars / 4 = 10 tokens
+	// 40 ASCII chars / 4 = 10 tokens
 	tokens := EstimateContextTokens(msgs)
 	if tokens != 10 {
 		t.Errorf("expected 10 tokens, got %d", tokens)
+	}
+}
+
+// TestEstimateContextTokens_NonASCII 业务期望：中文按字节计（3字节/字，保守偏大）
+func TestEstimateContextTokens_NonASCII(t *testing.T) {
+	msgs := []Message{
+		{ContentText: "你好世界"}, // 12 字节 (4字*3字节) → 12/4 = 3 tokens
+	}
+	tokens := EstimateContextTokens(msgs)
+	if tokens != 3 {
+		t.Errorf("expected 3 tokens, got %d", tokens)
+	}
+}
+
+// TestEstimateContextTokens_Mixed 业务期望：混合内容正确计算
+func TestEstimateContextTokens_Mixed(t *testing.T) {
+	msgs := []Message{
+		{ContentText: "hello"},  // 5 ASCII 字节 → 5/4 = 1 token
+		{ContentText: "你好"},     // 6 字节 (2字*3字节) → 6/4 = 1 token
+		{ContentText: " world"}, // 6 ASCII 字节 → 6/4 = 1 token
+	}
+	// 5 + 6 + 6 = 17 字节，17/4 = 4 tokens (向下取整)
+	tokens := EstimateContextTokens(msgs)
+	if tokens != 4 {
+		t.Errorf("expected 4 tokens (17 bytes / 4), got %d", tokens)
 	}
 }
 
