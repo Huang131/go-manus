@@ -321,7 +321,7 @@ func (s *AgentService) GetTaskEvents(ctx context.Context, taskID string, startID
 	}
 
 	// 未注册任务必须先确认 Redis stream 存在，避免对不存在的 task 永久 BLOCK。
-	size, err := s.caps.MessageQueue.Size(ctx, fmt.Sprintf("task:output:%s", taskID))
+	size, err := s.caps.MessageQueue.Size(ctx, taskOutputStreamName(taskID))
 	if err != nil {
 		return nil, fmt.Errorf("check task stream failed: %w", err)
 	}

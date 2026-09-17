@@ -527,8 +527,8 @@ func mergeEventMetadata(ctx context.Context, event *model.Event) []byte {
 
 	if len(event.Data) == 0 {
 		out, err := sonic.Marshal(map[string]interface{}{
-			"event_id":   event.ID,
-			"created_at": createdAt.Unix(),
+			model.EventMetadataKeyEventID:   event.ID,
+			model.EventMetadataKeyCreatedAt: createdAt.Unix(),
 		})
 		if err != nil {
 			logger.ErrorContext(ctx, "序列化空事件元数据失败", logger.Err(err))
@@ -545,8 +545,8 @@ func mergeEventMetadata(ctx context.Context, event *model.Event) []byte {
 	if payload == nil {
 		return event.Data
 	}
-	payload["event_id"] = event.ID
-	payload["created_at"] = createdAt.Unix()
+	payload[model.EventMetadataKeyEventID] = event.ID
+	payload[model.EventMetadataKeyCreatedAt] = createdAt.Unix()
 	out, err := sonic.Marshal(payload)
 	if err != nil {
 		logger.ErrorContext(ctx, "序列化事件元数据失败", logger.Err(err))

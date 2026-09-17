@@ -93,6 +93,13 @@ const (
 	StepEventStatusFailed    StepEventStatus = "failed"
 )
 
+// 事件元数据 key：task_runner 写事件时把 event_id / created_at 平铺进业务 payload，
+// SSE 层据此识别、不解析重组。两端需共用同一 key 避免静默错位。
+const (
+	EventMetadataKeyEventID   = "event_id"
+	EventMetadataKeyCreatedAt = "created_at"
+)
+
 // Event 事件模型
 // 每个事件代表 Agent 执行过程中的一个原子动作或状态变化。
 type Event struct {

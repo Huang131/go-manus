@@ -98,3 +98,9 @@ const (
 	a2aRoleUser          = "user"
 	a2aPartKindText      = "text"
 )
+
+// 常用 HTTP MIME 类型（Content-Type / Accept 头取值）。
+const (
+	ContentTypeJSON = "application/json"
+	ContentTypeSSE  = "text/event-stream"
+)

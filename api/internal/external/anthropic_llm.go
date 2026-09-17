@@ -192,7 +192,7 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Content-Type", ContentTypeJSON)
 	httpReq.Header.Set("x-api-key", c.apiKey)
 	httpReq.Header.Set("anthropic-version", c.version)
 
@@ -348,8 +348,8 @@ func (c *AnthropicClient) Stream(ctx context.Context, req *LLMRequest) (<-chan l
 	if err != nil {
 		return nil, fmt.Errorf("create stream request: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "text/event-stream")
+	httpReq.Header.Set("Content-Type", ContentTypeJSON)
+	httpReq.Header.Set("Accept", ContentTypeSSE)
 	httpReq.Header.Set("x-api-key", c.apiKey)
 	httpReq.Header.Set("anthropic-version", c.version)
 	resp, err := c.httpClient.Do(httpReq)

@@ -209,7 +209,7 @@ func (c *TavilySearchClient) Invoke(ctx context.Context, query string, dateRange
 		return model.NewToolError(err.Error()), err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", ContentTypeJSON)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -317,7 +317,7 @@ func (c *BochaSearchClient) Invoke(ctx context.Context, query string, dateRange 
 		return model.NewToolError(err.Error()), err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", ContentTypeJSON)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

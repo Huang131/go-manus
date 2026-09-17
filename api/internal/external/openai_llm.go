@@ -201,7 +201,7 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LL
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Content-Type", ContentTypeJSON)
 	if c.apiKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
@@ -381,8 +381,8 @@ func (c *OpenAIClient) Stream(ctx context.Context, req *LLMRequest) (<-chan llmc
 	if err != nil {
 		return nil, fmt.Errorf("create stream request: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Accept", "text/event-stream")
+	httpReq.Header.Set("Content-Type", ContentTypeJSON)
+	httpReq.Header.Set("Accept", ContentTypeSSE)
 	if c.apiKey != "" {
 		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}

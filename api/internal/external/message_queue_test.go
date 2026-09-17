@@ -71,8 +71,8 @@ func TestMessageQueueGetBlockingHonorsContext(t *testing.T) {
 }
 
 func TestMessageQueueDefaultTimeouts(t *testing.T) {
-	if defaultBlockTimeout != 3*time.Second {
-		t.Fatalf("default block timeout = %s, want 3s", defaultBlockTimeout)
+	if DefaultBlockTimeout != 3*time.Second {
+		t.Fatalf("default block timeout = %s, want 3s", DefaultBlockTimeout)
 	}
 	if maxBlockTimeout != 5*time.Second {
 		t.Fatalf("max block timeout = %s, want 5s", maxBlockTimeout)

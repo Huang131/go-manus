@@ -222,7 +222,7 @@ func (m *A2AClientManager) Invoke(ctx context.Context, agentID string, query str
 	if err != nil {
 		return nil, fmt.Errorf("创建 HTTP 请求失败: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Content-Type", ContentTypeJSON)
 
 	resp, err := m.httpClient.Do(httpReq)
 	if err != nil {

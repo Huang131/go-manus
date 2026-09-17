@@ -177,7 +177,7 @@ func (c *SandboxClient) doRequest(ctx context.Context, method, action string, re
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Content-Type", ContentTypeJSON)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {

@@ -13,7 +13,8 @@ import (
 
 // 消息队列相关常量
 const (
-	defaultBlockTimeout = 3 * time.Second
+	// DefaultBlockTimeout 是 Redis 阻塞读取的默认超时，供上层（如任务流读取）引用。
+	DefaultBlockTimeout = 3 * time.Second
 	maxBlockTimeout     = 5 * time.Second
 	// 保留足够的增量事件，避免短时断线时 token 前缀被过早裁剪。
 	streamMaxLen             = 10000
@@ -91,7 +92,7 @@ func (q *RedisStreamMessageQueue) SetRetention(ctx context.Context, streamName s
 // timeout: 单次阻塞超时，建议 3-5 秒，最大不超过 5 秒
 func (q *RedisStreamMessageQueue) GetBlocking(ctx context.Context, streamName string, startID string, timeout ...time.Duration) (string, interface{}, error) {
 	// 默认超时使用常量
-	blockTimeout := defaultBlockTimeout
+	blockTimeout := DefaultBlockTimeout
 	if len(timeout) > 0 && timeout[0] > 0 {
 		blockTimeout = timeout[0]
 	}
@@ -152,7 +153,7 @@ func (q *RedisStreamMessageQueue) GetBlocking(ctx context.Context, streamName st
 // GetBlockingBatch 阻塞读取一批消息，返回严格位于 startID 之后的事件。
 // COUNT 限制单次响应大小，避免 token 增量积压时产生过大的 SSE 批次。
 func (q *RedisStreamMessageQueue) GetBlockingBatch(ctx context.Context, streamName string, startID string, count int, timeout ...time.Duration) ([]StreamMessage, error) {
-	blockTimeout := defaultBlockTimeout
+	blockTimeout := DefaultBlockTimeout
 	if len(timeout) > 0 && timeout[0] > 0 {
 		blockTimeout = timeout[0]
 	}

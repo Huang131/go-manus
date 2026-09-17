@@ -207,7 +207,7 @@ func (s *TaskStream) Pop(ctx context.Context) (string, string, error) {
 	s.mu.Unlock()
 
 	// 使用 GetBlocking 实现阻塞 Pop
-	id, data, err := s.mq.GetBlocking(ctx, s.streamName, startID, DefaultBlockTimeout)
+	id, data, err := s.mq.GetBlocking(ctx, s.streamName, startID, external.DefaultBlockTimeout)
 	if err != nil {
 		return "", "", err
 	}
@@ -253,9 +253,6 @@ func (s *TaskStream) Len(ctx context.Context) (int, error) {
 	return int(size), err
 }
 
-// DefaultBlockTimeout 默认阻塞超时时间。
-const DefaultBlockTimeout = 3 * time.Second
-
 const maxTaskOutputBatch = 64
 
 // NewRedisStreamTask 创建基于 Redis Stream 的任务
@@ -292,14 +289,24 @@ func NewRedisStreamTask(mq external.TaskMessageQueue, runner TaskRunner, registr
 	return task
 }
 
+// taskInputStreamName 返回任务输入流名。
+func taskInputStreamName(id string) string {
+	return "task:input:" + id
+}
+
+// taskOutputStreamName 返回任务输出流名。
+func taskOutputStreamName(id string) string {
+	return "task:output:" + id
+}
+
 // inputStreamName 返回输入流名称
 func (t *RedisStreamTask) inputStreamName() string {
-	return fmt.Sprintf("task:input:%s", t.id)
+	return taskInputStreamName(t.id)
 }
 
 // outputStreamName 返回输出流名称
 func (t *RedisStreamTask) outputStreamName() string {
-	return fmt.Sprintf("task:output:%s", t.id)
+	return taskOutputStreamName(t.id)
 }
 
 // ID 返回任务ID
@@ -508,7 +515,7 @@ func ReadTaskOutput(ctx context.Context, mq external.TaskMessageQueue, taskID, s
 	if mq == nil {
 		return nil, fmt.Errorf("task message queue is nil")
 	}
-	return readTaskOutput(ctx, mq, fmt.Sprintf("task:output:%s", taskID), startID, blockTimeout...)
+	return readTaskOutput(ctx, mq, taskOutputStreamName(taskID), startID, blockTimeout...)
 }
 
 func readTaskOutput(ctx context.Context, mq external.TaskMessageQueue, streamName, startID string, blockTimeout ...int) ([]*model.Event, error) {
@@ -521,7 +528,7 @@ func readTaskOutput(ctx context.Context, mq external.TaskMessageQueue, streamNam
 	if ms > 0 {
 		timeout = time.Duration(ms) * time.Millisecond
 	} else {
-		timeout = DefaultBlockTimeout
+		timeout = external.DefaultBlockTimeout
 	}
 
 	if startID == "" {
@@ -615,7 +622,7 @@ func (t *RedisStreamTask) SubscribeOutput(ctx context.Context, bufferSize int) (
 				return
 			default:
 				// 获取下一条消息
-				id, data, err := t.outputStream.GetBlocking(subCtx, t.outputStreamName(), lastID, DefaultBlockTimeout)
+				id, data, err := t.outputStream.GetBlocking(subCtx, t.outputStreamName(), lastID, external.DefaultBlockTimeout)
 				if err != nil {
 					if subCtx.Err() != nil {
 						return

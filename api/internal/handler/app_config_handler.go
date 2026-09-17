@@ -59,6 +59,14 @@ func updateConfig[T any](c *gin.Context, fn func(ctx context.Context, cfg *T) er
 	response.Success(c, nil)
 }
 
+// reloadOrFail 执行运行时重载，失败时统一映射为 Unavailable（label 前缀区分域名）。
+func reloadOrFail(c *gin.Context, label string, reload func(*gin.Context) error) error {
+	if err := reload(c); err != nil {
+		return apperr.Unavailable(label + "运行时重载失败: " + err.Error())
+	}
+	return nil
+}
+
 // GetLLMConfig 获取 LLM 配置
 func (h *AppConfigHandler) GetLLMConfig(c *gin.Context) {
 	cfg, err := h.service.GetLLMConfig(c.Request.Context())
@@ -71,16 +79,9 @@ func (h *AppConfigHandler) GetLLMConfig(c *gin.Context) {
 
 // UpdateLLMConfig 更新 LLM 配置
 func (h *AppConfigHandler) UpdateLLMConfig(c *gin.Context) {
-	var request model.LLMConfigRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		response.FromError(c, apperr.BadRequest(err.Error()))
-		return
-	}
-	if err := h.service.UpdateLLMConfig(c.Request.Context(), request.NewLLMConfig()); err != nil {
-		response.FromError(c, err)
-		return
-	}
-	response.Success(c, nil)
+	updateConfig(c, func(ctx context.Context, req *model.LLMConfigRequest) error {
+		return h.service.UpdateLLMConfig(ctx, req.NewLLMConfig())
+	})
 }
 
 // GetAgentConfig 获取 Agent 配置
@@ -90,19 +91,15 @@ func (h *AppConfigHandler) GetAgentConfig(c *gin.Context) {
 
 // UpdateAgentConfig 更新 Agent 配置
 func (h *AppConfigHandler) UpdateAgentConfig(c *gin.Context) {
-	var cfg model.AgentConfig
-	if err := c.ShouldBindJSON(&cfg); err != nil {
-		response.FromError(c, apperr.BadRequest(err.Error()))
-		return
-	}
-	if err := h.service.UpdateAgentConfig(c.Request.Context(), &cfg); err != nil {
-		response.FromError(c, err)
-		return
-	}
-	if h.reloader != nil {
-		h.reloader.ReloadAgentConfig(&agent.AgentConfig{MaxIterations: cfg.MaxIterations, MaxRetries: cfg.MaxRetries})
-	}
-	response.Success(c, nil)
+	updateConfig(c, func(ctx context.Context, cfg *model.AgentConfig) error {
+		if err := h.service.UpdateAgentConfig(ctx, cfg); err != nil {
+			return err
+		}
+		if h.reloader != nil {
+			h.reloader.ReloadAgentConfig(&agent.AgentConfig{MaxIterations: cfg.MaxIterations, MaxRetries: cfg.MaxRetries})
+		}
+		return nil
+	})
 }
 
 // GetMCPConfig 获取 MCP 配置
@@ -112,20 +109,12 @@ func (h *AppConfigHandler) GetMCPConfig(c *gin.Context) {
 
 // UpdateMCPConfig 更新 MCP 配置
 func (h *AppConfigHandler) UpdateMCPConfig(c *gin.Context) {
-	var cfg model.MCPConfig
-	if err := c.ShouldBindJSON(&cfg); err != nil {
-		response.FromError(c, apperr.BadRequest(err.Error()))
-		return
-	}
-	if err := h.service.UpdateMCPConfig(c.Request.Context(), &cfg); err != nil {
-		response.FromError(c, err)
-		return
-	}
-	if err := h.reloadMCP(c); err != nil {
-		response.FromError(c, apperr.Unavailable("MCP运行时重载失败: "+err.Error()))
-		return
-	}
-	response.Success(c, nil)
+	updateConfig(c, func(ctx context.Context, cfg *model.MCPConfig) error {
+		if err := h.service.UpdateMCPConfig(ctx, cfg); err != nil {
+			return err
+		}
+		return reloadOrFail(c, "MCP", h.reloadMCP)
+	})
 }
 
 // DeleteMCPServer 删除 MCP 服务器
@@ -135,8 +124,8 @@ func (h *AppConfigHandler) DeleteMCPServer(c *gin.Context) {
 		response.FromError(c, err)
 		return
 	}
-	if err := h.reloadMCP(c); err != nil {
-		response.FromError(c, apperr.Unavailable("MCP运行时重载失败: "+err.Error()))
+	if err := reloadOrFail(c, "MCP", h.reloadMCP); err != nil {
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, nil)
@@ -155,8 +144,8 @@ func (h *AppConfigHandler) UpdateMCPServerEnabled(c *gin.Context) {
 		response.FromError(c, err)
 		return
 	}
-	if err := h.reloadMCP(c); err != nil {
-		response.FromError(c, apperr.Unavailable("MCP运行时重载失败: "+err.Error()))
+	if err := reloadOrFail(c, "MCP", h.reloadMCP); err != nil {
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, nil)
@@ -169,20 +158,12 @@ func (h *AppConfigHandler) GetA2AConfig(c *gin.Context) {
 
 // UpdateA2AConfig 更新 A2A 配置
 func (h *AppConfigHandler) UpdateA2AConfig(c *gin.Context) {
-	var cfg model.A2AConfig
-	if err := c.ShouldBindJSON(&cfg); err != nil {
-		response.FromError(c, apperr.BadRequest(err.Error()))
-		return
-	}
-	if err := h.service.UpdateA2AConfig(c.Request.Context(), &cfg); err != nil {
-		response.FromError(c, err)
-		return
-	}
-	if err := h.reloadA2A(c); err != nil {
-		response.FromError(c, apperr.Unavailable("A2A运行时重载失败: "+err.Error()))
-		return
-	}
-	response.Success(c, nil)
+	updateConfig(c, func(ctx context.Context, cfg *model.A2AConfig) error {
+		if err := h.service.UpdateA2AConfig(ctx, cfg); err != nil {
+			return err
+		}
+		return reloadOrFail(c, "A2A", h.reloadA2A)
+	})
 }
 
 // DeleteA2AServer 删除 A2A 服务。
@@ -191,8 +172,8 @@ func (h *AppConfigHandler) DeleteA2AServer(c *gin.Context) {
 		response.FromError(c, err)
 		return
 	}
-	if err := h.reloadA2A(c); err != nil {
-		response.FromError(c, apperr.Unavailable("A2A运行时重载失败: "+err.Error()))
+	if err := reloadOrFail(c, "A2A", h.reloadA2A); err != nil {
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, nil)
@@ -211,8 +192,8 @@ func (h *AppConfigHandler) UpdateA2AServerEnabled(c *gin.Context) {
 		response.FromError(c, err)
 		return
 	}
-	if err := h.reloadA2A(c); err != nil {
-		response.FromError(c, apperr.Unavailable("A2A运行时重载失败: "+err.Error()))
+	if err := reloadOrFail(c, "A2A", h.reloadA2A); err != nil {
+		response.FromError(c, err)
 		return
 	}
 	response.Success(c, nil)

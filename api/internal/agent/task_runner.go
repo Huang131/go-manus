@@ -217,8 +217,8 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 			// 业务事件序列化为 payload 并注入元数据
 			var payload map[string]interface{}
 			if err := sonic.Unmarshal(eventJSON, &payload); err == nil {
-				payload["event_id"] = eventID
-				payload["created_at"] = eventCreatedAt.Unix()
+				payload[model.EventMetadataKeyEventID] = eventID
+				payload[model.EventMetadataKeyCreatedAt] = eventCreatedAt.Unix()
 				eventJSON, err = sonic.Marshal(payload)
 				if err != nil {
 					logger.ErrorContext(ctx, "序列化事件 payload 失败",

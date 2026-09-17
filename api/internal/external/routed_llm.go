@@ -28,6 +28,9 @@ type RoutedLLM struct {
 	health   map[string]LLMRuntimeHealth
 }
 
+// unhealthyFailureThreshold 连续失败达到该次数即判定模型为 unhealthy。
+const unhealthyFailureThreshold = 3
+
 var _ StreamingLLM = (*RoutedLLM)(nil)
 
 // ErrModelNotAvailable 表示请求 ctx 指定的 model_id 在目录中不存在/被禁用。
@@ -330,7 +333,7 @@ func (r *RoutedLLM) RecordFailure(modelKey string, err error, latency time.Durat
 	}
 	health.RecentFailures++
 	switch {
-	case health.RecentFailures >= 3:
+	case health.RecentFailures >= unhealthyFailureThreshold:
 		health.Status = model.HealthStateUnhealthy
 	default:
 		health.Status = model.HealthStateDegraded
