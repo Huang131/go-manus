@@ -122,7 +122,33 @@ var (
 	ErrModelAPIKeyRequired = apperr.BadRequest("API Key 不能为空")
 )
 
-// validateRequired 校验必填字段
+// 模型默认值与温度边界。
+const (
+	defaultTemperature = 0.7
+	defaultMaxTokens   = 8192
+	temperatureMin     = 0.0
+	temperatureMax     = 2.0
+
+	// pgUniqueViolationCode 是 PostgreSQL 唯一约束冲突的 SQLSTATE 码。
+	pgUniqueViolationCode = "23505"
+)
+
+// normalizeDefaults 归一化缺省/越界字段为默认值（会修改入参）。
+// 与 validateRequired 分离：本函数负责"写默认值"，校验函数只读、命名不再误导。
+func normalizeDefaults(m *model.LLMModel) {
+	if m.Temperature < temperatureMin || m.Temperature > temperatureMax {
+		m.Temperature = defaultTemperature
+	}
+	if m.MaxTokens <= 0 {
+		m.MaxTokens = defaultMaxTokens
+	}
+	if m.Tags == nil {
+		m.Tags = []string{}
+	}
+	m.Capabilities = model.MergeDefaultCapabilities(m.Capabilities)
+}
+
+// validateRequired 校验必填字段（只读，不修改入参）。
 func validateRequired(m *model.LLMModel) error {
 	if strings.TrimSpace(m.Name) == "" ||
 		strings.TrimSpace(m.Provider) == "" ||
@@ -130,16 +156,6 @@ func validateRequired(m *model.LLMModel) error {
 		strings.TrimSpace(m.ModelName) == "" {
 		return ErrModelNameRequired
 	}
-	if m.Temperature < 0 || m.Temperature > 2 {
-		m.Temperature = 0.7
-	}
-	if m.MaxTokens <= 0 {
-		m.MaxTokens = 8192
-	}
-	if m.Tags == nil {
-		m.Tags = []string{}
-	}
-	m.Capabilities = model.MergeDefaultCapabilities(m.Capabilities)
 	return nil
 }
 
@@ -162,6 +178,7 @@ func (s *DefaultLLMModelService) GetByID(ctx context.Context, id string) (*model
 
 // Create 新增
 func (s *DefaultLLMModelService) Create(ctx context.Context, m *model.LLMModel) (*model.LLMModel, error) {
+	normalizeDefaults(m)
 	if err := validateRequired(m); err != nil {
 		return nil, err
 	}
@@ -174,6 +191,12 @@ func (s *DefaultLLMModelService) Create(ctx context.Context, m *model.LLMModel) 
 
 	// 如果没显式设 default，且当前无 default → 自动设为 default
 	autoSetDefault := !m.IsDefault
+	// default 写操作与 SetDefault/UnsetDefault 串行化：
+	// 避免并发 Create 都读到"无 default"而双双 SetDefault 触发唯一索引冲突。
+	if autoSetDefault {
+		s.defaultMu.Lock()
+		defer s.defaultMu.Unlock()
+	}
 
 	err := s.repo.WithTx(ctx, func(r repository.LLMModelRepository) error {
 		// 检查唯一约束（提前校验，依赖 DB 错误也可）
@@ -218,6 +241,7 @@ func (s *DefaultLLMModelService) Update(ctx context.Context, m *model.LLMModel) 
 	if old == nil {
 		return nil, ErrModelNotFound
 	}
+	normalizeDefaults(m)
 	if err := validateRequired(m); err != nil {
 		return nil, err
 	}
@@ -233,8 +257,15 @@ func (s *DefaultLLMModelService) Update(ctx context.Context, m *model.LLMModel) 
 	// 编辑即新模型：失效路由器内存中的健康缓存，后续调用从零重新积累。
 	s.invalidateHealth(m.ID)
 
+	// 涉及 default 切换（false→true）时串行化，避免 ClearDefault+SetDefault 竞态。
+	switchDefault := m.IsDefault && !old.IsDefault
+	if switchDefault {
+		s.defaultMu.Lock()
+		defer s.defaultMu.Unlock()
+	}
+
 	err = s.repo.WithTx(ctx, func(r repository.LLMModelRepository) error {
-		if m.IsDefault && !old.IsDefault {
+		if switchDefault {
 			if err := r.ClearDefault(ctx); err != nil {
 				return err
 			}
@@ -249,7 +280,7 @@ func (s *DefaultLLMModelService) Update(ctx context.Context, m *model.LLMModel) 
 			}
 			return err
 		}
-		if m.IsDefault && !old.IsDefault {
+		if switchDefault {
 			if err := r.SetDefault(ctx, m.ID); err != nil {
 				return err
 			}
@@ -264,7 +295,7 @@ func (s *DefaultLLMModelService) Update(ctx context.Context, m *model.LLMModel) 
 
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+	return errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolationCode
 }
 
 // Delete 删除（允许删除默认模型；agent 启动时会降级到第一个 enabled）
@@ -278,6 +309,12 @@ func (s *DefaultLLMModelService) Delete(ctx context.Context, id string) error {
 	}
 	// 模型即将删除：同步失效内存健康缓存，避免路由器残留已删除模型的 entry。
 	s.invalidateHealth(id)
+	// 删除 default 模型时，ClearDefault 需与 SetDefault 串行化，
+	// 否则并发 SetDefault 会把刚设置的新 default 误清。
+	if m.IsDefault {
+		s.defaultMu.Lock()
+		defer s.defaultMu.Unlock()
+	}
 	return s.repo.WithTx(ctx, func(r repository.LLMModelRepository) error {
 		// 如果是 default，先清掉 default 标记（事务内原子）
 		if m.IsDefault {
@@ -359,6 +396,7 @@ func (s *DefaultLLMModelService) Test(ctx context.Context, m *model.LLMModel) (*
 	if m == nil {
 		return nil, ErrModelNameRequired
 	}
+	normalizeDefaults(m)
 	if err := validateRequired(m); err != nil {
 		return nil, err
 	}

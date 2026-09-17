@@ -98,15 +98,6 @@ func (s *DefaultFileService) UploadFile(ctx context.Context, sessionID, filename
 		return nil, err
 	}
 
-	// 内容级去重：同会话内相同内容（可不同文件名）复用既有记录
-	if existing, err := s.repo.GetBySessionAndHash(ctx, sessionID, contentHash); err == nil && existing != nil && existing.ID != file.ID {
-		_ = s.repo.Delete(ctx, file.ID)
-		_ = s.storage.Delete(ctx, key)
-		logger.Info("检测到同内容文件，复用既有记录",
-			logger.String("session_id", sessionID),
-			logger.String("file_id", existing.ID))
-		return existing, nil
-	}
 	return file, nil
 }
 
@@ -131,11 +122,11 @@ func (s *DefaultFileService) downloadFile(ctx context.Context, lookup func(conte
 		return nil, nil, apperr.NotFound("文件不存在")
 	}
 
-	if s.storage != nil {
-		reader, err := s.storage.Download(ctx, file.Key)
-		return file, reader, err
+	if s.storage == nil {
+		return nil, nil, fmt.Errorf("%w: cannot download file without storage", ErrStorageUnavailable)
 	}
-	return file, nil, nil
+	reader, err := s.storage.Download(ctx, file.Key)
+	return file, reader, err
 }
 
 // GetFileInfo 获取文件信息

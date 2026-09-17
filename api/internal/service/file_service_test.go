@@ -317,16 +317,16 @@ func TestFileServiceDownloadFileStorageError(t *testing.T) {
 	}
 }
 
-func TestFileServiceDownloadFileNilStorageReturnsNilReader(t *testing.T) {
+func TestFileServiceDownloadFileNilStorageReturnsStorageUnavailable(t *testing.T) {
 	file := &model.File{ID: "file-1", Key: "k"}
 	svc := NewFileService(&stubFileRepo{file: file}, nil)
 
 	got, reader, err := svc.DownloadFile(context.Background(), "file-1")
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, ErrStorageUnavailable) {
+		t.Fatalf("DownloadFile() error = %v, want ErrStorageUnavailable", err)
 	}
-	if got == nil || reader != nil {
-		t.Errorf("DownloadFile() = (%v, %v), want (file, nil)", got, reader)
+	if got != nil || reader != nil {
+		t.Errorf("DownloadFile() = (%v, %v), want (nil, nil)", got, reader)
 	}
 }
 

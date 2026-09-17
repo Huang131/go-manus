@@ -33,6 +33,10 @@ type SessionService interface {
 	GetVNCURL(ctx context.Context, sessionID string) (string, error)
 }
 
+// defaultVNCPort 是 sandbox 的 VNC WebSocket 端口。
+// go-manus 使用单一共享 sandbox，各会话共用同一 VNC 端口。
+const defaultVNCPort = 5901
+
 // DefaultSessionService 会话服务默认实现
 type DefaultSessionService struct {
 	repo           repository.SessionRepository
@@ -45,7 +49,7 @@ type DefaultSessionService struct {
 func NewSessionService(repo repository.SessionRepository) SessionService {
 	return &DefaultSessionService{
 		repo:    repo,
-		vncPort: 5901,
+		vncPort: defaultVNCPort,
 	}
 }
 
@@ -56,7 +60,7 @@ func NewSessionServiceWithSandbox(repo repository.SessionRepository, fileRepo re
 		repo:           repo,
 		fileRepo:       fileRepo,
 		sandboxAddress: sandboxAddress,
-		vncPort:        5901,
+		vncPort:        defaultVNCPort,
 	}
 }
 

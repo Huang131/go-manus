@@ -44,65 +44,45 @@ func (s *DefaultStatusService) GetHealthStatus(ctx context.Context) (*model.Heal
 		Services:  make(map[model.ServiceName]model.ServiceStatus),
 	}
 
-	// 检查 PostgreSQL
+	// 依赖为 nil 时不注入对应 healthCheck，checkDependency 据此标为 skipped。
+	var dbCheck, redisCheck, ossCheck func(context.Context) error
 	if s.db != nil {
-		postgresStatus := model.ServiceStatus{
-			Name:   model.ServiceNamePostgres,
-			Status: model.HealthStateHealthy,
-		}
-		if err := s.db.HealthCheck(ctx); err != nil {
-			postgresStatus.Status = model.HealthStateUnhealthy
-			postgresStatus.Error = apperr.ToInternal(err).Error()
-			status.Status = model.HealthStateDegraded
-		}
-		status.Services[model.ServiceNamePostgres] = postgresStatus
-	} else {
-		status.Services[model.ServiceNamePostgres] = model.ServiceStatus{
-			Name:   model.ServiceNamePostgres,
-			Status: model.HealthStateSkipped,
-		}
-		status.Status = model.HealthStateDegraded
+		dbCheck = s.db.HealthCheck
 	}
-
-	// 检查 Redis
 	if s.redis != nil {
-		redisStatus := model.ServiceStatus{
-			Name:   model.ServiceNameRedis,
-			Status: model.HealthStateHealthy,
-		}
-		if err := s.redis.HealthCheck(ctx); err != nil {
-			redisStatus.Status = model.HealthStateUnhealthy
-			redisStatus.Error = apperr.ToInternal(err).Error()
-			status.Status = model.HealthStateDegraded
-		}
-		status.Services[model.ServiceNameRedis] = redisStatus
-	} else {
-		status.Services[model.ServiceNameRedis] = model.ServiceStatus{
-			Name:   model.ServiceNameRedis,
-			Status: model.HealthStateSkipped,
-		}
-		status.Status = model.HealthStateDegraded
+		redisCheck = s.redis.HealthCheck
+	}
+	if s.oss != nil {
+		ossCheck = s.oss.HealthCheck
 	}
 
-	// 检查 OSS
-	if s.oss != nil {
-		ossStatus := model.ServiceStatus{
-			Name:   model.ServiceNameOSS,
-			Status: model.HealthStateHealthy,
-		}
-		if err := s.oss.HealthCheck(ctx); err != nil {
-			ossStatus.Status = model.HealthStateUnhealthy
-			ossStatus.Error = apperr.ToInternal(err).Error()
-			status.Status = model.HealthStateDegraded
-		}
-		status.Services[model.ServiceNameOSS] = ossStatus
-	} else {
-		status.Services[model.ServiceNameOSS] = model.ServiceStatus{
-			Name:   model.ServiceNameOSS,
-			Status: model.HealthStateSkipped,
-		}
-		status.Status = model.HealthStateDegraded
-	}
+	s.checkDependency(ctx, status, model.ServiceNamePostgres, dbCheck)
+	s.checkDependency(ctx, status, model.ServiceNameRedis, redisCheck)
+	s.checkDependency(ctx, status, model.ServiceNameOSS, ossCheck)
 
 	return status, nil
+}
+
+// checkDependency 检查单个依赖健康并写入 status.Services。
+// healthCheck 为 nil 表示该依赖未注入 → 标记 skipped，整体降级为 degraded；
+// 检查失败 → 标记 unhealthy，整体降级为 degraded。
+func (s *DefaultStatusService) checkDependency(
+	ctx context.Context,
+	status *model.HealthStatus,
+	name model.ServiceName,
+	healthCheck func(context.Context) error,
+) {
+	dep := model.ServiceStatus{Name: name, Status: model.HealthStateHealthy}
+	switch {
+	case healthCheck == nil:
+		dep.Status = model.HealthStateSkipped
+		status.Status = model.HealthStateDegraded
+	default:
+		if err := healthCheck(ctx); err != nil {
+			dep.Status = model.HealthStateUnhealthy
+			dep.Error = apperr.ToInternal(err).Error()
+			status.Status = model.HealthStateDegraded
+		}
+	}
+	status.Services[name] = dep
 }
