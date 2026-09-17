@@ -27,6 +27,33 @@ func CompletedStreamRetention() time.Duration {
 	return completedStreamRetention
 }
 
+// resolveBlockTimeout 解析单次阻塞超时：默认 DefaultBlockTimeout，
+// 调用方显式传入正数时优先，且最大不超过 maxBlockTimeout。
+func resolveBlockTimeout(timeout ...time.Duration) time.Duration {
+	blockTimeout := DefaultBlockTimeout
+	if len(timeout) > 0 && timeout[0] > 0 {
+		blockTimeout = timeout[0]
+	}
+	if blockTimeout > maxBlockTimeout {
+		blockTimeout = maxBlockTimeout
+	}
+	return blockTimeout
+}
+
+// decodeStreamData 把 Redis Stream 消息里的 data 字段（JSON 字符串）反序列化为 interface{}。
+// 反序列化失败时降级为原始字符串，保证后续处理不中断。
+func decodeStreamData(raw interface{}) (interface{}, error) {
+	dataStr, ok := raw.(string)
+	if !ok {
+		return nil, fmt.Errorf("invalid message format")
+	}
+	var data interface{}
+	if err := sonic.Unmarshal([]byte(dataStr), &data); err != nil {
+		data = dataStr
+	}
+	return data, nil
+}
+
 // RedisStreamMessageQueue 基于 Redis Stream 的消息队列
 type RedisStreamMessageQueue struct {
 	client *redis.Client
@@ -91,15 +118,7 @@ func (q *RedisStreamMessageQueue) SetRetention(ctx context.Context, streamName s
 // GetBlocking 阻塞获取消息，支持 context 取消和超时
 // timeout: 单次阻塞超时，建议 3-5 秒，最大不超过 5 秒
 func (q *RedisStreamMessageQueue) GetBlocking(ctx context.Context, streamName string, startID string, timeout ...time.Duration) (string, interface{}, error) {
-	// 默认超时使用常量
-	blockTimeout := DefaultBlockTimeout
-	if len(timeout) > 0 && timeout[0] > 0 {
-		blockTimeout = timeout[0]
-	}
-	// 防止超时设置过大（使用常量限制）
-	if blockTimeout > maxBlockTimeout {
-		blockTimeout = maxBlockTimeout
-	}
+	blockTimeout := resolveBlockTimeout(timeout...)
 
 	// startID 为空时从最新消息开始
 	if startID == "" {
@@ -135,16 +154,10 @@ func (q *RedisStreamMessageQueue) GetBlocking(ctx context.Context, streamName st
 		// 处理消息
 		if len(result) > 0 && len(result[0].Messages) > 0 {
 			msg := result[0].Messages[0]
-			dataStr, ok := msg.Values["data"].(string)
-			if !ok {
-				return "", nil, fmt.Errorf("invalid message format")
+			data, err := decodeStreamData(msg.Values["data"])
+			if err != nil {
+				return "", nil, err
 			}
-
-			var data interface{}
-			if err := sonic.Unmarshal([]byte(dataStr), &data); err != nil {
-				data = dataStr
-			}
-
 			return msg.ID, data, nil
 		}
 	}
@@ -153,13 +166,7 @@ func (q *RedisStreamMessageQueue) GetBlocking(ctx context.Context, streamName st
 // GetBlockingBatch 阻塞读取一批消息，返回严格位于 startID 之后的事件。
 // COUNT 限制单次响应大小，避免 token 增量积压时产生过大的 SSE 批次。
 func (q *RedisStreamMessageQueue) GetBlockingBatch(ctx context.Context, streamName string, startID string, count int, timeout ...time.Duration) ([]StreamMessage, error) {
-	blockTimeout := DefaultBlockTimeout
-	if len(timeout) > 0 && timeout[0] > 0 {
-		blockTimeout = timeout[0]
-	}
-	if blockTimeout > maxBlockTimeout {
-		blockTimeout = maxBlockTimeout
-	}
+	blockTimeout := resolveBlockTimeout(timeout...)
 	if startID == "" {
 		startID = "$"
 	}
@@ -189,13 +196,9 @@ func (q *RedisStreamMessageQueue) GetBlockingBatch(ctx context.Context, streamNa
 		messages := make([]StreamMessage, 0, count)
 		for _, stream := range result {
 			for _, msg := range stream.Messages {
-				dataStr, ok := msg.Values["data"].(string)
-				if !ok {
-					return nil, fmt.Errorf("invalid message format")
-				}
-				var data interface{}
-				if err := sonic.Unmarshal([]byte(dataStr), &data); err != nil {
-					data = dataStr
+				data, err := decodeStreamData(msg.Values["data"])
+				if err != nil {
+					return nil, err
 				}
 				messages = append(messages, StreamMessage{ID: msg.ID, Data: data})
 			}

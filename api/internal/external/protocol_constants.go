@@ -104,3 +104,11 @@ const (
 	ContentTypeJSON = "application/json"
 	ContentTypeSSE  = "text/event-stream"
 )
+
+// 搜索客户端通用运行参数。
+const (
+	// defaultSearchHTTPTimeout 是搜索客户端缺省的 HTTP 请求超时。
+	defaultSearchHTTPTimeout = 30 * time.Second
+	// authBearerPrefix 是 Authorization 头 Bearer 认证方案的固定前缀。
+	authBearerPrefix = "Bearer "
+)

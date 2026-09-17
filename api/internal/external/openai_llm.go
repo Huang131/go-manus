@@ -203,7 +203,7 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LL
 	}
 	httpReq.Header.Set("Content-Type", ContentTypeJSON)
 	if c.apiKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+		httpReq.Header.Set("Authorization", authBearerPrefix+c.apiKey)
 	}
 
 	// 发送请求
@@ -239,7 +239,7 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LL
 
 	// 非 2xx：分类为 ProviderError，让阶段 3 fallback 决策有 ErrorKind
 	if resp.StatusCode != http.StatusOK {
-		return nil, c.classifyHTTPError(resp.StatusCode, respBody)
+		return nil, classifyHTTPError(resp.StatusCode, respBody, "openai_compat", c.modelName)
 	}
 
 	// 解析响应
@@ -384,7 +384,7 @@ func (c *OpenAIClient) Stream(ctx context.Context, req *LLMRequest) (<-chan llmc
 	httpReq.Header.Set("Content-Type", ContentTypeJSON)
 	httpReq.Header.Set("Accept", ContentTypeSSE)
 	if c.apiKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+		httpReq.Header.Set("Authorization", authBearerPrefix+c.apiKey)
 	}
 
 	resp, err := c.httpClient.Do(httpReq)
@@ -405,7 +405,7 @@ func (c *OpenAIClient) Stream(ctx context.Context, req *LLMRequest) (<-chan llmc
 		if readErr != nil {
 			return nil, fmt.Errorf("read stream error response: %w", readErr)
 		}
-		return nil, c.classifyHTTPError(resp.StatusCode, body)
+		return nil, classifyHTTPError(resp.StatusCode, body, "openai_compat", c.modelName)
 	}
 
 	deltas := make(chan llmcore.LLMDelta)
@@ -590,14 +590,14 @@ func toOpenAITools(tools []llmcore.ToolSpec) []openAIToolSpec {
 	return out
 }
 
-// classifyHTTPError 把 HTTP 状态码分类为 llmcore.ErrorKind
+// classifyHTTPError 把 HTTP 状态码分类为 llmcore.ErrorKind，并包装为 ProviderError。
 // 参考 MULTI_LLM_ADAPTER_DESIGN.md "错误分类"：
 //   - 401/403 → auth         不重试不 fallback
 //   - 429     → rate_limit   读 Retry-After 退避，必要时 fallback
 //   - 5xx     → server       有限重试，失败后 fallback
 //   - 4xx     → bad_request  不重试
 //   - 其他    → unknown
-func (c *OpenAIClient) classifyHTTPError(status int, body []byte) error {
+func classifyHTTPError(status int, body []byte, provider, modelName string) error {
 	kind := llmcore.KindUnknown
 	switch {
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
@@ -618,7 +618,6 @@ func (c *OpenAIClient) classifyHTTPError(status int, body []byte) error {
 	var probe struct {
 		Error *struct {
 			Message string `json:"message"`
-			Code    string `json:"code"`
 		} `json:"error"`
 	}
 	_ = sonic.Unmarshal(body, &probe)
@@ -630,11 +629,9 @@ func (c *OpenAIClient) classifyHTTPError(status int, body []byte) error {
 		upstreamMsg = truncateBody(body)
 	}
 
-	pe := llmcore.NewProviderError(kind, "openai_compat", c.modelName,
+	pe := llmcore.NewProviderError(kind, provider, modelName,
 		fmt.Sprintf("status=%d: %s", status, upstreamMsg))
 	pe.StatusCode = status
-	// classifyHTTPError 的 kind 已经被 isRetryable/isFallbackable 决定
-	// 这里用 NewProviderError 默认规则即可
 	return pe
 }
 

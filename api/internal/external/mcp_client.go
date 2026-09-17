@@ -159,47 +159,44 @@ func (c *StdioMCPClient) terminateProcess() {
 	_ = c.cmd.Wait()
 }
 
-// getEnv 获取环境变量
+// getEnv 返回配置中的环境变量。
 func (c *StdioMCPClient) getEnv() map[string]string {
-	// 返回配置中的环境变量
-	return c.getConfigEnv()
-}
-
-// getConfigEnv 获取配置中的环境变量
-func (c *StdioMCPClient) getConfigEnv() map[string]string {
 	if c.env == nil {
 		return map[string]string{}
 	}
 	return c.env
 }
 
-// sendInitialize 发送初始化请求
-func (c *StdioMCPClient) sendInitialize(ctx context.Context) error {
+// call 在串行锁内分配请求 ID、发送一条 JSON-RPC 请求并读取一条响应，
+// 供 initialize / ListTools / CallTool 复用，消除重复的请求-响应样板。
+func (c *StdioMCPClient) call(ctx context.Context, method string, params map[string]interface{}) (*MCPResponse, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	req := MCPRequest{
 		JSONRPC: mcpJSONRPCVersion,
 		ID:      c.nextID,
-		Method:  mcpMethodInitialize,
-		Params: map[string]interface{}{
-			"protocolVersion": mcpProtocolVersion,
-			"capabilities": map[string]interface{}{
-				"tools": struct{}{},
-			},
-			"clientInfo": map[string]interface{}{
-				"name":    mcpClientName,
-				"version": mcpClientVersion,
-			},
-		},
+		Method:  method,
+		Params:  params,
 	}
 	c.nextID++
-
 	if err := c.sendRequest(req); err != nil {
-		return err
+		return nil, err
 	}
+	return c.readResponse(ctx)
+}
 
-	// 读取响应（带 ctx，可被超时打断）
-	_, err := c.readResponse(ctx)
+// sendInitialize 发送初始化请求
+func (c *StdioMCPClient) sendInitialize(ctx context.Context) error {
+	_, err := c.call(ctx, mcpMethodInitialize, map[string]interface{}{
+		"protocolVersion": mcpProtocolVersion,
+		"capabilities": map[string]interface{}{
+			"tools": struct{}{},
+		},
+		"clientInfo": map[string]interface{}{
+			"name":    mcpClientName,
+			"version": mcpClientVersion,
+		},
+	})
 	return err
 }
 
@@ -209,20 +206,7 @@ func (c *StdioMCPClient) ListTools(ctx context.Context) ([]MCPToolInfo, error) {
 		return nil, fmt.Errorf("MCP client is closed")
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	req := MCPRequest{
-		JSONRPC: mcpJSONRPCVersion,
-		ID:      c.nextID,
-		Method:  mcpMethodListTools,
-	}
-	c.nextID++
-
-	if err := c.sendRequest(req); err != nil {
-		return nil, err
-	}
-
-	resp, err := c.readResponse(ctx)
+	resp, err := c.call(ctx, mcpMethodListTools, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -280,24 +264,10 @@ func (c *StdioMCPClient) CallTool(ctx context.Context, name string, args map[str
 		return nil, fmt.Errorf("MCP client is closed")
 	}
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	req := MCPRequest{
-		JSONRPC: mcpJSONRPCVersion,
-		ID:      c.nextID,
-		Method:  mcpMethodCallTool,
-		Params: map[string]interface{}{
-			"name":      name,
-			"arguments": args,
-		},
-	}
-	c.nextID++
-
-	if err := c.sendRequest(req); err != nil {
-		return nil, err
-	}
-
-	resp, err := c.readResponse(ctx)
+	resp, err := c.call(ctx, mcpMethodCallTool, map[string]interface{}{
+		"name":      name,
+		"arguments": args,
+	})
 	if err != nil {
 		return nil, err
 	}

@@ -28,6 +28,11 @@ func sandboxToolResult(resp *sandboxResponse) *model.ToolResult {
 	return &model.ToolResult{Message: resp.Msg, Data: resp.Data, StatusCode: resp.Code}
 }
 
+// toolResultErr 把底层错误包装为 ToolResult 错误一并返回，供各 HTTP 客户端统一复用。
+func toolResultErr(err error) (*model.ToolResult, error) {
+	return model.NewToolError(err.Error()), err
+}
+
 // Sandbox 沙箱服务接口
 type Sandbox interface {
 	// ExecCommand 执行 Shell 命令
@@ -131,8 +136,8 @@ type sandboxResponse struct {
 	Data map[string]interface{} `json:"data,omitempty"`
 }
 
-// sandboxErrorResponse 沙箱错误响应
-type sandboxErrorResponse struct {
+// toolResultErrorResponse 沙箱错误响应
+type toolResultErrorResponse struct {
 	Code int    `json:"code"`
 	Msg  string `json:"msg"`
 }
@@ -239,7 +244,7 @@ func (c *SandboxClient) ExecCommand(ctx context.Context, sessionID, execDir, com
 		Command:   command,
 	})
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	return sandboxToolResult(resp), nil
 }
@@ -251,7 +256,7 @@ func (c *SandboxClient) ReadShellOutput(ctx context.Context, sessionID string, c
 		Console:   console,
 	})
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	return sandboxToolResult(resp), nil
 }
@@ -264,7 +269,7 @@ func (c *SandboxClient) WaitProcess(ctx context.Context, sessionID string, secon
 	}
 	resp, err := c.doRequest(ctx, http.MethodPost, "shell/wait-process", req)
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	return sandboxToolResult(resp), nil
 }
@@ -277,7 +282,7 @@ func (c *SandboxClient) WriteShellInput(ctx context.Context, sessionID, inputTex
 		PressEnter: pressEnter,
 	})
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	return sandboxToolResult(resp), nil
 }
@@ -288,7 +293,7 @@ func (c *SandboxClient) KillProcess(ctx context.Context, sessionID string) (*mod
 		SessionID: sessionID,
 	})
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	return sandboxToolResult(resp), nil
 }
@@ -304,7 +309,7 @@ func (c *SandboxClient) WriteFile(ctx context.Context, filepath, content string,
 		Sudo:       sudo,
 	})
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	return sandboxToolResult(resp), nil
 }
@@ -324,7 +329,7 @@ func (c *SandboxClient) ReadFile(ctx context.Context, filepath string, startLine
 	}
 	resp, err := c.doRequest(ctx, http.MethodPost, "file/read-file", req)
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	return sandboxToolResult(resp), nil
 }
@@ -335,7 +340,7 @@ func (c *SandboxClient) CheckFileExists(ctx context.Context, filepath string) (*
 		Filepath: filepath,
 	})
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	return sandboxToolResult(resp), nil
 }
@@ -346,7 +351,7 @@ func (c *SandboxClient) DeleteFile(ctx context.Context, filepath string) (*model
 		Filepath: filepath,
 	})
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	return sandboxToolResult(resp), nil
 }
@@ -357,7 +362,7 @@ func (c *SandboxClient) ListFiles(ctx context.Context, dirPath string) (*model.T
 		DirPath: dirPath,
 	})
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	return sandboxToolResult(resp), nil
 }
@@ -371,7 +376,7 @@ func (c *SandboxClient) ReplaceInFile(ctx context.Context, filepath, oldStr, new
 		Sudo:     sudo,
 	})
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	return sandboxToolResult(resp), nil
 }
@@ -384,7 +389,7 @@ func (c *SandboxClient) SearchInFile(ctx context.Context, filepath, regex string
 		Sudo:     sudo,
 	})
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	return sandboxToolResult(resp), nil
 }
@@ -400,7 +405,7 @@ func (c *SandboxClient) FindFiles(ctx context.Context, dirPath, globPattern stri
 		GlobPtn: glob,
 	})
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	return sandboxToolResult(resp), nil
 }
@@ -420,36 +425,36 @@ func (c *SandboxClient) UploadFile(ctx context.Context, fileData []byte, filepat
 	// 添加文件
 	part, err := writer.CreateFormFile("file", filename)
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	if _, err := part.Write(fileData); err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 
 	// 添加 filepath 字段
 	if err := writer.WriteField("filepath", filepath); err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 
 	if err := writer.Close(); err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -458,7 +463,7 @@ func (c *SandboxClient) UploadFile(ctx context.Context, fileData []byte, filepat
 
 	var sandboxResp sandboxResponse
 	if err := sonic.Unmarshal(respBody, &sandboxResp); err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 
 	return sandboxToolResult(&sandboxResp), nil
@@ -475,7 +480,7 @@ func (c *SandboxClient) DownloadFile(ctx context.Context, filepath string) (*mod
 	url := fmt.Sprintf("%s/api/file/download-file?filepath=%s", c.address, url.QueryEscape(filepath))
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -556,11 +561,11 @@ func (c *BrowserClient) browserExec(ctx context.Context, sessionID, script strin
 	}
 	seconds := 10
 	if _, err = c.sandbox.WaitProcess(ctx, sessionID, &seconds); err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	output, err := c.sandbox.ReadShellOutput(ctx, sessionID, false)
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	if output == nil || !output.Success {
 		return output, fmt.Errorf("browser command output unavailable")

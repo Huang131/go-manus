@@ -20,6 +20,14 @@ type SearchEngine interface {
 	Invoke(ctx context.Context, query string, dateRange *string) (*model.ToolResult, error)
 }
 
+// resolveSearchTimeout 解析搜索客户端超时：非正值时回退到默认超时。
+func resolveSearchTimeout(timeout time.Duration) time.Duration {
+	if timeout <= 0 {
+		return defaultSearchHTTPTimeout
+	}
+	return timeout
+}
+
 // GoogleSearchClient Google 搜索客户端。
 // Google Custom Search 要求同时提供 apiKey 与 searchEngineID（即请求参数 cx），
 // 缺一不可；cx 为空时 Google 会以 400 拒绝请求。
@@ -32,15 +40,13 @@ type GoogleSearchClient struct {
 
 // NewGoogleSearchClient 创建 Google 搜索客户端
 func NewGoogleSearchClient(apiKey, searchEngineID string) *GoogleSearchClient {
-	return NewGoogleSearchClientWithTimeout(apiKey, searchEngineID, 30*time.Second)
+	return NewGoogleSearchClientWithTimeout(apiKey, searchEngineID, defaultSearchHTTPTimeout)
 }
 
 // NewGoogleSearchClientWithTimeout 创建带请求超时的 Google 客户端。
 // baseURL 预置为 Google Custom Search 端点，测试中可覆盖为 httptest 地址。
 func NewGoogleSearchClientWithTimeout(apiKey, searchEngineID string, timeout time.Duration) *GoogleSearchClient {
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
+	timeout = resolveSearchTimeout(timeout)
 	return &GoogleSearchClient{
 		apiKey:         apiKey,
 		searchEngineID: searchEngineID,
@@ -75,20 +81,20 @@ func (c *GoogleSearchClient) Invoke(ctx context.Context, query string, dateRange
 	// 创建请求
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 
 	// 发送请求
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	defer resp.Body.Close()
 
 	// 读取响应
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -98,7 +104,7 @@ func (c *GoogleSearchClient) Invoke(ctx context.Context, query string, dateRange
 	// 解析响应
 	var googleResp googleSearchResponse
 	if err := sonic.Unmarshal(body, &googleResp); err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 
 	// 转换为标准搜索结果
@@ -167,14 +173,12 @@ type TavilySearchClient struct {
 
 // NewTavilySearchClient 创建 Tavily 搜索客户端。
 func NewTavilySearchClient(apiKey string) *TavilySearchClient {
-	return NewTavilySearchClientWithTimeout(apiKey, 30*time.Second)
+	return NewTavilySearchClientWithTimeout(apiKey, defaultSearchHTTPTimeout)
 }
 
 // NewTavilySearchClientWithTimeout 创建带请求超时的 Tavily 客户端。
 func NewTavilySearchClientWithTimeout(apiKey string, timeout time.Duration) *TavilySearchClient {
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
+	timeout = resolveSearchTimeout(timeout)
 	return &TavilySearchClient{
 		apiKey:  apiKey,
 		baseURL: "https://api.tavily.com/search",
@@ -201,25 +205,25 @@ func (c *TavilySearchClient) Invoke(ctx context.Context, query string, dateRange
 		TimeRange:   tavilyTimeRange(dateRange),
 	})
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL, bytes.NewReader(body))
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Authorization", authBearerPrefix+c.apiKey)
 	req.Header.Set("Content-Type", ContentTypeJSON)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return model.NewToolError(fmt.Sprintf("Tavily API error: status=%d, body=%s", resp.StatusCode, string(respBody))), nil
@@ -227,7 +231,7 @@ func (c *TavilySearchClient) Invoke(ctx context.Context, query string, dateRange
 
 	var tavilyResp tavilySearchResponse
 	if err := sonic.Unmarshal(respBody, &tavilyResp); err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 
 	results := &model.SearchResults{
@@ -277,14 +281,12 @@ type BochaSearchClient struct {
 
 // NewBochaSearchClient 创建博查搜索客户端。
 func NewBochaSearchClient(apiKey string) *BochaSearchClient {
-	return NewBochaSearchClientWithTimeout(apiKey, 30*time.Second)
+	return NewBochaSearchClientWithTimeout(apiKey, defaultSearchHTTPTimeout)
 }
 
 // NewBochaSearchClientWithTimeout 创建带请求超时的博查客户端。
 func NewBochaSearchClientWithTimeout(apiKey string, timeout time.Duration) *BochaSearchClient {
-	if timeout <= 0 {
-		timeout = 30 * time.Second
-	}
+	timeout = resolveSearchTimeout(timeout)
 	return &BochaSearchClient{
 		apiKey:  apiKey,
 		baseURL: "https://api.bochaai.com/v1/web-search",
@@ -309,25 +311,25 @@ func (c *BochaSearchClient) Invoke(ctx context.Context, query string, dateRange 
 		Freshness: bochaFreshness(dateRange),
 	})
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL, bytes.NewReader(body))
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("Authorization", authBearerPrefix+c.apiKey)
 	req.Header.Set("Content-Type", ContentTypeJSON)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		return model.NewToolError(fmt.Sprintf("Bocha API error: status=%d, body=%s", resp.StatusCode, string(respBody))), nil
@@ -335,7 +337,7 @@ func (c *BochaSearchClient) Invoke(ctx context.Context, query string, dateRange 
 
 	var bochaResp bochaSearchResponse
 	if err := sonic.Unmarshal(respBody, &bochaResp); err != nil {
-		return model.NewToolError(err.Error()), err
+		return toolResultErr(err)
 	}
 	if bochaResp.Code != 0 {
 		return model.NewToolError(fmt.Sprintf("Bocha API error: code=%d, message=%s", bochaResp.Code, bochaResp.Message)), nil

@@ -215,7 +215,7 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 			logger.Int("status", resp.StatusCode),
 			logger.String("body", string(respBody)),
 		)
-		return nil, c.classifyHTTPError(resp.StatusCode, respBody)
+		return nil, classifyHTTPError(resp.StatusCode, respBody, anthropicProvider, c.modelName)
 	}
 
 	var anthropicResp AnthropicResponse
@@ -365,7 +365,7 @@ func (c *AnthropicClient) Stream(ctx context.Context, req *LLMRequest) (<-chan l
 			pe.Cause = readErr
 			return nil, pe
 		}
-		return nil, c.classifyHTTPError(resp.StatusCode, body)
+		return nil, classifyHTTPError(resp.StatusCode, body, anthropicProvider, c.modelName)
 	}
 	deltas := make(chan llmcore.LLMDelta)
 	// cancel 不能在 Stream 返回时触发：流由 reader goroutine 异步消费，
@@ -581,52 +581,6 @@ func mustMarshalMap(input map[string]interface{}) []byte {
 		return []byte("{}")
 	}
 	return data
-}
-
-// classifyHTTPError 把 HTTP 状态码归一化为 llmcore.ProviderError，
-// 与 OpenAIClient.classifyHTTPError 行为对齐，使 routed_llm 的 fallback 判定生效。
-//   - 401/403 → auth         不重试不 fallback
-//   - 429     → rate_limit   退避后必要时 fallback
-//   - 5xx     → server       有限重试，失败后 fallback
-//   - 4xx     → bad_request  不重试
-//   - 其他    → unknown
-func (c *AnthropicClient) classifyHTTPError(status int, body []byte) error {
-	kind := llmcore.KindUnknown
-	switch {
-	case status == http.StatusUnauthorized || status == http.StatusForbidden:
-		kind = llmcore.KindAuth
-	case status == http.StatusTooManyRequests:
-		kind = llmcore.KindRateLimit
-	case status == http.StatusRequestTimeout:
-		kind = llmcore.KindTimeout
-	case status == http.StatusNotFound:
-		kind = llmcore.KindNotFound
-	case status >= 500:
-		kind = llmcore.KindServer
-	case status >= 400:
-		kind = llmcore.KindBadRequest
-	}
-
-	// 尝试从 body 提取上游 error.message
-	var probe struct {
-		Error *struct {
-			Message string `json:"message"`
-			Type    string `json:"type"`
-		} `json:"error"`
-	}
-	_ = sonic.Unmarshal(body, &probe)
-	upstreamMsg := ""
-	if probe.Error != nil {
-		upstreamMsg = probe.Error.Message
-	}
-	if upstreamMsg == "" {
-		upstreamMsg = truncateBody(body)
-	}
-
-	pe := llmcore.NewProviderError(kind, anthropicProvider, c.modelName,
-		fmt.Sprintf("status=%d: %s", status, upstreamMsg))
-	pe.StatusCode = status
-	return pe
 }
 
 // classifySendError 把 httpClient.Do 返回的网络/超时错误归一化为 ProviderError。
