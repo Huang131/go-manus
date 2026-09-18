@@ -38,17 +38,16 @@ type LLMModelService interface {
 	Update(ctx context.Context, m *model.LLMModel) (*model.LLMModel, error)
 	Delete(ctx context.Context, id string) error
 	SetDefault(ctx context.Context, id string) error
-	// UnsetDefault 取消默认模型（允许系统处于"无默认"状态，agent 启动时降级到第一个 enabled）
+	// 取消默认模型（允许系统处于"无默认"状态，agent 启动时降级到第一个 enabled）
 	UnsetDefault(ctx context.Context) error
-	// GetDefaultForAgent 启动读取：default 优先，否则第一个 enabled。
+	// 启动读取：default 优先，否则第一个 enabled。
 	GetDefaultForAgent(ctx context.Context) (*model.LLMModel, error)
 	Test(ctx context.Context, m *model.LLMModel) (*model.LLMModelTestResponse, error)
-	// GetRuntimeHealth 读取模型的实时运行健康快照（路由器内存数据，重启归零）。
-	// 模型不存在返回 ErrModelNotFound；无调用记录时返回零值健康。
+	// 读取模型的实时运行健康快照（路由器内存数据，重启归零）。
 	GetRuntimeHealth(ctx context.Context, id string) (*model.RuntimeHealth, error)
-	// SetHealthInvalidator 注入路由器内存健康缓存失效器（编辑/删除模型时触发）。
+	// 注入路由器内存健康缓存失效器（编辑/删除模型时触发）。
 	SetHealthInvalidator(inv HealthInvalidator)
-	// SetRuntimeHealthReader 注入路由器实时健康读取器（bootstrap 创建 RoutedLLM 后调用）。
+	// 注入路由器实时健康读取器（bootstrap 创建 RoutedLLM 后调用）。
 	SetRuntimeHealthReader(reader RuntimeHealthReader)
 }
 
@@ -199,8 +198,7 @@ func (s *DefaultLLMModelService) Create(ctx context.Context, m *model.LLMModel) 
 	}
 
 	err := s.repo.WithTx(ctx, func(r repository.LLMModelRepository) error {
-		// 检查唯一约束（提前校验，依赖 DB 错误也可）
-		// 直接插入，让 unique constraint 兜底
+		// 直接插入，DB unique constraint 兜底冲突错误
 		if err := r.Create(ctx, m); err != nil {
 			if isUniqueViolation(err) {
 				return ErrModelConflict
@@ -208,15 +206,12 @@ func (s *DefaultLLMModelService) Create(ctx context.Context, m *model.LLMModel) 
 			return err
 		}
 		if autoSetDefault {
-			// 当前表里没有 default 才自动设置
+			// 表中无 default 时，才自动设为 default
 			cur, err := r.GetDefault(ctx)
 			if err != nil {
 				return err
 			}
 			if cur == nil {
-				if err := r.ClearDefault(ctx); err != nil {
-					return err
-				}
 				if err := r.SetDefault(ctx, m.ID); err != nil {
 					return err
 				}
@@ -231,9 +226,9 @@ func (s *DefaultLLMModelService) Create(ctx context.Context, m *model.LLMModel) 
 	return m, nil
 }
 
-// Update 更新
+// Update 更新（编辑即新模型：失效健康缓存，后续调用从零重新积累）
 func (s *DefaultLLMModelService) Update(ctx context.Context, m *model.LLMModel) (*model.LLMModel, error) {
-	// 先查原值
+	// 先查原值，确保存在且用于对比 IsDefault 变化
 	old, err := s.repo.GetByID(ctx, m.ID)
 	if err != nil {
 		return nil, err
@@ -254,10 +249,7 @@ func (s *DefaultLLMModelService) Update(ctx context.Context, m *model.LLMModel) 
 	m.SortOrder = old.SortOrder
 	m.UpdatedAt = time.Now()
 
-	// 编辑即新模型：失效路由器内存中的健康缓存，后续调用从零重新积累。
-	s.invalidateHealth(m.ID)
-
-	// 涉及 default 切换（false→true）时串行化，避免 ClearDefault+SetDefault 竞态。
+	// 显式设为 default 时（false→true）加锁，避免与 ClearDefault 竞态。
 	switchDefault := m.IsDefault && !old.IsDefault
 	if switchDefault {
 		s.defaultMu.Lock()
@@ -290,6 +282,9 @@ func (s *DefaultLLMModelService) Update(ctx context.Context, m *model.LLMModel) 
 	if err != nil {
 		return nil, err
 	}
+
+	// 编辑即新模型：事务成功后失效内存健康缓存，后续调用从零重新积累。
+	s.invalidateHealth(m.ID)
 	return m, nil
 }
 
@@ -307,15 +302,13 @@ func (s *DefaultLLMModelService) Delete(ctx context.Context, id string) error {
 	if m == nil {
 		return ErrModelNotFound
 	}
-	// 模型即将删除：同步失效内存健康缓存，避免路由器残留已删除模型的 entry。
-	s.invalidateHealth(id)
 	// 删除 default 模型时，ClearDefault 需与 SetDefault 串行化，
 	// 否则并发 SetDefault 会把刚设置的新 default 误清。
 	if m.IsDefault {
 		s.defaultMu.Lock()
 		defer s.defaultMu.Unlock()
 	}
-	return s.repo.WithTx(ctx, func(r repository.LLMModelRepository) error {
+	if err := s.repo.WithTx(ctx, func(r repository.LLMModelRepository) error {
 		// 如果是 default，先清掉 default 标记（事务内原子）
 		if m.IsDefault {
 			if err := r.ClearDefault(ctx); err != nil {
@@ -323,7 +316,12 @@ func (s *DefaultLLMModelService) Delete(ctx context.Context, id string) error {
 			}
 		}
 		return r.Delete(ctx, id)
-	})
+	}); err != nil {
+		return err
+	}
+	// 模型删除成功后：同步失效内存健康缓存，避免路由器残留已删除模型的 entry。
+	s.invalidateHealth(id)
+	return nil
 }
 
 // SetDefault 切换默认（事务内原子操作）
@@ -360,7 +358,6 @@ func (s *DefaultLLMModelService) SetDefault(ctx context.Context, id string) erro
 			}
 			return err
 		}
-		// 触发部分 unique 索引兜底
 		return nil
 	})
 }
@@ -374,17 +371,21 @@ func (s *DefaultLLMModelService) UnsetDefault(ctx context.Context) error {
 }
 
 // GetDefaultForAgent agent 启动读默认模型。
-// 找不到 default → 降级到第一个 enabled。
+// 找不到 default（或被禁用）→ 降级到第一个 enabled。
 func (s *DefaultLLMModelService) GetDefaultForAgent(ctx context.Context) (*model.LLMModel, error) {
 	def, err := s.repo.GetDefault(ctx)
-	if err == nil && def != nil {
-		if def.IsEnabled {
-			return def, nil
-		}
+	if err != nil {
+		return nil, err
+	}
+	if def != nil && def.IsEnabled {
+		return def, nil
 	}
 	// 降级
 	first, err := s.repo.GetFirstEnabled(ctx)
-	if err == nil && first != nil {
+	if err != nil {
+		return nil, err
+	}
+	if first != nil {
 		return first, nil
 	}
 	return nil, apperr.Unavailable("no LLM model available: please add and enable at least one model in settings")
