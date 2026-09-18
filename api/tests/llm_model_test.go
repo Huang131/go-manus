@@ -8,8 +8,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Huang131/go-manus/api/internal/model"
-	"github.com/Huang131/go-manus/api/internal/repository"
 	"github.com/stretchr/testify/assert"
 )
 
