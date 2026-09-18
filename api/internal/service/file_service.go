@@ -30,8 +30,8 @@ type FileService interface {
 	DeleteFile(ctx context.Context, id string) error
 }
 
-// COSFileStorage 接口（用于 COS 集成）
-type COSFileStorage interface {
+// FileStorage 对象存储接口，抽象底层存储实现。
+type FileStorage interface {
 	Upload(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error
 	Download(ctx context.Context, key string) (io.ReadCloser, error)
 	Delete(ctx context.Context, key string) error
@@ -41,13 +41,13 @@ type COSFileStorage interface {
 // DefaultFileService 文件服务默认实现
 type DefaultFileService struct {
 	repo    repository.FileRepository
-	storage COSFileStorage
+	storage FileStorage
 	// cleanupService 文件清理服务，与定时调度器共享同一实例以保持统计一致。
 	cleanupService FileCleanupService
 }
 
 // NewFileService 创建文件服务
-func NewFileService(repo repository.FileRepository, storage COSFileStorage) FileService {
+func NewFileService(repo repository.FileRepository, storage FileStorage) FileService {
 	return &DefaultFileService{
 		repo:    repo,
 		storage: storage,

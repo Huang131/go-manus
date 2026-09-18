@@ -147,7 +147,7 @@ func (s *stubStorage) GetURL(_ context.Context, key string) (string, error) {
 	return "http://storage.local/" + key, nil
 }
 
-var _ COSFileStorage = (*stubStorage)(nil)
+var _ FileStorage = (*stubStorage)(nil)
 var _ repository.FileRepository = (*stubFileRepo)(nil)
 
 func TestFileServiceMissingFileReturnsNotFound(t *testing.T) {

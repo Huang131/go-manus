@@ -54,14 +54,14 @@ type CleanupStats struct {
 // DefaultFileCleanupService 默认文件清理服务实现
 type DefaultFileCleanupService struct {
 	repo      repository.FileRepository
-	storage   COSFileStorage
+	storage   FileStorage
 	stats     CleanupStats
 	statsMu   sync.RWMutex
 	cleanupMu sync.Mutex
 }
 
 // NewFileCleanupService 创建文件清理服务
-func NewFileCleanupService(repo repository.FileRepository, storage COSFileStorage) FileCleanupService {
+func NewFileCleanupService(repo repository.FileRepository, storage FileStorage) FileCleanupService {
 	return &DefaultFileCleanupService{
 		repo:    repo,
 		storage: storage,
@@ -299,24 +299,4 @@ func (s *FileCleanupScheduler) cleanup() {
 	if cleaned > 0 {
 		logger.Info("定时清理完成", logger.Int("cleaned_count", cleaned))
 	}
-}
-
-// DefaultFileService 添加清理相关方法
-// CleanExpiredFiles 清理过期文件（便捷方法）
-func (s *DefaultFileService) CleanExpiredFiles(ctx context.Context, expireDuration string, batchSize int) (int, error) {
-	return s.cleanupService.CleanExpiredFiles(ctx, expireDuration, batchSize)
-}
-
-// GetExpiredFileCount 获取过期文件数量（便捷方法）
-func (s *DefaultFileService) GetExpiredFileCount(ctx context.Context, expireDuration string) (int64, error) {
-	return s.repo.CountExpiredFiles(ctx, expireDuration)
-}
-
-// ValidateExpireDuration 验证过期时间格式
-func ValidateExpireDuration(duration string) error {
-	_, err := time.ParseDuration(duration)
-	if err != nil {
-		return fmt.Errorf("无效的过期时间格式: %s, 正确格式如: 24h, 7d, 30m", duration)
-	}
-	return nil
 }

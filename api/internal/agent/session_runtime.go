@@ -14,6 +14,7 @@ import (
 	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
+	"github.com/Huang131/go-manus/api/internal/service"
 
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
@@ -27,7 +28,7 @@ type SessionRuntime struct {
 	sessionRep  repository.SessionRepository
 	fileRep     repository.FileRepository
 	sandbox     external.Sandbox
-	fileStorage COSFileStorage
+	fileStorage service.FileStorage
 	attLoader   *attachment.Loader
 }
 
@@ -37,7 +38,7 @@ func NewSessionRuntime(
 	sessionRep repository.SessionRepository,
 	fileRep repository.FileRepository,
 	sandbox external.Sandbox,
-	fileStorage COSFileStorage,
+	fileStorage service.FileStorage,
 ) *SessionRuntime {
 	r := &SessionRuntime{
 		sessionID:   sessionID,

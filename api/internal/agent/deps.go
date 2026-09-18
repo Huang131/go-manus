@@ -1,11 +1,9 @@
 package agent
 
 import (
-	"context"
-	"io"
-
 	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/repository"
+	"github.com/Huang131/go-manus/api/internal/service"
 )
 
 // Repositories 聚合 Agent 服务所需的数据访问依赖。
@@ -25,13 +23,6 @@ type Capabilities struct {
 	Sandbox      external.Sandbox
 	Browser      external.Browser
 	SearchEngine external.SearchEngine
-	FileStorage  COSFileStorage
+	FileStorage  service.FileStorage
 	MessageQueue external.TaskMessageQueue
-}
-
-// COSFileStorage 对象存储最小接口，供文件同步与附件下载使用。
-type COSFileStorage interface {
-	Upload(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error
-	Download(ctx context.Context, key string) (io.ReadCloser, error)
-	GetURL(ctx context.Context, key string) (string, error)
 }

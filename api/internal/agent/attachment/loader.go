@@ -11,7 +11,7 @@ import (
 	"github.com/Huang131/go-manus/api/internal/model"
 )
 
-// FileStorage 文件存储最小接口（由 agent.COSFileStorage 实现）
+// FileStorage 文件存储最小接口（由 service.FileStorage 或 *infrastructure.OSS 实现）
 type FileStorage interface {
 	Download(ctx context.Context, key string) (io.ReadCloser, error)
 }
