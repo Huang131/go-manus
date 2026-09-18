@@ -121,14 +121,6 @@ type ObjectStorageConfig struct {
 type SandboxConfig struct {
 	Address     string `mapstructure:"address"`
 	HTTPTimeout int    `mapstructure:"http_timeout" validate:"gte=0"` // 沙箱 HTTP 请求超时（秒）
-	Image       string `mapstructure:"image"`
-	NamePrefix  string `mapstructure:"name_prefix"`
-	TTLMinutes  int    `mapstructure:"ttl_minutes"`
-	Network     string `mapstructure:"network"`
-	ChromeArgs  string `mapstructure:"chrome_args"`
-	HTTPSProxy  string `mapstructure:"https_proxy"`
-	HTTPProxy   string `mapstructure:"http_proxy"`
-	NoProxy     string `mapstructure:"no_proxy"`
 }
 
 // ServerConfig HTTP 服务配置

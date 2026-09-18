@@ -37,14 +37,6 @@ oss:
 sandbox:
   address: http://sandbox:8080
   http_timeout: 60
-  image: ""
-  name_prefix: manus
-  ttl_minutes: 60
-  network: ""
-  chrome_args: ""
-  https_proxy: ""
-  http_proxy: ""
-  no_proxy: ""
 
 # LLM 配置：实际值由 .env 通过环境变量覆盖（env 优先级 > yaml）
 # 这里的 base_url/model_name 仅作占位，最终生效值见根目录 .env

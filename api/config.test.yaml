@@ -46,14 +46,6 @@ oss:
 sandbox:
   address: ""
   http_timeout: 60
-  image: ""
-  name_prefix: manus-test
-  ttl_minutes: 5
-  network: ""
-  chrome_args: ""
-  https_proxy: ""
-  http_proxy: ""
-  no_proxy: ""
 
 llm:
   base_url: "https://api.openai.com/v1"
