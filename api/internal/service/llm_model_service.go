@@ -188,35 +188,31 @@ func (s *DefaultLLMModelService) Create(ctx context.Context, m *model.LLMModel) 
 	m.CreatedAt = now
 	m.UpdatedAt = now
 
-	// 如果没显式设 default，且当前无 default → 自动设为 default
-	autoSetDefault := !m.IsDefault
-	// default 写操作与 SetDefault/UnsetDefault 串行化：
-	// 避免并发 Create 都读到"无 default"而双双 SetDefault 触发唯一索引冲突。
-	if autoSetDefault {
-		s.defaultMu.Lock()
-		defer s.defaultMu.Unlock()
-	}
+	// 决定/切换 default 涉及"读当前 default + 清旧 + 插入"，整体持锁串行化，
+	// 避免并发都读到"无 default"而双双设 default 触发唯一索引冲突。
+	s.defaultMu.Lock()
+	defer s.defaultMu.Unlock()
 
 	err := s.repo.WithTx(ctx, func(r repository.LLMModelRepository) error {
-		// 直接插入，DB unique constraint 兜底冲突错误
+		if !m.IsDefault {
+			// 未显式设 default：库里无 default 时自动成为 default
+			cur, err := r.GetDefault(ctx)
+			if err != nil {
+				return err
+			}
+			m.IsDefault = cur == nil
+		}
+		if m.IsDefault {
+			// 成为 default 前先清掉旧的，避免违反 partial unique index
+			if err := r.ClearDefault(ctx); err != nil {
+				return err
+			}
+		}
 		if err := r.Create(ctx, m); err != nil {
 			if isUniqueViolation(err) {
 				return ErrModelConflict
 			}
 			return err
-		}
-		if autoSetDefault {
-			// 表中无 default 时，才自动设为 default
-			cur, err := r.GetDefault(ctx)
-			if err != nil {
-				return err
-			}
-			if cur == nil {
-				if err := r.SetDefault(ctx, m.ID); err != nil {
-					return err
-				}
-				m.IsDefault = true
-			}
 		}
 		return nil
 	})

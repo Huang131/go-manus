@@ -18,7 +18,6 @@ import (
 // MockLLMModelRepository 仓储 mock
 type MockLLMModelRepository struct {
 	models        map[string]*model.LLMModel
-	defaultID     string
 	conflict      bool
 	listErr       error
 	getDefaultErr error
@@ -158,9 +157,6 @@ func TestLLMModelService_SetDefault_ConcurrentlyDeletedMapsToNotFound(t *testing
 
 func (m *MockLLMModelRepository) Delete(ctx context.Context, id string) error {
 	delete(m.models, id)
-	if m.defaultID == id {
-		m.defaultID = ""
-	}
 	return nil
 }
 
@@ -175,11 +171,10 @@ func (m *MockLLMModelRepository) GetDefault(ctx context.Context) (*model.LLMMode
 	if m.getDefaultErr != nil {
 		return nil, m.getDefaultErr
 	}
-	if m.defaultID == "" {
-		return nil, nil
-	}
-	if mm, ok := m.models[m.defaultID]; ok {
-		return mm, nil
+	for _, mm := range m.models {
+		if mm.IsDefault {
+			return mm, nil
+		}
 	}
 	return nil, nil
 }
@@ -208,7 +203,6 @@ func (m *MockLLMModelRepository) ClearDefault(ctx context.Context) error {
 	for _, mm := range m.models {
 		mm.IsDefault = false
 	}
-	m.defaultID = ""
 	return nil
 }
 
@@ -221,7 +215,6 @@ func (m *MockLLMModelRepository) SetDefault(ctx context.Context, id string) erro
 		return pgx.ErrNoRows // 对齐真实仓储：id 不存在（并发删除）→ ErrNoRows
 	}
 	mm.IsDefault = true
-	m.defaultID = id
 	return nil
 }
 
@@ -461,14 +454,14 @@ func TestLLMModelService_UnsetDefault_ClearsDefaultFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !m.IsDefault {
-		t.Fatal("first created model should be default (mock defaultID set by service?)")
+		t.Fatal("first created model should be default")
 	}
 
 	if err := svc.UnsetDefault(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 
-	// GetDefault 应回到 nil（defaultID 被清空）
+	// GetDefault 应回到 nil（无 default 模型）
 	def, err := repo.GetDefault(context.Background())
 	if err != nil {
 		t.Fatal(err)
