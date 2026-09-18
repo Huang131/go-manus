@@ -14,6 +14,7 @@ const (
 	FlowStatusSummarizing FlowStatus = "summarizing" // 汇总中
 	FlowStatusCompleted   FlowStatus = "completed"   // 已完成
 	FlowStatusFailed      FlowStatus = "failed"      // 已失败
+	FlowStatusCancelled   FlowStatus = "cancelled"   // 已取消
 )
 
 // ToSessionStatus 把流状态投影成会话状态，作为三套状态（Flow/Session/Execution）之间唯一的投影入口。
@@ -25,6 +26,8 @@ func (s FlowStatus) ToSessionStatus(plan *model.Plan) model.SessionStatus {
 		return model.SessionStatusWaiting
 	case FlowStatusFailed:
 		return model.SessionStatusFailed
+	case FlowStatusCancelled:
+		return model.SessionStatusCancelled
 	case FlowStatusCompleted:
 		if planHasFailedStep(plan) {
 			return model.SessionStatusFailed

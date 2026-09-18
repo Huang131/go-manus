@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bytedance/sonic"
@@ -27,7 +28,9 @@ type BaseAgent struct {
 	toolRegistry     *ToolRegistry
 	jsonParser       external.JSONParser
 	eventCh          chan<- model.BaseEvent // 事件输出通道（由 Flow 注入，nil 时静默）
-	shellWatchCancel context.CancelFunc     // 取消正在进行的 shell 输出 watch
+	shellWatchMu     sync.Mutex
+	shellWatchCancel context.CancelFunc
+	shellWatchDone   <-chan struct{}
 }
 
 // NewBaseAgent 创建基础 Agent
@@ -81,16 +84,8 @@ func (a *BaseAgent) SetEventCh(ch chan<- model.BaseEvent) {
 }
 
 // emitEvent 向事件通道发送事件，通道未注入时静默跳过。
-// 由 Flow 保证事件通道的消费方（task_runner）持续消费，此处阻塞发送安全。
+// Flow 在关闭事件通道前停止所有后台 watcher，保证发送方生命周期不越界。
 func (a *BaseAgent) emitEvent(ctx context.Context, ev model.BaseEvent) {
-	// 事件通道可能已被 flow 收尾关闭（如 shell watcher 与 flow 生命周期不同步），
-	// send-on-closed-channel 会 panic，这里兜底 recover 保证 watcher 等后台
-	// goroutine 的误发不会杀死整个进程。
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Warn("emitEvent 向已关闭的事件通道发送被忽略", logger.Any("panic", r))
-		}
-	}()
 	if a.eventCh == nil {
 		return
 	}
@@ -598,27 +593,40 @@ const shellOutputWatchTimeout = 15 * time.Minute
 // flow 到达终态/任务收尾时必须调用：事件通道随即关闭，
 // 存活的 watcher 向其发送会触发 send-on-closed-channel panic。
 func (a *BaseAgent) StopShellWatch() {
+	a.shellWatchMu.Lock()
+	defer a.shellWatchMu.Unlock()
+	a.stopShellWatchLocked()
+}
+
+func (a *BaseAgent) stopShellWatchLocked() {
 	if a.shellWatchCancel != nil {
 		a.shellWatchCancel()
-		a.shellWatchCancel = nil
 	}
+	if a.shellWatchDone != nil {
+		<-a.shellWatchDone
+	}
+	a.shellWatchCancel = nil
+	a.shellWatchDone = nil
 }
 
 // startShellWatch 在 shell exec 返回 running 后启动后台轮询：
 // 周期性读取沙箱控制台记录并以 ShellOutputEvent 推送增量快照，
 // 进程结束后推一次最终快照再退出。新 watch 会顶掉旧 watch。
 func (a *BaseAgent) startShellWatch(ctx context.Context, sandbox external.Sandbox, sessionID string) {
+	a.shellWatchMu.Lock()
+	defer a.shellWatchMu.Unlock()
+
 	// 顶掉旧 watch：同一会话同一时刻只跟踪最新一条长命令
-	if a.shellWatchCancel != nil {
-		a.shellWatchCancel()
-	}
+	a.stopShellWatchLocked()
 	watchCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
 	a.shellWatchCancel = cancel
+	a.shellWatchDone = done
 
 	go func() {
 		defer func() {
 			cancel()
-			a.shellWatchCancel = nil
+			close(done)
 		}()
 		deadline := time.Now().Add(shellOutputWatchTimeout)
 		var lastSnap string

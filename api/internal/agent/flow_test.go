@@ -19,6 +19,7 @@ func TestFlowStatus_Values(t *testing.T) {
 		{FlowStatusSummarizing, "summarizing"},
 		{FlowStatusCompleted, "completed"},
 		{FlowStatusFailed, "failed"},
+		{FlowStatusCancelled, "cancelled"},
 	}
 
 	for _, tt := range tests {
@@ -47,6 +48,7 @@ func TestFlowStatus_ToSessionStatus(t *testing.T) {
 		{"updating -> running", FlowStatusUpdating, nil, model.SessionStatusRunning},
 		{"summarizing -> running", FlowStatusSummarizing, nil, model.SessionStatusRunning},
 		{"failed -> failed", FlowStatusFailed, nil, model.SessionStatusFailed},
+		{"cancelled -> cancelled", FlowStatusCancelled, nil, model.SessionStatusCancelled},
 		{"completed+failed-step -> failed", FlowStatusCompleted, failedPlan, model.SessionStatusFailed},
 		{"completed+ok -> completed", FlowStatusCompleted, okPlan, model.SessionStatusCompleted},
 		{"completed+nil-plan -> completed", FlowStatusCompleted, nil, model.SessionStatusCompleted},

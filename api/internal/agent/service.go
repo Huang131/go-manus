@@ -179,8 +179,8 @@ func (s *AgentService) StopSession(ctx context.Context, sessionID string) error 
 		task.Cancel()
 	}
 
-	// 更新会话状态
-	if err := s.repos.Session.UpdateStatus(ctx, sessionID, model.SessionStatusCompleted); err != nil {
+	// 取消与正常完成是不同终态，后续执行收尾不得把取消投影为成功。
+	if err := s.repos.Session.UpdateStatus(ctx, sessionID, model.SessionStatusCancelled); err != nil {
 		return fmt.Errorf("更新会话状态失败: %w", err)
 	}
 

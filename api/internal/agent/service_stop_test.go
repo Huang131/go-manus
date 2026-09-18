@@ -17,9 +17,11 @@ type stopSessionRepository struct {
 
 type successfulStopSessionRepository struct {
 	repository.SessionRepository
+	status model.SessionStatus
 }
 
-func (successfulStopSessionRepository) UpdateStatus(context.Context, string, model.SessionStatus) error {
+func (r *successfulStopSessionRepository) UpdateStatus(_ context.Context, _ string, status model.SessionStatus) error {
+	r.status = status
 	return nil
 }
 
@@ -46,8 +48,9 @@ func TestAgentService_StopSessionKeepsTaskMappingUntilRunnerExits(t *testing.T) 
 		release: make(chan struct{}),
 	}
 	task := NewRedisStreamTask(&mockMQWrapper{}, runner)
+	repo := &successfulStopSessionRepository{}
 	svc := &AgentService{
-		repos:         Repositories{Session: successfulStopSessionRepository{}},
+		repos:         Repositories{Session: repo},
 		taskBySession: map[string]*RedisStreamTask{"session-1": task},
 	}
 	task.SetOnFinished(func() {
@@ -63,6 +66,9 @@ func TestAgentService_StopSessionKeepsTaskMappingUntilRunnerExits(t *testing.T) 
 
 	if err := svc.StopSession(context.Background(), "session-1"); err != nil {
 		t.Fatalf("StopSession() error = %v", err)
+	}
+	if repo.status != model.SessionStatusCancelled {
+		t.Fatalf("StopSession() status = %q, want %q", repo.status, model.SessionStatusCancelled)
 	}
 	svc.mu.RLock()
 	_, mapped := svc.taskBySession["session-1"]

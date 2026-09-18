@@ -25,6 +25,21 @@ func TestMarshalSessionEventsRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
+func TestExtractSessionMessageProjectsCompletedAssistantMessage(t *testing.T) {
+	event := &model.Event{
+		Type: model.EventTypeMessageDone,
+		Data: []byte(`{"message_id":"message-1","content":"final answer"}`),
+	}
+
+	message, assistant := extractSessionMessage(event)
+	if message != "final answer" {
+		t.Fatalf("extractSessionMessage() message = %q, want %q", message, "final answer")
+	}
+	if !assistant {
+		t.Fatal("extractSessionMessage() assistant = false, want true")
+	}
+}
+
 // TestSessionRepository_Create 测试创建会话
 func TestSessionRepository_Create(t *testing.T) {
 	// 测试会话模型创建

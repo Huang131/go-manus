@@ -229,17 +229,8 @@ func (r *PostgresSessionRepository) AppendEvent(ctx context.Context, id string, 
 		event.CreatedAt = time.Now()
 	}
 
-	// 从事件中提取最新消息内容，并判断是否为 assistant 回复
-	// 只有 assistant 的新回复才计入未读数（用户自己发送的消息不算未读）
-	var message string
-	isAssistantReply := false
-	if event.Type == model.EventTypeMessage {
-		var msgEvent model.MessageEvent
-		if err := sonic.Unmarshal(event.Data, &msgEvent); err == nil {
-			message = msgEvent.Message
-			isAssistantReply = msgEvent.Role == model.RoleAssistant
-		}
-	}
+	// 只有完整消息参与列表摘要投影；token delta 不落库，也不能重复计数。
+	message, isAssistantReply := extractSessionMessage(event)
 
 	unreadDelta := 0
 	if isAssistantReply {
@@ -259,6 +250,28 @@ func (r *PostgresSessionRepository) AppendEvent(ctx context.Context, id string, 
 		WHERE id = $1 AND deleted_at IS NULL
 	`
 	return r.execSessionWrite(ctx, query, id, event.ToJSON(), message, timestamp, unreadDelta)
+}
+
+func extractSessionMessage(event *model.Event) (string, bool) {
+	if event == nil {
+		return "", false
+	}
+	switch event.Type {
+	case model.EventTypeMessage:
+		var message model.MessageEvent
+		if err := sonic.Unmarshal(event.Data, &message); err != nil {
+			return "", false
+		}
+		return message.Message, message.Role == model.RoleAssistant
+	case model.EventTypeMessageDone:
+		var message model.MessageDoneEvent
+		if err := sonic.Unmarshal(event.Data, &message); err != nil {
+			return "", false
+		}
+		return message.Content, true
+	default:
+		return "", false
+	}
 }
 
 // UpdateTitle 更新会话标题

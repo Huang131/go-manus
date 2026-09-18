@@ -63,7 +63,7 @@ func (f *PlannerReActFlow) emitEvent(ctx context.Context, ch chan<- model.BaseEv
 	case ch <- event:
 		return true
 	case <-ctx.Done():
-		f.setStatus(FlowStatusCompleted)
+		f.setStatus(FlowStatusCancelled)
 		return false
 	}
 }
@@ -102,6 +102,7 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 
 	go func() {
 		defer close(ch)
+		defer f.stopShellWatches()
 
 		// 兜底 recover：任何 panic 不能杀死整个进程，转为 error 事件让前端正常结束
 		defer func() {
@@ -111,7 +112,11 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 					logger.Any("panic", r),
 					logger.String("stack", string(debug.Stack())))
 				f.emitEvent(ctx, ch, model.NewErrorEvent(fmt.Sprintf("内部错误: %v", r)))
-				f.setStatus(FlowStatusCompleted)
+				if ctx.Err() != nil {
+					f.setStatus(FlowStatusCancelled)
+				} else {
+					f.setStatus(FlowStatusFailed)
+				}
 			}
 		}()
 
@@ -143,6 +148,8 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 				stop = f.handleCompleted(ctx, ch)
 			case FlowStatusFailed:
 				stop = f.handleFailed(ctx, ch)
+			case FlowStatusCancelled:
+				return
 			default:
 				logger.ErrorContext(ctx, "PlannerReActFlow 遇到未知状态，终止执行",
 					logger.String("status", string(status)))
@@ -156,6 +163,11 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 	}()
 
 	return ch
+}
+
+func (f *PlannerReActFlow) stopShellWatches() {
+	f.planner.StopShellWatch()
+	f.react.StopShellWatch()
 }
 
 // currentStatus 在加锁状态下读取流状态
