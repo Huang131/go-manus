@@ -29,7 +29,7 @@ func TestTavilySearchClient_Invoke(t *testing.T) {
 	c := NewTavilySearchClientWithTimeout("key-foo", time.Second)
 	c.baseURL = srv.URL
 
-	res, err := c.Invoke(context.Background(), "hello world", &dr)
+	res, err := c.Invoke(context.Background(), "hello world", &dr, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,6 +47,9 @@ func TestTavilySearchClient_Invoke(t *testing.T) {
 	}
 	if !strings.Contains(gotBody, `"time_range":"week"`) {
 		t.Errorf("body missing time_range mapping: %s", gotBody)
+	}
+	if !strings.Contains(gotBody, `"max_results":7`) {
+		t.Errorf("body missing max_results: %s", gotBody)
 	}
 
 	data, ok := res.Data.(map[string]interface{})
@@ -81,7 +84,7 @@ func TestBochaSearchClient_Invoke(t *testing.T) {
 	c := NewBochaSearchClientWithTimeout("key-bar", time.Second)
 	c.baseURL = srv.URL
 
-	res, err := c.Invoke(context.Background(), "golang", &dr)
+	res, err := c.Invoke(context.Background(), "golang", &dr, 6)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,6 +96,9 @@ func TestBochaSearchClient_Invoke(t *testing.T) {
 	}
 	if !strings.Contains(gotBody, `"freshness":"oneMonth"`) {
 		t.Errorf("body missing freshness mapping: %s", gotBody)
+	}
+	if !strings.Contains(gotBody, `"count":6`) {
+		t.Errorf("body missing count: %s", gotBody)
 	}
 
 	data := res.Data.(map[string]interface{})
@@ -115,7 +121,7 @@ func TestBochaSearchClient_Invoke_NonZeroCode(t *testing.T) {
 	c := NewBochaSearchClientWithTimeout("key", time.Second)
 	c.baseURL = srv.URL
 
-	res, err := c.Invoke(context.Background(), "x", nil)
+	res, err := c.Invoke(context.Background(), "x", nil, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,12 +167,13 @@ var _ SearchEngine = (*GoogleSearchClient)(nil)
 // 复现并锁定历史 bug：SearchEngineID 配置后曾在工厂/客户端两层被丢弃，cx 恒为空，
 // Google Custom Search 会以 400 拒绝。
 func TestGoogleSearchClient_Invoke_SendsSearchEngineID(t *testing.T) {
-	var gotCX, gotKey, gotQ string
+	var gotCX, gotKey, gotQ, gotNum string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		gotCX = q.Get("cx")
 		gotKey = q.Get("key")
 		gotQ = q.Get("q")
+		gotNum = q.Get("num")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"queries":{"request":[]},"searchInformation":{"totalResults":"0"},"items":[]}`))
@@ -176,7 +183,7 @@ func TestGoogleSearchClient_Invoke_SendsSearchEngineID(t *testing.T) {
 	c := NewGoogleSearchClientWithTimeout("key-foo", "my-engine-id", time.Second)
 	c.baseURL = srv.URL
 
-	res, err := c.Invoke(context.Background(), "golang", nil)
+	res, err := c.Invoke(context.Background(), "golang", nil, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,13 +199,35 @@ func TestGoogleSearchClient_Invoke_SendsSearchEngineID(t *testing.T) {
 	if gotQ != "golang" {
 		t.Errorf("q = %q, want golang", gotQ)
 	}
+	if gotNum != "7" {
+		t.Errorf("num = %q, want 7", gotNum)
+	}
+}
+
+func TestGoogleSearchClient_Invoke_CapsLimitAtTen(t *testing.T) {
+	var gotNum string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotNum = r.URL.Query().Get("num")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"queries":{"request":[]},"searchInformation":{"totalResults":"0"},"items":[]}`))
+	}))
+	defer srv.Close()
+
+	c := NewGoogleSearchClientWithTimeout("key", "engine", time.Second)
+	c.baseURL = srv.URL
+	if _, err := c.Invoke(context.Background(), "golang", nil, 50); err != nil {
+		t.Fatal(err)
+	}
+	if gotNum != "10" {
+		t.Fatalf("num = %q, want 10", gotNum)
+	}
 }
 
 // TestGoogleSearchClient_Invoke_MissingSearchEngineID 验证 cx 缺失时在本地直接失败，
 // 而不是发出一个注定被 Google 拒绝的请求。
 func TestGoogleSearchClient_Invoke_MissingSearchEngineID(t *testing.T) {
 	c := NewGoogleSearchClientWithTimeout("key-foo", "", time.Second)
-	res, err := c.Invoke(context.Background(), "golang", nil)
+	res, err := c.Invoke(context.Background(), "golang", nil, 10)
 	if err != nil {
 		t.Fatal(err)
 	}

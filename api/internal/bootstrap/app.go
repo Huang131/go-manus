@@ -580,6 +580,20 @@ type externalClients struct {
 	a2aConfig *agent.A2AConfig
 }
 
+// resolveAgentConfig overlays the persisted runtime settings on the code defaults.
+// Non-positive values are treated as missing so a partially populated row cannot
+// disable the agent loop or produce an invalid provider request.
+func resolveAgentConfig(persisted *model.AgentConfig) *agent.AgentConfig {
+	if persisted == nil {
+		return agent.DefaultAgentConfig()
+	}
+	return agent.NormalizeAgentConfig(&agent.AgentConfig{
+		MaxIterations:    persisted.MaxIterations,
+		MaxRetries:       persisted.MaxRetries,
+		MaxSearchResults: persisted.MaxSearchResults,
+	})
+}
+
 // initExternalClients 初始化外部客户端组件。
 //
 // 外部客户端包括：
@@ -691,6 +705,16 @@ func (a *App) initAgent(opts Options, clients *externalClients) error {
 		return ErrAgentRequiresLLM
 	}
 
+	var persisted *model.AgentConfig
+	if a.AppConfigSvc != nil {
+		loaded, err := a.AppConfigSvc.GetAgentConfig(context.Background())
+		if err != nil {
+			return fmt.Errorf("load agent config: %w", err)
+		}
+		persisted = loaded
+	}
+	agentConfig := resolveAgentConfig(persisted)
+
 	// 创建 Agent 服务
 	a.AgentService = agent.NewAgentService(
 		context.Background(),
@@ -707,7 +731,7 @@ func (a *App) initAgent(opts Options, clients *externalClients) error {
 			FileStorage:  a.OSS,
 			MessageQueue: clients.mq,
 		},
-		agent.DefaultAgentConfig(),
+		agentConfig,
 		clients.mcpConfig,
 		clients.a2aConfig,
 	)

@@ -79,7 +79,11 @@ func (h *AppConfigHandler) UpdateAgentConfig(c *gin.Context) {
 			return err
 		}
 		if h.reloader != nil {
-			h.reloader.ReloadAgentConfig(&agent.AgentConfig{MaxIterations: cfg.MaxIterations, MaxRetries: cfg.MaxRetries})
+			h.reloader.ReloadAgentConfig(&agent.AgentConfig{
+				MaxIterations:    cfg.MaxIterations,
+				MaxRetries:       cfg.MaxRetries,
+				MaxSearchResults: cfg.MaxSearchResults,
+			})
 		}
 		return nil
 	})

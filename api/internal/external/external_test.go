@@ -476,7 +476,7 @@ type MockSearchEngine struct {
 	searchErr    error
 }
 
-func (m *MockSearchEngine) Invoke(ctx context.Context, query string, dateRange *string) (*model.ToolResult, error) {
+func (m *MockSearchEngine) Invoke(ctx context.Context, query string, dateRange *string, limit int) (*model.ToolResult, error) {
 	if m.searchErr != nil {
 		return nil, m.searchErr
 	}
@@ -493,7 +493,7 @@ func (m *MockSearchEngine) Invoke(ctx context.Context, query string, dateRange *
 func TestSearchEngine_Invoke(t *testing.T) {
 	search := &MockSearchEngine{}
 
-	result, err := search.Invoke(context.Background(), "test query", nil)
+	result, err := search.Invoke(context.Background(), "test query", nil, 10)
 	if err != nil {
 		t.Errorf("Invoke() error = %v", err)
 	}
@@ -513,7 +513,7 @@ func TestSearchEngine_Invoke_WithError(t *testing.T) {
 		searchErr: context.DeadlineExceeded,
 	}
 
-	result, err := search.Invoke(context.Background(), "test query", nil)
+	result, err := search.Invoke(context.Background(), "test query", nil, 10)
 	if err == nil {
 		t.Error("Invoke() should return an error")
 	}

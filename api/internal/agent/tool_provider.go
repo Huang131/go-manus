@@ -50,7 +50,7 @@ func NewToolProvider(ctx context.Context, caps Capabilities, mcpConfig *MCPConfi
 }
 
 // Tools 组装当前可用的工具集合。
-func (p *ToolProvider) Tools() []Tool {
+func (p *ToolProvider) Tools(searchLimit int) []Tool {
 	p.mu.RLock()
 	sandbox := p.sandbox
 	browser := p.browser
@@ -78,7 +78,7 @@ func (p *ToolProvider) Tools() []Tool {
 
 	// 4. Search 工具 (依赖 searchEngine)
 	if searchEngine != nil {
-		tools = append(tools, NewSearchTool(searchEngine))
+		tools = append(tools, NewSearchTool(searchEngine, searchLimit))
 	}
 
 	// 5. Message 工具 (无需外部依赖)

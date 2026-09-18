@@ -44,6 +44,7 @@ func NewAgentService(
 	mcpConfig *MCPConfig,
 	a2aConfig *A2AConfig,
 ) *AgentService {
+	agentConfig = NormalizeAgentConfig(agentConfig)
 	return &AgentService{
 		repos:         repos,
 		caps:          caps,
@@ -110,7 +111,10 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *llmc
 	}
 
 	// 获取或创建 RedisStreamTask
-	task, err := s.getOrCreateTask(ctx, session, s.toolsProvider.Tools())
+	s.mu.RLock()
+	searchLimit := s.agentConfig.MaxSearchResults
+	s.mu.RUnlock()
+	task, err := s.getOrCreateTask(ctx, session, s.toolsProvider.Tools(searchLimit))
 	if err != nil {
 		return "", fmt.Errorf("创建任务失败: %w", err)
 	}
@@ -239,7 +243,7 @@ func (s *AgentService) ReloadAgentConfig(cfg *AgentConfig) {
 		return
 	}
 	s.mu.Lock()
-	s.agentConfig = cfg
+	s.agentConfig = NormalizeAgentConfig(cfg)
 	s.mu.Unlock()
 }
 

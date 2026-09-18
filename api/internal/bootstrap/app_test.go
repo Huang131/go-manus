@@ -13,9 +13,30 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Huang131/go-manus/api/config"
+	"github.com/Huang131/go-manus/api/internal/agent"
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
+	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/service"
 )
+
+func TestResolveAgentConfigOverlaysPersistedValues(t *testing.T) {
+	got := resolveAgentConfig(&model.AgentConfig{
+		MaxIterations:    4,
+		MaxRetries:       1,
+		MaxSearchResults: 6,
+	})
+	if got.MaxIterations != 4 || got.MaxRetries != 1 || got.MaxSearchResults != 6 {
+		t.Fatalf("resolved config = %+v, want persisted runtime values", got)
+	}
+}
+
+func TestResolveAgentConfigKeepsDefaultsForMissingValues(t *testing.T) {
+	defaults := agent.DefaultAgentConfig()
+	got := resolveAgentConfig(&model.AgentConfig{})
+	if got.MaxIterations != defaults.MaxIterations || got.MaxRetries != defaults.MaxRetries || got.MaxSearchResults != defaults.MaxSearchResults {
+		t.Fatalf("resolved config = %+v, want defaults", got)
+	}
+}
 
 func TestAppCloseIsIdempotent(t *testing.T) {
 	var closeCount int

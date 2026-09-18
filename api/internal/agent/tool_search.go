@@ -10,11 +10,12 @@ import (
 // SearchTool 搜索工具
 type SearchTool struct {
 	searchEngine external.SearchEngine
+	limit        int
 }
 
 // NewSearchTool 创建搜索工具
-func NewSearchTool(searchEngine external.SearchEngine) *SearchTool {
-	return &SearchTool{searchEngine: searchEngine}
+func NewSearchTool(searchEngine external.SearchEngine, limit int) *SearchTool {
+	return &SearchTool{searchEngine: searchEngine, limit: limit}
 }
 
 // Name 返回工具名称
@@ -62,5 +63,5 @@ func (t *SearchTool) Invoke(ctx context.Context, params map[string]interface{}) 
 		dateRange = &v
 	}
 
-	return t.searchEngine.Invoke(ctx, query, dateRange)
+	return t.searchEngine.Invoke(ctx, query, dateRange, t.limit)
 }

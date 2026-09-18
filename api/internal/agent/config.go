@@ -8,6 +8,8 @@ type AgentConfig struct {
 	MaxIterations int `json:"max_iterations"`
 	// MaxRetries LLM 调用失败时的最大重试次数
 	MaxRetries int `json:"max_retries"`
+	// MaxSearchResults 搜索工具返回的最大结果数
+	MaxSearchResults int `json:"max_search_results"`
 	// MaxMemorySize 最大记忆大小 (token)
 	MaxMemorySize int `json:"max_memory_size"`
 	// CompactThreshold 压缩阈值 (记忆超过此大小时触发压缩)
@@ -28,6 +30,7 @@ func DefaultAgentConfig() *AgentConfig {
 		MaxSteps:            50,
 		MaxIterations:       10,
 		MaxRetries:          3,
+		MaxSearchResults:    10,
 		MaxMemorySize:       128000,
 		CompactThreshold:    100000,
 		PlanningPrompt:      "你是一个任务规划助手。根据用户的需求，创建一个分步骤的执行计划。",
@@ -35,6 +38,47 @@ func DefaultAgentConfig() *AgentConfig {
 		SummarizationPrompt: "你是一个总结助手。请总结整个任务的执行结果。",
 		SummaryMaxLength:    2000,
 	}
+}
+
+// NormalizeAgentConfig fills missing runtime values from the defaults.
+// It returns a copy so callers can safely retain or mutate their input.
+func NormalizeAgentConfig(cfg *AgentConfig) *AgentConfig {
+	defaults := DefaultAgentConfig()
+	if cfg == nil {
+		return defaults
+	}
+	normalized := *cfg
+	if normalized.MaxSteps <= 0 {
+		normalized.MaxSteps = defaults.MaxSteps
+	}
+	if normalized.MaxIterations <= 0 {
+		normalized.MaxIterations = defaults.MaxIterations
+	}
+	if normalized.MaxRetries <= 0 {
+		normalized.MaxRetries = defaults.MaxRetries
+	}
+	if normalized.MaxSearchResults <= 0 {
+		normalized.MaxSearchResults = defaults.MaxSearchResults
+	}
+	if normalized.MaxMemorySize <= 0 {
+		normalized.MaxMemorySize = defaults.MaxMemorySize
+	}
+	if normalized.CompactThreshold <= 0 {
+		normalized.CompactThreshold = defaults.CompactThreshold
+	}
+	if normalized.PlanningPrompt == "" {
+		normalized.PlanningPrompt = defaults.PlanningPrompt
+	}
+	if normalized.ExecutionPrompt == "" {
+		normalized.ExecutionPrompt = defaults.ExecutionPrompt
+	}
+	if normalized.SummarizationPrompt == "" {
+		normalized.SummarizationPrompt = defaults.SummarizationPrompt
+	}
+	if normalized.SummaryMaxLength <= 0 {
+		normalized.SummaryMaxLength = defaults.SummaryMaxLength
+	}
+	return &normalized
 }
 
 // MCPConfig MCP 配置

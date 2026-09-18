@@ -17,7 +17,16 @@ import (
 // SearchEngine 搜索引擎接口
 type SearchEngine interface {
 	// Invoke 调用搜索引擎
-	Invoke(ctx context.Context, query string, dateRange *string) (*model.ToolResult, error)
+	Invoke(ctx context.Context, query string, dateRange *string, limit int) (*model.ToolResult, error)
+}
+
+const defaultSearchResultLimit = 10
+
+func normalizeSearchLimit(limit int) int {
+	if limit <= 0 {
+		return defaultSearchResultLimit
+	}
+	return limit
 }
 
 // resolveSearchTimeout 解析搜索客户端超时：非正值时回退到默认超时。
@@ -58,7 +67,7 @@ func NewGoogleSearchClientWithTimeout(apiKey, searchEngineID string, timeout tim
 }
 
 // Invoke 调用 Google 搜索
-func (c *GoogleSearchClient) Invoke(ctx context.Context, query string, dateRange *string) (*model.ToolResult, error) {
+func (c *GoogleSearchClient) Invoke(ctx context.Context, query string, dateRange *string, limit int) (*model.ToolResult, error) {
 	if c.apiKey == "" {
 		return model.NewToolError("Google API key not configured"), nil
 	}
@@ -72,6 +81,10 @@ func (c *GoogleSearchClient) Invoke(ctx context.Context, query string, dateRange
 	params.Set("q", query)
 	params.Set("cx", c.searchEngineID)
 	params.Set("hl", "zh-CN")
+	if limit = normalizeSearchLimit(limit); limit > 10 {
+		limit = 10
+	}
+	params.Set("num", fmt.Sprintf("%d", limit))
 	if dateRange != nil {
 		params.Set("dateRestrict", *dateRange)
 	}
@@ -189,7 +202,7 @@ func NewTavilySearchClientWithTimeout(apiKey string, timeout time.Duration) *Tav
 }
 
 // Invoke 调用 Tavily 搜索。dateRange 取值 d/w/m/y，映射为 day/week/month/year。
-func (c *TavilySearchClient) Invoke(ctx context.Context, query string, dateRange *string) (*model.ToolResult, error) {
+func (c *TavilySearchClient) Invoke(ctx context.Context, query string, dateRange *string, limit int) (*model.ToolResult, error) {
 	if c.apiKey == "" {
 		return model.NewToolError("Tavily API key not configured"), nil
 	}
@@ -200,7 +213,7 @@ func (c *TavilySearchClient) Invoke(ctx context.Context, query string, dateRange
 	body, err := sonic.Marshal(tavilySearchRequest{
 		Query:       query,
 		SearchDepth: tavilySearchDepthBasic,
-		MaxResults:  10,
+		MaxResults:  normalizeSearchLimit(limit),
 		Topic:       tavilyTopicGeneral,
 		TimeRange:   tavilyTimeRange(dateRange),
 	})
@@ -297,7 +310,7 @@ func NewBochaSearchClientWithTimeout(apiKey string, timeout time.Duration) *Boch
 }
 
 // Invoke 调用博查搜索。dateRange 取值 d/w/m/y，映射为 oneDay/oneWeek/oneMonth/oneYear。
-func (c *BochaSearchClient) Invoke(ctx context.Context, query string, dateRange *string) (*model.ToolResult, error) {
+func (c *BochaSearchClient) Invoke(ctx context.Context, query string, dateRange *string, limit int) (*model.ToolResult, error) {
 	if c.apiKey == "" {
 		return model.NewToolError("Bocha API key not configured"), nil
 	}
@@ -307,7 +320,7 @@ func (c *BochaSearchClient) Invoke(ctx context.Context, query string, dateRange 
 
 	body, err := sonic.Marshal(bochaSearchRequest{
 		Query:     query,
-		Count:     10,
+		Count:     normalizeSearchLimit(limit),
 		Freshness: bochaFreshness(dateRange),
 	})
 	if err != nil {
