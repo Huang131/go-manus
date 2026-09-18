@@ -162,7 +162,6 @@ type SearchConfig struct {
 // MCPConfig MCP 配置
 type MCPConfig struct {
 	Servers []MCPServer `mapstructure:"servers"`
-	Timeout int         `mapstructure:"timeout"`
 }
 
 // MCPServer MCP 服务器配置
@@ -175,15 +174,13 @@ type MCPServer struct {
 
 // A2AConfig A2A 配置
 type A2AConfig struct {
-	Agents  []A2AAgent `mapstructure:"agents"`
-	Timeout int        `mapstructure:"timeout"`
+	Agents []A2AAgent `mapstructure:"agents"`
 }
 
 // A2AAgent A2A Agent 配置
 type A2AAgent struct {
-	Name     string            `mapstructure:"name"`
-	URL      string            `mapstructure:"url"`
-	Metadata map[string]string `mapstructure:"metadata"`
+	Name string `mapstructure:"name"`
+	URL  string `mapstructure:"url"`
 }
 
 // FileCleanupConfig 文件清理配置

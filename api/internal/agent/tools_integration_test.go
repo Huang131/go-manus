@@ -419,7 +419,6 @@ func TestMCPTool_WithConfig(t *testing.T) {
 				Args:    []string{"test"},
 			},
 		},
-		Timeout: 30,
 	}
 
 	err := tool.Initialize(context.Background(), config)

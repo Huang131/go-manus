@@ -22,11 +22,6 @@ export type ExecutionStatus = "pending" | "running" | "completed" | "failed";
  */
 export type ToolEventStatus = "calling" | "called";
 
-/**
- * MCP 传输类型
- */
-export type MCPTransport = "stdio" | "sse" | "streamable_http";
-
 // ==================== 配置模块类型 ====================
 
 /**
@@ -81,13 +76,9 @@ export type AgentConfig = {
 export type ListMCPServerItem = {
   server_name: string;
   enabled: boolean;
-  transport: MCPTransport;
-  tools: string[];
   command?: string;
   args?: string[];
   env?: Record<string, string>;
-  url?: string;
-  headers?: Record<string, string>;
 };
 
 /**
@@ -102,14 +93,10 @@ export type MCPServersData = {
  */
 export type MCPServerConfig = {
   server_name: string;
-  transport?: MCPTransport;
   enabled?: boolean;
-  tools?: string[];
   env?: Record<string, string>;
   command?: string;
   args?: string[];
-  url?: string;
-  headers?: Record<string, string>;
 };
 
 /**
@@ -124,14 +111,8 @@ export type MCPConfig = {
  */
 export type ListA2AServerItem = {
   id: string;
-  name: string;
-  description: string;
-  input_modes: string[];
-  output_modes: string[];
-  streaming: boolean;
-  push_notifications: boolean;
   enabled: boolean;
-  url?: string;
+  url: string;
 };
 
 /**

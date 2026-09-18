@@ -2,7 +2,7 @@
 
 import {useState} from 'react'
 import {toast} from 'sonner'
-import {LayoutList, Loader2, Trash} from 'lucide-react'
+import {Loader2, Trash} from 'lucide-react'
 import {
   Dialog,
   DialogClose,
@@ -17,9 +17,9 @@ import {Badge} from '@/components/ui/badge'
 import {Button} from '@/components/ui/button'
 import {Field, FieldDescription, FieldGroup, FieldLegend, FieldSet} from '@/components/ui/field'
 import {Input} from '@/components/ui/input'
-import {Item, ItemContent, ItemDescription, ItemGroup, ItemTitle} from '@/components/ui/item'
+import {Item, ItemContent, ItemGroup, ItemTitle} from '@/components/ui/item'
 import {Switch} from '@/components/ui/switch'
-import type {ListA2AServerItem, CreateA2AServerParams} from '@/lib/api'
+import type {ListA2AServerItem} from '@/lib/api'
 
 // ==================== A2A Agent 配置 ====================
 
@@ -132,7 +132,7 @@ export function A2ASetting({servers, loading, onToggleEnabled, onDelete, onAdd}:
                   <ItemContent>
                     <ItemTitle className="w-full flex justify-between items-center text-md font-bold text-gray-700">
                       <div className="flex gap-2 items-center">
-                        {server.name}
+                        {server.id}
                         {!server.enabled && <Badge>禁用</Badge>}
                       </div>
                       <div className="flex items-center justify-center gap-2">
@@ -151,30 +151,6 @@ export function A2ASetting({servers, loading, onToggleEnabled, onDelete, onAdd}:
                         />
                       </div>
                     </ItemTitle>
-                    {server.description && (
-                      <ItemDescription>{server.description}</ItemDescription>
-                    )}
-                    <ItemDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                      <LayoutList size={12}/>
-                      {server.input_modes?.map((mode) => (
-                        <Badge key={`in-${mode}`} variant="secondary" className="text-gray-500">
-                          输入: {mode}
-                        </Badge>
-                      ))}
-                      {server.output_modes?.map((mode) => (
-                        <Badge key={`out-${mode}`} variant="secondary" className="text-gray-500">
-                          输出: {mode}
-                        </Badge>
-                      ))}
-                      <Badge variant={server.streaming ? 'secondary' : 'outline'}
-                             className={server.streaming ? 'text-gray-500' : 'text-gray-400'}>
-                        流式输出: {server.streaming ? '开启' : '关闭'}
-                      </Badge>
-                      <Badge variant={server.push_notifications ? 'secondary' : 'outline'}
-                             className={server.push_notifications ? 'text-gray-500' : 'text-gray-400'}>
-                        推送通知: {server.push_notifications ? '开启' : '关闭'}
-                      </Badge>
-                    </ItemDescription>
                   </ItemContent>
                 </Item>
               ))}

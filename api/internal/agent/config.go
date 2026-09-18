@@ -1,5 +1,7 @@
 package agent
 
+import "github.com/Huang131/go-manus/api/internal/model"
+
 // AgentConfig Agent 配置
 type AgentConfig struct {
 	// MaxIterations 最大迭代次数
@@ -43,8 +45,6 @@ func NormalizeAgentConfig(cfg *AgentConfig) *AgentConfig {
 type MCPConfig struct {
 	// Servers MCP 服务器列表
 	Servers []MCPServer `json:"servers"`
-	// Timeout 超时时间 (秒)
-	Timeout int `json:"timeout"`
 }
 
 // MCPServer MCP 服务器配置
@@ -63,8 +63,6 @@ type MCPServer struct {
 type A2AConfig struct {
 	// Agents A2A Agent 列表
 	Agents []A2AAgent `json:"agents"`
-	// Timeout 超时时间 (秒)
-	Timeout int `json:"timeout"`
 }
 
 // A2AAgent A2A Agent 配置
@@ -73,6 +71,54 @@ type A2AAgent struct {
 	Name string `json:"name"`
 	// URL Agent 服务地址
 	URL string `json:"url"`
-	// Metadata 元数据
-	Metadata map[string]string `json:"metadata"`
+}
+
+// RuntimeMCPConfig converts the persisted control-plane model into an isolated
+// runtime snapshot. Disabled servers never reach the client manager.
+func RuntimeMCPConfig(cfg *model.MCPConfig) *MCPConfig {
+	if cfg == nil {
+		return nil
+	}
+	runtimeCfg := &MCPConfig{Servers: make([]MCPServer, 0, len(cfg.Servers))}
+	for _, server := range cfg.Servers {
+		if !server.Enabled {
+			continue
+		}
+		runtimeCfg.Servers = append(runtimeCfg.Servers, MCPServer{
+			Name:    server.ServerName,
+			Command: server.Command,
+			Args:    append([]string(nil), server.Args...),
+			Env:     cloneStringMap(server.Env),
+		})
+	}
+	return runtimeCfg
+}
+
+// RuntimeA2AConfig converts persisted A2A settings into an isolated runtime snapshot.
+func RuntimeA2AConfig(cfg *model.A2AConfig) *A2AConfig {
+	if cfg == nil {
+		return nil
+	}
+	runtimeCfg := &A2AConfig{Agents: make([]A2AAgent, 0, len(cfg.Servers))}
+	for _, server := range cfg.Servers {
+		if !server.Enabled {
+			continue
+		}
+		runtimeCfg.Agents = append(runtimeCfg.Agents, A2AAgent{
+			Name: server.ID,
+			URL:  server.URL,
+		})
+	}
+	return runtimeCfg
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if values == nil {
+		return nil
+	}
+	cloned := make(map[string]string, len(values))
+	for key, value := range values {
+		cloned[key] = value
+	}
+	return cloned
 }

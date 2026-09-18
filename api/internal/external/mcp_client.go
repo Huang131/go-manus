@@ -396,7 +396,6 @@ type MCPError struct {
 // MCPConfig MCP 配置
 type MCPConfig struct {
 	Servers []MCPConfigServer
-	Timeout int
 }
 
 // MCPConfigServer MCP 服务器配置

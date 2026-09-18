@@ -661,7 +661,7 @@ func newMCPConfig(cfg *config.Config) *agent.MCPConfig {
 			Name: server.Name, Command: server.Command, Args: server.Args, Env: server.Env,
 		}
 	}
-	return &agent.MCPConfig{Servers: servers, Timeout: cfg.MCP.Timeout}
+	return &agent.MCPConfig{Servers: servers}
 }
 
 // newA2AConfig 从配置创建 A2A（Agent-to-Agent）通信配置。
@@ -676,9 +676,36 @@ func newA2AConfig(cfg *config.Config) *agent.A2AConfig {
 	}
 	agents := make([]agent.A2AAgent, len(cfg.A2A.Agents))
 	for i, a := range cfg.A2A.Agents {
-		agents[i] = agent.A2AAgent{Name: a.Name, URL: a.URL, Metadata: a.Metadata}
+		agents[i] = agent.A2AAgent{Name: a.Name, URL: a.URL}
 	}
-	return &agent.A2AConfig{Agents: agents, Timeout: cfg.A2A.Timeout}
+	return &agent.A2AConfig{Agents: agents}
+}
+
+func loadRuntimeToolConfigs(
+	ctx context.Context,
+	configService service.AppConfigService,
+	fallbackMCP *agent.MCPConfig,
+	fallbackA2A *agent.A2AConfig,
+) (*agent.MCPConfig, *agent.A2AConfig, error) {
+	if configService == nil {
+		return fallbackMCP, fallbackA2A, nil
+	}
+
+	mcpConfig, err := configService.GetMCPConfig(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load MCP config: %w", err)
+	}
+	a2aConfig, err := configService.GetA2AConfig(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load A2A config: %w", err)
+	}
+	if mcpConfig != nil {
+		fallbackMCP = agent.RuntimeMCPConfig(mcpConfig)
+	}
+	if a2aConfig != nil {
+		fallbackA2A = agent.RuntimeA2AConfig(a2aConfig)
+	}
+	return fallbackMCP, fallbackA2A, nil
 }
 
 // initAgent 初始化 Agent 核心服务。
@@ -714,6 +741,15 @@ func (a *App) initAgent(opts Options, clients *externalClients) error {
 		persisted = loaded
 	}
 	agentConfig := resolveAgentConfig(persisted)
+	mcpConfig, a2aConfig, err := loadRuntimeToolConfigs(
+		context.Background(),
+		a.AppConfigSvc,
+		clients.mcpConfig,
+		clients.a2aConfig,
+	)
+	if err != nil {
+		return err
+	}
 
 	// 创建 Agent 服务
 	a.AgentService = agent.NewAgentService(
@@ -732,8 +768,8 @@ func (a *App) initAgent(opts Options, clients *externalClients) error {
 			MessageQueue: clients.mq,
 		},
 		agentConfig,
-		clients.mcpConfig,
-		clients.a2aConfig,
+		mcpConfig,
+		a2aConfig,
 	)
 	a.stopHook(func() {
 		if a.AgentService != nil {

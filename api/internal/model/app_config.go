@@ -47,13 +47,9 @@ type MCPConfig struct {
 type MCPServer struct {
 	ServerName string            `json:"server_name"` // MCP 服务器名称，用于工具调用时的标识
 	Enabled    bool              `json:"enabled"`     // 是否启用该服务器
-	Transport  string            `json:"transport"`   // 传输协议：stdio、sse、http
-	Tools      []string          `json:"tools"`       // 该服务器暴露的工具名称列表
 	Command    string            `json:"command,omitempty"`
 	Args       []string          `json:"args,omitempty"`
 	Env        map[string]string `json:"env,omitempty"`
-	URL        string            `json:"url,omitempty"`
-	Headers    map[string]string `json:"headers,omitempty"`
 }
 
 // A2AConfig A2A 配置
@@ -64,13 +60,7 @@ type A2AConfig struct {
 // A2AServer A2A 协议服务器节点。
 // A2A (Agent-to-Agent) 协议允许不同 Agent 之间直接通信和协作。
 type A2AServer struct {
-	ID                string   `json:"id"`                 // 唯一标识，Agent 注册时的实例 ID
-	Name              string   `json:"name"`               // 服务名称，如 "Claude Agent"
-	Description       string   `json:"description"`        // Agent 能力描述，用于服务发现
-	InputModes        []string `json:"input_modes"`        // 支持的输入模式：text, image, audio, video
-	OutputModes       []string `json:"output_modes"`       // 支持的输出模式：text, image, audio
-	Streaming         bool     `json:"streaming"`          // 是否支持 Server-Sent Events 流式响应
-	PushNotifications bool     `json:"push_notifications"` // 是否支持主动推送通知
-	Enabled           bool     `json:"enabled"`            // 是否启用，未启用的 Agent 不会被路由到
-	URL               string   `json:"url,omitempty"`      // 远程 Agent 卡片地址
+	ID      string `json:"id"`      // 运行时使用的唯一标识
+	Enabled bool   `json:"enabled"` // 是否启用，未启用的 Agent 不会被路由到
+	URL     string `json:"url"`     // 远程 Agent 基础地址
 }

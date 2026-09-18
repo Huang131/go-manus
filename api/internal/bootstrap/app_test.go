@@ -115,6 +115,40 @@ func TestInitExternalClientsDoesNotCreateBrowserWithoutSandboxAddress(t *testing
 	}
 }
 
+type runtimeConfigServiceStub struct {
+	service.AppConfigService
+	mcp *model.MCPConfig
+	a2a *model.A2AConfig
+}
+
+func (s runtimeConfigServiceStub) GetMCPConfig(context.Context) (*model.MCPConfig, error) {
+	return s.mcp, nil
+}
+
+func (s runtimeConfigServiceStub) GetA2AConfig(context.Context) (*model.A2AConfig, error) {
+	return s.a2a, nil
+}
+
+func TestLoadRuntimeToolConfigsPrefersPersistedSettings(t *testing.T) {
+	yamlMCP := &agent.MCPConfig{Servers: []agent.MCPServer{{Name: "yaml", Command: "yaml-command"}}}
+	yamlA2A := &agent.A2AConfig{Agents: []agent.A2AAgent{{Name: "yaml", URL: "https://yaml.example"}}}
+	svc := runtimeConfigServiceStub{
+		mcp: &model.MCPConfig{Servers: []model.MCPServer{{ServerName: "db", Enabled: true, Command: "db-command"}}},
+		a2a: &model.A2AConfig{Servers: []model.A2AServer{{ID: "db", Enabled: true, URL: "https://db.example"}}},
+	}
+
+	mcp, a2a, err := loadRuntimeToolConfigs(context.Background(), svc, yamlMCP, yamlA2A)
+	if err != nil {
+		t.Fatalf("loadRuntimeToolConfigs() error = %v", err)
+	}
+	if len(mcp.Servers) != 1 || mcp.Servers[0].Name != "db" {
+		t.Fatalf("MCP config = %+v, want persisted config", mcp)
+	}
+	if len(a2a.Agents) != 1 || a2a.Agents[0].Name != "db" {
+		t.Fatalf("A2A config = %+v, want persisted config", a2a)
+	}
+}
+
 func TestBuildTestModeWithRoutes(t *testing.T) {
 	cfg := &config.Config{
 		Server: config.ServerConfig{Host: "127.0.0.1", Port: 8080},

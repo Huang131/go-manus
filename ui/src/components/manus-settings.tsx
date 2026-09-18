@@ -24,10 +24,7 @@ import type {
   AgentConfig,
   ListMCPServerItem,
   ListA2AServerItem,
-  MCPConfig,
-  MCPServerConfig,
   CreateA2AServerParams,
-  LLMModel,
 } from '@/lib/api'
 
 // ==================== 设置弹窗主组件 ====================
@@ -202,7 +199,7 @@ export function ManusSettings() {
     try {
       await configApi.updateA2AServerEnabled(id, enabled)
       const server = a2aServers.find((s) => s.id === id)
-      toast.success(`${server?.name ?? 'Agent'} 已${enabled ? '启用' : '禁用'}`)
+      toast.success(`${server?.id ?? 'Agent'} 已${enabled ? '启用' : '禁用'}`)
     } catch {
       setA2aServers((prev) =>
         prev.map((s) => (s.id === id ? {...s, enabled: !enabled} : s)),
@@ -217,7 +214,7 @@ export function ManusSettings() {
     setA2aServers((list) => list.filter((s) => s.id !== id))
     try {
       await configApi.deleteA2AServer(id)
-      toast.success(`已删除 A2A Agent「${target?.name ?? id}」`)
+      toast.success(`已删除 A2A Agent「${target?.id ?? id}」`)
     } catch {
       setA2aServers(prev)
       toast.error(`删除失败，请重试`)
@@ -230,13 +227,7 @@ export function ManusSettings() {
       const config: CreateA2AServerParams = {
         servers: [{
           id: `a2a-${crypto.randomUUID()}`,
-          name: url.hostname,
-          description: '',
           url: url.toString(),
-          input_modes: ['text'],
-          output_modes: ['text'],
-          streaming: false,
-          push_notifications: false,
           enabled: true,
         }],
       }
@@ -357,4 +348,3 @@ export function ManusSettings() {
     </Dialog>
   )
 }
-

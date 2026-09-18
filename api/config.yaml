@@ -54,7 +54,6 @@ search:
   search_engine_id: ""
 
 mcp:
-  timeout: 60
   servers:
     # - name: "filesystem"
     #   command: "npx"
@@ -64,12 +63,9 @@ mcp:
     #   args: ["-y", "@modelcontextprotocol/server-memory"]
 
 a2a:
-  timeout: 30
   agents:
     # - name: "planner"
     #   url: "http://localhost:8081"
-    #   metadata:
-    #     description: "任务规划助手"
 
 server:
   host: 0.0.0.0

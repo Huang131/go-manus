@@ -33,13 +33,13 @@ func NewToolProvider(ctx context.Context, caps Capabilities, mcpConfig *MCPConfi
 		searchEngine: caps.SearchEngine,
 	}
 
-	if mcpConfig != nil {
+	if mcpConfig != nil && len(mcpConfig.Servers) > 0 {
 		p.mcpTool = NewMCPTool()
 		if err := p.mcpTool.Initialize(ctx, mcpConfig); err != nil {
 			logger.Warn("MCP 工具初始化失败，继续启动 Agent 服务", logger.Err(err))
 		}
 	}
-	if a2aConfig != nil {
+	if a2aConfig != nil && len(a2aConfig.Agents) > 0 {
 		p.a2aTool = NewA2ATool()
 		if err := p.a2aTool.Initialize(ctx, a2aConfig); err != nil {
 			logger.Warn("A2A 工具初始化失败，继续启动 Agent 服务", logger.Err(err))
@@ -103,6 +103,16 @@ func (p *ToolProvider) Tools(searchLimit int) []Tool {
 
 // ReloadMCPConfig 重建 MCP 客户端，确保配置接口保存后立即生效。
 func (p *ToolProvider) ReloadMCPConfig(ctx context.Context, cfg *MCPConfig) error {
+	if cfg == nil || len(cfg.Servers) == 0 {
+		p.mu.Lock()
+		oldTool := p.mcpTool
+		p.mcpTool = nil
+		if oldTool != nil {
+			p.retiredMCP = append(p.retiredMCP, oldTool)
+		}
+		p.mu.Unlock()
+		return nil
+	}
 	newTool := NewMCPTool()
 	if err := newTool.Initialize(ctx, cfg); err != nil {
 		return err
@@ -119,6 +129,16 @@ func (p *ToolProvider) ReloadMCPConfig(ctx context.Context, cfg *MCPConfig) erro
 
 // ReloadA2AConfig 重建 A2A 客户端，确保配置接口保存后立即生效。
 func (p *ToolProvider) ReloadA2AConfig(ctx context.Context, cfg *A2AConfig) error {
+	if cfg == nil || len(cfg.Agents) == 0 {
+		p.mu.Lock()
+		oldTool := p.a2aTool
+		p.a2aTool = nil
+		if oldTool != nil {
+			p.retiredA2A = append(p.retiredA2A, oldTool)
+		}
+		p.mu.Unlock()
+		return nil
+	}
 	newTool := NewA2ATool()
 	if err := newTool.Initialize(ctx, cfg); err != nil {
 		return err

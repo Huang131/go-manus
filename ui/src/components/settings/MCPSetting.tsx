@@ -2,7 +2,7 @@
 
 import {useState} from 'react'
 import {toast} from 'sonner'
-import {Wrench, Loader2, Trash} from 'lucide-react'
+import {Loader2, Trash} from 'lucide-react'
 import {
   Dialog,
   DialogClose,
@@ -16,7 +16,7 @@ import {
 import {Badge} from '@/components/ui/badge'
 import {Button} from '@/components/ui/button'
 import {Field, FieldDescription, FieldGroup, FieldLegend, FieldSet} from '@/components/ui/field'
-import {Item, ItemContent, ItemDescription, ItemGroup, ItemTitle} from '@/components/ui/item'
+import {Item, ItemContent, ItemGroup, ItemTitle} from '@/components/ui/item'
 import {Switch} from '@/components/ui/switch'
 import {Textarea} from '@/components/ui/textarea'
 import type {ListMCPServerItem, MCPConfig, MCPServerConfig} from '@/lib/api'
@@ -36,8 +36,6 @@ export function normalizeMCPConfig(value: unknown): MCPConfig {
     ...config,
     server_name: name,
     enabled: config.enabled ?? true,
-    transport: config.transport ?? (config.command ? 'stdio' : 'streamable_http'),
-    tools: config.tools ?? [],
   }))
   return {servers}
 }
@@ -168,7 +166,7 @@ export function MCPSetting({servers, loading, onToggleEnabled, onDelete, onAdd}:
                     <ItemTitle className="w-full flex justify-between items-center text-md font-bold text-gray-700">
                       <div className="flex gap-2 items-center">
                         {server.server_name}
-                        <Badge>{server.transport}</Badge>
+                        <Badge>stdio</Badge>
                         {!server.enabled && <Badge>禁用</Badge>}
                       </div>
                       <div className="flex items-center justify-center gap-2">
@@ -187,16 +185,6 @@ export function MCPSetting({servers, loading, onToggleEnabled, onDelete, onAdd}:
                         />
                       </div>
                     </ItemTitle>
-                    {server.tools.length > 0 && (
-                      <ItemDescription className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <Wrench size={12}/>
-                        {server.tools.map((tool) => (
-                          <Badge key={tool} variant="secondary" className="text-gray-500">
-                            {tool}
-                          </Badge>
-                        ))}
-                      </ItemDescription>
-                    )}
                   </ItemContent>
                 </Item>
               ))}

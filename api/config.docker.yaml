@@ -57,11 +57,9 @@ search:
   search_engine_id: ""
 
 mcp:
-  timeout: 60
   servers: []
 
 a2a:
-  timeout: 30
   agents: []
 
 server:

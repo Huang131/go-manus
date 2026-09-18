@@ -195,7 +195,6 @@ func TestMCPConfig(t *testing.T) {
 				Env:     map[string]string{"KEY": "value"},
 			},
 		},
-		Timeout: 30,
 	}
 
 	if len(cfg.Servers) != 1 {
@@ -206,9 +205,6 @@ func TestMCPConfig(t *testing.T) {
 		t.Errorf("Servers[0].Name = %s, want test-server", cfg.Servers[0].Name)
 	}
 
-	if cfg.Timeout != 30 {
-		t.Errorf("Timeout = %d, want 30", cfg.Timeout)
-	}
 }
 
 // TestStdioMCPClientConfig 测试 stdio 客户端配置

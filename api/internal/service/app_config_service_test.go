@@ -133,8 +133,7 @@ func TestAppConfigService_GetMCPConfig(t *testing.T) {
 			{
 				ServerName: "filesystem",
 				Enabled:    true,
-				Transport:  "stdio",
-				Tools:      []string{"read_file", "write_file"},
+				Command:    "filesystem-server",
 			},
 		},
 	}
@@ -169,13 +168,9 @@ func TestAppConfigService_GetA2AConfig(t *testing.T) {
 	a2aConfig := &model.A2AConfig{
 		Servers: []model.A2AServer{
 			{
-				ID:          "server-1",
-				Name:        "Test Server",
-				Description: "A test A2A server",
-				InputModes:  []string{"text", "json"},
-				OutputModes: []string{"text", "json"},
-				Streaming:   true,
-				Enabled:     true,
+				ID:      "server-1",
+				URL:     "https://agent.example",
+				Enabled: true,
 			},
 		},
 	}
@@ -198,8 +193,8 @@ func TestAppConfigService_GetA2AConfig(t *testing.T) {
 	if !retrieved.Servers[0].Enabled {
 		t.Error("A2AConfig.Servers[0].Enabled should be true")
 	}
-	if retrieved.Servers[0].Streaming != true {
-		t.Error("A2AConfig.Servers[0].Streaming should be true")
+	if retrieved.Servers[0].URL != "https://agent.example" {
+		t.Errorf("A2AConfig.Servers[0].URL = %q", retrieved.Servers[0].URL)
 	}
 }
 
@@ -210,7 +205,7 @@ func TestAppConfigService_UpdateMCPConfig(t *testing.T) {
 	// 先创建默认 MCP 配置
 	mcpConfig := &model.MCPConfig{
 		Servers: []model.MCPServer{
-			{ServerName: "server-1", Enabled: true, Transport: "stdio"},
+			{ServerName: "server-1", Enabled: true, Command: "server-one"},
 		},
 	}
 	configValue, _ := sonic.Marshal(mcpConfig)
@@ -224,8 +219,8 @@ func TestAppConfigService_UpdateMCPConfig(t *testing.T) {
 	// 添加新服务器（测试同名覆盖 + 新增场景）
 	newConfig := &model.MCPConfig{
 		Servers: []model.MCPServer{
-			{ServerName: "server-1", Enabled: true, Transport: "stdio"},
-			{ServerName: "server-2", Enabled: false, Transport: "http"},
+			{ServerName: "server-1", Enabled: true, Command: "server-one"},
+			{ServerName: "server-2", Enabled: false, Command: "server-two"},
 		},
 	}
 
@@ -240,6 +235,29 @@ func TestAppConfigService_UpdateMCPConfig(t *testing.T) {
 	}
 }
 
+func TestAppConfigService_UpdateMCPConfigRejectsMissingCommand(t *testing.T) {
+	svc := NewAppConfigService(NewMockAppConfigRepository())
+	err := svc.UpdateMCPConfig(context.Background(), &model.MCPConfig{Servers: []model.MCPServer{{
+		ServerName: "missing-command",
+		Enabled:    true,
+	}}})
+	if err == nil {
+		t.Fatal("UpdateMCPConfig() error = nil, want validation error")
+	}
+}
+
+func TestAppConfigService_UpdateA2AConfigRejectsInvalidURL(t *testing.T) {
+	svc := NewAppConfigService(NewMockAppConfigRepository())
+	err := svc.UpdateA2AConfig(context.Background(), &model.A2AConfig{Servers: []model.A2AServer{{
+		ID:      "agent-1",
+		URL:     "://invalid",
+		Enabled: true,
+	}}})
+	if err == nil {
+		t.Fatal("UpdateA2AConfig() error = nil, want validation error")
+	}
+}
+
 func TestAppConfigService_DeleteMCPServer(t *testing.T) {
 	repo := NewMockAppConfigRepository()
 	svc := NewAppConfigService(repo)
@@ -247,8 +265,8 @@ func TestAppConfigService_DeleteMCPServer(t *testing.T) {
 	// 先创建默认 MCP 配置
 	mcpConfig := &model.MCPConfig{
 		Servers: []model.MCPServer{
-			{ServerName: "server-1", Enabled: true, Transport: "stdio"},
-			{ServerName: "server-2", Enabled: true, Transport: "http"},
+			{ServerName: "server-1", Enabled: true, Command: "server-one"},
+			{ServerName: "server-2", Enabled: true, Command: "server-two"},
 		},
 	}
 	configValue, _ := sonic.Marshal(mcpConfig)
@@ -297,7 +315,7 @@ func TestAppConfigService_DeleteMCPServer_NotFoundWithoutConfig(t *testing.T) {
 func TestAppConfigService_UpdateMCPServerEnabled(t *testing.T) {
 	repo := NewMockAppConfigRepository()
 	svc := NewAppConfigService(repo)
-	if err := svc.UpdateMCPConfig(context.Background(), &model.MCPConfig{Servers: []model.MCPServer{{ServerName: "s", Enabled: false}}}); err != nil {
+	if err := svc.UpdateMCPConfig(context.Background(), &model.MCPConfig{Servers: []model.MCPServer{{ServerName: "s", Enabled: false, Command: "server"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.UpdateMCPServerEnabled(context.Background(), "s", true); err != nil {

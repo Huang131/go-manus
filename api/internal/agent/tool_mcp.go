@@ -155,9 +155,7 @@ func (t *MCPTool) Initialize(ctx context.Context, cfg *MCPConfig) error {
 	t.config = cfg
 
 	// 将 agent.MCPConfig 转换为 external.MCPConfig
-	externalConfig := &external.MCPConfig{
-		Timeout: cfg.Timeout,
-	}
+	externalConfig := &external.MCPConfig{}
 	for _, server := range cfg.Servers {
 		externalConfig.Servers = append(externalConfig.Servers, external.MCPConfigServer{
 			Name:    server.Name,

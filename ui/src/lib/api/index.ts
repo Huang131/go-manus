@@ -20,7 +20,6 @@ export type {
   SessionStatus,
   ExecutionStatus,
   ToolEventStatus,
-  MCPTransport,
   AgentConfig,
   ListMCPServerItem,
   MCPServerConfig,

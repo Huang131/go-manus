@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -124,12 +126,33 @@ func (s *DefaultAppConfigService) mergeAndSaveMCPConfig(ctx context.Context, cfg
 		}
 		cfg.Servers = mergeMCPServers(oldMCP.Servers, cfg.Servers)
 	}
+	if err := validateMCPConfig(cfg); err != nil {
+		return err
+	}
 
 	appConfig, err := newAppConfig(model.AppConfigTypeMCP, model.AppConfigKeyDefault, cfg)
 	if err != nil {
 		return err
 	}
 	return s.repo.SaveConfig(ctx, appConfig)
+}
+
+func validateMCPConfig(cfg *model.MCPConfig) error {
+	seen := make(map[string]struct{}, len(cfg.Servers))
+	for _, server := range cfg.Servers {
+		name := strings.TrimSpace(server.ServerName)
+		if name == "" {
+			return apperr.BadRequest("MCP服务器名称不能为空")
+		}
+		if _, exists := seen[name]; exists {
+			return apperr.BadRequest("MCP服务器名称重复: " + name)
+		}
+		seen[name] = struct{}{}
+		if strings.TrimSpace(server.Command) == "" {
+			return apperr.BadRequest("MCP服务器启动命令不能为空: " + name)
+		}
+	}
+	return nil
 }
 
 // mergeMCPServers 按 ServerName 合并新旧服务器列表。
@@ -254,12 +277,34 @@ func (s *DefaultAppConfigService) mergeAndSaveA2AConfig(ctx context.Context, cfg
 		}
 		cfg.Servers = mergeA2AServers(oldA2A.Servers, cfg.Servers)
 	}
+	if err := validateA2AConfig(cfg); err != nil {
+		return err
+	}
 
 	appConfig, err := newAppConfig(model.AppConfigTypeA2A, model.AppConfigKeyDefault, cfg)
 	if err != nil {
 		return err
 	}
 	return s.repo.SaveConfig(ctx, appConfig)
+}
+
+func validateA2AConfig(cfg *model.A2AConfig) error {
+	seen := make(map[string]struct{}, len(cfg.Servers))
+	for _, server := range cfg.Servers {
+		id := strings.TrimSpace(server.ID)
+		if id == "" {
+			return apperr.BadRequest("A2A服务器 ID 不能为空")
+		}
+		if _, exists := seen[id]; exists {
+			return apperr.BadRequest("A2A服务器 ID 重复: " + id)
+		}
+		seen[id] = struct{}{}
+		parsed, err := url.ParseRequestURI(strings.TrimSpace(server.URL))
+		if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+			return apperr.BadRequest("A2A服务器 URL 无效: " + id)
+		}
+	}
+	return nil
 }
 
 // mergeA2AServers 按 ID 合并新旧服务器列表。

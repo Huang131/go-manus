@@ -194,17 +194,7 @@ func (h *AppConfigHandler) reloadMCP(c *gin.Context) error {
 	if err != nil {
 		return err
 	}
-	runtimeCfg := &agent.MCPConfig{}
-	if cfg != nil {
-		runtimeCfg.Servers = make([]agent.MCPServer, 0, len(cfg.Servers))
-		for _, server := range cfg.Servers {
-			if !server.Enabled {
-				continue
-			}
-			runtimeCfg.Servers = append(runtimeCfg.Servers, agent.MCPServer{Name: server.ServerName, Command: server.Command, Args: server.Args, Env: server.Env})
-		}
-	}
-	return h.reloader.ReloadMCPConfig(c.Request.Context(), runtimeCfg)
+	return h.reloader.ReloadMCPConfig(c.Request.Context(), agent.RuntimeMCPConfig(cfg))
 }
 
 func (h *AppConfigHandler) reloadA2A(c *gin.Context) error {
@@ -215,15 +205,5 @@ func (h *AppConfigHandler) reloadA2A(c *gin.Context) error {
 	if err != nil {
 		return err
 	}
-	runtimeCfg := &agent.A2AConfig{}
-	if cfg != nil {
-		runtimeCfg.Agents = make([]agent.A2AAgent, 0, len(cfg.Servers))
-		for _, server := range cfg.Servers {
-			if !server.Enabled {
-				continue
-			}
-			runtimeCfg.Agents = append(runtimeCfg.Agents, agent.A2AAgent{Name: server.ID, URL: server.URL})
-		}
-	}
-	return h.reloader.ReloadA2AConfig(c.Request.Context(), runtimeCfg)
+	return h.reloader.ReloadA2AConfig(c.Request.Context(), agent.RuntimeA2AConfig(cfg))
 }
