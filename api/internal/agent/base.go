@@ -110,11 +110,6 @@ func (a *BaseAgent) SessionID() string {
 	return a.sessionID
 }
 
-// LoadMemory 从数据库恢复记忆（当前未启用数据库持久化，保留为空操作）
-func (a *BaseAgent) LoadMemory(ctx context.Context) error {
-	return nil
-}
-
 // AddMemory 添加记忆
 func (a *BaseAgent) AddMemory(ctx context.Context, msg llmcore.Message) error {
 	return a.memory.Add(msg)
@@ -142,11 +137,6 @@ func (a *BaseAgent) mergeMemory(ctx context.Context, msgs []llmcore.Message) {
 	if err := a.memory.MergeMessages(msgs); err != nil {
 		logger.ErrorContext(ctx, "记忆合并失败", logger.Err(err))
 	}
-}
-
-// GetMemory 获取记忆
-func (a *BaseAgent) GetMemory() []llmcore.Message {
-	return a.memory.GetMessages()
 }
 
 // CompactMemory 压缩记忆
@@ -599,16 +589,6 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 		Arguments:    arguments,
 		Result:       result,
 	}, nil
-}
-
-// GetToolRegistry 获取工具注册表
-func (a *BaseAgent) GetToolRegistry() *ToolRegistry {
-	return a.toolRegistry
-}
-
-// GetLLM 获取 LLM
-func (a *BaseAgent) GetLLM() external.LLM {
-	return a.llm
 }
 
 // shellOutputWatchTimeout 单条长命令输出 watch 的最长时长。

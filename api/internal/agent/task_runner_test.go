@@ -212,6 +212,10 @@ func (s *attachmentStorage) GetURL(ctx context.Context, key string) (string, err
 	return "", nil
 }
 
+func (s *attachmentStorage) Delete(ctx context.Context, key string) error {
+	return nil
+}
+
 type attachmentSandbox struct {
 	external.Sandbox
 	filepath string
