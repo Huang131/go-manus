@@ -9,6 +9,7 @@ import (
 
 	"github.com/bytedance/sonic"
 
+	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/pkg/response"
 	"github.com/gin-gonic/gin"
@@ -40,9 +41,8 @@ func (m *MockSessionServiceForHandler) CreateSession(ctx context.Context) (*mode
 func (m *MockSessionServiceForHandler) GetSession(ctx context.Context, id string) (*model.Session, error) {
 	session, ok := m.sessions[id]
 	if !ok {
-		// 返回空 session 而非 nil，匹配 handler 不做 nil 检查的现状，
-		// 同时让"未找到"测试的"返回 null 数据"断言保持兼容。
-		return &model.Session{ID: id, Title: "新对话"}, nil
+		// 忠实模拟真实 SessionService：not found 返回 (nil, NotFound)
+		return nil, apperr.NotFound("会话不存在")
 	}
 	// 返回拷贝避免 handler 直接修改 mock 内部状态
 	clone := *session
@@ -176,8 +176,8 @@ func TestSessionHandler_Get_NotFound(t *testing.T) {
 
 	router.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("Get() status = %d, want %d", w.Code, http.StatusOK)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("Get() status = %d, want %d", w.Code, http.StatusNotFound)
 	}
 
 	var resp response.Response
@@ -185,9 +185,9 @@ func TestSessionHandler_Get_NotFound(t *testing.T) {
 		t.Fatalf("Failed to unmarshal response: %v", err)
 	}
 
-	// 未找到返回 null 数据，不返回错误码
-	if resp.Code != 0 {
-		t.Errorf("Response code = %d, want 0", resp.Code)
+	// not found 映射为 404（mock 忠实模拟真实 service 的 NotFound 契约）
+	if resp.Code != http.StatusNotFound {
+		t.Errorf("Response code = %d, want %d", resp.Code, http.StatusNotFound)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -89,6 +90,34 @@ func TestLLMModelRepo_CreateAndGetByID(t *testing.T) {
 	assert.Equal(t, m.CostPolicy.Currency, got.CostPolicy.Currency)
 }
 
+// TestLLMModelRepo_Create_SecondDefaultViolatesUniqueIndex 验证 partial unique index
+// uq_llm_models_default (is_default) WHERE is_default=TRUE：表里已有 default 时，
+// 直接 INSERT 第二个 default 应返回 23505。该约束是 service 层 defaultMu 加锁之外
+// 的最后一道防线，mock 无法模拟，只有真实 PG 能验证。
+func TestLLMModelRepo_Create_SecondDefaultViolatesUniqueIndex(t *testing.T) {
+	repo := testLLMModelRepo(t)
+
+	// 清空所有 default，保证测试从干净状态开始
+	_, err := testDB.Pool.Exec(context.Background(), "UPDATE llm_models SET is_default = FALSE WHERE is_default = TRUE")
+	require.NoError(t, err)
+
+	m1 := newTestModel()
+	m1.IsDefault = true
+	err = repo.Create(context.Background(), m1)
+	require.NoError(t, err)
+	t.Cleanup(func() { cleanupLLMModel(t, m1.ID) })
+
+	// 绕过 service 层直接调仓储：第二个 default 应触发唯一索引冲突
+	m2 := newTestModel()
+	m2.IsDefault = true
+	err = repo.Create(context.Background(), m2)
+	require.Error(t, err)
+
+	var pgErr *pgconn.PgError
+	require.ErrorAs(t, err, &pgErr)
+	assert.Equal(t, "23505", pgErr.Code)
+}
+
 // ===== GetByID Not Found =====
 
 func TestLLMModelRepo_GetByID_NotFoundReturnsNilNil(t *testing.T) {
@@ -104,14 +133,9 @@ func TestLLMModelRepo_GetByID_NotFoundReturnsNilNil(t *testing.T) {
 func TestLLMModelRepo_Update(t *testing.T) {
 	repo := testLLMModelRepo(t)
 	m := newTestModel()
-	m.IsDefault = true
 	err := repo.Create(context.Background(), m)
 	require.NoError(t, err)
 	t.Cleanup(func() { cleanupLLMModel(t, m.ID) })
-
-	// 先清 default，避免 update 时违反 is_default 唯一约束
-	_, err = testDB.Pool.Exec(context.Background(), "UPDATE llm_models SET is_default = FALSE WHERE id = $1", m.ID)
-	require.NoError(t, err)
 
 	m.Name = "updated-name"
 	m.Temperature = 0.9

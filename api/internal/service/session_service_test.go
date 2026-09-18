@@ -13,12 +13,14 @@ import (
 
 // MockSessionRepository 用于测试的 Repository Mock
 type MockSessionRepository struct {
-	sessions  map[string]*model.Session
-	events    map[string][]model.Event
-	createErr error
-	getErr    error
-	deleteErr error
-	updateErr error
+	sessions   map[string]*model.Session
+	events     map[string][]model.Event
+	createErr  error
+	getErr     error
+	deleteErr  error
+	updateErr  error
+	listLimit  int
+	listOffset int
 }
 
 func NewMockSessionRepository() *MockSessionRepository {
@@ -43,7 +45,8 @@ func (m *MockSessionRepository) GetByID(ctx context.Context, id string) (*model.
 	}
 	session, ok := m.sessions[id]
 	if !ok {
-		return nil, errors.New("会话不存在")
+		// 与真实仓储契约一致：not found 返回 (nil, nil)，由 service 层判断 nil 转 NotFound
+		return nil, nil
 	}
 	return session, nil
 }
@@ -57,24 +60,16 @@ func (m *MockSessionRepository) GetAll(ctx context.Context) ([]*model.Session, e
 }
 
 func (m *MockSessionRepository) List(ctx context.Context, limit, offset int) ([]*model.Session, int, error) {
-	// 真实实现：使用 SQL LIMIT/OFFSET
-	allSessions := make([]*model.Session, 0, len(m.sessions))
+	// 只记录 service 传入的分页参数，不做切片分页：分页是真实 SQL LIMIT/OFFSET
+	// 的职责（集成测试覆盖），mock 复刻分页逻辑会与真实实现漂移。
+	m.listLimit = limit
+	m.listOffset = offset
+
+	result := make([]*model.Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
-		allSessions = append(allSessions, s)
+		result = append(result, s)
 	}
-
-	// 计算分页
-	total := len(allSessions)
-	start := offset
-	if start > total {
-		start = total
-	}
-	end := start + limit
-	if end > total {
-		end = total
-	}
-
-	return allSessions[start:end], total, nil
+	return result, len(result), nil
 }
 
 func (m *MockSessionRepository) Update(ctx context.Context, session *model.Session) error {
@@ -237,14 +232,18 @@ func TestSessionService_ListSessions(t *testing.T) {
 		svc.CreateSession(context.Background())
 	}
 
-	// 测试分页
-	sessions, total, err := svc.ListSessions(context.Background(), 2, 0)
+	// 测试分页参数透传
+	_, total, err := svc.ListSessions(context.Background(), 2, 0)
 	if err != nil {
 		t.Fatalf("ListSessions() error = %v", err)
 	}
 
-	if len(sessions) != 2 {
-		t.Errorf("ListSessions() returned %d sessions, want 2", len(sessions))
+	// 分页切片是真实 SQL 的职责（集成测试覆盖），这里只验证 service 透传参数
+	if repo.listLimit != 2 {
+		t.Errorf("ListSessions() passed limit = %d, want 2", repo.listLimit)
+	}
+	if repo.listOffset != 0 {
+		t.Errorf("ListSessions() passed offset = %d, want 0", repo.listOffset)
 	}
 	if total != 5 {
 		t.Errorf("ListSessions() total = %d, want 5", total)
@@ -261,14 +260,14 @@ func TestSessionService_ListSessions_DefaultLimit(t *testing.T) {
 	}
 
 	// 测试默认 limit
-	sessions, total, err := svc.ListSessions(context.Background(), 0, 0)
+	_, total, err := svc.ListSessions(context.Background(), 0, 0)
 	if err != nil {
 		t.Fatalf("ListSessions() error = %v", err)
 	}
 
-	// 默认 limit 为 20
-	if len(sessions) != 20 {
-		t.Errorf("ListSessions() returned %d sessions with default limit, want 20", len(sessions))
+	// 关键断言：service 把"未指定 limit（0）"归一化为默认 20 后透传给 repo
+	if repo.listLimit != 20 {
+		t.Errorf("ListSessions() passed limit = %d, want default 20", repo.listLimit)
 	}
 	if total != 25 {
 		t.Errorf("ListSessions() total = %d, want 25", total)

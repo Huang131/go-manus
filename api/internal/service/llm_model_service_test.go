@@ -4,58 +4,13 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/model"
-	"github.com/Huang131/go-manus/api/internal/repository"
 )
-
-// MockLLMModelRepository 仓储 mock
-type MockLLMModelRepository struct {
-	models        map[string]*model.LLMModel
-	conflict      bool
-	listErr       error
-	getDefaultErr error
-	createErr     error
-	updateErr     error
-	setDefaultErr error
-}
-
-func NewMockLLMModelRepository() *MockLLMModelRepository {
-	return &MockLLMModelRepository{models: make(map[string]*model.LLMModel)}
-}
-
-func (m *MockLLMModelRepository) Create(ctx context.Context, mm *model.LLMModel) error {
-	if m.createErr != nil {
-		return m.createErr
-	}
-	if m.conflict {
-		return &pgconn.PgError{Code: "23505"}
-	}
-	mm.UpdatedAt = time.Now()
-	if mm.CreatedAt.IsZero() {
-		mm.CreatedAt = mm.UpdatedAt
-	}
-	m.models[mm.ID] = mm
-	return nil
-}
-
-func (m *MockLLMModelRepository) Update(ctx context.Context, mm *model.LLMModel) error {
-	if m.updateErr != nil {
-		return m.updateErr
-	}
-	if _, ok := m.models[mm.ID]; !ok {
-		return pgx.ErrNoRows // 对齐真实仓储：id 不存在（并发删除）→ ErrNoRows
-	}
-	mm.UpdatedAt = time.Now()
-	m.models[mm.ID] = mm
-	return nil
-}
 
 func TestLLMModelService_Create_PreservesRepositoryError(t *testing.T) {
 	repo := NewMockLLMModelRepository()
@@ -114,9 +69,9 @@ func TestLLMModelService_Update_PreservesRepositoryError(t *testing.T) {
 	}
 }
 
-// TestLLMModelService_Update_ConcurrentlyDeletedMapsToNotFound 校验通过后模型被并发删除：
-// 事务内 UPDATE 影响 0 行（pgx.ErrNoRows），应映射为 404 而非 500。
-func TestLLMModelService_Update_ConcurrentlyDeletedMapsToNotFound(t *testing.T) {
+// TestLLMModelService_Update_RowNotFoundMapsToNotFound 校验通过后行已不存在（注入
+// pgx.ErrNoRows 模拟并发删除）：事务内 UPDATE 影响 0 行，应映射为 404 而非 500。
+func TestLLMModelService_Update_RowNotFoundMapsToNotFound(t *testing.T) {
 	repo := NewMockLLMModelRepository()
 	svc := NewLLMModelService(repo)
 	m, err := svc.Create(context.Background(), &model.LLMModel{
@@ -134,9 +89,9 @@ func TestLLMModelService_Update_ConcurrentlyDeletedMapsToNotFound(t *testing.T) 
 	}
 }
 
-// TestLLMModelService_SetDefault_ConcurrentlyDeletedMapsToNotFound GetByID 校验后模型被并发删除：
-// 事务内 SetDefault 影响 0 行，应映射为 404，而非静默成功把表留在"无默认"状态。
-func TestLLMModelService_SetDefault_ConcurrentlyDeletedMapsToNotFound(t *testing.T) {
+// TestLLMModelService_SetDefault_RowNotFoundMapsToNotFound GetByID 校验后行已不存在（注入
+// pgx.ErrNoRows 模拟并发删除）：事务内 SetDefault 影响 0 行，应映射为 404，而非静默成功。
+func TestLLMModelService_SetDefault_RowNotFoundMapsToNotFound(t *testing.T) {
 	repo := NewMockLLMModelRepository()
 	svc := NewLLMModelService(repo)
 	svc.Create(context.Background(), &model.LLMModel{
@@ -154,75 +109,6 @@ func TestLLMModelService_SetDefault_ConcurrentlyDeletedMapsToNotFound(t *testing
 		t.Fatalf("SetDefault() error = %v, want ErrModelNotFound", err)
 	}
 }
-
-func (m *MockLLMModelRepository) Delete(ctx context.Context, id string) error {
-	delete(m.models, id)
-	return nil
-}
-
-func (m *MockLLMModelRepository) GetByID(ctx context.Context, id string) (*model.LLMModel, error) {
-	if mm, ok := m.models[id]; ok {
-		return mm, nil
-	}
-	return nil, nil
-}
-
-func (m *MockLLMModelRepository) GetDefault(ctx context.Context) (*model.LLMModel, error) {
-	if m.getDefaultErr != nil {
-		return nil, m.getDefaultErr
-	}
-	for _, mm := range m.models {
-		if mm.IsDefault {
-			return mm, nil
-		}
-	}
-	return nil, nil
-}
-
-func (m *MockLLMModelRepository) GetFirstEnabled(ctx context.Context) (*model.LLMModel, error) {
-	for _, mm := range m.models {
-		if mm.IsEnabled {
-			return mm, nil
-		}
-	}
-	return nil, nil
-}
-
-func (m *MockLLMModelRepository) List(ctx context.Context) ([]*model.LLMModel, error) {
-	if m.listErr != nil {
-		return nil, m.listErr
-	}
-	out := make([]*model.LLMModel, 0, len(m.models))
-	for _, mm := range m.models {
-		out = append(out, mm)
-	}
-	return out, nil
-}
-
-func (m *MockLLMModelRepository) ClearDefault(ctx context.Context) error {
-	for _, mm := range m.models {
-		mm.IsDefault = false
-	}
-	return nil
-}
-
-func (m *MockLLMModelRepository) SetDefault(ctx context.Context, id string) error {
-	if m.setDefaultErr != nil {
-		return m.setDefaultErr
-	}
-	mm, ok := m.models[id]
-	if !ok {
-		return pgx.ErrNoRows // 对齐真实仓储：id 不存在（并发删除）→ ErrNoRows
-	}
-	mm.IsDefault = true
-	return nil
-}
-
-func (m *MockLLMModelRepository) WithTx(ctx context.Context, fn func(repo repository.LLMModelRepository) error) error {
-	return fn(m)
-}
-
-var _ repository.LLMModelRepository = (*MockLLMModelRepository)(nil)
 
 // ====================== 测试 ======================
 

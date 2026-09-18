@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/Huang131/go-manus/api/internal/model"
-	"github.com/Huang131/go-manus/api/internal/repository"
 	"github.com/Huang131/go-manus/api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -48,7 +47,6 @@ func (s *stubVNCService) GetVNCURL(ctx context.Context, sessionID string) (strin
 }
 
 var _ service.SessionService = (*stubVNCService)(nil)
-var _ repository.SessionRepository = (repository.SessionRepository)(nil)
 
 func TestVNCProxy_ServiceError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
