@@ -7,7 +7,6 @@ import (
 
 	"github.com/bytedance/sonic"
 
-	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 )
 
@@ -105,60 +104,6 @@ func TestSessionRepository_UpdateLatestMessage(t *testing.T) {
 
 	if session.UnreadMessageCount != 1 {
 		t.Errorf("UnreadMessageCount 应为 1，实际: %d", session.UnreadMessageCount)
-	}
-}
-
-// TestSessionRepository_Memory 测试记忆操作
-func TestSessionRepository_Memory(t *testing.T) {
-	// 构造含 ToolCalls/Attachments 的完整消息，验证序列化往返无损
-	messages := []llmcore.Message{
-		{
-			Role:        model.RoleUser,
-			ContentText: "Hello",
-			Attachments: []string{"file-1", "file-2"},
-		},
-		{
-			Role:        model.RoleAssistant,
-			ContentText: "调用工具",
-			ToolCalls: []llmcore.ToolCall{
-				{
-					ID:   "call-1",
-					Type: "function",
-					Function: llmcore.ToolCallFunction{
-						Name:      "search",
-						Arguments: `{"query":"go"}`,
-					},
-				},
-			},
-		},
-		{
-			Role:        model.RoleTool,
-			ContentText: `{"result":"ok"}`,
-		},
-	}
-
-	// 序列化记忆
-	memoryJSON, err := sonic.Marshal(messages)
-	if err != nil {
-		t.Fatalf("记忆序列化失败: %v", err)
-	}
-
-	// 反序列化验证
-	var restored []llmcore.Message
-	if err := sonic.Unmarshal(memoryJSON, &restored); err != nil {
-		t.Fatalf("记忆反序列化失败: %v", err)
-	}
-	if len(restored) != 3 {
-		t.Fatalf("消息数量应为 3，实际: %d", len(restored))
-	}
-	if restored[0].ContentText != "Hello" || len(restored[0].Attachments) != 2 {
-		t.Errorf("user 消息内容/附件不匹配: %+v", restored[0])
-	}
-	if len(restored[1].ToolCalls) != 1 || restored[1].ToolCalls[0].Function.Name != "search" {
-		t.Errorf("assistant 消息 ToolCalls 不匹配: %+v", restored[1])
-	}
-	if restored[1].ToolCalls[0].Function.Arguments != `{"query":"go"}` {
-		t.Errorf("工具调用参数不匹配: %s", restored[1].ToolCalls[0].Function.Arguments)
 	}
 }
 

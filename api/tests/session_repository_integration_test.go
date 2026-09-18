@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
 	"github.com/google/uuid"
@@ -113,45 +112,6 @@ func TestSessionRepo_AppendEvent_UserMessageNotUnread(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "user question", got.LatestMessage)
 	assert.Equal(t, 0, got.UnreadMessageCount)
-}
-
-func TestSessionRepo_GetMemory_NotFoundSessionReturnsEmptySlice(t *testing.T) {
-	repo := testSessionRepo(t)
-
-	messages, err := repo.GetMemory(context.Background(), "non-existent-session", "planner")
-	require.NoError(t, err)
-	assert.Empty(t, messages)
-}
-
-func TestSessionRepo_GetMemory_AgentNotInMemoryReturnsEmptySlice(t *testing.T) {
-	repo := testSessionRepo(t)
-	sessionID := createSessionForTest(t)
-	defer CleanupSession(t, sessionID)
-
-	messages, err := repo.GetMemory(context.Background(), sessionID, "planner")
-	require.NoError(t, err)
-	assert.Empty(t, messages)
-}
-
-func TestSessionRepo_SaveAndGetMemory_RoundTrip(t *testing.T) {
-	repo := testSessionRepo(t)
-	sessionID := createSessionForTest(t)
-	defer CleanupSession(t, sessionID)
-
-	messages := []llmcore.Message{
-		{Role: model.RoleUser, ContentText: "test message content"},
-		{Role: model.RoleAssistant, ContentText: "assistant response"},
-	}
-
-	err := repo.SaveMemory(context.Background(), sessionID, "planner", messages)
-	require.NoError(t, err)
-
-	got, err := repo.GetMemory(context.Background(), sessionID, "planner")
-	require.NoError(t, err)
-	require.Len(t, got, 2)
-	assert.Equal(t, "test message content", got[0].ContentText)
-	assert.Equal(t, model.RoleUser, got[0].Role)
-	assert.Equal(t, "assistant response", got[1].ContentText)
 }
 
 func TestSessionRepo_SoftDelete(t *testing.T) {

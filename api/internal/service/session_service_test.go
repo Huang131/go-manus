@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
 )
@@ -103,14 +102,6 @@ func (m *MockSessionRepository) AppendEvent(ctx context.Context, id string, even
 	}
 	session.Events = append(session.Events, *event)
 	m.events[id] = session.Events
-	return nil
-}
-
-func (m *MockSessionRepository) GetMemory(ctx context.Context, id string, agentName string) ([]llmcore.Message, error) {
-	return nil, nil
-}
-
-func (m *MockSessionRepository) SaveMemory(ctx context.Context, id string, agentName string, messages []llmcore.Message) error {
 	return nil
 }
 

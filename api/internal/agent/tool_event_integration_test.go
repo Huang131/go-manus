@@ -209,12 +209,6 @@ func (m *mockSessionRepo) AppendEvent(ctx context.Context, id string, event *mod
 	m.events = append(m.events, event)
 	return nil
 }
-func (m *mockSessionRepo) GetMemory(ctx context.Context, id, agentName string) ([]llmcore.Message, error) {
-	return nil, nil
-}
-func (m *mockSessionRepo) SaveMemory(ctx context.Context, id, agentName string, messages []llmcore.Message) error {
-	return nil
-}
 func (m *mockSessionRepo) UpdateTitle(ctx context.Context, id, title string) error { return nil }
 func (m *mockSessionRepo) UpdateLatestMessage(ctx context.Context, id, message string) error {
 	return nil

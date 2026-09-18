@@ -11,7 +11,6 @@ import (
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
-	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -28,10 +27,6 @@ type SessionRepository interface {
 
 	// 事件操作
 	AppendEvent(ctx context.Context, id string, event *model.Event) error
-
-	// 内存操作
-	GetMemory(ctx context.Context, id string, agentName string) ([]llmcore.Message, error)
-	SaveMemory(ctx context.Context, id string, agentName string, messages []llmcore.Message) error
 
 	// 原子更新
 	UpdateTitle(ctx context.Context, id string, title string) error
@@ -98,8 +93,8 @@ func (r *PostgresSessionRepository) Create(ctx context.Context, session *model.S
 	q := r.queryer()
 	query := `
 		INSERT INTO sessions (id, sandbox_id, task_id, title, unread_message_count, latest_message,
-			latest_message_at, events, memories, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '{}'::jsonb, $9, $10, $11)
+			latest_message_at, events, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 	`
 	events, err := marshalSessionEvents(session.Events)
 	if err != nil {
@@ -187,7 +182,7 @@ func (r *PostgresSessionRepository) List(ctx context.Context, limit, offset int)
 	return sessions, total, nil
 }
 
-// Update 更新会话 (全字段，memories 列由 SaveMemory 独立管理，此处不触碰)
+// Update 更新会话全字段。
 func (r *PostgresSessionRepository) Update(ctx context.Context, session *model.Session) error {
 	query := `
 		UPDATE sessions SET
@@ -264,46 +259,6 @@ func (r *PostgresSessionRepository) AppendEvent(ctx context.Context, id string, 
 		WHERE id = $1 AND deleted_at IS NULL
 	`
 	return r.execSessionWrite(ctx, query, id, event.ToJSON(), message, timestamp, unreadDelta)
-}
-
-// GetMemory 获取指定 Agent 的记忆
-func (r *PostgresSessionRepository) GetMemory(ctx context.Context, id string, agentName string) ([]llmcore.Message, error) {
-	q := r.queryer()
-	query := `SELECT memories->>$2 FROM sessions WHERE id = $1 AND deleted_at IS NULL`
-	var memoryJSON []byte
-	err := q.QueryRow(ctx, query, id, agentName).Scan(&memoryJSON)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return []llmcore.Message{}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	if len(memoryJSON) == 0 {
-		return []llmcore.Message{}, nil
-	}
-	var messages []llmcore.Message
-	if err := sonic.Unmarshal(memoryJSON, &messages); err != nil {
-		return nil, err
-	}
-	return messages, nil
-}
-
-// SaveMemory 保存指定 Agent 的记忆
-func (r *PostgresSessionRepository) SaveMemory(ctx context.Context, id string, agentName string, messages []llmcore.Message) error {
-	if messages == nil {
-		messages = []llmcore.Message{}
-	}
-	memoryJSON, err := sonic.Marshal(messages)
-	if err != nil {
-		return err
-	}
-	query := `
-		UPDATE sessions SET
-			memories = JSONB_SET(COALESCE(memories, '{}'::jsonb), ARRAY[$2], $3),
-			updated_at = NOW()
-		WHERE id = $1 AND deleted_at IS NULL
-	`
-	return r.execSessionWrite(ctx, query, id, agentName, memoryJSON)
 }
 
 // UpdateTitle 更新会话标题
