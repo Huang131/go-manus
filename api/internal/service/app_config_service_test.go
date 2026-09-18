@@ -31,7 +31,6 @@ func (m *MockAppConfigRepository) GetConfig(ctx context.Context, configType mode
 	}
 	for _, c := range m.configs {
 		if c.ConfigType == configType && c.ConfigKey == configKey {
-			// 存储时已经是原始 JSON 字节，直接返回即可
 			return c, nil
 		}
 	}
@@ -103,8 +102,8 @@ func TestAppConfigService_GetAgentConfig(t *testing.T) {
 	}
 	configValue, _ := sonic.Marshal(agentConfig)
 	config := &model.AppConfig{
-		ConfigType:  "agent",
-		ConfigKey:   "default",
+		ConfigType:  model.AppConfigTypeAgent,
+		ConfigKey:   model.AppConfigKeyDefault,
 		ConfigValue: configValue,
 	}
 	repo.SaveConfig(context.Background(), config)
@@ -141,8 +140,8 @@ func TestAppConfigService_GetMCPConfig(t *testing.T) {
 	}
 	configValue, _ := sonic.Marshal(mcpConfig)
 	config := &model.AppConfig{
-		ConfigType:  "mcp",
-		ConfigKey:   "default",
+		ConfigType:  model.AppConfigTypeMCP,
+		ConfigKey:   model.AppConfigKeyDefault,
 		ConfigValue: configValue,
 	}
 	repo.SaveConfig(context.Background(), config)
@@ -182,8 +181,8 @@ func TestAppConfigService_GetA2AConfig(t *testing.T) {
 	}
 	configValue, _ := sonic.Marshal(a2aConfig)
 	config := &model.AppConfig{
-		ConfigType:  "a2a",
-		ConfigKey:   "default",
+		ConfigType:  model.AppConfigTypeA2A,
+		ConfigKey:   model.AppConfigKeyDefault,
 		ConfigValue: configValue,
 	}
 	repo.SaveConfig(context.Background(), config)
@@ -222,7 +221,7 @@ func TestAppConfigService_UpdateMCPConfig(t *testing.T) {
 	}
 	repo.SaveConfig(context.Background(), config)
 
-	// 添加新服务器
+	// 添加新服务器（测试同名覆盖 + 新增场景）
 	newConfig := &model.MCPConfig{
 		Servers: []model.MCPServer{
 			{ServerName: "server-1", Enabled: true, Transport: "stdio"},
@@ -254,8 +253,8 @@ func TestAppConfigService_DeleteMCPServer(t *testing.T) {
 	}
 	configValue, _ := sonic.Marshal(mcpConfig)
 	config := &model.AppConfig{
-		ConfigType:  "mcp",
-		ConfigKey:   "default",
+		ConfigType:  model.AppConfigTypeMCP,
+		ConfigKey:   model.AppConfigKeyDefault,
 		ConfigValue: configValue,
 	}
 	repo.SaveConfig(context.Background(), config)

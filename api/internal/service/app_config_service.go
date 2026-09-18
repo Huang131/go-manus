@@ -101,35 +101,28 @@ func (s *DefaultAppConfigService) GetMCPConfig(ctx context.Context) (*model.MCPC
 	return getConfig[model.MCPConfig](s, ctx, model.AppConfigTypeMCP)
 }
 
-// UpdateMCPConfig 更新 MCP 配置 (合并服务器列表)
+// UpdateMCPConfig 更新 MCP 配置
 func (s *DefaultAppConfigService) UpdateMCPConfig(ctx context.Context, cfg *model.MCPConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.updateMCPConfig(ctx, cfg)
+	return s.mergeAndSaveMCPConfig(ctx, cfg)
 }
 
-func (s *DefaultAppConfigService) updateMCPConfig(ctx context.Context, cfg *model.MCPConfig) error {
+// mergeAndSaveMCPConfig 合并服务器配置并写入
+func (s *DefaultAppConfigService) mergeAndSaveMCPConfig(ctx context.Context, cfg *model.MCPConfig) error {
 	if cfg == nil {
 		return apperr.BadRequest("MCP配置不能为空")
 	}
-	// 获取现有配置
-	oldCfg, err := s.GetMCPConfig(ctx)
+	oldCfg, err := s.repo.GetConfig(ctx, model.AppConfigTypeMCP, model.AppConfigKeyDefault)
 	if err != nil {
 		return fmt.Errorf("读取现有 MCP 配置失败: %w", err)
 	}
 	if oldCfg != nil {
-		// 合并服务器配置
-		existingServers := make(map[string]model.MCPServer)
-		for _, server := range oldCfg.Servers {
-			existingServers[server.ServerName] = server
+		var oldMCP model.MCPConfig
+		if err := sonic.Unmarshal(oldCfg.ConfigValue, &oldMCP); err != nil {
+			return fmt.Errorf("解析现有 MCP 配置失败: %w", err)
 		}
-		for _, server := range cfg.Servers {
-			existingServers[server.ServerName] = server
-		}
-		cfg.Servers = make([]model.MCPServer, 0, len(existingServers))
-		for _, server := range existingServers {
-			cfg.Servers = append(cfg.Servers, server)
-		}
+		cfg.Servers = mergeMCPServers(oldMCP.Servers, cfg.Servers)
 	}
 
 	appConfig, err := newAppConfig(model.AppConfigTypeMCP, model.AppConfigKeyDefault, cfg)
@@ -137,6 +130,38 @@ func (s *DefaultAppConfigService) updateMCPConfig(ctx context.Context, cfg *mode
 		return err
 	}
 	return s.repo.SaveConfig(ctx, appConfig)
+}
+
+// mergeMCPServers 按 ServerName 合并新旧服务器列表。
+// 新传入的服务器覆盖同名的旧服务器；旧配置原有的顺序保持不变，新传入的新增项追加在末尾。
+func mergeMCPServers(oldServers, incoming []model.MCPServer) []model.MCPServer {
+	if len(oldServers) == 0 {
+		return incoming
+	}
+	// 覆盖合并：后写的值生效（incoming 覆盖 old）
+	serverMap := make(map[string]model.MCPServer, len(oldServers)+len(incoming))
+	for _, server := range oldServers {
+		serverMap[server.ServerName] = server
+	}
+	for _, server := range incoming {
+		serverMap[server.ServerName] = server
+	}
+	// 顺序重建：先遍历旧配置（保持稳定顺序），再追加 incoming 中新增的服务器。
+	merged := make([]model.MCPServer, 0, len(serverMap))
+	seen := make(map[string]bool, len(serverMap))
+	for _, server := range oldServers {
+		if !seen[server.ServerName] {
+			seen[server.ServerName] = true
+			merged = append(merged, serverMap[server.ServerName])
+		}
+	}
+	for _, server := range incoming {
+		if !seen[server.ServerName] {
+			seen[server.ServerName] = true
+			merged = append(merged, serverMap[server.ServerName])
+		}
+	}
+	return merged
 }
 
 // DeleteMCPServer 删除 MCP 服务器
@@ -195,7 +220,7 @@ func (s *DefaultAppConfigService) updateMCPServerEnabled(ctx context.Context, se
 	for i := range cfg.Servers {
 		if cfg.Servers[i].ServerName == serverName {
 			cfg.Servers[i].Enabled = enabled
-			return s.updateMCPConfig(ctx, cfg)
+			return s.mergeAndSaveMCPConfig(ctx, cfg)
 		}
 	}
 	return apperr.NotFound("MCP服务器不存在")
@@ -210,31 +235,24 @@ func (s *DefaultAppConfigService) GetA2AConfig(ctx context.Context) (*model.A2AC
 func (s *DefaultAppConfigService) UpdateA2AConfig(ctx context.Context, cfg *model.A2AConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.updateA2AConfig(ctx, cfg)
+	return s.mergeAndSaveA2AConfig(ctx, cfg)
 }
 
-func (s *DefaultAppConfigService) updateA2AConfig(ctx context.Context, cfg *model.A2AConfig) error {
+// mergeAndSaveA2AConfig 合并服务器配置并写入，不加锁（由调用方负责加锁）。
+func (s *DefaultAppConfigService) mergeAndSaveA2AConfig(ctx context.Context, cfg *model.A2AConfig) error {
 	if cfg == nil {
 		return apperr.BadRequest("A2A配置不能为空")
 	}
-	// 获取现有配置
-	oldCfg, err := s.GetA2AConfig(ctx)
+	oldCfg, err := s.repo.GetConfig(ctx, model.AppConfigTypeA2A, model.AppConfigKeyDefault)
 	if err != nil {
 		return fmt.Errorf("读取现有 A2A 配置失败: %w", err)
 	}
 	if oldCfg != nil {
-		// 合并服务器配置
-		existingServers := make(map[string]model.A2AServer)
-		for _, server := range oldCfg.Servers {
-			existingServers[server.ID] = server
+		var oldA2A model.A2AConfig
+		if err := sonic.Unmarshal(oldCfg.ConfigValue, &oldA2A); err != nil {
+			return fmt.Errorf("解析现有 A2A 配置失败: %w", err)
 		}
-		for _, server := range cfg.Servers {
-			existingServers[server.ID] = server
-		}
-		cfg.Servers = make([]model.A2AServer, 0, len(existingServers))
-		for _, server := range existingServers {
-			cfg.Servers = append(cfg.Servers, server)
-		}
+		cfg.Servers = mergeA2AServers(oldA2A.Servers, cfg.Servers)
 	}
 
 	appConfig, err := newAppConfig(model.AppConfigTypeA2A, model.AppConfigKeyDefault, cfg)
@@ -242,6 +260,36 @@ func (s *DefaultAppConfigService) updateA2AConfig(ctx context.Context, cfg *mode
 		return err
 	}
 	return s.repo.SaveConfig(ctx, appConfig)
+}
+
+// mergeA2AServers 按 ID 合并新旧服务器列表。
+// 新传入的服务器覆盖同 ID 的旧服务器；旧配置原有的顺序保持不变，新传入的新增项追加在末尾。
+func mergeA2AServers(oldServers, incoming []model.A2AServer) []model.A2AServer {
+	if len(oldServers) == 0 {
+		return incoming
+	}
+	serverMap := make(map[string]model.A2AServer, len(oldServers)+len(incoming))
+	for _, server := range oldServers {
+		serverMap[server.ID] = server
+	}
+	for _, server := range incoming {
+		serverMap[server.ID] = server
+	}
+	merged := make([]model.A2AServer, 0, len(serverMap))
+	seen := make(map[string]bool, len(serverMap))
+	for _, server := range oldServers {
+		if !seen[server.ID] {
+			seen[server.ID] = true
+			merged = append(merged, serverMap[server.ID])
+		}
+	}
+	for _, server := range incoming {
+		if !seen[server.ID] {
+			seen[server.ID] = true
+			merged = append(merged, serverMap[server.ID])
+		}
+	}
+	return merged
 }
 
 // DeleteA2AServer 删除一个 A2A 服务配置。
