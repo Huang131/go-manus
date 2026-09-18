@@ -12,9 +12,7 @@ import (
 // TestPlannerReActFlow_StateTransitions 测试状态转换逻辑
 func TestPlannerReActFlow_StateTransitions(t *testing.T) {
 	// 创建测试配置
-	config := &AgentConfig{
-		MaxSteps: 10,
-	}
+	config := DefaultAgentConfig()
 
 	// 测试状态转换
 	flow := &PlannerReActFlow{
@@ -174,9 +172,7 @@ func TestPlannerReActFlow_InvokeContext(t *testing.T) {
 	}
 
 	// 使用 NewPlannerReActFlow 正确初始化所有字段
-	config := &AgentConfig{
-		MaxSteps: 10,
-	}
+	config := DefaultAgentConfig()
 
 	flow := NewPlannerReActFlow(
 		"test-session",

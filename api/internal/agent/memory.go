@@ -24,14 +24,12 @@ type Memory interface {
 type SimpleMemory struct {
 	mu       sync.RWMutex
 	messages []llmcore.Message
-	maxSize  int
 }
 
 // NewSimpleMemory 创建简单记忆
-func NewSimpleMemory(maxSize int) *SimpleMemory {
+func NewSimpleMemory() *SimpleMemory {
 	return &SimpleMemory{
 		messages: make([]llmcore.Message, 0),
-		maxSize:  maxSize,
 	}
 }
 

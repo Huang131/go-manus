@@ -8,7 +8,7 @@ import (
 )
 
 func TestSimpleMemory_Add(t *testing.T) {
-	mem := NewSimpleMemory(100)
+	mem := NewSimpleMemory()
 	msg := llmcore.Message{
 		Role:        model.RoleUser,
 		ContentText: "Hello, world!",
@@ -24,7 +24,7 @@ func TestSimpleMemory_Add(t *testing.T) {
 }
 
 func TestSimpleMemory_GetMessages(t *testing.T) {
-	mem := NewSimpleMemory(100)
+	mem := NewSimpleMemory()
 
 	mem.Add(llmcore.Message{Role: model.RoleUser, ContentText: "Hello"})
 	mem.Add(llmcore.Message{Role: model.RoleAssistant, ContentText: "Hi there"})
@@ -36,7 +36,7 @@ func TestSimpleMemory_GetMessages(t *testing.T) {
 }
 
 func TestSimpleMemory_Compact(t *testing.T) {
-	mem := NewSimpleMemory(100)
+	mem := NewSimpleMemory()
 
 	for i := 0; i < 20; i++ {
 		mem.Add(llmcore.Message{Role: model.RoleUser, ContentText: "Message"})
@@ -54,7 +54,7 @@ func TestSimpleMemory_Compact(t *testing.T) {
 }
 
 func TestSimpleMemory_Clear(t *testing.T) {
-	mem := NewSimpleMemory(100)
+	mem := NewSimpleMemory()
 
 	mem.Add(llmcore.Message{Role: model.RoleUser, ContentText: "Hello"})
 	mem.Add(llmcore.Message{Role: model.RoleAssistant, ContentText: "Hi"})

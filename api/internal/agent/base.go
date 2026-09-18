@@ -46,7 +46,7 @@ func NewBaseAgent(name, sessionID string, config *AgentConfig, llm external.LLM,
 		config:       config,
 		llm:          llm,
 		tools:        tools,
-		memory:       NewSimpleMemory(config.MaxMemorySize),
+		memory:       NewSimpleMemory(),
 		toolRegistry: registry,
 		jsonParser:   jsonParser,
 	}
@@ -69,7 +69,7 @@ func NewBaseAgentWithParser(name, sessionID string, config *AgentConfig, llm ext
 		config:       config,
 		llm:          llm,
 		tools:        tools,
-		memory:       NewSimpleMemory(config.MaxMemorySize),
+		memory:       NewSimpleMemory(),
 		toolRegistry: registry,
 		jsonParser:   jsonParser,
 	}
