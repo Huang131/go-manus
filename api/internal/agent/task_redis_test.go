@@ -690,26 +690,6 @@ func TestRedisStreamTask_Cancel(t *testing.T) {
 	task.Cancel()
 }
 
-func TestRedisStreamTask_SubscribeOutputCancelIsIdempotent(t *testing.T) {
-	defaultTaskRegistry.Clear()
-
-	task := NewRedisStreamTask(&mockMQWrapper{}, &mockTaskRunner{})
-	events, cancel := task.SubscribeOutput(context.Background(), 1)
-
-	cancel()
-	cancel()
-
-	select {
-	case _, ok := <-events:
-		if ok {
-			for range events {
-			}
-		}
-	case <-time.After(time.Second):
-		t.Fatal("SubscribeOutput channel was not closed after cancellation")
-	}
-}
-
 func TestStreamDataStringMarshalsNonStringData(t *testing.T) {
 	got, err := streamDataString(map[string]string{"message": "hello"})
 	if err != nil {

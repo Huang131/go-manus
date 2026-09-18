@@ -55,12 +55,12 @@ func TestDynamicLLM_UsesFactory(t *testing.T) {
 
 func TestRoutedLLMFromSingleProvider(t *testing.T) {
 	var gotModel string
-	router := NewRoutedLLMFromSingleProvider(
-		func(ctx context.Context) (*LLMRuntimeConfig, error) {
-			return &LLMRuntimeConfig{
+	router := NewRoutedLLM(
+		func(ctx context.Context) ([]*LLMRuntimeConfig, error) {
+			return []*LLMRuntimeConfig{{
 				Profile:   llmcore.ModelProfile{Protocol: llmcore.ProtocolOpenAICompat},
 				ModelName: "single-model",
-			}, nil
+			}}, nil
 		},
 		nil,
 		func(cfg *LLMRuntimeConfig) LLM {

@@ -79,20 +79,6 @@ func (r *RoutedLLM) GetHealth(id string) LLMRuntimeHealth {
 	return r.health[id]
 }
 
-// NewRoutedLLMFromSingleProvider 兼容只提供单个候选的老入口。
-func NewRoutedLLMFromSingleProvider(provider LLMConfigProvider, fallback *LLMRuntimeConfig, factory LLMClientFactory) *RoutedLLM {
-	if provider == nil {
-		return NewRoutedLLM(nil, fallback, factory)
-	}
-	return NewRoutedLLM(func(ctx context.Context) ([]*LLMRuntimeConfig, error) {
-		cfg, err := provider(ctx)
-		if err != nil || cfg == nil {
-			return nil, err
-		}
-		return []*LLMRuntimeConfig{cfg}, nil
-	}, fallback, factory)
-}
-
 // Invoke 先选主模型，再按严格规则 fallback。
 func (r *RoutedLLM) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMResponse, error) {
 	plan, err := r.plan(ctx, req)
