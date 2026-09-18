@@ -9,9 +9,7 @@ import (
 )
 
 // Repositories 聚合 Agent 服务所需的数据访问依赖。
-//
-// 原 AgentService 把四类仓库平铺成独立字段（其中 AppConfigRepository 甚至从未被读取），
-// 导致结构体字段膨胀且职责模糊。按职责归组后，服务只持有这一个聚合值。
+// 按职责归组后，服务只持有这一个聚合值，避免字段膨胀。
 type Repositories struct {
 	Session  repository.SessionRepository
 	File     repository.FileRepository

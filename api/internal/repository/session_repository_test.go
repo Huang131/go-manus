@@ -76,9 +76,6 @@ func TestSessionRepository_AppendEvent(t *testing.T) {
 	}
 }
 
-// TestSessionRepository_AppendFile 已废弃：Issue #1 后文件不再通过 sessions.files JSONB 存储，
-// 文件已统一到 files 表，对应测试见 TestFileRepository_*。
-
 // TestSessionRepository_UpdateLatestMessage 测试更新最新消息
 func TestSessionRepository_UpdateLatestMessage(t *testing.T) {
 	session := &model.Session{

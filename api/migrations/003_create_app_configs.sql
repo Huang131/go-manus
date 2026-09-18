@@ -2,7 +2,7 @@
 -- 创建 app_configs 表
 -- Date: 2026-09-02
 -- ============================================================
--- 业务说明：通用配置存储表，用于存储 LLM/Agent/MCP/A2A 等各类配置的 JSON 数据
+-- 业务说明：通用配置存储表，用于存储 Agent/MCP/A2A 等各类配置的 JSON 数据
 -- 注意：LLM 模型配置已迁移到 llm_models 表，此表保留用于其他配置类型
 
 CREATE TABLE IF NOT EXISTS app_configs (
@@ -24,7 +24,7 @@ CREATE INDEX IF NOT EXISTS idx_app_configs_config_key ON app_configs(config_key)
 -- ============================================================
 
 COMMENT ON COLUMN app_configs.id IS '配置项唯一标识符（UUID）';
-COMMENT ON COLUMN app_configs.config_type IS '配置类型：llm=大模型, agent=智能体, mcp=MCP配置, a2a=A2A配置, system=系统配置';
+COMMENT ON COLUMN app_configs.config_type IS '配置类型：agent=智能体, mcp=MCP配置, a2a=A2A配置';
 COMMENT ON COLUMN app_configs.config_key IS '配置键，在同一类型下区分不同的配置项';
 COMMENT ON COLUMN app_configs.config_value IS '配置值（JSON 格式），存储任意结构的配置数据';
 COMMENT ON COLUMN app_configs.created_at IS '创建时间';
