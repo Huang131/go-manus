@@ -354,50 +354,8 @@ func TestSessionService_GetSessionFiles_NotFound(t *testing.T) {
 }
 
 // newMockFileRepo 为 GetSessionFiles 测试提供最小化的 FileRepository mock
-func newMockFileRepo() *mockFileRepo {
-	return &mockFileRepo{files: map[string][]*model.File{}}
-}
-
-type mockFileRepo struct {
-	files map[string][]*model.File
-}
-
-func (m *mockFileRepo) GetBySessionAndFilename(ctx context.Context, sessionID, filename string) (*model.File, error) {
-	return nil, nil
-}
-
-func (m *mockFileRepo) GetBySessionAndHash(ctx context.Context, sessionID, sha256 string) (*model.File, error) {
-	return nil, nil
-}
-
-func (m *mockFileRepo) ListBySessionID(ctx context.Context, sessionID string) ([]*model.File, error) {
-	return m.files[sessionID], nil
-}
-
-// 实现 FileRepository 其他接口以满足编译（测试用不到）
-func (m *mockFileRepo) Create(ctx context.Context, f *model.File) error             { return nil }
-func (m *mockFileRepo) GetByID(ctx context.Context, id string) (*model.File, error) { return nil, nil }
-func (m *mockFileRepo) GetBySessionAndID(ctx context.Context, sessionID, id string) (*model.File, error) {
-	return nil, nil
-}
-func (m *mockFileRepo) GetBySessionAndFilepath(ctx context.Context, s, f string) (*model.File, error) {
-	return nil, nil
-}
-func (m *mockFileRepo) Update(ctx context.Context, f *model.File) error { return nil }
-func (m *mockFileRepo) Delete(ctx context.Context, id string) error     { return nil }
-func (m *mockFileRepo) DeleteBySessionID(ctx context.Context, s string) error {
-	delete(m.files, s)
-	return nil
-}
-func (m *mockFileRepo) GetExpiredFiles(ctx context.Context, d string, l int64) ([]*model.File, error) {
-	return nil, nil
-}
-func (m *mockFileRepo) DeleteByIDs(ctx context.Context, ids []string) (int64, error) { return 0, nil }
-func (m *mockFileRepo) GetFilesBySessionIDs(ctx context.Context, s []string) ([]*model.File, error) {
-	return nil, nil
-}
-func (m *mockFileRepo) WithTx(ctx context.Context, fn func(repository.FileRepository) error) error {
-	return fn(m)
+func newMockFileRepo() *MockFileRepository {
+	return NewMockFileRepository()
 }
 
 func TestSessionService_AppendEvent(t *testing.T) {

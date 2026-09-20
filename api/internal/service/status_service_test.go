@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
 	"github.com/Huang131/go-manus/api/internal/model"
 )
@@ -61,17 +60,5 @@ func TestStatusService_GetHealthStatus_WrapsHealthErrors(t *testing.T) {
 	}
 	if got := status.Services[model.ServiceNameOSS].Error; !strings.Contains(got, "internal server error") {
 		t.Fatalf("oss error = %q, want wrapped internal error", got)
-	}
-}
-
-func TestToInternal(t *testing.T) {
-	err := apperr.ToInternal(nil)
-	if err != nil {
-		t.Fatalf("ToInternal(nil) = %v, want nil", err)
-	}
-
-	wrapped := apperr.ToInternal(context.Canceled)
-	if wrapped == nil || wrapped.Error() == "" {
-		t.Fatal("ToInternal should wrap non-nil error")
 	}
 }

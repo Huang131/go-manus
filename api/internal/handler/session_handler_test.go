@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -297,32 +296,6 @@ func TestSessionHandler_GetFiles(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Errorf("GetFiles() status = %d, want %d", w.Code, http.StatusOK)
-	}
-}
-
-func TestSessionHandler_Chat(t *testing.T) {
-	// Chat handler 依赖 *agent.AgentService，本测试套件仅 mock service 层，
-	// 故跳过对 Chat 流式接口的单元测试，端到端由 docker-compose 验证。
-	t.Skip("Chat handler requires *agent.AgentService, covered by e2e test")
-	router := setupRouter()
-	svc := NewMockSessionServiceForHandler()
-	handler := NewSessionHandler(svc, nil, nil)
-
-	// 先创建一个会话
-	svc.CreateSession(context.Background())
-
-	router.POST("/sessions/:id/chat", handler.Chat)
-
-	body := map[string]string{"message": "Hello"}
-	bodyBytes, _ := sonic.Marshal(body)
-	req := httptest.NewRequest(http.MethodPost, "/sessions/test-session-id/chat", bytes.NewReader(bodyBytes))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Chat() status = %d, want %d", w.Code, http.StatusOK)
 	}
 }
 

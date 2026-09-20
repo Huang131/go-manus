@@ -8,148 +8,10 @@ import (
 	"testing"
 
 	"github.com/Huang131/go-manus/api/internal/model"
-	"github.com/Huang131/go-manus/api/internal/repository"
 )
 
-type emptyFileRepo struct{}
-
-func (emptyFileRepo) GetBySessionAndFilename(ctx context.Context, sessionID, filename string) (*model.File, error) {
-	return nil, nil
-}
-
-func (emptyFileRepo) GetBySessionAndHash(context.Context, string, string) (*model.File, error) {
-	return nil, nil
-}
-
-func (emptyFileRepo) Create(context.Context, *model.File) error            { return nil }
-func (emptyFileRepo) GetByID(context.Context, string) (*model.File, error) { return nil, nil }
-func (emptyFileRepo) GetBySessionAndID(context.Context, string, string) (*model.File, error) {
-	return nil, nil
-}
-func (emptyFileRepo) GetBySessionAndFilepath(context.Context, string, string) (*model.File, error) {
-	return nil, nil
-}
-func (emptyFileRepo) Update(context.Context, *model.File) error                      { return nil }
-func (emptyFileRepo) Delete(context.Context, string) error                           { return nil }
-func (emptyFileRepo) DeleteBySessionID(context.Context, string) error                { return nil }
-func (emptyFileRepo) ListBySessionID(context.Context, string) ([]*model.File, error) { return nil, nil }
-func (emptyFileRepo) GetExpiredFiles(context.Context, string, int64) ([]*model.File, error) {
-	return nil, nil
-}
-func (emptyFileRepo) DeleteByIDs(context.Context, []string) (int64, error) { return 0, nil }
-func (emptyFileRepo) GetFilesBySessionIDs(context.Context, []string) ([]*model.File, error) {
-	return nil, nil
-}
-func (r emptyFileRepo) WithTx(ctx context.Context, fn func(repository.FileRepository) error) error {
-	return fn(r)
-}
-
-// stubFileRepo 可配置的文件仓储 stub
-type stubFileRepo struct {
-	file           *model.File // GetByID 返回值
-	getErr         error
-	createErr      error
-	deleteErr      error
-	createdKey     string // 记录 Create 收到的文件 Key
-	deletedID      string // 记录 Delete 收到的 ID
-	existingByName *model.File
-}
-
-func (s *stubFileRepo) GetBySessionAndFilename(ctx context.Context, sessionID, filename string) (*model.File, error) {
-	return s.existingByName, nil
-}
-
-func (s *stubFileRepo) GetBySessionAndHash(ctx context.Context, sessionID, sha256 string) (*model.File, error) {
-	return nil, nil
-}
-func (s *stubFileRepo) Create(_ context.Context, f *model.File) error {
-	if s.createErr != nil {
-		return s.createErr
-	}
-	s.createdKey = f.Key
-	return nil
-}
-func (s *stubFileRepo) GetByID(_ context.Context, id string) (*model.File, error) {
-	if s.getErr != nil {
-		return nil, s.getErr
-	}
-	if s.file != nil && s.file.ID == id {
-		return s.file, nil
-	}
-	return nil, nil
-}
-func (s *stubFileRepo) GetBySessionAndID(_ context.Context, sessionID, id string) (*model.File, error) {
-	if s.file != nil && s.file.ID == id && s.file.SessionID == sessionID {
-		return s.file, nil
-	}
-	return nil, nil
-}
-func (s *stubFileRepo) GetBySessionAndFilepath(context.Context, string, string) (*model.File, error) {
-	return nil, nil
-}
-func (s *stubFileRepo) Update(context.Context, *model.File) error { return nil }
-func (s *stubFileRepo) Delete(_ context.Context, id string) error {
-	if s.deleteErr != nil {
-		return s.deleteErr
-	}
-	s.deletedID = id
-	return nil
-}
-func (s *stubFileRepo) DeleteBySessionID(context.Context, string) error { return nil }
-func (s *stubFileRepo) ListBySessionID(context.Context, string) ([]*model.File, error) {
-	return nil, nil
-}
-func (s *stubFileRepo) GetExpiredFiles(context.Context, string, int64) ([]*model.File, error) {
-	return nil, nil
-}
-func (s *stubFileRepo) DeleteByIDs(context.Context, []string) (int64, error) { return 0, nil }
-func (s *stubFileRepo) GetFilesBySessionIDs(context.Context, []string) ([]*model.File, error) {
-	return nil, nil
-}
-func (s *stubFileRepo) WithTx(ctx context.Context, fn func(repository.FileRepository) error) error {
-	return fn(s)
-}
-
-// stubStorage 可配置的对象存储 stub
-type stubStorage struct {
-	uploadErr   error
-	downloadErr error
-	deleteErr   error
-	uploadedKey string
-	downloaded  string
-	deletedKey  string
-}
-
-func (s *stubStorage) Upload(_ context.Context, key string, _ io.Reader, _ int64, _ string) error {
-	if s.uploadErr != nil {
-		return s.uploadErr
-	}
-	s.uploadedKey = key
-	return nil
-}
-func (s *stubStorage) Download(_ context.Context, key string) (io.ReadCloser, error) {
-	if s.downloadErr != nil {
-		return nil, s.downloadErr
-	}
-	s.downloaded = key
-	return io.NopCloser(strings.NewReader("file-content")), nil
-}
-func (s *stubStorage) Delete(_ context.Context, key string) error {
-	if s.deleteErr != nil {
-		return s.deleteErr
-	}
-	s.deletedKey = key
-	return nil
-}
-func (s *stubStorage) GetURL(_ context.Context, key string) (string, error) {
-	return "http://storage.local/" + key, nil
-}
-
-var _ FileStorage = (*stubStorage)(nil)
-var _ repository.FileRepository = (*stubFileRepo)(nil)
-
 func TestFileServiceMissingFileReturnsNotFound(t *testing.T) {
-	svc := NewFileService(emptyFileRepo{}, nil)
+	svc := NewFileService(NewMockFileRepository(), nil)
 	ctx := context.Background()
 
 	if _, err := svc.GetFileInfo(ctx, "missing"); err == nil {
@@ -164,7 +26,7 @@ func TestFileServiceMissingFileReturnsNotFound(t *testing.T) {
 }
 
 func TestFileServiceUploadFileNoStorageReturnsError(t *testing.T) {
-	svc := NewFileService(emptyFileRepo{}, nil)
+	svc := NewFileService(NewMockFileRepository(), nil)
 
 	_, err := svc.UploadFile(context.Background(), "session-1", "test.txt",
 		strings.NewReader("hello"), 5, "text/plain")
@@ -177,8 +39,8 @@ func TestFileServiceUploadFileNoStorageReturnsError(t *testing.T) {
 }
 
 func TestFileServiceUploadFileSuccess(t *testing.T) {
-	repo := &stubFileRepo{}
-	storage := &stubStorage{}
+	repo := NewMockFileRepository()
+	storage := &MockFileStorage{}
 	svc := NewFileService(repo, storage)
 
 	file, err := svc.UploadFile(context.Background(), "session-1", "doc.txt",
@@ -214,8 +76,9 @@ func TestFileServiceUploadFileSuccess(t *testing.T) {
 }
 
 func TestFileServiceUploadSameNameAndSizeStillChecksContent(t *testing.T) {
-	repo := &stubFileRepo{existingByName: &model.File{ID: "old", Size: 5}}
-	storage := &stubStorage{}
+	repo := NewMockFileRepository()
+	repo.existingByName = &model.File{ID: "old", Size: 5}
+	storage := &MockFileStorage{}
 	svc := NewFileService(repo, storage)
 
 	file, err := svc.UploadFile(context.Background(), "session-1", "doc.txt", strings.NewReader("hello"), 5, "text/plain")
@@ -232,8 +95,9 @@ func TestFileServiceUploadSameNameAndSizeStillChecksContent(t *testing.T) {
 
 func TestFileServiceDownloadFileWithStorage(t *testing.T) {
 	file := &model.File{ID: "file-1", SessionID: "session-1", Key: "files/session-1/file-1.txt"}
-	repo := &stubFileRepo{file: file}
-	storage := &stubStorage{}
+	repo := NewMockFileRepository()
+	repo.file = file
+	storage := &MockFileStorage{}
 	svc := NewFileService(repo, storage)
 
 	got, reader, err := svc.DownloadFile(context.Background(), "file-1")
@@ -255,7 +119,9 @@ func TestFileServiceDownloadFileWithStorage(t *testing.T) {
 
 func TestFileServiceSessionScopedLookupRejectsOtherSession(t *testing.T) {
 	file := &model.File{ID: "file-1", SessionID: "session-1", Key: "key"}
-	svc := NewFileService(&stubFileRepo{file: file}, &stubStorage{})
+	repo := NewMockFileRepository()
+	repo.file = file
+	svc := NewFileService(repo, &MockFileStorage{})
 
 	if _, err := svc.GetFileInfoForSession(context.Background(), "session-2", "file-1"); err == nil {
 		t.Fatal("GetFileInfoForSession() error = nil, want not found")
@@ -267,7 +133,9 @@ func TestFileServiceSessionScopedLookupRejectsOtherSession(t *testing.T) {
 
 func TestFileServiceSessionScopedLookupReturnsOwnedFile(t *testing.T) {
 	file := &model.File{ID: "file-1", SessionID: "session-1", Filename: "doc.txt", Key: "key"}
-	svc := NewFileService(&stubFileRepo{file: file}, &stubStorage{})
+	repo := NewMockFileRepository()
+	repo.file = file
+	svc := NewFileService(repo, &MockFileStorage{})
 
 	got, err := svc.GetFileInfoForSession(context.Background(), "session-1", "file-1")
 	if err != nil {
@@ -280,7 +148,9 @@ func TestFileServiceSessionScopedLookupReturnsOwnedFile(t *testing.T) {
 
 func TestFileServiceDownloadFileNilStorageReturnsStorageUnavailable(t *testing.T) {
 	file := &model.File{ID: "file-1", Key: "k"}
-	svc := NewFileService(&stubFileRepo{file: file}, nil)
+	repo := NewMockFileRepository()
+	repo.file = file
+	svc := NewFileService(repo, nil)
 
 	got, reader, err := svc.DownloadFile(context.Background(), "file-1")
 	if !errors.Is(err, ErrStorageUnavailable) {
@@ -293,7 +163,9 @@ func TestFileServiceDownloadFileNilStorageReturnsStorageUnavailable(t *testing.T
 
 func TestFileServiceGetFileInfoFound(t *testing.T) {
 	file := &model.File{ID: "file-1", Filename: "doc.txt"}
-	svc := NewFileService(&stubFileRepo{file: file}, nil)
+	repo := NewMockFileRepository()
+	repo.file = file
+	svc := NewFileService(repo, nil)
 
 	got, err := svc.GetFileInfo(context.Background(), "file-1")
 	if err != nil {
@@ -306,15 +178,16 @@ func TestFileServiceGetFileInfoFound(t *testing.T) {
 
 func TestFileServiceDeleteFileDeletesStorageAndRepo(t *testing.T) {
 	file := &model.File{ID: "file-1", Key: "files/session-1/file-1.txt"}
-	repo := &stubFileRepo{file: file}
-	storage := &stubStorage{}
+	repo := NewMockFileRepository()
+	repo.file = file
+	storage := &MockFileStorage{}
 	svc := NewFileService(repo, storage)
 
 	if err := svc.DeleteFile(context.Background(), "file-1"); err != nil {
 		t.Fatal(err)
 	}
-	if storage.deletedKey != "files/session-1/file-1.txt" {
-		t.Errorf("storage.Delete key = %q, want files/session-1/file-1.txt", storage.deletedKey)
+	if len(storage.deletedKeys) != 1 || storage.deletedKeys[0] != "files/session-1/file-1.txt" {
+		t.Errorf("storage.Delete keys = %v, want [files/session-1/file-1.txt]", storage.deletedKeys)
 	}
 	if repo.deletedID != "file-1" {
 		t.Errorf("repo.Delete id = %q, want file-1", repo.deletedID)
@@ -325,8 +198,9 @@ func TestFileServiceDeleteFileDeletesStorageAndRepo(t *testing.T) {
 // DB 记录先删（避免反向僵尸），残留对象仅告警、由 bucket 生命周期策略兜底。
 func TestFileServiceDeleteFileStorageError(t *testing.T) {
 	file := &model.File{ID: "file-1", Key: "k"}
-	storage := &stubStorage{deleteErr: errors.New("s3 delete failed")}
-	repo := &stubFileRepo{file: file}
+	storage := &MockFileStorage{deleteErr: errors.New("s3 delete failed")}
+	repo := NewMockFileRepository()
+	repo.file = file
 	svc := NewFileService(repo, storage)
 
 	if err := svc.DeleteFile(context.Background(), "file-1"); err != nil {

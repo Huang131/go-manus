@@ -311,7 +311,9 @@ func (s *stubRuntimeHealthReader) GetHealth(id string) external.LLMRuntimeHealth
 	return s.health
 }
 
-func TestLLMModelService_GetRuntimeHealth(t *testing.T) {
+// newHealthService 为 GetRuntimeHealth 相关测试创建带一个模型的 service。
+func newHealthService(t *testing.T) (LLMModelService, string) {
+	t.Helper()
 	repo := NewMockLLMModelRepository()
 	svc := NewLLMModelService(repo)
 	m, err := svc.Create(context.Background(), &model.LLMModel{
@@ -320,17 +322,23 @@ func TestLLMModelService_GetRuntimeHealth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return svc, m.ID
+}
 
-	// 未注入 reader：模型存在，返回零值健康
-	h, err := svc.GetRuntimeHealth(context.Background(), m.ID)
+func TestLLMModelService_GetRuntimeHealth_ZeroWithoutReader(t *testing.T) {
+	svc, id := newHealthService(t)
+
+	h, err := svc.GetRuntimeHealth(context.Background(), id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if h.Status != "" || h.RecentFailures != 0 || h.AverageLatencyMS != 0 {
 		t.Fatalf("without reader: got %+v, want zero health", h)
 	}
+}
 
-	// 注入 reader：返回路由器内存中的实时值
+func TestLLMModelService_GetRuntimeHealth_ReturnsReaderHealth(t *testing.T) {
+	svc, id := newHealthService(t)
 	svc.SetRuntimeHealthReader(&stubRuntimeHealthReader{
 		health: external.LLMRuntimeHealth{
 			Status:           model.HealthStateDegraded,
@@ -338,16 +346,20 @@ func TestLLMModelService_GetRuntimeHealth(t *testing.T) {
 			AverageLatencyMS: 350,
 		},
 	})
-	h, err = svc.GetRuntimeHealth(context.Background(), m.ID)
+
+	h, err := svc.GetRuntimeHealth(context.Background(), id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if h.Status != model.HealthStateDegraded || h.RecentFailures != 2 || h.AverageLatencyMS != 350 {
 		t.Fatalf("with reader: got %+v, want degraded/2/350", h)
 	}
+}
 
-	// 模型不存在：ErrModelNotFound
-	_, err = svc.GetRuntimeHealth(context.Background(), "missing-id")
+func TestLLMModelService_GetRuntimeHealth_NotFound(t *testing.T) {
+	svc, _ := newHealthService(t)
+
+	_, err := svc.GetRuntimeHealth(context.Background(), "missing-id")
 	if !errors.Is(err, ErrModelNotFound) {
 		t.Fatalf("err = %v, want ErrModelNotFound", err)
 	}

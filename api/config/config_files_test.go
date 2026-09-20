@@ -4,7 +4,15 @@ import (
 	"testing"
 )
 
-// TestLoadAllConfigFiles 验证三个配置文件都能正确加载并解析 server 配置
+// TestLoadAllConfigFiles 验证三个配置文件都能正确加载并解析 server 配置。
+//
+// 依赖：本测试会读取磁盘上真实的配置文件（相对 ../，即 api/ 根目录）：
+//   - config.yaml
+//   - config.test.yaml
+//   - config.docker.yaml
+//
+// 删除或重命名其中任意一个都会导致本测试失败。它守护的契约是
+// "三份配置文件的 server 段结构一致且关键字段有效"，因此保留磁盘依赖是必要的。
 func TestLoadAllConfigFiles(t *testing.T) {
 	tests := []struct {
 		file    string
