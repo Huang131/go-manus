@@ -16,8 +16,6 @@ type Memory interface {
 	GetMessages() []llmcore.Message
 	// Clear 清空记忆
 	Clear()
-	// Compact 压缩记忆（保留最近消息）
-	Compact(keepCount int) error
 }
 
 // SimpleMemory 简单记忆实现
@@ -59,17 +57,4 @@ func (m *SimpleMemory) Clear() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.messages = make([]llmcore.Message, 0)
-}
-
-func (m *SimpleMemory) Compact(keepCount int) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if len(m.messages) <= keepCount {
-		return nil
-	}
-
-	// 保留最后 keepCount 条消息
-	m.messages = m.messages[len(m.messages)-keepCount:]
-	return nil
 }

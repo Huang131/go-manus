@@ -276,11 +276,12 @@ func (s *AgentService) getOrCreateTask(ctx context.Context, session *model.Sessi
 	// 创建新的 task
 	runtime := NewSessionRuntime(session.ID, s.repos.Session, s.repos.File, s.caps.Sandbox, s.caps.FileStorage)
 	runner := NewAgentTaskRunner(&AgentTaskRunnerConfig{
-		SessionID:   session.ID,
-		AgentConfig: s.agentConfig,
-		LLM:         s.caps.LLM,
-		Tools:       tools,
-		Runtime:     runtime,
+		SessionID:       session.ID,
+		AgentConfig:     s.agentConfig,
+		InitialMessages: conversationMessages(session.Events),
+		LLM:             s.caps.LLM,
+		Tools:           tools,
+		Runtime:         runtime,
 	})
 
 	task := NewRedisStreamTask(s.caps.MessageQueue, runner)

@@ -293,13 +293,6 @@ func (f *PlannerReActFlow) handleExecuting(ctx context.Context, input *TaskInput
 	// ExecuteStep 操作的是本轮快照，执行结果需要写回 flow，供后续更新计划和外部查询使用。
 	f.setPlan(plan)
 
-	// 压缩记忆
-	if err := f.react.CompactMemory(); err != nil {
-		logger.WarnContext(ctx, "压缩 Agent 记忆失败",
-			logger.String("session_id", f.sessionID),
-			logger.Err(err))
-	}
-
 	f.setStatus(FlowStatusUpdating)
 	return false
 }

@@ -51,10 +51,9 @@ func (a *PlannerAgent) CreatePlan(ctx context.Context, input *TaskInput) (*model
 	// 添加系统提示词
 	systemPrompt := SystemPrompt + "\n" + PlannerSystemPrompt
 
-	// 构建消息历史（阶段 1d：改 llmcore.Message 强类型）
-	messages := []llmcore.Message{
-		{Role: model.RoleSystem, ContentText: systemPrompt},
-		{Role: model.RoleUser, ContentText: prompt},
+	messages, err := a.buildConversationMessages(systemPrompt, prompt)
+	if err != nil {
+		return nil, "", fmt.Errorf("构建计划上下文失败: %w", err)
 	}
 
 	// 调用 LLM（与原项目对齐：planner 阶段强制 JSON 输出，抑制 CoT 泄露）
@@ -143,10 +142,9 @@ func (a *PlannerAgent) UpdatePlan(ctx context.Context, plan *model.Plan, complet
 	// 添加系统提示词
 	systemPrompt := SystemPrompt + "\n" + PlannerSystemPrompt
 
-	// 构建消息历史（阶段 1d：改 llmcore.Message 强类型）
-	messages := []llmcore.Message{
-		{Role: model.RoleSystem, ContentText: systemPrompt},
-		{Role: model.RoleUser, ContentText: prompt},
+	messages, err := a.buildConversationMessages(systemPrompt, prompt)
+	if err != nil {
+		return nil, fmt.Errorf("构建计划更新上下文失败: %w", err)
 	}
 
 	// 调用 LLM（planner 阶段强制 JSON 输出，与原项目对齐）

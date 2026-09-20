@@ -25,6 +25,7 @@ type BaseAgent struct {
 	llm              external.LLM
 	tools            []Tool
 	memory           Memory
+	contextBuilder   *ContextBuilder
 	toolRegistry     *ToolRegistry
 	jsonParser       external.JSONParser
 	eventCh          chan<- model.BaseEvent // 事件输出通道（由 Flow 注入，nil 时静默）
@@ -44,14 +45,15 @@ func NewBaseAgent(name, sessionID string, config *AgentConfig, llm external.LLM,
 	jsonParser := external.NewRepairJSONParser()
 
 	return &BaseAgent{
-		name:         name,
-		sessionID:    sessionID,
-		config:       config,
-		llm:          llm,
-		tools:        tools,
-		memory:       NewSimpleMemory(),
-		toolRegistry: registry,
-		jsonParser:   jsonParser,
+		name:           name,
+		sessionID:      sessionID,
+		config:         config,
+		llm:            llm,
+		tools:          tools,
+		memory:         NewSimpleMemory(),
+		contextBuilder: NewContextBuilder(ContextPolicy{}),
+		toolRegistry:   registry,
+		jsonParser:     jsonParser,
 	}
 }
 
@@ -67,14 +69,15 @@ func NewBaseAgentWithParser(name, sessionID string, config *AgentConfig, llm ext
 	}
 
 	return &BaseAgent{
-		name:         name,
-		sessionID:    sessionID,
-		config:       config,
-		llm:          llm,
-		tools:        tools,
-		memory:       NewSimpleMemory(),
-		toolRegistry: registry,
-		jsonParser:   jsonParser,
+		name:           name,
+		sessionID:      sessionID,
+		config:         config,
+		llm:            llm,
+		tools:          tools,
+		memory:         NewSimpleMemory(),
+		contextBuilder: NewContextBuilder(ContextPolicy{}),
+		toolRegistry:   registry,
+		jsonParser:     jsonParser,
 	}
 }
 
@@ -112,15 +115,9 @@ func (a *BaseAgent) AddMemory(ctx context.Context, msg llmcore.Message) error {
 
 // buildConversationMessages 构建带记忆的完整 LLM 消息列表：system + 记忆原生消息 + 本次请求。
 // 记忆以原生消息形态参与对话，tool 消息保留 tool_call_id 配对。
-func (a *BaseAgent) buildConversationMessages(systemPrompt, query string) []llmcore.Message {
+func (a *BaseAgent) buildConversationMessages(systemPrompt, query string) ([]llmcore.Message, error) {
 	memoryMessages := a.memory.GetMessages()
-	messages := make([]llmcore.Message, 0, len(memoryMessages)+2)
-	if systemPrompt != "" {
-		messages = append(messages, llmcore.Message{Role: model.RoleSystem, ContentText: systemPrompt})
-	}
-	messages = append(messages, memoryMessages...)
-	messages = append(messages, llmcore.Message{Role: model.RoleUser, ContentText: query})
-	return messages
+	return a.contextBuilder.Build(systemPrompt, memoryMessages, query)
 }
 
 // mergeMemory 把本轮对话产生的新消息合并进记忆。
@@ -132,13 +129,6 @@ func (a *BaseAgent) mergeMemory(ctx context.Context, msgs []llmcore.Message) {
 	if err := a.memory.MergeMessages(msgs); err != nil {
 		logger.ErrorContext(ctx, "记忆合并失败", logger.Err(err))
 	}
-}
-
-// CompactMemory 压缩记忆
-func (a *BaseAgent) CompactMemory() error {
-	// 保留最近的消息，确保最近的上下文不会丢失
-	keepCount := 10
-	return a.memory.Compact(keepCount)
 }
 
 // GetToolsForLLM 获取 LLM 可用的工具（阶段 1d：返回 llmcore.ToolSpec 强类型）
@@ -312,7 +302,10 @@ func (a *BaseAgent) InvokeWithoutStreaming(ctx context.Context, systemPrompt, qu
 
 func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publishDeltas bool) (*InvokeResult, error) {
 	// 1. 构建初始消息：system + 记忆 + 本次用户消息
-	messages := a.buildConversationMessages(systemPrompt, query)
+	messages, err := a.buildConversationMessages(systemPrompt, query)
+	if err != nil {
+		return nil, err
+	}
 	// mergeFrom 指向本次用户消息，之后的所有消息都是本轮新增，需要合并进记忆
 	mergeFrom := len(messages) - 1
 

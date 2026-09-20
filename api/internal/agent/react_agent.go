@@ -121,7 +121,10 @@ func (a *ReActAgent) Summarize(ctx context.Context) (string, []string, bool, err
 	systemPrompt := SystemPrompt + "\n" + ReActSystemPrompt
 
 	// 构建消息历史：system + 记忆原生消息 + 总结请求
-	messages := a.buildConversationMessages(systemPrompt, prompt)
+	messages, err := a.buildConversationMessages(systemPrompt, prompt)
+	if err != nil {
+		return "", nil, false, fmt.Errorf("构建总结上下文失败: %w", err)
+	}
 
 	// 总结面向用户展示，使用非结构化文本流以便前端按 token 增量渲染。
 	// 若模型仍返回旧版 JSON，下面的解析逻辑仍可兼容并提取 message。

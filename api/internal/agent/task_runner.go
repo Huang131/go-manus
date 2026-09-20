@@ -40,11 +40,12 @@ type AgentTaskRunner struct {
 
 // AgentTaskRunnerConfig AgentTaskRunner 配置
 type AgentTaskRunnerConfig struct {
-	SessionID   string
-	AgentConfig *AgentConfig
-	LLM         external.LLM
-	Tools       []Tool
-	Runtime     *SessionRuntime
+	SessionID       string
+	AgentConfig     *AgentConfig
+	InitialMessages []llmcore.Message
+	LLM             external.LLM
+	Tools           []Tool
+	Runtime         *SessionRuntime
 }
 
 // NewAgentTaskRunner 创建任务运行器
@@ -59,6 +60,10 @@ func NewAgentTaskRunner(cfg *AgentTaskRunnerConfig) *AgentTaskRunner {
 
 	// 创建流程
 	runner.flow = NewPlannerReActFlow(cfg.SessionID, cfg.AgentConfig, cfg.LLM, cfg.Tools)
+	if len(cfg.InitialMessages) > 0 {
+		runner.flow.planner.mergeMemory(context.Background(), cfg.InitialMessages)
+		runner.flow.react.mergeMemory(context.Background(), cfg.InitialMessages)
+	}
 
 	return runner
 }

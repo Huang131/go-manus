@@ -35,24 +35,6 @@ func TestSimpleMemory_GetMessages(t *testing.T) {
 	}
 }
 
-func TestSimpleMemory_Compact(t *testing.T) {
-	mem := NewSimpleMemory()
-
-	for i := 0; i < 20; i++ {
-		mem.Add(llmcore.Message{Role: model.RoleUser, ContentText: "Message"})
-	}
-
-	if err := mem.Compact(5); err != nil {
-		t.Errorf("Compact() error = %v", err)
-	}
-
-	// Compact 应该保留最后 5 条消息
-	messages := mem.GetMessages()
-	if len(messages) != 5 {
-		t.Errorf("Compact(5) should keep 5 messages, got %d", len(messages))
-	}
-}
-
 func TestSimpleMemory_Clear(t *testing.T) {
 	mem := NewSimpleMemory()
 
