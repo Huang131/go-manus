@@ -19,7 +19,7 @@ type AppConfig struct {
 // HealthStatus 应用健康检查结果
 type HealthStatus struct {
 	Status    HealthState                   `json:"status"`    // 整体健康状态
-	Timestamp int64                         `json:"timestamp"` // 检查时间戳（Unix ms）
+	Timestamp int64                         `json:"timestamp"` // 检查时间戳（Unix 秒）
 	Services  map[ServiceName]ServiceStatus `json:"services"`  // 各基础设施服务的健康状态
 }
 
