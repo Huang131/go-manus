@@ -36,8 +36,7 @@ func (emptyFileRepo) ListBySessionID(context.Context, string) ([]*model.File, er
 func (emptyFileRepo) GetExpiredFiles(context.Context, string, int64) ([]*model.File, error) {
 	return nil, nil
 }
-func (emptyFileRepo) CountExpiredFiles(context.Context, string) (int64, error) { return 0, nil }
-func (emptyFileRepo) DeleteByIDs(context.Context, []string) (int64, error)     { return 0, nil }
+func (emptyFileRepo) DeleteByIDs(context.Context, []string) (int64, error) { return 0, nil }
 func (emptyFileRepo) GetFilesBySessionIDs(context.Context, []string) ([]*model.File, error) {
 	return nil, nil
 }
@@ -103,8 +102,7 @@ func (s *stubFileRepo) ListBySessionID(context.Context, string) ([]*model.File, 
 func (s *stubFileRepo) GetExpiredFiles(context.Context, string, int64) ([]*model.File, error) {
 	return nil, nil
 }
-func (s *stubFileRepo) CountExpiredFiles(context.Context, string) (int64, error) { return 0, nil }
-func (s *stubFileRepo) DeleteByIDs(context.Context, []string) (int64, error)     { return 0, nil }
+func (s *stubFileRepo) DeleteByIDs(context.Context, []string) (int64, error) { return 0, nil }
 func (s *stubFileRepo) GetFilesBySessionIDs(context.Context, []string) ([]*model.File, error) {
 	return nil, nil
 }

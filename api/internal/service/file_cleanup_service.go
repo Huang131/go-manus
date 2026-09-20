@@ -31,32 +31,12 @@ type FileCleanupService interface {
 	// batchSize: 每批清理的文件数量
 	// 返回: 清理的文件数量
 	CleanExpiredFiles(ctx context.Context, expireDuration string, batchSize int) (int, error)
-
-	// CleanSessionFiles 清理指定会话的所有文件
-	CleanSessionFiles(ctx context.Context, sessionID string) (int, error)
-
-	// GetExpiredFileCount 获取过期文件数量
-	GetExpiredFileCount(ctx context.Context, expireDuration string) (int64, error)
-
-	// GetCleanupStats 获取清理统计信息
-	GetCleanupStats() *CleanupStats
-}
-
-// CleanupStats 清理统计信息
-type CleanupStats struct {
-	TotalCleanedFiles   int64     `json:"total_cleaned_files"`   // 总清理文件数
-	TotalCleanedSize    int64     `json:"total_cleaned_size"`    // 总清理大小（字节）
-	LastCleanupTime     time.Time `json:"last_cleanup_time"`     // 上次清理时间
-	LastCleanupCount    int       `json:"last_cleanup_count"`    // 上次清理文件数
-	LastCleanupDuration string    `json:"last_cleanup_duration"` // 上次清理耗时
 }
 
 // DefaultFileCleanupService 默认文件清理服务实现
 type DefaultFileCleanupService struct {
 	repo      repository.FileRepository
 	storage   FileStorage
-	stats     CleanupStats
-	statsMu   sync.RWMutex
 	cleanupMu sync.Mutex
 }
 
@@ -65,7 +45,6 @@ func NewFileCleanupService(repo repository.FileRepository, storage FileStorage) 
 	return &DefaultFileCleanupService{
 		repo:    repo,
 		storage: storage,
-		stats:   CleanupStats{},
 	}
 }
 
@@ -83,7 +62,6 @@ func (s *DefaultFileCleanupService) CleanExpiredFiles(ctx context.Context, expir
 		// 获取一批过期文件
 		files, err := s.repo.GetExpiredFiles(ctx, expireDuration, int64(batchSize))
 		if err != nil {
-			s.updateCleanupStats(totalCleaned, totalSize, startTime)
 			return totalCleaned, fmt.Errorf("get expired files: %w", err)
 		}
 
@@ -95,7 +73,6 @@ func (s *DefaultFileCleanupService) CleanExpiredFiles(ctx context.Context, expir
 		// 清理这批文件
 		cleaned, size, err := s.cleanFiles(ctx, files)
 		if err != nil {
-			s.updateCleanupStats(totalCleaned, totalSize, startTime)
 			return totalCleaned, fmt.Errorf("clean expired file batch: %w", err)
 		}
 
@@ -110,8 +87,6 @@ func (s *DefaultFileCleanupService) CleanExpiredFiles(ctx context.Context, expir
 			break
 		}
 	}
-
-	s.updateCleanupStats(totalCleaned, totalSize, startTime)
 
 	logger.Info("清理过期文件完成",
 		logger.Int("total_cleaned", totalCleaned),
@@ -152,63 +127,6 @@ func (s *DefaultFileCleanupService) cleanFiles(ctx context.Context, files []*mod
 	}
 
 	return int(deleted), totalSize, nil
-}
-
-// CleanSessionFiles 清理指定会话的所有文件
-func (s *DefaultFileCleanupService) CleanSessionFiles(ctx context.Context, sessionID string) (int, error) {
-	s.cleanupMu.Lock()
-	defer s.cleanupMu.Unlock()
-	startTime := time.Now()
-
-	// 获取会话的所有文件
-	files, err := s.repo.ListBySessionID(ctx, sessionID)
-	if err != nil {
-		return 0, err
-	}
-
-	if len(files) == 0 {
-		return 0, nil
-	}
-
-	// 清理文件
-	cleaned, size, err := s.cleanFiles(ctx, files)
-	if err != nil {
-		return 0, err
-	}
-
-	s.updateCleanupStats(cleaned, size, startTime)
-
-	logger.Info("清理会话文件完成",
-		logger.String("session_id", sessionID),
-		logger.Int("cleaned_count", cleaned))
-
-	return cleaned, nil
-}
-
-// GetExpiredFileCount 获取过期文件数量
-func (s *DefaultFileCleanupService) GetExpiredFileCount(ctx context.Context, expireDuration string) (int64, error) {
-	return s.repo.CountExpiredFiles(ctx, expireDuration)
-}
-
-// GetCleanupStats 获取清理统计信息
-func (s *DefaultFileCleanupService) GetCleanupStats() *CleanupStats {
-	s.statsMu.RLock()
-	defer s.statsMu.RUnlock()
-
-	stats := s.stats
-	return &stats
-}
-
-// updateCleanupStats 只在内存更新期间持锁，避免数据库和对象存储 I/O 阻塞统计读取。
-func (s *DefaultFileCleanupService) updateCleanupStats(cleaned int, size int64, startedAt time.Time) {
-	s.statsMu.Lock()
-	defer s.statsMu.Unlock()
-
-	s.stats.TotalCleanedFiles += int64(cleaned)
-	s.stats.TotalCleanedSize += size
-	s.stats.LastCleanupTime = time.Now()
-	s.stats.LastCleanupCount = cleaned
-	s.stats.LastCleanupDuration = time.Since(startedAt).String()
 }
 
 // FileCleanupScheduler 文件清理调度器

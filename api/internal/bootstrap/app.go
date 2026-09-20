@@ -438,9 +438,8 @@ func (a *App) initServices(cfg *config.Config) {
 //
 // LLM 路由器（RoutedLLM）负责：
 //   - 模型选择：从数据库动态获取模型配置
-//   - 健康追踪：记录各模型的响应延迟和失败次数
+//   - 健康追踪：在当前进程内记录各模型的响应延迟和失败次数，重启后重新统计
 //   - 智能 fallback：主模型失败时自动切换备选模型
-//   - 持久化：健康状态写入数据库，重启后不丢失
 //
 // 模型选择优先级：
 //  1. 请求上下文中的 model_id（用户指定）
@@ -801,11 +800,8 @@ func (a *App) initSchedulers(cfg *config.Config, opts Options, factories Factori
 		return nil
 	}
 
-	// 创建文件清理服务，并注入给 FileService 以共享同一实例，保证统计一致。
+	// 文件清理只由后台调度器负责，避免把管理职责混入文件生命周期服务。
 	fileCleanupService := service.NewFileCleanupService(a.repos.file, a.OSS)
-	if fs, ok := a.FileService.(*service.DefaultFileService); ok {
-		fs.SetCleanupService(fileCleanupService)
-	}
 
 	// 创建调度器
 	cleanupScheduler := factories.NewFileCleanupScheduler(

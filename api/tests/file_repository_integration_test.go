@@ -142,14 +142,6 @@ func TestFileRepo_GetExpiredFiles_ActiveSession_NotExpired(t *testing.T) {
 	}
 }
 
-func TestFileRepo_CountExpiredFiles(t *testing.T) {
-	repo := testFileRepo(t)
-
-	count, err := repo.CountExpiredFiles(context.Background(), "24h")
-	require.NoError(t, err)
-	assert.GreaterOrEqual(t, count, int64(0))
-}
-
 func TestFileRepo_Delete_PhysicalDelete(t *testing.T) {
 	repo := testFileRepo(t)
 	sessionID := createSessionForTest(t)

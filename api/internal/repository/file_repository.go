@@ -28,7 +28,6 @@ type FileRepository interface {
 
 	// 过期文件管理
 	GetExpiredFiles(ctx context.Context, expireDuration string, limit int64) ([]*model.File, error)
-	CountExpiredFiles(ctx context.Context, expireDuration string) (int64, error)
 	DeleteByIDs(ctx context.Context, ids []string) (int64, error)
 
 	// 批量操作
@@ -238,22 +237,6 @@ func (r *PostgresFileRepository) GetFilesBySessionIDs(ctx context.Context, sessi
 		return nil, err
 	}
 	return collectRows(rows, scanFile)
-}
-
-// CountExpiredFiles 统计可清理的过期文件数量
-// 只统计孤立文件（无关联会话或关联会话已删除）
-func (r *PostgresFileRepository) CountExpiredFiles(ctx context.Context, expireDuration string) (int64, error) {
-	q := r.queryer()
-	query := `
-		SELECT COUNT(*) FROM files f
-		LEFT JOIN sessions s ON f.session_id = s.id
-		WHERE f.created_at < NOW() - $1::interval
-		  AND (f.session_id IS NULL OR s.deleted_at IS NOT NULL)
-	`
-
-	var count int64
-	err := q.QueryRow(ctx, query, expireDuration).Scan(&count)
-	return count, err
 }
 
 // DeleteByIDs 根据 ID 列表批量删除文件

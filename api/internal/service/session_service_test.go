@@ -392,8 +392,7 @@ func (m *mockFileRepo) DeleteBySessionID(ctx context.Context, s string) error {
 func (m *mockFileRepo) GetExpiredFiles(ctx context.Context, d string, l int64) ([]*model.File, error) {
 	return nil, nil
 }
-func (m *mockFileRepo) CountExpiredFiles(ctx context.Context, d string) (int64, error) { return 0, nil }
-func (m *mockFileRepo) DeleteByIDs(ctx context.Context, ids []string) (int64, error)   { return 0, nil }
+func (m *mockFileRepo) DeleteByIDs(ctx context.Context, ids []string) (int64, error) { return 0, nil }
 func (m *mockFileRepo) GetFilesBySessionIDs(ctx context.Context, s []string) ([]*model.File, error) {
 	return nil, nil
 }
