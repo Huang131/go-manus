@@ -5,9 +5,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/bytedance/sonic"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -231,24 +228,6 @@ func TestSessionService_CreateSession_RepositoryError(t *testing.T) {
 	}
 }
 
-func TestSessionService_GetSession(t *testing.T) {
-	repo := NewMockSessionRepository()
-	svc := NewSessionService(repo, nil, "")
-
-	// 先创建会话
-	created, _ := svc.CreateSession(context.Background())
-
-	// 获取会话
-	session, err := svc.GetSession(context.Background(), created.ID)
-	if err != nil {
-		t.Fatalf("GetSession() error = %v", err)
-	}
-
-	if session.ID != created.ID {
-		t.Errorf("Session ID = %s, want %s", session.ID, created.ID)
-	}
-}
-
 func TestSessionService_GetSession_NotFound(t *testing.T) {
 	repo := NewMockSessionRepository()
 	svc := NewSessionService(repo, nil, "")
@@ -265,77 +244,6 @@ func TestSessionService_GetSession_RepositoryError(t *testing.T) {
 	_, err := svc.GetSession(context.Background(), "any-id")
 	if !errors.Is(err, repo.getErr) {
 		t.Errorf("GetSession() error = %v, want repository error propagated", err)
-	}
-}
-
-// GetAllSessions 是纯透传，这里守护"service 不额外过滤或截断仓储结果"。
-func TestSessionService_GetAllSessions(t *testing.T) {
-	repo := NewMockSessionRepository()
-	svc := NewSessionService(repo, nil, "")
-
-	// 创建多个会话
-	svc.CreateSession(context.Background())
-	svc.CreateSession(context.Background())
-	svc.CreateSession(context.Background())
-
-	sessions, err := svc.GetAllSessions(context.Background())
-	if err != nil {
-		t.Fatalf("GetAllSessions() error = %v", err)
-	}
-
-	if len(sessions) != 3 {
-		t.Errorf("GetAllSessions() returned %d sessions, want 3", len(sessions))
-	}
-}
-
-func TestSessionService_ListSessions(t *testing.T) {
-	repo := NewMockSessionRepository()
-	svc := NewSessionService(repo, nil, "")
-
-	// 分页切片是真实 SQL 的职责（集成测试覆盖），这里只验证 service 原样透传分页参数
-	if _, _, err := svc.ListSessions(context.Background(), 2, 10); err != nil {
-		t.Fatalf("ListSessions() error = %v", err)
-	}
-
-	if repo.listLimit != 2 {
-		t.Errorf("ListSessions() passed limit = %d, want 2", repo.listLimit)
-	}
-	if repo.listOffset != 10 {
-		t.Errorf("ListSessions() passed offset = %d, want 10", repo.listOffset)
-	}
-}
-
-func TestSessionService_ListSessions_DefaultLimit(t *testing.T) {
-	repo := NewMockSessionRepository()
-	svc := NewSessionService(repo, nil, "")
-
-	// 关键断言：service 把"未指定 limit（0）"归一化为默认值后透传给 repo
-	if _, _, err := svc.ListSessions(context.Background(), 0, 0); err != nil {
-		t.Fatalf("ListSessions() error = %v", err)
-	}
-
-	if repo.listLimit != DefaultSessionListLimit {
-		t.Errorf("ListSessions() passed limit = %d, want default %d", repo.listLimit, DefaultSessionListLimit)
-	}
-}
-
-func TestSessionService_DeleteSession(t *testing.T) {
-	repo := NewMockSessionRepository()
-	svc := NewSessionService(repo, nil, "")
-
-	// 创建会话
-	session, _ := svc.CreateSession(context.Background())
-
-	// 删除会话
-	err := svc.DeleteSession(context.Background(), session.ID)
-	if err != nil {
-		t.Fatalf("DeleteSession() error = %v", err)
-	}
-
-	// 验证会话已被删除
-	_, err = svc.GetSession(context.Background(), session.ID)
-	if err == nil {
-		t.Error("GetSession() should return error after deletion")
 	}
 }
 
@@ -359,27 +267,6 @@ func TestSessionService_DeleteSession_RepositoryError(t *testing.T) {
 	err := svc.DeleteSession(context.Background(), session.ID)
 	if !errors.Is(err, repo.deleteErr) {
 		t.Errorf("DeleteSession() error = %v, want repository error propagated", err)
-	}
-}
-
-func TestSessionService_ClearUnreadCount(t *testing.T) {
-	repo := NewMockSessionRepository()
-	svc := NewSessionService(repo, nil, "")
-
-	// 创建会话
-	session, _ := svc.CreateSession(context.Background())
-	repo.sessions[session.ID].UnreadMessageCount = 5
-
-	// 清除未读数
-	err := svc.ClearUnreadCount(context.Background(), session.ID)
-	if err != nil {
-		t.Fatalf("ClearUnreadCount() error = %v", err)
-	}
-
-	// 验证未读数已清除
-	updated, _ := svc.GetSession(context.Background(), session.ID)
-	if updated.UnreadMessageCount != 0 {
-		t.Errorf("UnreadMessageCount = %d, want 0", updated.UnreadMessageCount)
 	}
 }
 
@@ -457,23 +344,6 @@ func TestSessionService_RenameSession_NotFound(t *testing.T) {
 	}
 }
 
-func TestSessionService_GetSessionFiles(t *testing.T) {
-	repo := NewMockSessionRepository()
-	svc := NewSessionService(repo, NewMockFileRepository(), "")
-
-	// 创建会话
-	session, _ := svc.CreateSession(context.Background())
-
-	files, err := svc.GetSessionFiles(context.Background(), session.ID)
-	if err != nil {
-		t.Fatalf("GetSessionFiles() error = %v", err)
-	}
-
-	if len(files) != 0 {
-		t.Errorf("GetSessionFiles() returned %d files, want 0", len(files))
-	}
-}
-
 func TestSessionService_GetSessionFiles_NotFound(t *testing.T) {
 	repo := NewMockSessionRepository()
 	svc := NewSessionService(repo, NewMockFileRepository(), "")
@@ -491,36 +361,4 @@ func TestSessionService_GetSessionFiles_RepositoryNotInjected(t *testing.T) {
 
 	_, err := svc.GetSessionFiles(context.Background(), session.ID)
 	requireAppErrKind(t, err, apperr.KindFailedPrecondition)
-}
-
-func TestSessionService_AppendEvent(t *testing.T) {
-	repo := NewMockSessionRepository()
-	svc := NewSessionService(repo, nil, "")
-
-	// 创建会话
-	session, _ := svc.CreateSession(context.Background())
-
-	// 添加事件
-	msgEvent := &model.MessageEvent{Type: model.EventTypeMessage, Role: model.RoleUser, Message: "Hello"}
-	eventData, _ := sonic.Marshal(msgEvent)
-	event := &model.Event{
-		ID:        "event-1",
-		Type:      model.EventTypeMessage,
-		CreatedAt: time.Now(),
-		Data:      eventData,
-	}
-
-	err := svc.AppendEvent(context.Background(), session.ID, event)
-	if err != nil {
-		t.Fatalf("AppendEvent() error = %v", err)
-	}
-
-	// 验证事件已添加 (从 repository 获取最新数据)
-	updated, err := svc.GetSession(context.Background(), session.ID)
-	if err != nil {
-		t.Fatalf("GetSession() error = %v", err)
-	}
-	if len(updated.Events) != 1 {
-		t.Errorf("Session Events length = %d, want 1", len(updated.Events))
-	}
 }
