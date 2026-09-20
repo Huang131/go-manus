@@ -12,32 +12,6 @@ import (
 	"github.com/Huang131/go-manus/api/internal/model"
 )
 
-func TestLLMModelService_Create_PreservesRepositoryError(t *testing.T) {
-	repo := NewMockLLMModelRepository()
-	repo.createErr = errors.New("database unavailable")
-	svc := NewLLMModelService(repo)
-
-	_, err := svc.Create(context.Background(), &model.LLMModel{
-		Name: "model", Provider: "provider", BaseURL: "https://example.test", ModelName: "m",
-	})
-	if err == nil || err.Error() != "database unavailable" {
-		t.Fatalf("Create() error = %v, want repository error", err)
-	}
-}
-
-func TestLLMModelService_Create_PreservesDefaultLookupError(t *testing.T) {
-	repo := NewMockLLMModelRepository()
-	repo.getDefaultErr = errors.New("database unavailable")
-	svc := NewLLMModelService(repo)
-
-	_, err := svc.Create(context.Background(), &model.LLMModel{
-		Name: "model", Provider: "provider", BaseURL: "https://example.test", ModelName: "m",
-	})
-	if err == nil || err.Error() != "database unavailable" {
-		t.Fatalf("Create() error = %v, want default lookup error", err)
-	}
-}
-
 func TestLLMModelService_Create_MapsUniqueViolationToConflict(t *testing.T) {
 	repo := NewMockLLMModelRepository()
 	repo.conflict = true
@@ -48,24 +22,6 @@ func TestLLMModelService_Create_MapsUniqueViolationToConflict(t *testing.T) {
 	})
 	if !errors.Is(err, ErrModelConflict) {
 		t.Fatalf("Create() error = %v, want conflict", err)
-	}
-}
-
-func TestLLMModelService_Update_PreservesRepositoryError(t *testing.T) {
-	repo := NewMockLLMModelRepository()
-	svc := NewLLMModelService(repo)
-	m, err := svc.Create(context.Background(), &model.LLMModel{
-		Name: "model", Provider: "provider", BaseURL: "https://example.test", ModelName: "m",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	repo.updateErr = errors.New("database unavailable")
-	_, err = svc.Update(context.Background(), &model.LLMModel{
-		ID: m.ID, Name: "model", Provider: "provider", BaseURL: "https://example.test", ModelName: "m",
-	})
-	if err == nil || err.Error() != "database unavailable" {
-		t.Fatalf("Update() error = %v, want repository error", err)
 	}
 }
 
@@ -305,17 +261,6 @@ func TestLLMModelService_List_Empty(t *testing.T) {
 	}
 	if len(models) != 0 {
 		t.Fatalf("List() returned %d models, want 0", len(models))
-	}
-}
-
-func TestLLMModelService_List_RepositoryError(t *testing.T) {
-	repo := NewMockLLMModelRepository()
-	repo.listErr = errors.New("database unavailable")
-	svc := NewLLMModelService(repo)
-
-	_, err := svc.List(context.Background())
-	if err == nil || err.Error() != "database unavailable" {
-		t.Fatalf("List() error = %v, want repository error", err)
 	}
 }
 

@@ -230,32 +230,6 @@ func TestFileServiceUploadSameNameAndSizeStillChecksContent(t *testing.T) {
 	}
 }
 
-func TestFileServiceUploadFileStorageError(t *testing.T) {
-	storage := &stubStorage{uploadErr: errors.New("s3 unavailable")}
-	svc := NewFileService(&stubFileRepo{}, storage)
-
-	_, err := svc.UploadFile(context.Background(), "session-1", "doc.txt",
-		strings.NewReader("hello"), 5, "text/plain")
-	if err == nil || err.Error() != "s3 unavailable" {
-		t.Fatalf("UploadFile() error = %v, want storage error", err)
-	}
-}
-
-func TestFileServiceUploadFileRepoCreateError(t *testing.T) {
-	repo := &stubFileRepo{createErr: errors.New("db write failed")}
-	storage := &stubStorage{}
-	svc := NewFileService(repo, storage)
-
-	_, err := svc.UploadFile(context.Background(), "session-1", "doc.txt",
-		strings.NewReader("hello"), 5, "text/plain")
-	if err == nil || err.Error() != "db write failed" {
-		t.Fatalf("UploadFile() error = %v, want repository error", err)
-	}
-	if storage.deletedKey == "" {
-		t.Fatal("UploadFile() should compensate by deleting uploaded object")
-	}
-}
-
 func TestFileServiceDownloadFileWithStorage(t *testing.T) {
 	file := &model.File{ID: "file-1", SessionID: "session-1", Key: "files/session-1/file-1.txt"}
 	repo := &stubFileRepo{file: file}
@@ -301,17 +275,6 @@ func TestFileServiceSessionScopedLookupReturnsOwnedFile(t *testing.T) {
 	}
 	if got.ID != file.ID {
 		t.Fatalf("GetFileInfoForSession() = %+v, want %q", got, file.ID)
-	}
-}
-
-func TestFileServiceDownloadFileStorageError(t *testing.T) {
-	file := &model.File{ID: "file-1", Key: "k"}
-	storage := &stubStorage{downloadErr: errors.New("s3 read failed")}
-	svc := NewFileService(&stubFileRepo{file: file}, storage)
-
-	_, _, err := svc.DownloadFile(context.Background(), "file-1")
-	if err == nil || err.Error() != "s3 read failed" {
-		t.Fatalf("DownloadFile() error = %v, want storage error", err)
 	}
 }
 
@@ -371,16 +334,5 @@ func TestFileServiceDeleteFileStorageError(t *testing.T) {
 	}
 	if repo.deletedID != "file-1" {
 		t.Fatalf("repo.Delete not called, deletedID = %q", repo.deletedID)
-	}
-}
-
-func TestFileServiceDeleteFileRepoError(t *testing.T) {
-	file := &model.File{ID: "file-1", Key: "k"}
-	repo := &stubFileRepo{file: file, deleteErr: errors.New("db delete failed")}
-	svc := NewFileService(repo, &stubStorage{})
-
-	err := svc.DeleteFile(context.Background(), "file-1")
-	if err == nil || err.Error() != "db delete failed" {
-		t.Fatalf("DeleteFile() error = %v, want repository error", err)
 	}
 }

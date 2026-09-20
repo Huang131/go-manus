@@ -24,27 +24,6 @@ func TestStatusServiceUsesInjectedClock(t *testing.T) {
 	}
 }
 
-type fakePostgres struct {
-	err error
-}
-
-func (f *fakePostgres) HealthCheck(ctx context.Context) error { return f.err }
-func (f *fakePostgres) Close()                                {}
-
-type fakeRedis struct {
-	err error
-}
-
-func (f *fakeRedis) HealthCheck(ctx context.Context) error { return f.err }
-func (f *fakeRedis) Close() error                          { return nil }
-
-type fakeOSS struct {
-	err error
-}
-
-func (f *fakeOSS) HealthCheck(ctx context.Context) error { return f.err }
-func (f *fakeOSS) Close() error                          { return nil }
-
 func TestStatusService_GetHealthStatus_SkippedServicesDegraded(t *testing.T) {
 	svc := NewStatusService(nil, nil, nil)
 

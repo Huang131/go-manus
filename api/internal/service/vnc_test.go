@@ -4,8 +4,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-
-	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 // VNC 测试不调用 GetSessionFiles，传 nil 即可
@@ -71,6 +69,3 @@ func TestSessionService_GetVNCURL_EmptyAddress(t *testing.T) {
 		t.Error("GetVNCURL() should return error when sandbox address is empty")
 	}
 }
-
-// 防止 model 包未使用导致编译失败
-var _ = model.SessionStatusPending
