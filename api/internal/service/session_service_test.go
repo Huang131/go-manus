@@ -3,22 +3,28 @@ package service
 import (
 	"context"
 	"errors"
-	"github.com/bytedance/sonic"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/bytedance/sonic"
+
+	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
 )
 
-// MockSessionRepository 用于测试的 Repository Mock
+// MockSessionRepository 用于测试的 Repository Mock。
+//
+// 契约：写操作命中不存在的会话必须返回 apperr.ErrSessionNotFound，与
+// PostgresSessionRepository 的 RowsAffected==0 行为一致。否则 service 的
+// 错误传播路径在单测中不可达，mock 的"宽容"会掩盖真实回归。
 type MockSessionRepository struct {
 	sessions   map[string]*model.Session
 	events     map[string][]model.Event
 	createErr  error
 	getErr     error
 	deleteErr  error
-	updateErr  error
 	listLimit  int
 	listOffset int
 }
@@ -30,7 +36,16 @@ func NewMockSessionRepository() *MockSessionRepository {
 	}
 }
 
-func (m *MockSessionRepository) Create(ctx context.Context, session *model.Session) error {
+// mustGet 按真实仓储契约取会话：不存在时返回 ErrSessionNotFound。
+func (m *MockSessionRepository) mustGet(id string) (*model.Session, error) {
+	session, ok := m.sessions[id]
+	if !ok {
+		return nil, apperr.ErrSessionNotFound
+	}
+	return session, nil
+}
+
+func (m *MockSessionRepository) Create(_ context.Context, session *model.Session) error {
 	if m.createErr != nil {
 		return m.createErr
 	}
@@ -39,7 +54,7 @@ func (m *MockSessionRepository) Create(ctx context.Context, session *model.Sessi
 	return nil
 }
 
-func (m *MockSessionRepository) GetByID(ctx context.Context, id string) (*model.Session, error) {
+func (m *MockSessionRepository) GetByID(_ context.Context, id string) (*model.Session, error) {
 	if m.getErr != nil {
 		return nil, m.getErr
 	}
@@ -51,7 +66,7 @@ func (m *MockSessionRepository) GetByID(ctx context.Context, id string) (*model.
 	return session, nil
 }
 
-func (m *MockSessionRepository) GetAll(ctx context.Context) ([]*model.Session, error) {
+func (m *MockSessionRepository) GetAll(_ context.Context) ([]*model.Session, error) {
 	result := make([]*model.Session, 0, len(m.sessions))
 	for _, s := range m.sessions {
 		result = append(result, s)
@@ -59,7 +74,7 @@ func (m *MockSessionRepository) GetAll(ctx context.Context) ([]*model.Session, e
 	return result, nil
 }
 
-func (m *MockSessionRepository) List(ctx context.Context, limit, offset int) ([]*model.Session, int, error) {
+func (m *MockSessionRepository) List(_ context.Context, limit, offset int) ([]*model.Session, int, error) {
 	// 只记录 service 传入的分页参数，不做切片分页：分页是真实 SQL LIMIT/OFFSET
 	// 的职责（集成测试覆盖），mock 复刻分页逻辑会与真实实现漂移。
 	m.listLimit = limit
@@ -72,86 +87,115 @@ func (m *MockSessionRepository) List(ctx context.Context, limit, offset int) ([]
 	return result, len(result), nil
 }
 
-func (m *MockSessionRepository) Update(ctx context.Context, session *model.Session) error {
-	if m.updateErr != nil {
-		return m.updateErr
-	}
+// Update 当前 service 层不调用，仅为满足接口实现。
+func (m *MockSessionRepository) Update(_ context.Context, session *model.Session) error {
 	m.sessions[session.ID] = session
 	return nil
 }
 
-func (m *MockSessionRepository) Delete(ctx context.Context, id string) error {
+func (m *MockSessionRepository) Delete(_ context.Context, id string) error {
 	if m.deleteErr != nil {
 		return m.deleteErr
+	}
+	if _, err := m.mustGet(id); err != nil {
+		return err
 	}
 	delete(m.sessions, id)
 	delete(m.events, id)
 	return nil
 }
 
-func (m *MockSessionRepository) AppendEvent(ctx context.Context, id string, event *model.Event) error {
-	// 真实实现：更新 session.Events JSONB 字段
-	session, ok := m.sessions[id]
-	if !ok {
-		return errors.New("会话不存在")
+func (m *MockSessionRepository) AppendEvent(_ context.Context, id string, event *model.Event) error {
+	session, err := m.mustGet(id)
+	if err != nil {
+		return err
 	}
 	session.Events = append(session.Events, *event)
 	m.events[id] = session.Events
 	return nil
 }
 
-func (m *MockSessionRepository) UpdateTitle(ctx context.Context, id string, title string) error {
-	if session, ok := m.sessions[id]; ok {
-		session.Title = title
+func (m *MockSessionRepository) UpdateTitle(_ context.Context, id string, title string) error {
+	session, err := m.mustGet(id)
+	if err != nil {
+		return err
 	}
+	session.Title = title
 	return nil
 }
 
-func (m *MockSessionRepository) UpdateLatestMessage(ctx context.Context, id string, message string) error {
-	if session, ok := m.sessions[id]; ok {
-		session.LatestMessage = message
+func (m *MockSessionRepository) UpdateLatestMessage(_ context.Context, id string, message string) error {
+	session, err := m.mustGet(id)
+	if err != nil {
+		return err
 	}
+	session.LatestMessage = message
 	return nil
 }
 
-func (m *MockSessionRepository) UpdateStatus(ctx context.Context, id string, status model.SessionStatus) error {
-	if session, ok := m.sessions[id]; ok {
-		session.Status = status
+func (m *MockSessionRepository) UpdateStatus(_ context.Context, id string, status model.SessionStatus) error {
+	session, err := m.mustGet(id)
+	if err != nil {
+		return err
 	}
+	session.Status = status
 	return nil
 }
 
-func (m *MockSessionRepository) IncrementUnreadCount(ctx context.Context, id string) error {
-	if session, ok := m.sessions[id]; ok {
-		session.UnreadMessageCount++
+func (m *MockSessionRepository) IncrementUnreadCount(_ context.Context, id string) error {
+	session, err := m.mustGet(id)
+	if err != nil {
+		return err
 	}
+	session.UnreadMessageCount++
 	return nil
 }
 
-func (m *MockSessionRepository) DecrementUnreadCount(ctx context.Context, id string) error {
-	if session, ok := m.sessions[id]; ok && session.UnreadMessageCount > 0 {
+func (m *MockSessionRepository) DecrementUnreadCount(_ context.Context, id string) error {
+	session, err := m.mustGet(id)
+	if err != nil {
+		return err
+	}
+	// 下限保护是真实 SQL GREATEST 的职责，这里只为让 mock 状态可读，
+	// 该语义不在本层验证（Service fake 不模拟 SQL 语义）。
+	if session.UnreadMessageCount > 0 {
 		session.UnreadMessageCount--
 	}
 	return nil
 }
 
-func (m *MockSessionRepository) SetUnreadCount(ctx context.Context, id string, count int) error {
-	if session, ok := m.sessions[id]; ok {
-		session.UnreadMessageCount = count
+func (m *MockSessionRepository) SetUnreadCount(_ context.Context, id string, count int) error {
+	session, err := m.mustGet(id)
+	if err != nil {
+		return err
 	}
+	session.UnreadMessageCount = count
 	return nil
 }
 
-func (m *MockSessionRepository) WithTx(ctx context.Context, fn func(repo repository.SessionRepository) error) error {
+func (m *MockSessionRepository) WithTx(_ context.Context, fn func(repo repository.SessionRepository) error) error {
 	return fn(m)
 }
 
 // 确保 Mock 实现正确的接口
 var _ repository.SessionRepository = (*MockSessionRepository)(nil)
 
+// requireAppErrKind 断言 err 是携带指定 Kind 的业务错误。
+// 只断言"有错"守护不了错误契约：NotFound 被误改成 Internal（500）时测试依然通过。
+func requireAppErrKind(t *testing.T, err error, kind apperr.Kind) {
+	t.Helper()
+	var ae *apperr.Error
+	if !errors.As(err, &ae) {
+		t.Fatalf("error = %v, want *apperr.Error", err)
+	}
+	if ae.Kind != kind {
+		t.Errorf("error kind = %s, want %s", ae.Kind, kind)
+	}
+}
+
 func TestSessionService_CreateSession(t *testing.T) {
 	repo := NewMockSessionRepository()
-	svc := NewSessionService(repo)
+	svc := NewSessionService(repo, nil, "")
 
 	session, err := svc.CreateSession(context.Background())
 	if err != nil {
@@ -176,9 +220,20 @@ func TestSessionService_CreateSession(t *testing.T) {
 	}
 }
 
+func TestSessionService_CreateSession_RepositoryError(t *testing.T) {
+	repo := NewMockSessionRepository()
+	repo.createErr = errors.New("database error")
+	svc := NewSessionService(repo, nil, "")
+
+	_, err := svc.CreateSession(context.Background())
+	if !errors.Is(err, repo.createErr) {
+		t.Errorf("CreateSession() error = %v, want repository error propagated", err)
+	}
+}
+
 func TestSessionService_GetSession(t *testing.T) {
 	repo := NewMockSessionRepository()
-	svc := NewSessionService(repo)
+	svc := NewSessionService(repo, nil, "")
 
 	// 先创建会话
 	created, _ := svc.CreateSession(context.Background())
@@ -196,17 +251,27 @@ func TestSessionService_GetSession(t *testing.T) {
 
 func TestSessionService_GetSession_NotFound(t *testing.T) {
 	repo := NewMockSessionRepository()
-	svc := NewSessionService(repo)
+	svc := NewSessionService(repo, nil, "")
 
 	_, err := svc.GetSession(context.Background(), "nonexistent-id")
-	if err == nil {
-		t.Error("GetSession() should return error for nonexistent session")
+	requireAppErrKind(t, err, apperr.KindNotFound)
+}
+
+func TestSessionService_GetSession_RepositoryError(t *testing.T) {
+	repo := NewMockSessionRepository()
+	repo.getErr = errors.New("database error")
+	svc := NewSessionService(repo, nil, "")
+
+	_, err := svc.GetSession(context.Background(), "any-id")
+	if !errors.Is(err, repo.getErr) {
+		t.Errorf("GetSession() error = %v, want repository error propagated", err)
 	}
 }
 
+// GetAllSessions 是纯透传，这里守护"service 不额外过滤或截断仓储结果"。
 func TestSessionService_GetAllSessions(t *testing.T) {
 	repo := NewMockSessionRepository()
-	svc := NewSessionService(repo)
+	svc := NewSessionService(repo, nil, "")
 
 	// 创建多个会话
 	svc.CreateSession(context.Background())
@@ -225,58 +290,38 @@ func TestSessionService_GetAllSessions(t *testing.T) {
 
 func TestSessionService_ListSessions(t *testing.T) {
 	repo := NewMockSessionRepository()
-	svc := NewSessionService(repo)
+	svc := NewSessionService(repo, nil, "")
 
-	// 创建多个会话
-	for i := 0; i < 5; i++ {
-		svc.CreateSession(context.Background())
-	}
-
-	// 测试分页参数透传
-	_, total, err := svc.ListSessions(context.Background(), 2, 0)
-	if err != nil {
+	// 分页切片是真实 SQL 的职责（集成测试覆盖），这里只验证 service 原样透传分页参数
+	if _, _, err := svc.ListSessions(context.Background(), 2, 10); err != nil {
 		t.Fatalf("ListSessions() error = %v", err)
 	}
 
-	// 分页切片是真实 SQL 的职责（集成测试覆盖），这里只验证 service 透传参数
 	if repo.listLimit != 2 {
 		t.Errorf("ListSessions() passed limit = %d, want 2", repo.listLimit)
 	}
-	if repo.listOffset != 0 {
-		t.Errorf("ListSessions() passed offset = %d, want 0", repo.listOffset)
-	}
-	if total != 5 {
-		t.Errorf("ListSessions() total = %d, want 5", total)
+	if repo.listOffset != 10 {
+		t.Errorf("ListSessions() passed offset = %d, want 10", repo.listOffset)
 	}
 }
 
 func TestSessionService_ListSessions_DefaultLimit(t *testing.T) {
 	repo := NewMockSessionRepository()
-	svc := NewSessionService(repo)
+	svc := NewSessionService(repo, nil, "")
 
-	// 创建多个会话
-	for i := 0; i < 25; i++ {
-		svc.CreateSession(context.Background())
-	}
-
-	// 测试默认 limit
-	_, total, err := svc.ListSessions(context.Background(), 0, 0)
-	if err != nil {
+	// 关键断言：service 把"未指定 limit（0）"归一化为默认值后透传给 repo
+	if _, _, err := svc.ListSessions(context.Background(), 0, 0); err != nil {
 		t.Fatalf("ListSessions() error = %v", err)
 	}
 
-	// 关键断言：service 把"未指定 limit（0）"归一化为默认 20 后透传给 repo
-	if repo.listLimit != 20 {
-		t.Errorf("ListSessions() passed limit = %d, want default 20", repo.listLimit)
-	}
-	if total != 25 {
-		t.Errorf("ListSessions() total = %d, want 25", total)
+	if repo.listLimit != DefaultSessionListLimit {
+		t.Errorf("ListSessions() passed limit = %d, want default %d", repo.listLimit, DefaultSessionListLimit)
 	}
 }
 
 func TestSessionService_DeleteSession(t *testing.T) {
 	repo := NewMockSessionRepository()
-	svc := NewSessionService(repo)
+	svc := NewSessionService(repo, nil, "")
 
 	// 创建会话
 	session, _ := svc.CreateSession(context.Background())
@@ -296,17 +341,30 @@ func TestSessionService_DeleteSession(t *testing.T) {
 
 func TestSessionService_DeleteSession_NotFound(t *testing.T) {
 	repo := NewMockSessionRepository()
-	svc := NewSessionService(repo)
+	svc := NewSessionService(repo, nil, "")
 
+	// 仓储以 RowsAffected==0 返回哨兵错误，response 层据此映射 404
 	err := svc.DeleteSession(context.Background(), "nonexistent-id")
-	if err == nil {
-		t.Error("DeleteSession() should return error for nonexistent session")
+	if !errors.Is(err, apperr.ErrSessionNotFound) {
+		t.Errorf("DeleteSession() error = %v, want ErrSessionNotFound", err)
+	}
+}
+
+func TestSessionService_DeleteSession_RepositoryError(t *testing.T) {
+	repo := NewMockSessionRepository()
+	svc := NewSessionService(repo, nil, "")
+	session, _ := svc.CreateSession(context.Background())
+
+	repo.deleteErr = errors.New("database error")
+	err := svc.DeleteSession(context.Background(), session.ID)
+	if !errors.Is(err, repo.deleteErr) {
+		t.Errorf("DeleteSession() error = %v, want repository error propagated", err)
 	}
 }
 
 func TestSessionService_ClearUnreadCount(t *testing.T) {
 	repo := NewMockSessionRepository()
-	svc := NewSessionService(repo)
+	svc := NewSessionService(repo, nil, "")
 
 	// 创建会话
 	session, _ := svc.CreateSession(context.Background())
@@ -325,10 +383,83 @@ func TestSessionService_ClearUnreadCount(t *testing.T) {
 	}
 }
 
+func TestSessionService_ClearUnreadCount_NotFound(t *testing.T) {
+	repo := NewMockSessionRepository()
+	svc := NewSessionService(repo, nil, "")
+
+	err := svc.ClearUnreadCount(context.Background(), "nonexistent-id")
+	if !errors.Is(err, apperr.ErrSessionNotFound) {
+		t.Errorf("ClearUnreadCount() error = %v, want ErrSessionNotFound", err)
+	}
+}
+
+func TestSessionService_RenameSession(t *testing.T) {
+	repo := NewMockSessionRepository()
+	svc := NewSessionService(repo, nil, "")
+
+	session, _ := svc.CreateSession(context.Background())
+
+	// 首尾空格必须被裁剪后再落库
+	err := svc.RenameSession(context.Background(), session.ID, "  我的标题  ")
+	if err != nil {
+		t.Fatalf("RenameSession() error = %v", err)
+	}
+	if got := repo.sessions[session.ID].Title; got != "我的标题" {
+		t.Errorf("Title = %q, want %q", got, "我的标题")
+	}
+}
+
+func TestSessionService_RenameSession_EmptyTitle(t *testing.T) {
+	repo := NewMockSessionRepository()
+	svc := NewSessionService(repo, nil, "")
+
+	session, _ := svc.CreateSession(context.Background())
+
+	// 纯空白标题去空格后为空，必须被拒绝
+	err := svc.RenameSession(context.Background(), session.ID, "   ")
+	requireAppErrKind(t, err, apperr.KindInvalidArgument)
+}
+
+func TestSessionService_RenameSession_TitleAtLimit(t *testing.T) {
+	repo := NewMockSessionRepository()
+	svc := NewSessionService(repo, nil, "")
+
+	session, _ := svc.CreateSession(context.Background())
+
+	// 100 个 rune 是上边界，必须放行（限制按 rune 而非 byte 计数）
+	title := strings.Repeat("字", 100)
+	if err := svc.RenameSession(context.Background(), session.ID, title); err != nil {
+		t.Fatalf("RenameSession() error = %v, want nil at 100 runes", err)
+	}
+	if got := repo.sessions[session.ID].Title; got != title {
+		t.Errorf("Title = %q, want %q", got, title)
+	}
+}
+
+func TestSessionService_RenameSession_TitleTooLong(t *testing.T) {
+	repo := NewMockSessionRepository()
+	svc := NewSessionService(repo, nil, "")
+
+	session, _ := svc.CreateSession(context.Background())
+
+	// 101 个中文字符为 101 个 rune，必须被拒绝（按 byte 计数会误判为更短）
+	err := svc.RenameSession(context.Background(), session.ID, strings.Repeat("字", 101))
+	requireAppErrKind(t, err, apperr.KindInvalidArgument)
+}
+
+func TestSessionService_RenameSession_NotFound(t *testing.T) {
+	repo := NewMockSessionRepository()
+	svc := NewSessionService(repo, nil, "")
+
+	err := svc.RenameSession(context.Background(), "nonexistent-id", "标题")
+	if !errors.Is(err, apperr.ErrSessionNotFound) {
+		t.Errorf("RenameSession() error = %v, want ErrSessionNotFound", err)
+	}
+}
+
 func TestSessionService_GetSessionFiles(t *testing.T) {
 	repo := NewMockSessionRepository()
-	fileRepo := newMockFileRepo()
-	svc := NewSessionServiceWithSandbox(repo, fileRepo, "")
+	svc := NewSessionService(repo, NewMockFileRepository(), "")
 
 	// 创建会话
 	session, _ := svc.CreateSession(context.Background())
@@ -345,22 +476,26 @@ func TestSessionService_GetSessionFiles(t *testing.T) {
 
 func TestSessionService_GetSessionFiles_NotFound(t *testing.T) {
 	repo := NewMockSessionRepository()
-	svc := NewSessionServiceWithSandbox(repo, newMockFileRepo(), "")
+	svc := NewSessionService(repo, NewMockFileRepository(), "")
 
 	_, err := svc.GetSessionFiles(context.Background(), "missing-session")
-	if err == nil {
-		t.Fatal("GetSessionFiles() error = nil, want not found")
-	}
+	requireAppErrKind(t, err, apperr.KindNotFound)
 }
 
-// newMockFileRepo 为 GetSessionFiles 测试提供最小化的 FileRepository mock
-func newMockFileRepo() *MockFileRepository {
-	return NewMockFileRepository()
+// 未注入 fileRepo 时是文档承诺的 FailedPrecondition 契约，不是 panic 也不是 500
+func TestSessionService_GetSessionFiles_RepositoryNotInjected(t *testing.T) {
+	repo := NewMockSessionRepository()
+	svc := NewSessionService(repo, nil, "")
+
+	session, _ := svc.CreateSession(context.Background())
+
+	_, err := svc.GetSessionFiles(context.Background(), session.ID)
+	requireAppErrKind(t, err, apperr.KindFailedPrecondition)
 }
 
 func TestSessionService_AppendEvent(t *testing.T) {
 	repo := NewMockSessionRepository()
-	svc := NewSessionService(repo)
+	svc := NewSessionService(repo, nil, "")
 
 	// 创建会话
 	session, _ := svc.CreateSession(context.Background())
@@ -389,17 +524,3 @@ func TestSessionService_AppendEvent(t *testing.T) {
 		t.Errorf("Session Events length = %d, want 1", len(updated.Events))
 	}
 }
-
-func TestSessionService_CreateSession_RepositoryError(t *testing.T) {
-	repo := NewMockSessionRepository()
-	repo.createErr = errors.New("database error")
-	svc := NewSessionService(repo)
-
-	_, err := svc.CreateSession(context.Background())
-	if err == nil {
-		t.Error("CreateSession() should return error when repository fails")
-	}
-}
-
-// GetVNCURL 测试已由 vnc_test.go 覆盖（TestSessionService_GetVNCURL_Success, HTTPS, NotFound, EmptyAddress）
-// 本文件不再重复

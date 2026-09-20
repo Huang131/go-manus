@@ -427,7 +427,7 @@ func (a *App) initServices(cfg *config.Config) {
 	a.repos = newRepositories(a.Postgres)
 
 	// 创建服务层
-	a.SessionService = service.NewSessionServiceWithSandbox(a.repos.session, a.repos.file, cfg.Sandbox.Address)
+	a.SessionService = service.NewSessionService(a.repos.session, a.repos.file, cfg.Sandbox.Address)
 	a.FileService = service.NewFileService(a.repos.file, a.OSS)
 	a.StatusService = service.NewStatusService(a.Postgres, a.Redis, a.OSS)
 	a.AppConfigSvc = service.NewAppConfigService(a.repos.appConfig)

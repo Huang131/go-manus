@@ -71,7 +71,7 @@ func (h *SessionHandler) Get(c *gin.Context) {
 
 // List 获取会话列表
 func (h *SessionHandler) List(c *gin.Context) {
-	limit, err := strconv.Atoi(c.DefaultQuery("limit", "20"))
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", strconv.Itoa(service.DefaultSessionListLimit)))
 	if err != nil || limit < 1 || limit > 100 {
 		response.FromError(c, apperr.BadRequest("limit must be between 1 and 100"))
 		return

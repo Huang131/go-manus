@@ -20,18 +20,27 @@ type SessionService interface {
 	GetAllSessions(ctx context.Context) ([]*model.Session, error)
 	ListSessions(ctx context.Context, limit, offset int) ([]*model.Session, int, error)
 	DeleteSession(ctx context.Context, id string) error
-	// RenameSession 重命名会话标题
+	// RenameSession 重命名会话标题，标题去空格后不得为空，且最长 100 个字符
 	RenameSession(ctx context.Context, id string, title string) error
 	ClearUnreadCount(ctx context.Context, id string) error
+	// GetSessionFiles 返回会话的文件列表，数据源统一为 files 表，单一数据源。
+	// fileRepo 未注入时返回 FailedPrecondition。
 	GetSessionFiles(ctx context.Context, id string) ([]*model.File, error)
+	// AppendEvent 追加事件。仓储层会一并回填事件 ID/时间戳、更新 latest_message，
+	// 并对 assistant 的完整回复递增 unread_message_count。
 	AppendEvent(ctx context.Context, sessionID string, event *model.Event) error
 
 	// GetVNCURL 返回会话对应的 VNC WebSocket 地址。
 	// go-manus 当前使用单一共享 sandbox 服务（区别于 mooc-manus 的 per-session Docker），
 	// 因此 VNC URL 与 session 无关；保留 sessionID 入参是为了对齐 mooc-manus 接口契约
 	// （get_vnc_url(session_id)），同时校验会话存在性。
+	// sandboxAddress 未配置时返回 FailedPrecondition。
 	GetVNCURL(ctx context.Context, sessionID string) (string, error)
 }
+
+// DefaultSessionListLimit 是会话列表未指定 limit 时的默认条数。
+// HTTP 层与服务层共用同一常量，避免两处各写一份魔数而改漏。
+const DefaultSessionListLimit = 20
 
 // defaultVNCPort 是 sandbox 的 VNC WebSocket 端口。
 // go-manus 使用单一共享 sandbox，各会话共用同一 VNC 端口。
@@ -45,17 +54,9 @@ type DefaultSessionService struct {
 	vncPort        int
 }
 
-// NewSessionService 创建会话服务（不含 fileRepo，GetSessionFiles 会报错）
-func NewSessionService(repo repository.SessionRepository) SessionService {
-	return &DefaultSessionService{
-		repo:    repo,
-		vncPort: defaultVNCPort,
-	}
-}
-
-// NewSessionServiceWithSandbox 创建带 sandbox 配置的会话服务
-// 注意：fileRepo 为可选，GetSessionFiles 依赖它。如果未注入且被调用，方法内会返回错误。
-func NewSessionServiceWithSandbox(repo repository.SessionRepository, fileRepo repository.FileRepository, sandboxAddress string) SessionService {
+// NewSessionService 创建会话服务。
+// fileRepo / sandboxAddress 允许为空，表示对应能力未启用
+func NewSessionService(repo repository.SessionRepository, fileRepo repository.FileRepository, sandboxAddress string) SessionService {
 	return &DefaultSessionService{
 		repo:           repo,
 		fileRepo:       fileRepo,
@@ -104,21 +105,15 @@ func (s *DefaultSessionService) GetAllSessions(ctx context.Context) ([]*model.Se
 // ListSessions 获取会话列表
 func (s *DefaultSessionService) ListSessions(ctx context.Context, limit, offset int) ([]*model.Session, int, error) {
 	if limit <= 0 {
-		limit = 20
+		limit = DefaultSessionListLimit
 	}
 	return s.repo.List(ctx, limit, offset)
 }
 
-// DeleteSession 删除会话
+// DeleteSession 删除会话（软删除）。
+// 仓储层以 RowsAffected==0 判定会话不存在并返回 ErrSessionNotFound，
+// 因此这里不前置查询，避免多一次数据库往返。
 func (s *DefaultSessionService) DeleteSession(ctx context.Context, id string) error {
-	// 先检查会话是否存在
-	session, err := s.repo.GetByID(ctx, id)
-	if err != nil {
-		return err
-	}
-	if session == nil {
-		return apperr.NotFound("会话不存在")
-	}
 	return s.repo.Delete(ctx, id)
 }
 
@@ -127,8 +122,7 @@ func (s *DefaultSessionService) ClearUnreadCount(ctx context.Context, id string)
 	return s.repo.SetUnreadCount(ctx, id, 0)
 }
 
-// GetSessionFiles 获取会话的文件列表
-// 统一走 files 表（替代旧 sessions.files JSONB），单一数据源，永不不一致
+// GetSessionFiles 获取会话的文件列表，先校验会话存在再读取 files 表
 func (s *DefaultSessionService) GetSessionFiles(ctx context.Context, id string) ([]*model.File, error) {
 	// 先确认 session 存在
 	session, err := s.repo.GetByID(ctx, id)
@@ -148,7 +142,7 @@ func (s *DefaultSessionService) GetSessionFiles(ctx context.Context, id string) 
 	return files, nil
 }
 
-// AppendEvent 追加事件
+// AppendEvent 追加事件；ID/时间戳回填、latest_message 投影与未读数累计由仓储层完成
 func (s *DefaultSessionService) AppendEvent(ctx context.Context, sessionID string, event *model.Event) error {
 	return s.repo.AppendEvent(ctx, sessionID, event)
 }
@@ -165,10 +159,7 @@ func (s *DefaultSessionService) RenameSession(ctx context.Context, id string, ti
 	return s.repo.UpdateTitle(ctx, id, title)
 }
 
-// GetVNCURL 返回会话对应的 VNC WebSocket 地址。
-// 实现：从 sandboxAddress (http(s)://host[:port]) 派生 ws://host:5901 或 wss://host:5901。
-// 之所以保留 sessionID 入参，是为了对齐 mooc-manus 的 get_vnc_url(session_id) 接口契约
-// （即使 go-manus 当前使用单一共享 sandbox，仍然校验会话存在）。
+// GetVNCURL 从 sandboxAddress (http(s)://host[:port]) 派生 ws://host:5901 或 wss://host:5901。
 func (s *DefaultSessionService) GetVNCURL(ctx context.Context, sessionID string) (string, error) {
 	session, err := s.repo.GetByID(ctx, sessionID)
 	if err != nil {
