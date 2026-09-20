@@ -3,16 +3,20 @@
 // Package integration 包含真实环境的集成测试。
 //
 // 测试特点：
-//   - 使用真实的 Postgres、Redis、MinIO（需先启动 ../../scripts/test-env-up.sh）
+//   - 使用真实的 Postgres、Redis、MinIO（需先准备独立测试资源）
 //   - 每个测试用例独立，使用唯一标识避免数据污染
 //   - 测试完成后自动清理数据
 //
 // 运行方式：
 //
-//	# 先确保开发 Docker (docker-compose.yml) 已启动
-//	# 初始化测试数据（在共享 Docker 上创建 manus_test DB 等）
+//	# 先准备测试资源；默认配置仍兼容本地 Docker
 //	cd ../../scripts && ./test-env-up.sh
 //
+//	# 可用 API_TEST_* 覆盖连接信息，避免连接开发资源
+//	API_TEST_POSTGRES_DSN=postgres://.../manus_test \
+//	API_TEST_REDIS_ADDR=127.0.0.1:6380 API_TEST_REDIS_DB=2 \
+//	API_TEST_S3_ENDPOINT=http://127.0.0.1:9002 \
+//	API_TEST_S3_BUCKET=go-manus-test-files-ci \
 //	# 运行测试
 //	go test -tags=integration -v ./tests/...
 //
@@ -35,6 +39,7 @@ import (
 	"github.com/Huang131/go-manus/api/config"
 	"github.com/Huang131/go-manus/api/internal/bootstrap"
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
+	"github.com/Huang131/go-manus/api/internal/testsupport"
 	"github.com/Huang131/go-manus/api/pkg/response"
 	"github.com/bytedance/sonic"
 	"github.com/gin-gonic/gin"
@@ -51,10 +56,11 @@ var (
 func TestMain(m *testing.M) {
 	gin.SetMode(gin.TestMode)
 
-	cfg, err := config.LoadWithValidation("../config.test.yaml")
+	testEnv, err := testsupport.LoadIntegrationEnv("../config.test.yaml")
 	if err != nil {
 		log.Fatalf("加载测试配置失败: %v", err)
 	}
+	cfg := testEnv.Config
 
 	app, err := bootstrap.Build(cfg, bootstrap.Options{
 		EnablePostgres:    true,

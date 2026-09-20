@@ -1,6 +1,6 @@
 # 集成测试
 
-本目录包含使用真实环境的集成测试，这些测试：
+本目录包含使用独立测试资源的集成测试，这些测试：
 
 - 连接真实的 PostgreSQL、Redis、MinIO
 - 测试真实的数据库操作和文件上传
@@ -8,7 +8,7 @@
 
 ## 测试数据隔离方案
 
-集成测试复用开发环境的 Docker（`docker-compose.yml`），通过以下方式实现数据隔离：
+当前默认配置兼容本地 Docker；CI 或并行测试应通过 `API_TEST_*` 环境变量指向独立资源。测试数据使用以下隔离约束：
 
 | 资源 | 开发用 | 测试用 | 隔离方式 |
 |------|--------|--------|----------|
@@ -16,7 +16,17 @@
 | Redis | `localhost:6379` / db 0 | `localhost:6379` / db 1 | 不同 DB 编号 |
 | MinIO | `localhost:9000` / `go-manus-files` | `localhost:9000` / `go-manus-test-files` | 不同 bucket |
 
-每个测试用例通过 `truncateTables()` 清表 + `defer CleanupXxx()` 双重保护，开发数据不受影响。
+每个测试用例使用唯一标识创建数据，并通过 `defer CleanupXxx()` 清理；测试入口会拒绝生产数据库、Redis DB 0 和非测试 bucket。
+
+可用环境变量：
+
+```text
+API_TEST_POSTGRES_DSN
+API_TEST_REDIS_ADDR
+API_TEST_REDIS_DB
+API_TEST_S3_ENDPOINT
+API_TEST_S3_BUCKET
+```
 
 ## 快速开始
 
@@ -46,8 +56,8 @@ make test-down
 
 ## 前置条件
 
-1. Docker 和 Docker Compose 已安装
-2. 开发环境已启动：`docker compose -f ../docker-compose.yml up -d`
+1. Docker 和 Docker Compose 已安装（使用默认本地测试资源时）
+2. 测试资源已启动并完成迁移；默认脚本仍使用 `docker compose -f ../docker-compose.yml up -d`
 
 ## 测试覆盖
 
@@ -63,7 +73,7 @@ make test-down
 ### Q: 测试连接失败
 
 ```bash
-# 检查开发 Docker 是否运行
+# 检查默认本地测试资源是否运行
 docker ps | grep go-manus-postgres
 docker ps | grep go-manus-minio
 
