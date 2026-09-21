@@ -5,6 +5,8 @@ package integration
 import (
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -275,18 +277,29 @@ func TestLLMModelAPI_SetDefault_Concurrent(t *testing.T) {
 	}()
 
 	var wg sync.WaitGroup
-	for _, id := range ids {
+	results := make([]struct {
+		status int
+		body   string
+	}, len(ids))
+	for i, id := range ids {
 		wg.Add(1)
-		go func(modelID string) {
+		go func(index int, modelID string) {
 			defer wg.Done()
-			w := postJSON(t, "/api/llm-models/"+modelID+"/default", nil)
-			// 竞争失败只能映射为业务冲突，不能把数据库错误暴露成 500。
-			if w.Code != http.StatusOK && w.Code != http.StatusConflict {
-				t.Errorf("unexpected response for id=%s: status=%d, body=%s", modelID, w.Code, w.Body.String())
-			}
-		}(id)
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/llm-models/"+modelID+"/default", strings.NewReader("null"))
+			req.Header.Set("Content-Type", "application/json")
+			testServer.ServeHTTP(w, req)
+			results[index].status = w.Code
+			results[index].body = w.Body.String()
+		}(i, id)
 	}
 	wg.Wait()
+	for i, result := range results {
+		// 竞争失败只能映射为业务冲突，不能把数据库错误暴露成 500。
+		if result.status != http.StatusOK && result.status != http.StatusConflict {
+			t.Errorf("unexpected response for id=%s: status=%d, body=%s", ids[i], result.status, result.body)
+		}
+	}
 
 	// 统计最终 is_default=true 的数量
 	ctx, cancel := NewTestContext()
