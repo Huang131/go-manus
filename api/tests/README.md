@@ -8,13 +8,13 @@
 
 ## 测试数据隔离方案
 
-当前默认配置兼容本地 Docker；CI 或并行测试应通过 `API_TEST_*` 环境变量指向独立资源。测试数据使用以下隔离约束：
+默认使用 `docker-compose.test.yml` 启动独立容器、网络和 volume；CI 或并行测试可通过 `API_TEST_*` 环境变量改端口或指向独立资源。测试数据使用以下隔离约束：
 
 | 资源 | 开发用 | 测试用 | 隔离方式 |
 |------|--------|--------|----------|
-| PostgreSQL | `localhost:5432` / `manus` | `localhost:5432` / `manus_test` | 不同数据库 |
-| Redis | `localhost:6379` / db 0 | `localhost:6379` / db 1 | 不同 DB 编号 |
-| MinIO | `localhost:9000` / `go-manus-files` | `localhost:9000` / `go-manus-test-files` | 不同 bucket |
+| PostgreSQL | `localhost:5432` / `manus` | `localhost:15432` / `manus_test` | 独立容器、端口和 volume |
+| Redis | `localhost:6379` / db 0 | `localhost:16379` / db 1 | 独立容器和端口 |
+| MinIO | `localhost:9000` / `go-manus-files` | `localhost:19000` / `go-manus-test-files` | 独立容器、端口和 volume |
 
 每个测试用例使用唯一标识创建数据，并通过 `defer CleanupXxx()` 清理；测试入口会拒绝生产数据库、Redis DB 0 和非测试 bucket。
 
@@ -37,7 +37,7 @@ cd api
 make test-integration
 ```
 
-自动执行：初始化测试环境 → 运行集成测试
+自动执行：启动独立环境 → 执行迁移 → 运行集成测试 → 删除测试环境。失败时会先输出容器日志。
 
 ### 方式二：分步操作
 
@@ -50,14 +50,14 @@ make test-up
 # 2. 运行集成测试
 go test -tags=integration -v ./tests/...
 
-# 3. 清理测试数据（可选，不会删除数据库本身）
+# 3. 删除测试容器和 volume
 make test-down
 ```
 
 ## 前置条件
 
-1. Docker 和 Docker Compose 已安装（使用默认本地测试资源时）
-2. 测试资源已启动并完成迁移；默认脚本仍使用 `docker compose -f ../docker-compose.yml up -d`
+1. Docker 和 Docker Compose 已安装
+2. 默认端口 `15432`、`16379`、`19000`、`19001` 未被占用，或通过 `API_TEST_*_PORT` 覆盖
 
 ## 测试覆盖
 
@@ -73,9 +73,8 @@ make test-down
 ### Q: 测试连接失败
 
 ```bash
-# 检查默认本地测试资源是否运行
-docker ps | grep go-manus-postgres
-docker ps | grep go-manus-minio
+# 检查独立测试资源状态
+docker compose -f ../docker-compose.test.yml ps
 
 # 重新初始化测试环境
 make test-up
@@ -98,15 +97,20 @@ go test -tags=integration -v -run TestFileAPI ./tests/...
 - MinIO bucket 被手动删除
 - 数据库结构异常
 
-否则 `manus_test` 数据库会保留，下次直接运行测试即可。
+`make test-integration` 每次都会创建全新的 volume，因此不会复用上一次的数据。
 
 ## Makefile 命令说明
 
 | 命令 | 作用 |
 |------|------|
-| `make test-up` | 初始化测试环境（调用 `../scripts/test-env-up.sh`） |
-| `make test-integration` | 一键运行：初始化 + 测试（依赖 `test-up`） |
-| `make test-down` | 清理测试数据（调用 `../scripts/test-env-down.sh`） |
+| `make test-unit` | 运行无外部依赖的普通测试 |
+| `make test-component` | 启动独立环境并运行 repository component 测试 |
+| `make test-api` | 启动独立环境并运行 HTTP API 集成测试 |
+| `make test-integration` | 启动独立环境并运行全部内部集成测试 |
+| `make test-external` | 只运行显式 `external` 标签的 SenseNova 测试 |
+| `make test-race` | 使用 race detector 运行普通测试 |
+| `make test-up` | 启动独立测试环境并执行 migration |
+| `make test-down` | 删除独立测试容器、网络和 volume |
 
 ## CI 集成
 
@@ -114,19 +118,6 @@ go test -tags=integration -v -run TestFileAPI ./tests/...
 #!/bin/bash
 set -e
 
-# 确保开发 Docker 运行
-docker compose -f docker-compose.yml up -d
-
-# 初始化测试数据（创建 manus_test DB 等）
-make test-up
-
-# 运行测试
-go test -tags=integration -cover ./tests/... || {
-    # 测试失败时保留日志
-    docker compose logs
-    exit 1
-}
-
-# 清理测试数据
-make test-down
+# Makefile 负责启动、日志和清理
+make test-integration
 ```

@@ -124,7 +124,7 @@ func TestFileAPI_GetSessionFiles_Lifecycle(t *testing.T) {
 
 	fileIDs := make([]string, 2)
 	for i := 0; i < 2; i++ {
-		fileContent := []byte("Test content")
+		fileContent := []byte(fmt.Sprintf("Test content %d", i))
 		fileID := uploadFileForTest(t, sessionID, fmt.Sprintf("test_%d.txt", i), fileContent)
 		fileIDs[i] = fileID
 		defer CleanupFile(t, fileID)
@@ -182,7 +182,10 @@ func TestFileAPI_Upload_LargeFile(t *testing.T) {
 
 // TestFileAPI_GetInfo_NotFound 测试获取不存在的文件
 func TestFileAPI_GetInfo_NotFound(t *testing.T) {
-	w := getJSON(t, "/api/files/non-existent-id")
+	sessionID := createSessionForTest(t)
+	defer CleanupSession(t, sessionID)
+
+	w := getJSON(t, "/api/files/non-existent-id?session_id="+sessionID)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 

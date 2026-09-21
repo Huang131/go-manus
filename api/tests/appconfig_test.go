@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestAppConfigAPI_AgentConfig_Lifecycle 测试 Agent 配置完整生命周期
@@ -15,7 +16,7 @@ func TestAppConfigAPI_AgentConfig_Lifecycle(t *testing.T) {
 
 	// 1. Get 初始状态
 	getW := getJSON(t, "/api/app-config/agent")
-	assert.Equal(t, http.StatusOK, getW.Code)
+	require.Equal(t, http.StatusOK, getW.Code, getW.Body.String())
 
 	resp := parseResponse(t, getW)
 	assert.Equal(t, 0, resp.Code)
@@ -27,11 +28,11 @@ func TestAppConfigAPI_AgentConfig_Lifecycle(t *testing.T) {
 		"max_search_results": 10,
 	}
 	updW := postJSON(t, "/api/app-config/agent", updateData)
-	assert.Equal(t, http.StatusOK, updW.Code)
+	require.Equal(t, http.StatusOK, updW.Code, updW.Body.String())
 
 	// 3. Get 验证更新
 	getW2 := getJSON(t, "/api/app-config/agent")
-	assert.Equal(t, http.StatusOK, getW2.Code)
+	require.Equal(t, http.StatusOK, getW2.Code, getW2.Body.String())
 
 	resp2 := parseResponse(t, getW2)
 	assert.Equal(t, 0, resp2.Code)
@@ -48,7 +49,7 @@ func TestAppConfigAPI_MCPConfig_Lifecycle(t *testing.T) {
 
 	// 1. Get 初始状态
 	getW := getJSON(t, "/api/app-config/mcp-servers")
-	assert.Equal(t, http.StatusOK, getW.Code)
+	require.Equal(t, http.StatusOK, getW.Code, getW.Body.String())
 
 	resp := parseResponse(t, getW)
 	assert.Equal(t, 0, resp.Code)
@@ -59,25 +60,26 @@ func TestAppConfigAPI_MCPConfig_Lifecycle(t *testing.T) {
 			{
 				"server_name": "test-filesystem",
 				"enabled":     true,
-				"transport":   "stdio",
-				"tools":       []string{"read_file", "write_file"},
+				"command":     "test-mcp-server",
+				"args":        []string{"--stdio"},
 			},
 		},
 	}
 	updW := postJSON(t, "/api/app-config/mcp-servers", mcpConfig)
-	assert.Equal(t, http.StatusOK, updW.Code)
+	require.Equal(t, http.StatusOK, updW.Code, updW.Body.String())
 
 	// 3. Get 验证更新
 	getW2 := getJSON(t, "/api/app-config/mcp-servers")
-	assert.Equal(t, http.StatusOK, getW2.Code)
+	require.Equal(t, http.StatusOK, getW2.Code, getW2.Body.String())
 
 	resp2 := parseResponse(t, getW2)
 	assert.Equal(t, 0, resp2.Code)
 
 	data := parseResponseDataAsMap(t, getW2)
 
-	servers := data["servers"].([]any)
-	assert.GreaterOrEqual(t, len(servers), 1, "should have at least 1 server")
+	servers, ok := data["servers"].([]any)
+	require.True(t, ok, "servers should be an array: %#v", data["servers"])
+	require.NotEmpty(t, servers)
 
 	// 找到我们刚添加的 server
 	var found map[string]any
@@ -87,8 +89,8 @@ func TestAppConfigAPI_MCPConfig_Lifecycle(t *testing.T) {
 			break
 		}
 	}
-	assert.NotNil(t, found, "should find test-filesystem server")
-	assert.Equal(t, "stdio", found["transport"])
+	require.NotNil(t, found, "should find test-filesystem server")
+	assert.Equal(t, "test-mcp-server", found["command"])
 }
 
 // TestAppConfigAPI_MCPConfig_Delete 测试删除 MCP 服务器
@@ -101,20 +103,19 @@ func TestAppConfigAPI_MCPConfig_Delete(t *testing.T) {
 			{
 				"server_name": "temp-server-to-delete",
 				"enabled":     true,
-				"transport":   "stdio",
-				"tools":       []string{"test"},
+				"command":     "temporary-mcp-server",
 			},
 		},
 	}
 	addW := postJSON(t, "/api/app-config/mcp-servers", mcpConfig)
-	assert.Equal(t, http.StatusOK, addW.Code)
+	require.Equal(t, http.StatusOK, addW.Code, addW.Body.String())
 
 	// 2. 删除服务器
 	deleteW := postJSON(t, "/api/app-config/mcp-servers/temp-server-to-delete/delete", nil)
 	if deleteW.Code != http.StatusOK {
 		t.Logf("delete response body: %s", deleteW.Body.String())
 	}
-	assert.Equal(t, http.StatusOK, deleteW.Code)
+	require.Equal(t, http.StatusOK, deleteW.Code, deleteW.Body.String())
 
 	// 3. 验证服务器已被删除
 	getW := getJSON(t, "/api/app-config/mcp-servers")
@@ -139,7 +140,7 @@ func TestAppConfigAPI_A2AConfig_Lifecycle(t *testing.T) {
 
 	// 1. Get 初始状态
 	getW := getJSON(t, "/api/app-config/a2a-servers")
-	assert.Equal(t, http.StatusOK, getW.Code)
+	require.Equal(t, http.StatusOK, getW.Code, getW.Body.String())
 
 	resp := parseResponse(t, getW)
 	assert.Equal(t, 0, resp.Code)
@@ -148,31 +149,27 @@ func TestAppConfigAPI_A2AConfig_Lifecycle(t *testing.T) {
 	a2aConfig := map[string]any{
 		"servers": []map[string]any{
 			{
-				"id":                 "test-a2a-1",
-				"name":               "test-agent",
-				"description":        "A test A2A agent",
-				"input_modes":        []string{"text"},
-				"output_modes":       []string{"text"},
-				"streaming":          true,
-				"push_notifications": false,
-				"enabled":            true,
+				"id":      "test-a2a-1",
+				"url":     "http://test-a2a.example",
+				"enabled": true,
 			},
 		},
 	}
 	updW := postJSON(t, "/api/app-config/a2a-servers", a2aConfig)
-	assert.Equal(t, http.StatusOK, updW.Code)
+	require.Equal(t, http.StatusOK, updW.Code, updW.Body.String())
 
 	// 3. Get 验证更新
 	getW2 := getJSON(t, "/api/app-config/a2a-servers")
-	assert.Equal(t, http.StatusOK, getW2.Code)
+	require.Equal(t, http.StatusOK, getW2.Code, getW2.Body.String())
 
 	resp2 := parseResponse(t, getW2)
 	assert.Equal(t, 0, resp2.Code)
 
 	data := parseResponseDataAsMap(t, getW2)
 
-	servers := data["servers"].([]any)
-	assert.GreaterOrEqual(t, len(servers), 1, "should have at least 1 server")
+	servers, ok := data["servers"].([]any)
+	require.True(t, ok, "servers should be an array: %#v", data["servers"])
+	require.NotEmpty(t, servers)
 
 	// 找到我们刚添加的 a2a server
 	var found map[string]any
@@ -182,9 +179,8 @@ func TestAppConfigAPI_A2AConfig_Lifecycle(t *testing.T) {
 			break
 		}
 	}
-	assert.NotNil(t, found, "should find test-a2a-1 server")
-	assert.Equal(t, "test-agent", found["name"])
-	assert.Equal(t, "A test A2A agent", found["description"])
+	require.NotNil(t, found, "should find test-a2a-1 server")
+	assert.Equal(t, "http://test-a2a.example", found["url"])
 }
 
 // TestAppConfigAPI_EmptyUpdate 测试空更新

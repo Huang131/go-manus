@@ -232,10 +232,34 @@ func TestLLMModelRepo_GetFirstEnabled_NoEnabledReturnsNilNil(t *testing.T) {
 func TestLLMModelRepo_GetFirstEnabled_ReturnsFirstBySortOrder(t *testing.T) {
 	repo := testLLMModelRepo(t)
 
+	// GetFirstEnabled 查询整张表，因此先隔离其他测试或启动逻辑创建的模型。
+	rows, err := testDB.Pool.Query(context.Background(), "SELECT id FROM llm_models WHERE is_enabled = TRUE")
+	require.NoError(t, err)
+	var previouslyEnabled []string
+	for rows.Next() {
+		var id string
+		require.NoError(t, rows.Scan(&id))
+		previouslyEnabled = append(previouslyEnabled, id)
+	}
+	require.NoError(t, rows.Err())
+	rows.Close()
+	_, err = testDB.Pool.Exec(context.Background(), "UPDATE llm_models SET is_enabled = FALSE WHERE is_enabled = TRUE")
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if len(previouslyEnabled) == 0 {
+			return
+		}
+		ctx, cancel := NewTestContext()
+		defer cancel()
+		if _, err := testDB.Pool.Exec(ctx, "UPDATE llm_models SET is_enabled = TRUE WHERE id = ANY($1)", previouslyEnabled); err != nil {
+			t.Logf("恢复启用模型失败: %v", err)
+		}
+	})
+
 	m1 := newTestModel()
 	m1.Name = "first-model"
 	m1.SortOrder = 1
-	err := repo.Create(context.Background(), m1)
+	err = repo.Create(context.Background(), m1)
 	require.NoError(t, err)
 	t.Cleanup(func() { cleanupLLMModel(t, m1.ID) })
 

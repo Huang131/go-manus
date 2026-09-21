@@ -16,7 +16,7 @@
 - [tool_event_integration_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/agent/tool_event_integration_test.go:29) 自己实现 Redis Stream 的内存替身，但文件没有 `integration` build tag。
 - [session_handler_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/handler/session_handler_test.go:17) 的 Handler mock 维护完整 Session map，重实现了部分业务状态。
 - [task_redis_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/agent/task_redis_test.go:402) 等测试依赖固定 `Sleep` 和轮询。
-- 当前没有真正验证 Redis `XADD/XREAD`、cursor、blocking cancel、retention 和续读的 component integration；[message_queue_redis_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/external/message_queue_redis_test.go:8) 主要是常量测试。
+- 当前没有真正验证 Redis `XADD/XREAD`、cursor、blocking cancel、retention 和续读的 component integration；[message_queue_redis_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/mq/message_queue_redis_test.go:8) 主要是常量测试。
 - Chat 集成测试只覆盖 Agent 未启用时的 412，[session_routes_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/session_routes_test.go:25) 没有成功执行链路。
 - [tests/README.md](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/README.md:19) 描述了不存在的 `truncateTables()`，且把 Redis 描述为已被真实测试使用，文档与实现不一致。
 
@@ -45,7 +45,7 @@ go test ./...
 go vet ./...
 ```
 
-集成测试使用集中式 `internal/testsupport.IntegrationEnv`，测试函数不直接散落读取环境变量。当前已实现连接覆盖；启动方式和 Makefile 分层命令仍属于 Phase 1 后续交付：
+集成测试使用集中式 `internal/testsupport.IntegrationEnv`，测试函数不直接散落读取环境变量。当前已实现以下连接覆盖：
 
 ```text
 API_TEST_POSTGRES_DSN
@@ -55,7 +55,7 @@ API_TEST_S3_ENDPOINT
 API_TEST_S3_BUCKET
 ```
 
-当前 [Makefile](../api/Makefile) 只有 `test`、`test-cover`、`test-up`、`test-integration` 和 `test-down`。以下命令是 Phase 1 的交付物，不是当前已经存在的入口：
+当前 [Makefile](../api/Makefile) 已提供以下分层入口：
 
 ```bash
 make test-unit
@@ -67,12 +67,7 @@ make test-race
 
 配置加载器会校验测试资源：数据库名称必须包含独立的 `test` 段，Redis 禁止使用 DB 0，bucket 名称必须包含独立的 `test` 段。当前实现还没有消费 Redis prefix；在 prefix 真正接入读写链路前，不把它列为可用配置。CI 使用独立 service container 或每个 job 的唯一 namespace，不依赖固定开发容器名。
 
-当前 `test-integration: test-up` 依赖开发 Docker 中固定的 `go-manus-postgres` 和 `go-manus-minio` 容器，不能作为组件环境独立性的验收依据。Phase 1 必须选择并落地一种启动方式：
-
-- 优先方案：独立 Docker Compose test profile，使用独立容器、网络和 volume；
-- 备选方案：Testcontainers，由测试进程创建并销毁依赖。
-
-无论选择哪种方式，都必须覆盖启动、migration、测试、清理和失败日志保留，并允许 CI job 使用唯一 namespace。
+Phase 1 已落地独立 `docker-compose.test.yml`：不使用固定容器名，使用独立端口、网络和 volume，并在成功或失败后清理。CI 并行任务可通过 `API_TEST_COMPOSE_PROJECT` 和 `API_TEST_*_PORT` 使用唯一 namespace。启动脚本负责 migration 和 MinIO bucket 初始化；Makefile 在测试失败时输出容器日志，并始终调用 `test-down` 删除环境。
 
 SenseNova 测试保留现有验证用途；后续若调整入口，应使用独立 external profile 和显式命令，不能让普通 `go test ./...` 触发外部调用。
 
@@ -115,10 +110,10 @@ SenseNova 测试保留现有验证用途；后续若调整入口，应使用独�
 
 以下测试没有足够的运行时价值，应在确认生产引用后逐步删除或合并：
 
-- [message_queue_test.go:9](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/external/message_queue_test.go:9) 的接口编译断言。
-- [message_queue_test.go:40](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/external/message_queue_test.go:40) 对 mock 固定返回值的测试。
-- [message_queue_test.go:62](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/external/message_queue_test.go:62) 对 mock 自身 context 行为的测试。
-- [message_queue_test.go:73](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/external/message_queue_test.go:73) 与 Redis 常量重复的测试。
+- [message_queue_test.go:9](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/mq/message_queue_test.go:9) 的接口编译断言。
+- [message_queue_test.go:40](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/mq/message_queue_test.go:40) 对 mock 固定返回值的测试。
+- [message_queue_test.go:62](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/mq/message_queue_test.go:62) 对 mock 自身 context 行为的测试。
+- [message_queue_test.go:73](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/mq/message_queue_test.go:73) 与 Redis 常量重复的测试。
 - [memory_test.go:10](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/agent/memory_test.go:10) 仅验证容器 Add/Get/Clear，且 Add 只断言长度非零，没有验证内容和顺序；当前若保留 SimpleMemory，应补齐 `MergeMessages`、内容和顺序契约。
 - [llm_model_test.go:223](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/llm_model_test.go:223) 的 NotFound 测试只断言非 200，应精确断言 404 和业务错误码。
 - [llm_model_test.go:229](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/llm_model_test.go:229) 允许任意非 500 的宽松断言。
