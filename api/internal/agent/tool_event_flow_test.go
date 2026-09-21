@@ -26,9 +26,9 @@ func parseStreamSeq(id string) uint64 {
 // 测试辅助组件
 // ============================================================================
 
-// inMemoryMessageQueue 内存版 MessageQueue，模拟 Redis Stream 的
-// "游标推进 + 阻塞读取"语义，用于在集成测试中替换 Redis，
-// 验证事件能从 agent → flow → output_stream 完整流转。
+// inMemoryMessageQueue 是 Agent flow 测试专用的最小队列替身。
+// Redis Stream 协议由 api/tests 的 component 测试负责验证，这里只验证
+// agent → flow → output_stream 的事件编排和顺序。
 type inMemoryMessageQueue struct {
 	mu      sync.Mutex
 	streams map[string]*inMemoryStream
@@ -288,7 +288,7 @@ func TestToolCallingEvents_SSEStream(t *testing.T) {
 	task := NewRedisStreamTask(mq, runner)
 	defer task.Cancel()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	// 3. 启动任务执行（后台 goroutine 从 input_stream 消费并驱动 flow）
@@ -310,8 +310,6 @@ func TestToolCallingEvents_SSEStream(t *testing.T) {
 	callingSeq, calledSeq := 0, 0
 	seq := 0
 	startID := ""
-	deadline := time.After(15 * time.Second)
-
 	for {
 		events, err := task.GetOutput(ctx, startID, 500)
 		if err != nil {
@@ -375,10 +373,8 @@ func TestToolCallingEvents_SSEStream(t *testing.T) {
 			startID = ev.ID
 		}
 
-		select {
-		case <-deadline:
-			t.Fatalf("等待工具事件超时: calling=%v called=%v, 已收到事件数=%d", gotCalling, gotCalled, seq)
-		default:
+		if err := ctx.Err(); err != nil {
+			t.Fatalf("等待工具事件超时: calling=%v called=%v, 已收到事件数=%d: %v", gotCalling, gotCalled, seq, err)
 		}
 	}
 }
@@ -431,7 +427,7 @@ func TestToolCallingEvents_SSEStream_Failure(t *testing.T) {
 	task := NewRedisStreamTask(mq, runner)
 	defer task.Cancel()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	if err := task.Invoke(ctx); err != nil {
@@ -449,7 +445,6 @@ func TestToolCallingEvents_SSEStream_Failure(t *testing.T) {
 
 	var gotCalling, gotCalled bool
 	var calledEvent model.ToolCalledEvent
-	deadline := time.After(15 * time.Second)
 	startID := ""
 
 	for {
@@ -517,10 +512,8 @@ func TestToolCallingEvents_SSEStream_Failure(t *testing.T) {
 			startID = ev.ID
 		}
 
-		select {
-		case <-deadline:
-			t.Fatalf("等待工具事件超时: calling=%v called=%v", gotCalling, gotCalled)
-		default:
+		if err := ctx.Err(); err != nil {
+			t.Fatalf("等待工具事件超时: calling=%v called=%v: %v", gotCalling, gotCalled, err)
 		}
 	}
 }

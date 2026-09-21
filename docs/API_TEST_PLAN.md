@@ -13,7 +13,7 @@
 当前主要问题不是测试太少，而是测试层级和业务边界混杂：
 
 - [tests/integration_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/integration_test.go:51) 使用一个 `TestMain` 同时初始化 PostgreSQL、Redis、MinIO 和 Gin 路由。
-- [tool_event_integration_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/agent/tool_event_integration_test.go:29) 自己实现 Redis Stream 的内存替身，但文件没有 `integration` build tag。
+- [tool_event_flow_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/agent/tool_event_flow_test.go:29) 使用内存队列替身验证 Agent flow 编排；Redis Stream 协议由独立 component 测试验证。
 - [session_handler_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/handler/session_handler_test.go:17) 的 Handler mock 维护完整 Session map，重实现了部分业务状态。
 - [task_redis_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/agent/task_redis_test.go:402) 等测试依赖固定 `Sleep` 和轮询。
 - Redis component 测试已迁移到 [redis_component_integration_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/redis_component_integration_test.go:1)，使用独立 Redis 验证 `XADD/XREAD`、cursor、blocking cancel、retention 和清空；Agent 事件编排仍需后续补充续读链路。
@@ -114,7 +114,7 @@ SenseNova 测试保留现有验证用途；后续若调整入口，应使用独�
 - [llm_model_test.go:223](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/llm_model_test.go:223) 的 NotFound 测试只断言非 200，应精确断言 404 和业务错误码。
 - [llm_model_test.go:229](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/llm_model_test.go:229) 允许任意非 500 的宽松断言。
 - [appconfig_test.go:190](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/appconfig_test.go:190) 只断言空更新返回 200 的测试，需先明确业务契约。
-- [tool_event_integration_test.go:313](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/agent/tool_event_integration_test.go:313) 的 15 秒固定 deadline，应改为事件完成信号，只保留短的失败保护超时。
+- [tool_event_flow_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/agent/tool_event_flow_test.go:313) 使用统一 context 超时等待事件，避免额外维护固定 deadline。
 
 不要为了减少数量直接删除仍覆盖生产语义的测试。每次删除前先确认生产调用、替代测试和当前业务契约。
 
