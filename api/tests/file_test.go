@@ -104,9 +104,6 @@ func TestFileAPI_GetSessionFiles_Lifecycle(t *testing.T) {
 
 // TestFileAPI_Upload_MissingSession 测试缺少 session_id
 func TestFileAPI_Upload_MissingSession(t *testing.T) {
-	// 创建会话（只是为了让测试环境正常，但上传时不使用）
-	_ = createSessionForTest(t)
-
 	body, contentType := makeMultipartFile(nil, "test.txt", []byte("content"))
 	w := doRequest(t, "POST", "/api/files", body.Bytes(), contentType)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
