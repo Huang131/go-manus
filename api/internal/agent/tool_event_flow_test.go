@@ -32,6 +32,7 @@ func parseStreamSeq(id string) uint64 {
 type inMemoryMessageQueue struct {
 	mu      sync.Mutex
 	streams map[string]*inMemoryStream
+	notify  chan struct{}
 }
 
 type inMemoryStream struct {
@@ -47,7 +48,10 @@ type inMemoryMessage struct {
 
 // newInMemoryMessageQueue 创建内存消息队列
 func newInMemoryMessageQueue() *inMemoryMessageQueue {
-	return &inMemoryMessageQueue{streams: make(map[string]*inMemoryStream)}
+	return &inMemoryMessageQueue{
+		streams: make(map[string]*inMemoryStream),
+		notify:  make(chan struct{}),
+	}
 }
 
 // Put 追加一条消息，返回自增的流 ID
@@ -63,6 +67,8 @@ func (q *inMemoryMessageQueue) Put(ctx context.Context, streamName string, messa
 	st.nextSeq++
 	id := fmt.Sprintf("%d-0", st.nextSeq)
 	st.messages = append(st.messages, inMemoryMessage{seq: st.nextSeq, id: id, data: message})
+	close(q.notify)
+	q.notify = make(chan struct{})
 	return id, nil
 }
 
@@ -95,14 +101,9 @@ func (q *inMemoryMessageQueue) GetBlocking(ctx context.Context, streamName strin
 	fromSeq := q.fromSeqLocked(streamName, startID)
 	q.mu.Unlock()
 
-	deadline := time.Now().Add(blockTimeout)
+	timer := time.NewTimer(blockTimeout)
+	defer timer.Stop()
 	for {
-		select {
-		case <-ctx.Done():
-			return "", nil, ctx.Err()
-		default:
-		}
-
 		q.mu.Lock()
 		if st := q.streams[streamName]; st != nil {
 			for _, msg := range st.messages {
@@ -112,15 +113,15 @@ func (q *inMemoryMessageQueue) GetBlocking(ctx context.Context, streamName strin
 				}
 			}
 		}
+		waitCh := q.notify
 		q.mu.Unlock()
 
-		if time.Now().After(deadline) {
-			return "", nil, nil // 超时无新消息
-		}
 		select {
 		case <-ctx.Done():
 			return "", nil, ctx.Err()
-		case <-time.After(2 * time.Millisecond):
+		case <-timer.C:
+			return "", nil, nil // 超时无新消息
+		case <-waitCh:
 		}
 	}
 }
