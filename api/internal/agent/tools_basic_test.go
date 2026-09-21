@@ -113,7 +113,7 @@ func (m *mockSandbox) UploadFile(ctx context.Context, fileData []byte, filepath,
 	return nil, nil
 }
 
-func (m *mockSandbox) DownloadFile(ctx context.Context, filepath string) (*model.ToolResult, error) {
+func (m *mockSandbox) DownloadFile(ctx context.Context, filepath string) ([]byte, error) {
 	return nil, nil
 }
 

@@ -106,41 +106,24 @@ func (t *FileTool) Invoke(ctx context.Context, params map[string]interface{}) (*
 		return toolErr, nil
 	}
 
+	sudo := optionalToolBool(params, "sudo")
+
 	switch action {
 	case FileActionRead:
-		var startLine, endLine *int
-		if v, ok := params["start_line"].(float64); ok {
-			n := int(v)
-			startLine = &n
+		// max_length 缺省交给沙箱侧默认上限，避免两侧各维护一份截断常量
+		maxLength := 0
+		if v := optionalToolInt(params, "max_length"); v != nil {
+			maxLength = *v
 		}
-		if v, ok := params["end_line"].(float64); ok {
-			n := int(v)
-			endLine = &n
-		}
-		maxLength := 10000
-		if v, ok := params["max_length"].(float64); ok {
-			maxLength = int(v)
-		}
-		sudo := false
-		if v, ok := params["sudo"].(bool); ok {
-			sudo = v
-		}
-		return t.sandbox.ReadFile(ctx, filepath, startLine, endLine, sudo, maxLength)
+		return t.sandbox.ReadFile(ctx, filepath,
+			optionalToolInt(params, "start_line"), optionalToolInt(params, "end_line"), sudo, maxLength)
 
 	case FileActionWrite:
 		content, toolErr := requiredToolString(params, "content")
 		if toolErr != nil {
 			return toolErr, nil
 		}
-		append := false
-		if v, ok := params["append"].(bool); ok {
-			append = v
-		}
-		sudo := false
-		if v, ok := params["sudo"].(bool); ok {
-			sudo = v
-		}
-		return t.sandbox.WriteFile(ctx, filepath, content, append, false, false, sudo)
+		return t.sandbox.WriteFile(ctx, filepath, content, optionalToolBool(params, "append"), false, false, sudo)
 
 	case FileActionDelete:
 		return t.sandbox.DeleteFile(ctx, filepath)
@@ -150,7 +133,7 @@ func (t *FileTool) Invoke(ctx context.Context, params map[string]interface{}) (*
 
 	case FileActionList:
 		dirPath := filepath
-		if v, ok := params["dir_path"].(string); ok {
+		if v := optionalToolString(params, "dir_path"); v != "" {
 			dirPath = v
 		}
 		return t.sandbox.ListFiles(ctx, dirPath)
@@ -159,10 +142,6 @@ func (t *FileTool) Invoke(ctx context.Context, params map[string]interface{}) (*
 		regex, toolErr := requiredToolString(params, "regex")
 		if toolErr != nil {
 			return toolErr, nil
-		}
-		sudo := false
-		if v, ok := params["sudo"].(bool); ok {
-			sudo = v
 		}
 		return t.sandbox.SearchInFile(ctx, filepath, regex, sudo)
 
@@ -174,10 +153,6 @@ func (t *FileTool) Invoke(ctx context.Context, params map[string]interface{}) (*
 		newStr, toolErr := requiredToolString(params, "new_str")
 		if toolErr != nil {
 			return toolErr, nil
-		}
-		sudo := false
-		if v, ok := params["sudo"].(bool); ok {
-			sudo = v
 		}
 		return t.sandbox.ReplaceInFile(ctx, filepath, oldStr, newStr, sudo)
 

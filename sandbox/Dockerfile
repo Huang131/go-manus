@@ -65,7 +65,15 @@ RUN mkdir -p /etc/apt/keyrings && \
 WORKDIR /sandbox
 
 # ============================================================
-# 阶段4: Python 依赖 (使用 uv sync)
+# 阶段4: Node 依赖 (playwright-core)
+# 仅通过 CDP 连接镜像内已有的 chromium，不下载 Playwright 自带浏览器
+# 利用缓存: package.json 变化时才重新安装
+# ============================================================
+COPY package.json ./
+RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
+
+# ============================================================
+# 阶段5: Python 依赖 (使用 uv sync)
 # 利用缓存: pyproject.toml/uv.lock 变化时才重新安装
 # ============================================================
 # 设置 uv 环境变量
@@ -79,7 +87,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev && uv pip install --python /venv/bin/python pytest
 
 # ============================================================
-# 阶段5: 复制代码和配置
+# 阶段6: 复制代码和配置
 # 代码放最后，减少缓存失效
 # ============================================================
 COPY . .

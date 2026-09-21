@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"mime"
@@ -79,40 +80,31 @@ func (r *SessionRuntime) SyncFileToStorage(ctx context.Context, filePath string)
 		return nil
 	}
 
-	// 从沙箱读取文件
-	result, err := r.sandbox.ReadFile(ctx, filePath, nil, nil, false, 0)
+	// 以二进制通道下载：产物可能是图片/压缩包，走文本读取会因截断和编码问题损坏内容，
+	// 且二进制字节数无法从文本长度还原。
+	data, err := r.sandbox.DownloadFile(ctx, filePath)
 	if err != nil {
-		logger.WarnContext(ctx, "从沙箱读取文件失败", logger.String("filepath", filePath), logger.Err(err))
+		logger.WarnContext(ctx, "从沙箱下载文件失败", logger.String("filepath", filePath), logger.Err(err))
 		return nil
-	}
-	if !result.Success {
-		logger.WarnContext(ctx, "从沙箱读取文件失败", logger.String("filepath", filePath), logger.String("message", result.Message))
-		return nil
-	}
-
-	// 提取文件内容
-	var content string
-	if dataMap, ok := result.Data.(map[string]interface{}); ok {
-		if c, ok := dataMap["content"].(string); ok {
-			content = c
-		}
 	}
 
 	// 对象 key 使用文件名，避免把沙箱绝对路径泄露或重复拼入对象存储路径。
 	filename := path.Base(filePath)
 	key := "agent/" + r.sessionID + "/" + filename
-	err = r.fileStorage.Upload(ctx, key, &readerWrapper{data: []byte(content)}, int64(len(content)), "text/plain")
+
+	extension := filepath.Ext(filename)
+	mimeType := mime.TypeByExtension(extension)
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+
+	err = r.fileStorage.Upload(ctx, key, bytes.NewReader(data), int64(len(data)), mimeType)
 	if err != nil {
 		logger.WarnContext(ctx, "同步文件到存储失败", logger.String("filepath", filePath), logger.Err(err))
 		return nil
 	}
 
 	// 创建文件记录
-	extension := filepath.Ext(filename)
-	mimeType := mime.TypeByExtension(extension)
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
 	file := &model.File{
 		ID:        uuid.New().String(),
 		SessionID: r.sessionID,
@@ -121,7 +113,7 @@ func (r *SessionRuntime) SyncFileToStorage(ctx context.Context, filePath string)
 		Key:       key,
 		Extension: extension,
 		MimeType:  mimeType,
-		Size:      int64(len(content)),
+		Size:      int64(len(data)),
 		CreatedAt: time.Now(),
 	}
 	if err := r.fileRep.Create(ctx, file); err != nil {
@@ -206,19 +198,4 @@ func (r *SessionRuntime) SyncUserAttachmentsToSandbox(ctx context.Context, attac
 	}
 
 	return result, nil
-}
-
-// readerWrapper 将 []byte 适配为 io.Reader。
-type readerWrapper struct {
-	data []byte
-	pos  int
-}
-
-func (r *readerWrapper) Read(p []byte) (n int, err error) {
-	if r.pos >= len(r.data) {
-		return 0, io.EOF
-	}
-	n = copy(p, r.data[r.pos:])
-	r.pos += n
-	return n, nil
 }

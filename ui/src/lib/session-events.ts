@@ -329,6 +329,8 @@ export function eventsToTimeline(events: SSEEventData[]): TimelineItem[] {
           args: raw.arguments ?? {},
           status: isCalling ? 'calling' : 'called',
           content,
+          // display 单独承载仅 UI 可见的数据（如截图 data URI），与 content 互不干扰
+          display: result?.display,
         };
         const toolCallId = tool.tool_call_id;
 

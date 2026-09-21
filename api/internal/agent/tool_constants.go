@@ -36,17 +36,22 @@ const (
 	ShellActionKill  = "kill"
 )
 
-// Browser 工具动作。
+// Browser 工具动作，与沙箱侧浏览器端点一一对应。
 const (
-	BrowserActionNavigate   = "navigate"
-	BrowserActionView       = "view"
-	BrowserActionScreenshot = "screenshot"
-	BrowserActionClick      = "click"
-	BrowserActionInput      = "input"
-	BrowserActionScrollUp   = "scroll_up"
-	BrowserActionScrollDown = "scroll_down"
-	BrowserActionPressKey   = "press_key"
+	BrowserActionNavigate    = "navigate"
+	BrowserActionSnapshot    = "snapshot"
+	BrowserActionScreenshot  = "screenshot"
+	BrowserActionClick       = "click"
+	BrowserActionInput       = "input"
+	BrowserActionPressKey    = "press_key"
+	BrowserActionScroll      = "scroll"
+	BrowserActionConsoleExec = "console_exec"
+	BrowserActionConsoleView = "console_view"
 )
+
+// browserDisplayScreenshot 截图在 ToolResult.Display 中的键名：
+// data URI 只给 UI 渲染，不进入 LLM 上下文。
+const browserDisplayScreenshot = "screenshot"
 
 // A2A 工具动作。
 const (

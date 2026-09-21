@@ -73,50 +73,71 @@ export function getFriendlyToolLabel(data: ToolEvent | null | undefined): string
   const command = getArg(args, 'command', 'cmd', 'script')
   const url = getArg(args, 'url', 'href', 'link')
   const key = getArg(args, 'key')
+  // 内置工具（shell/file/browser）是 action 分发模型：动作名由 args.action 承载，
+  // function 恒为工具名，因此优先按 action 匹配，其次兼容旧的 *_xxx 函数名。
+  const action = getArg(args, 'action')
 
   if (name === 'file') {
-    switch (fn) {
+    switch (action || fn) {
+      case 'read':
       case 'read_file':
         return filepath ? `正在读取文件 ${truncate(filepath, 60)}` : '正在读取文件'
+      case 'write':
       case 'write_file':
         return filepath ? `正在写入文件 ${truncate(filepath, 60)}` : '正在写入文件'
+      case 'replace':
       case 'replace_in_file':
         return filepath ? `正在替换文件内容 ${truncate(filepath, 60)}` : '正在替换文件内容'
+      case 'search':
       case 'search_in_file':
         return filepath ? `正在在文件中搜索 ${truncate(filepath, 60)}` : '正在在文件中搜索'
       case 'find_files':
         return dirPath ? `正在查找文件 ${truncate(dirPath, 60)}` : '正在查找文件'
+      case 'list':
       case 'list_files':
         return dirPath ? `正在列出目录 ${truncate(dirPath, 60)}` : '正在列出目录'
+      case 'exists':
+        return filepath ? `正在检查文件是否存在 ${truncate(filepath, 60)}` : '正在检查文件'
+      case 'delete':
+        return filepath ? `正在删除文件 ${truncate(filepath, 60)}` : '正在删除文件'
       default:
         return filepath ? `正在访问文件 ${truncate(filepath, 60)}` : dirPath ? `正在访问目录 ${truncate(dirPath, 60)}` : '正在访问文件'
     }
   }
 
   if (name === 'browser' || fn.startsWith('browser_')) {
-    switch (fn) {
+    switch (action || fn) {
+      case 'navigate':
+      case 'browser_navigate':
+      case 'browser_restart':
+        return url ? `正在打开页面 ${truncate(url, 80)}` : '正在打开页面'
+      case 'snapshot':
+      case 'view':
       case 'browser_view':
         return '正在查看当前页面'
-      case 'browser_navigate':
-        return url ? `正在打开页面 ${truncate(url, 80)}` : '正在打开页面'
-      case 'browser_restart':
-        return url ? `正在重启浏览器并打开 ${truncate(url, 80)}` : '正在重启浏览器'
+      case 'click':
       case 'browser_click':
         return '正在点击页面元素'
+      case 'input':
       case 'browser_input':
         return '正在输入内容'
-      case 'browser_move_mouse':
-        return '正在移动鼠标'
+      case 'press_key':
       case 'browser_press_key':
         return key ? `正在按键 ${key}` : '正在按键'
-      case 'browser_select_option':
-        return '正在选择下拉选项'
+      case 'scroll':
+        return '正在滚动页面'
+      case 'scroll_up':
       case 'browser_scroll_up':
         return '正在向上滚动页面'
+      case 'scroll_down':
       case 'browser_scroll_down':
         return '正在向下滚动页面'
+      case 'screenshot':
+        return '正在截图'
+      case 'console_exec':
       case 'browser_console_exec':
         return '正在执行控制台脚本'
+      case 'console_view':
       case 'browser_console_view':
         return '正在查看控制台输出'
       default:
@@ -129,15 +150,20 @@ export function getFriendlyToolLabel(data: ToolEvent | null | undefined): string
   }
 
   if (name === 'shell') {
-    switch (fn) {
+    switch (action || fn) {
+      case 'exec':
       case 'shell_execute':
         return command ? `正在执行命令 ${truncate(command, 60)}` : '正在执行命令'
+      case 'read':
       case 'shell_read_output':
         return '正在查看命令输出'
+      case 'wait':
       case 'shell_wait':
         return '正在等待命令完成'
+      case 'write':
       case 'shell_write_input':
         return '正在向命令输入内容'
+      case 'kill':
       case 'shell_kill_process':
         return '正在终止进程'
       default:

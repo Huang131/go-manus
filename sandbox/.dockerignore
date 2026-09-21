@@ -35,6 +35,10 @@ dist/
 build/
 *.whl
 
+# Node 依赖在镜像内安装，不随构建上下文复制
+node_modules/
+npm-debug.log*
+
 # Documentation
 *.md
 docs/

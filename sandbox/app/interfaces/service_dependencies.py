@@ -7,6 +7,7 @@
 """
 from functools import lru_cache
 
+from app.services.browser import BrowserService
 from app.services.file import FileService
 from app.services.shell import ShellService
 from app.services.supervisor import SupervisorService
@@ -15,6 +16,11 @@ from app.services.supervisor import SupervisorService
 @lru_cache()
 def get_shell_service() -> ShellService:
     return ShellService()
+
+
+@lru_cache()
+def get_browser_service() -> BrowserService:
+    return BrowserService()
 
 
 @lru_cache()

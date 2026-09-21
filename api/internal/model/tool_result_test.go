@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -60,5 +61,37 @@ func TestToolResult_FromSandbox(t *testing.T) {
 				t.Errorf("FromSandbox() Success = %v, want %v", result.Success, tt.wantSuccess)
 			}
 		})
+	}
+}
+
+// TestToolResult_LLMJSONStripsDisplay 保证仅用于 UI 的重数据不会进入 LLM 上下文。
+func TestToolResult_LLMJSONStripsDisplay(t *testing.T) {
+	result := NewToolResultWithMessage("ok", map[string]interface{}{"path": "/tmp/a.png"}).
+		WithDisplay("screenshot", "data:image/png;base64,AAAA")
+
+	if !strings.Contains(result.JSON(), "data:image/png;base64,AAAA") {
+		t.Fatalf("JSON() should keep display for UI, got %s", result.JSON())
+	}
+	if strings.Contains(result.LLMJSON(), "base64") {
+		t.Fatalf("LLMJSON() should strip display, got %s", result.LLMJSON())
+	}
+	if !strings.Contains(result.LLMJSON(), "/tmp/a.png") {
+		t.Fatalf("LLMJSON() should keep data, got %s", result.LLMJSON())
+	}
+}
+
+// TestToolResult_WithDisplayIsChainable 验证多次追加展示数据不互相覆盖。
+func TestToolResult_WithDisplayIsChainable(t *testing.T) {
+	result := NewToolResult(nil).WithDisplay("screenshot", "a").WithDisplay("url", "https://example.com")
+
+	if result.Display["screenshot"] != "a" || result.Display["url"] != "https://example.com" {
+		t.Fatalf("Display = %#v, want both entries", result.Display)
+	}
+}
+
+func TestToolResult_LLMJSONOnNil(t *testing.T) {
+	var result *ToolResult
+	if !strings.Contains(result.LLMJSON(), "success") {
+		t.Fatalf("nil LLMJSON() = %q, want error payload", result.LLMJSON())
 	}
 }

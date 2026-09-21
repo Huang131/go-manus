@@ -390,7 +390,7 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 					messages = append(messages, llmcore.Message{
 						Role:        model.RoleTool,
 						ToolCallID:  result.ToolCallID,
-						ContentText: result.Result.JSON(),
+						ContentText: result.Result.LLMJSON(),
 					})
 
 					// 获取用户问题
@@ -415,7 +415,7 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 				messages = append(messages, llmcore.Message{
 					Role:        model.RoleTool,
 					ToolCallID:  result.ToolCallID,
-					ContentText: result.Result.JSON(),
+					ContentText: result.Result.LLMJSON(),
 				})
 			}
 
@@ -502,6 +502,13 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 		logger.String("function", functionName),
 		logger.Any("arguments", arguments))
 
+	// session_id 由 Agent 注入，不交给模型填写：沙箱会话与本次对话一一对应，
+	// 模型自行编造 session_id 会在共享沙箱里串到别的会话。
+	// 必须在发出 tool_calling 之前注入，前端才能用它关联 shell_output 增量。
+	if functionName == ToolNameShell {
+		arguments["session_id"] = a.sessionID
+	}
+
 	// 发出工具调用开始事件（tool_calling），前端 SSE 实时展示调用参数
 	callingEvent := model.NewToolCallingEvent(toolCallID, functionName, arguments)
 	callingEvent.Name = tool.Name()
@@ -520,22 +527,15 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 		}, nil
 	}
 
-	// 调用工具（带重试）
+	// 不重试工具调用：click/exec/write 这类操作没有幂等保证，
+	// 超时后重放可能重复点击、重复执行带副作用的命令。
+	// 失败交由模型根据错误结果自行决策是否换个方式重试。
 	var result *model.ToolResult
 	var err error
-	for retry := 0; retry < a.config.MaxRetries; retry++ {
-		if multiTool, ok := tool.(MultiFunctionTool); ok {
-			result, err = multiTool.InvokeWithName(functionName, ctx, arguments)
-		} else {
-			result, err = tool.Invoke(ctx, arguments)
-		}
-		if err == nil {
-			break
-		}
-		logger.WarnContext(ctx, "工具调用失败，执行重试",
-			logger.String("function", functionName),
-			logger.Int("retry", retry+1),
-			logger.Err(err))
+	if multiTool, ok := tool.(MultiFunctionTool); ok {
+		result, err = multiTool.InvokeWithName(functionName, ctx, arguments)
+	} else {
+		result, err = tool.Invoke(ctx, arguments)
 	}
 
 	if err != nil {

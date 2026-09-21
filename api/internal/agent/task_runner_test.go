@@ -223,8 +223,9 @@ type attachmentSandbox struct {
 	data     []byte
 }
 
-func (s *attachmentSandbox) ReadFile(ctx context.Context, filepath string, startLine, endLine *int, sudo bool, maxLength int) (*model.ToolResult, error) {
-	return model.NewToolResult(map[string]interface{}{"content": string(s.data)}), nil
+// DownloadFile 走二进制通道：产物同步必须字节原样落存储，不能被文本读取截断。
+func (s *attachmentSandbox) DownloadFile(ctx context.Context, filepath string) ([]byte, error) {
+	return append([]byte(nil), s.data...), nil
 }
 
 type generatedFileRepository struct {
@@ -260,6 +261,12 @@ func TestSessionRuntime_SyncFileToStorageRegistersMetadata(t *testing.T) {
 	}
 	if file.CreatedAt.IsZero() {
 		t.Fatal("expected created_at")
+	}
+	if storage.uploadedKey != "agent/session-1/report.txt" || storage.uploadedSize != int64(len("generated")) {
+		t.Fatalf("uploaded object = key:%q size:%d", storage.uploadedKey, storage.uploadedSize)
+	}
+	if storage.uploadedType != file.MimeType {
+		t.Fatalf("uploaded content type = %q, want %q", storage.uploadedType, file.MimeType)
 	}
 }
 

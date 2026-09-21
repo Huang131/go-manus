@@ -240,7 +240,7 @@ class FileService:
                 break
             parts.append(addition)
             length += len(addition)
-        return "".join(parts) + ("(truncated)" if truncated else ""), truncated
+        return "".join(parts), truncated
 
     @staticmethod
     def _iter_file_lines(filepath: str) -> Iterator[_LineChunk]:
@@ -321,7 +321,7 @@ class FileService:
                 truncated = True
             else:
                 parts.append(addition)
-        return "".join(parts) + ("(truncated)" if truncated else ""), truncated, stopped_early
+        return "".join(parts), truncated, stopped_early
 
     async def write_file(
             self,

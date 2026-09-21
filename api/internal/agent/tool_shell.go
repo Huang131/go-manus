@@ -37,10 +37,6 @@ func (t *ShellTool) Parameters() map[string]interface{} {
 				"description": "操作类型: exec, read, write, wait, kill",
 				"enum":        []string{ShellActionExec, ShellActionRead, ShellActionWrite, ShellActionWait, ShellActionKill},
 			},
-			"session_id": map[string]interface{}{
-				"type":        "string",
-				"description": "Shell 会话 ID",
-			},
 			"exec_dir": map[string]interface{}{
 				"type":        "string",
 				"description": "执行目录",
@@ -66,7 +62,9 @@ func (t *ShellTool) Parameters() map[string]interface{} {
 				"description": "等待秒数 (仅 wait 操作)",
 			},
 		},
-		"required": []string{"action", "session_id"},
+		// session_id 不暴露给模型：沙箱会话与本次对话一一对应，由 Agent 执行前注入，
+		// 模型自行编造会在共享沙箱中串到别的会话。
+		"required": []string{"action"},
 	}
 }
 
@@ -86,6 +84,7 @@ func (t *ShellTool) Invoke(ctx context.Context, params map[string]interface{}) (
 	if toolErr != nil {
 		return toolErr, nil
 	}
+	// session_id 由 Agent 注入，缺失说明调用链未按约定注入，属于内部错误
 	sessionID, toolErr := requiredToolString(params, "session_id")
 	if toolErr != nil {
 		return toolErr, nil
@@ -93,44 +92,25 @@ func (t *ShellTool) Invoke(ctx context.Context, params map[string]interface{}) (
 
 	switch action {
 	case ShellActionExec:
-		command := ""
-		var ok bool
-		if value, exists := params["command"]; !exists {
-			return model.NewToolError("command 不能为空"), nil
-		} else if command, ok = value.(string); !ok || command == "" {
-			return model.NewToolError("command 必须是非空字符串"), nil
+		command, toolErr := requiredToolString(params, "command")
+		if toolErr != nil {
+			return toolErr, nil
 		}
-		execDir := ""
-		if v, ok := params["exec_dir"].(string); ok {
-			execDir = v
-		}
-		return t.sandbox.ExecCommand(ctx, sessionID, execDir, command)
+		return t.sandbox.ExecCommand(ctx, sessionID, optionalToolString(params, "exec_dir"), command)
 
 	case ShellActionRead:
-		console := false
-		if v, ok := params["console"].(bool); ok {
-			console = v
-		}
-		return t.sandbox.ReadShellOutput(ctx, sessionID, console)
+		return t.sandbox.ReadShellOutput(ctx, sessionID, optionalToolBool(params, "console"))
 
 	case ShellActionWrite:
-		inputText := ""
-		if v, ok := params["input_text"].(string); ok {
-			inputText = v
-		}
+		// press_enter 缺省为 true：写输入通常是回答交互式提问，回车才是语义完整的一步
 		pressEnter := true
-		if v, ok := params["press_enter"].(bool); ok {
-			pressEnter = v
+		if _, ok := params["press_enter"]; ok {
+			pressEnter = optionalToolBool(params, "press_enter")
 		}
-		return t.sandbox.WriteShellInput(ctx, sessionID, inputText, pressEnter)
+		return t.sandbox.WriteShellInput(ctx, sessionID, optionalToolString(params, "input_text"), pressEnter)
 
 	case ShellActionWait:
-		var seconds *int
-		if v, ok := params["seconds"].(float64); ok {
-			n := int(v)
-			seconds = &n
-		}
-		return t.sandbox.WaitProcess(ctx, sessionID, seconds)
+		return t.sandbox.WaitProcess(ctx, sessionID, optionalToolInt(params, "seconds"))
 
 	case ShellActionKill:
 		return t.sandbox.KillProcess(ctx, sessionID)

@@ -485,8 +485,9 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(file_service_module, "MAX_PENDING_BYTES", 128):
             result = await FileService.read_file(filepath, max_length=None)
         self.assertTrue(result.truncated)
-        self.assertTrue(result.content.endswith("(truncated)"))
-        self.assertLessEqual(len(result.content), 128 + len("(truncated)"))
+        # content 必须保持文件真实内容，截断信号只通过 truncated 字段暴露
+        self.assertFalse(result.content.endswith("(truncated)"))
+        self.assertLessEqual(len(result.content.encode("utf-8")), 128)
 
     async def test_long_utf8_line_respects_byte_limit(self):
         import app.services.file as file_service_module
@@ -497,7 +498,7 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(Path(filepath).unlink, missing_ok=True)
         with patch.object(file_service_module, "MAX_PENDING_BYTES", 128):
             result = await FileService.read_file(filepath, max_length=None)
-        content = result.content.removesuffix("(truncated)")
+        content = result.content
         self.assertTrue(result.truncated)
         self.assertLessEqual(len(content.encode("utf-8")), 128)
 
@@ -606,7 +607,7 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
                 with self.assertRaises(BadRequestException):
                     await FileService.read_file(file.name)
 
-    async def test_read_file_streams_and_marks_truncated_content(self):
+    async def test_read_file_streams_and_flags_truncated_content(self):
         import app.services.file as file_service_module
 
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as file:
@@ -616,8 +617,7 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(file_service_module, "MAX_READ_BYTES", 1024):
             result = await FileService.read_file(filepath, max_length=10)
         self.assertTrue(result.truncated)
-        self.assertTrue(result.content.endswith("(truncated)"))
-        self.assertLessEqual(len(result.content), 21)
+        self.assertEqual(result.content, "abcdefgh\nab")
 
     async def test_read_file_handles_a_single_line_larger_than_chunk_size(self):
         import app.services.file as file_service_module
@@ -629,7 +629,7 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(file_service_module, "MAX_READ_BYTES", file_service_module.READ_CHUNK_BYTES + 200):
             result = await FileService.read_file(filepath, max_length=100)
         self.assertTrue(result.truncated)
-        self.assertEqual(len(result.content), 100 + len("(truncated)"))
+        self.assertEqual(len(result.content), 100)
 
     async def test_search_streams_until_match_limit(self):
         import app.services.file as file_service_module

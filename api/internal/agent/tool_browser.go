@@ -3,12 +3,17 @@ package agent
 import (
 	"context"
 	"encoding/base64"
+	"strings"
 
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/sandbox"
 )
 
-// BrowserTool 浏览器工具
+// BrowserTool 浏览器工具。
+//
+// 浏览器页面状态保存在沙箱内的 Chrome 里，工具本身无会话概念：
+// 模型先 snapshot 拿到带编号的可交互元素，再用编号 click/input，
+// 编号语义由沙箱侧统一生成，避免模型凭 HTML 猜元素位置。
 type BrowserTool struct {
 	browser sandbox.Browser
 }
@@ -25,7 +30,8 @@ func (t *BrowserTool) Name() string {
 
 // Description 返回工具描述
 func (t *BrowserTool) Description() string {
-	return "用于控制浏览器。可以访问网页、点击元素、输入文本、滚动页面、截图等。"
+	return "用于控制浏览器。访问网页后先执行 snapshot 获取带编号的可交互元素，" +
+		"再按编号 click/input；支持滚动、按键、执行 JavaScript、读取控制台日志与截图。"
 }
 
 // Parameters 返回工具参数定义
@@ -35,55 +41,69 @@ func (t *BrowserTool) Parameters() map[string]interface{} {
 		"properties": map[string]interface{}{
 			"action": map[string]interface{}{
 				"type":        "string",
-				"description": "操作类型: navigate, view, screenshot, click, input, scroll_up, scroll_down, press_key",
-				"enum":        []string{BrowserActionNavigate, BrowserActionView, BrowserActionScreenshot, BrowserActionClick, BrowserActionInput, BrowserActionScrollUp, BrowserActionScrollDown, BrowserActionPressKey},
-			},
-			"session_id": map[string]interface{}{
-				"type":        "string",
-				"description": "浏览器会话 ID",
+				"description": "操作类型: navigate, snapshot, screenshot, click, input, press_key, scroll, console_exec, console_view",
+				"enum": []string{
+					BrowserActionNavigate, BrowserActionSnapshot, BrowserActionScreenshot,
+					BrowserActionClick, BrowserActionInput, BrowserActionPressKey,
+					BrowserActionScroll, BrowserActionConsoleExec, BrowserActionConsoleView,
+				},
 			},
 			"url": map[string]interface{}{
 				"type":        "string",
-				"description": "要访问的 URL (navigate 操作)",
-			},
-			"text": map[string]interface{}{
-				"type":        "string",
-				"description": "输入文本 (input 操作)",
-			},
-			"press_enter": map[string]interface{}{
-				"type":        "boolean",
-				"description": "是否按回车键 (input 操作)",
+				"description": "要访问的 URL (navigate)",
 			},
 			"index": map[string]interface{}{
 				"type":        "integer",
-				"description": "元素索引 (click/input 操作)",
+				"description": "元素编号，取自最近一次 snapshot 结果 (click/input)",
+			},
+			"selector": map[string]interface{}{
+				"type":        "string",
+				"description": "CSS 选择器，编号不可用时的兜底定位方式 (click/input)",
 			},
 			"coordinate_x": map[string]interface{}{
 				"type":        "number",
-				"description": "X 坐标 (click 操作)",
+				"description": "X 坐标，无明确元素时的兜底定位方式 (click/input)",
 			},
 			"coordinate_y": map[string]interface{}{
 				"type":        "number",
-				"description": "Y 坐标 (click 操作)",
+				"description": "Y 坐标，无明确元素时的兜底定位方式 (click/input)",
+			},
+			"text": map[string]interface{}{
+				"type":        "string",
+				"description": "要输入的文本 (input)",
+			},
+			"press_enter": map[string]interface{}{
+				"type":        "boolean",
+				"description": "输入完成后是否按回车 (input)，如提交搜索框",
 			},
 			"key": map[string]interface{}{
 				"type":        "string",
-				"description": "按键标识 (press_key 操作)",
+				"description": "按键标识，如 Enter/Escape/Tab/ArrowDown (press_key)",
 			},
-			"to_top": map[string]interface{}{
-				"type":        "boolean",
-				"description": "是否滚动到顶部 (scroll_up 操作)",
+			"direction": map[string]interface{}{
+				"type":        "string",
+				"description": "滚动方向: up/down (scroll)",
+				"enum":        []string{sandbox.ScrollDirectionUp, sandbox.ScrollDirectionDown},
 			},
-			"to_down": map[string]interface{}{
+			"to_end": map[string]interface{}{
 				"type":        "boolean",
-				"description": "是否滚动到底部 (scroll_down 操作)",
+				"description": "是否直达顶部/底部，否则只滚动一屏 (scroll)",
 			},
 			"full_page": map[string]interface{}{
 				"type":        "boolean",
-				"description": "是否整页截图 (screenshot 操作)",
+				"description": "是否整页截图，默认仅当前视口 (screenshot)",
+			},
+			"javascript": map[string]interface{}{
+				"type":        "string",
+				"description": "要在页面上下文执行的 JavaScript 表达式 (console_exec)",
+			},
+			"max_lines": map[string]interface{}{
+				"type":        "integer",
+				"description": "返回最近多少行控制台日志 (console_view)",
 			},
 		},
-		"required": []string{"action", "session_id"},
+		// session_id 不暴露给模型：沙箱浏览器无需会话标识，由沙箱侧统一管理。
+		"required": []string{"action"},
 	}
 }
 
@@ -98,10 +118,6 @@ func (t *BrowserTool) Invoke(ctx context.Context, params map[string]interface{})
 	if toolErr != nil {
 		return toolErr, nil
 	}
-	sessionID, toolErr := requiredToolString(params, "session_id")
-	if toolErr != nil {
-		return toolErr, nil
-	}
 
 	switch action {
 	case BrowserActionNavigate:
@@ -109,85 +125,89 @@ func (t *BrowserTool) Invoke(ctx context.Context, params map[string]interface{})
 		if toolErr != nil {
 			return toolErr, nil
 		}
-		return t.browser.Navigate(ctx, sessionID, url)
+		return t.browser.Navigate(ctx, url)
 
-	case BrowserActionView:
-		return t.browser.ViewPage(ctx, sessionID)
+	case BrowserActionSnapshot:
+		return t.browser.Snapshot(ctx)
 
 	case BrowserActionScreenshot:
-		var fullPage *bool
-		if v, ok := params["full_page"].(bool); ok {
-			fullPage = &v
-		}
-		data, err := t.browser.Screenshot(ctx, sessionID, fullPage)
+		data, err := t.browser.Screenshot(ctx, optionalToolBool(params, "full_page"))
 		if err != nil {
 			return model.NewToolError(err.Error()), err
 		}
-		return model.NewToolResult(map[string]interface{}{
-			// UI 预览统一消费 screenshot，并带上可直接嵌入 img 的 MIME 前缀。
-			"screenshot": "data:image/png;base64," + base64.StdEncoding.EncodeToString(data),
-		}), nil
+		// 截图字节只进 Display 供 UI 预览：LLM 拿不到 base64，避免重数据污染上下文。
+		result := model.NewToolResult(map[string]interface{}{"bytes": len(data)})
+		return result.WithDisplay(browserDisplayScreenshot, pngDataURI(data)), nil
 
 	case BrowserActionClick:
-		var index *int
-		if v, ok := params["index"].(float64); ok {
-			n := int(v)
-			index = &n
+		target, toolErr := browserTargetFromParams(params)
+		if toolErr != nil {
+			return toolErr, nil
 		}
-		var coordX, coordY *float64
-		if v, ok := params["coordinate_x"].(float64); ok {
-			coordX = &v
-		}
-		if v, ok := params["coordinate_y"].(float64); ok {
-			coordY = &v
-		}
-		return t.browser.Click(ctx, sessionID, index, coordX, coordY)
+		return t.browser.Click(ctx, target)
 
 	case BrowserActionInput:
 		text, toolErr := requiredToolString(params, "text")
 		if toolErr != nil {
 			return toolErr, nil
 		}
-		pressEnter := false
-		if v, ok := params["press_enter"].(bool); ok {
-			pressEnter = v
+		target, toolErr := browserTargetFromParams(params)
+		if toolErr != nil {
+			return toolErr, nil
 		}
-		var index *int
-		if v, ok := params["index"].(float64); ok {
-			n := int(v)
-			index = &n
-		}
-		var coordX, coordY *float64
-		if v, ok := params["coordinate_x"].(float64); ok {
-			coordX = &v
-		}
-		if v, ok := params["coordinate_y"].(float64); ok {
-			coordY = &v
-		}
-		return t.browser.Input(ctx, sessionID, text, pressEnter, index, coordX, coordY)
-
-	case BrowserActionScrollUp:
-		var toTop *bool
-		if v, ok := params["to_top"].(bool); ok {
-			toTop = &v
-		}
-		return t.browser.ScrollUp(ctx, sessionID, toTop)
-
-	case BrowserActionScrollDown:
-		var toDown *bool
-		if v, ok := params["to_down"].(bool); ok {
-			toDown = &v
-		}
-		return t.browser.ScrollDown(ctx, sessionID, toDown)
+		return t.browser.Input(ctx, sandbox.BrowserInput{
+			BrowserTarget: target,
+			Text:          text,
+			PressEnter:    optionalToolBool(params, "press_enter"),
+		})
 
 	case BrowserActionPressKey:
 		key, toolErr := requiredToolString(params, "key")
 		if toolErr != nil {
 			return toolErr, nil
 		}
-		return t.browser.PressKey(ctx, sessionID, key)
+		return t.browser.PressKey(ctx, key)
+
+	case BrowserActionScroll:
+		direction := optionalToolString(params, "direction")
+		if direction == "" {
+			direction = sandbox.ScrollDirectionDown
+		}
+		if direction != sandbox.ScrollDirectionUp && direction != sandbox.ScrollDirectionDown {
+			return model.NewToolError("direction 只能是 up 或 down"), nil
+		}
+		return t.browser.Scroll(ctx, direction, optionalToolBool(params, "to_end"))
+
+	case BrowserActionConsoleExec:
+		javascript, toolErr := requiredToolString(params, "javascript")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		return t.browser.ConsoleExec(ctx, javascript)
+
+	case BrowserActionConsoleView:
+		return t.browser.ConsoleView(ctx, optionalToolInt(params, "max_lines"))
 
 	default:
 		return model.NewToolError("unknown action: " + action), nil
 	}
+}
+
+// browserTargetFromParams 解析元素定位参数，要求三种定位方式至少给出一种。
+func browserTargetFromParams(params map[string]interface{}) (sandbox.BrowserTarget, *model.ToolResult) {
+	target := sandbox.BrowserTarget{
+		Index:    optionalToolInt(params, "index"),
+		Selector: strings.TrimSpace(optionalToolString(params, "selector")),
+		X:        optionalToolFloat(params, "coordinate_x"),
+		Y:        optionalToolFloat(params, "coordinate_y"),
+	}
+	if target.Index == nil && target.Selector == "" && (target.X == nil || target.Y == nil) {
+		return target, model.NewToolError("需要 index、selector 或完整坐标之一来定位元素")
+	}
+	return target, nil
+}
+
+// pngDataURI 把 PNG 字节编码为可直接嵌入 img 的 data URI。
+func pngDataURI(data []byte) string {
+	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(data)
 }

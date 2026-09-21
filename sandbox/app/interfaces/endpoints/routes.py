@@ -7,7 +7,7 @@
 """
 from fastapi import APIRouter
 
-from . import file, shell, supervisor
+from . import browser, file, shell, supervisor
 
 
 def create_api_routes() -> APIRouter:
@@ -19,6 +19,7 @@ def create_api_routes() -> APIRouter:
     api_router.include_router(file.router)
     api_router.include_router(shell.router)
     api_router.include_router(supervisor.router)
+    api_router.include_router(browser.router)
 
     return api_router
 

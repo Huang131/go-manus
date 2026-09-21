@@ -121,10 +121,8 @@ function ShellPreview({ tool }: { tool: ToolEvent }) {
 }
 
 function BrowserPreview({ tool, onOpenVNC }: { tool: ToolEvent; onOpenVNC?: () => void }) {
-  const content = getToolContent(tool)
-  const screenshot = typeof content?.screenshot === 'string'
-    ? content.screenshot
-    : typeof content?.screenshot_data === 'string' ? content.screenshot_data : null
+  // 截图 data URI 走后端 ToolResult.display：它只给 UI，不进 LLM 上下文
+  const screenshot = typeof tool.display?.screenshot === 'string' ? tool.display.screenshot : null
   const url = getArg(tool.args, 'url', 'href', 'link')
 
   return (

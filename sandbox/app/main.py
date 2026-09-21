@@ -83,6 +83,10 @@ openapi_tags = [
         "name": "Supervisor模块",
         "description": "使用接口+Supervisor实现管理沙箱系统的程序逻辑",
     },
+    {
+        "name": "浏览器模块",
+        "description": "包含 **导航/快照/截图/点击/输入/滚动/控制台** 等 API 接口，用于操控沙箱内的 Chrome。",
+    },
 ]
 
 # 3.实例化FastAPI项目实例

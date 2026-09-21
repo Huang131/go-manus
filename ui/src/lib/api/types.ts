@@ -253,6 +253,11 @@ export type ToolEvent = {
   function: string;
   args: Record<string, unknown>;
   content?: unknown;
+  /**
+   * 仅 UI 展示用的数据，来自后端 ToolResult.display（如浏览器截图的 data URI）。
+   * 后端不会把它写进 LLM 上下文，因此这里可以安全承载大体积数据。
+   */
+  display?: Record<string, unknown>;
   status?: ToolEventStatus;
   [key: string]: unknown;
 };
@@ -264,6 +269,8 @@ export type ToolResult = {
   success: boolean;
   message: string;
   data?: unknown;
+  /** 仅 UI 展示用的数据（如截图 data URI），不进入 LLM 上下文 */
+  display?: Record<string, unknown>;
 };
 
 /**

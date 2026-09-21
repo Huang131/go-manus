@@ -55,7 +55,9 @@ async def read_file(
     )
 
     return Response.success(
-        msg="文件内容读取成功",
+        # 截断信号只走 msg，不污染 content：content 必须与文件真实内容一致，
+        # 否则模型会把标记当成文件内容，回写时污染源文件。
+        msg="文件内容读取成功（内容已截断，仅返回部分内容）" if result.truncated else "文件内容读取成功",
         data=result,
     )
 
