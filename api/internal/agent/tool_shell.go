@@ -3,17 +3,17 @@ package agent
 import (
 	"context"
 
-	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/sandbox"
 )
 
 // ShellTool Shell 工具
 type ShellTool struct {
-	sandbox external.Sandbox
+	sandbox sandbox.Sandbox
 }
 
 // NewShellTool 创建 Shell 工具
-func NewShellTool(sandbox external.Sandbox) *ShellTool {
+func NewShellTool(sandbox sandbox.Sandbox) *ShellTool {
 	return &ShellTool{sandbox: sandbox}
 }
 
@@ -76,7 +76,7 @@ func (t *ShellTool) ReadOnly() bool {
 }
 
 // Sandbox 返回底层沙箱客户端（供 BaseAgent 的 shell 输出 watcher 轮询）。
-func (t *ShellTool) Sandbox() external.Sandbox {
+func (t *ShellTool) Sandbox() sandbox.Sandbox {
 	return t.sandbox
 }
 

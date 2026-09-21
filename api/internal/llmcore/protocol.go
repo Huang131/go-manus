@@ -5,9 +5,9 @@
 //   - Adapter（openai/anthropic）把厂商响应归一化到这套类型
 //   - 类型设计"足够完整但不过度抽象"：先满足当前业务能落地，未来扩展以新增字段而非推倒重来
 //
-// 与 external 包的关系：
-//   - external.LLM interface 仍存在；它的内部实现改用 llmcore.LLMRequest / LLMResponse
-//   - 业务侧看到的是 external 包，但底下的 wire format 是 llmcore
+// 与 llm 包的关系：
+//   - llm.LLM interface 仍存在；它的内部实现改用 llmcore.LLMRequest / LLMResponse
+//   - 业务侧看到的是 llm 包，但底下的 wire format 是 llmcore
 package llmcore
 
 import "github.com/Huang131/go-manus/api/internal/model"

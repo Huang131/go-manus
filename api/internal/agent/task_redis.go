@@ -13,8 +13,8 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/google/uuid"
 
-	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/mq"
 
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
@@ -147,8 +147,8 @@ type TaskRunner interface {
 type RedisStreamTask struct {
 	id           string
 	runner       TaskRunner
-	inputStream  external.TaskMessageQueue
-	outputStream external.TaskMessageQueue
+	inputStream  mq.TaskMessageQueue
+	outputStream mq.TaskMessageQueue
 	cancelFunc   context.CancelFunc
 	done         atomic.Bool
 	finished     atomic.Bool
@@ -172,16 +172,16 @@ func (t *RedisStreamTask) IsDone() bool {
 }
 
 // TaskStream Redis Stream 适配器
-// 将 external.MessageQueue 适配为 Task 需要的 Stream 接口
+// 将 mq.MessageQueue 适配为 Task 需要的 Stream 接口
 type TaskStream struct {
-	mq         external.TaskMessageQueue
+	mq         mq.TaskMessageQueue
 	streamName string
 	lastID     string // 上次读取的消息 ID，用于游标推进；空值表示从头开始读取
 	mu         sync.Mutex
 }
 
 // NewTaskStream 创建任务流适配器
-func NewTaskStream(mq external.TaskMessageQueue, streamName string) *TaskStream {
+func NewTaskStream(mq mq.TaskMessageQueue, streamName string) *TaskStream {
 	return &TaskStream{
 		mq:         mq,
 		streamName: streamName,
@@ -207,7 +207,7 @@ func (s *TaskStream) Pop(ctx context.Context) (string, string, error) {
 	s.mu.Unlock()
 
 	// 使用 GetBlocking 实现阻塞 Pop
-	id, data, err := s.mq.GetBlocking(ctx, s.streamName, startID, external.DefaultBlockTimeout)
+	id, data, err := s.mq.GetBlocking(ctx, s.streamName, startID, mq.DefaultBlockTimeout)
 	if err != nil {
 		return "", "", err
 	}
@@ -260,7 +260,7 @@ const maxTaskOutputBatch = 64
 //   - mq: 消息队列
 //   - runner: 任务运行器
 //   - registry: 任务注册表（可选，为 nil 时使用全局默认注册表）
-func NewRedisStreamTask(mq external.TaskMessageQueue, runner TaskRunner, registry ...TaskRegistryInterface) *RedisStreamTask {
+func NewRedisStreamTask(mq mq.TaskMessageQueue, runner TaskRunner, registry ...TaskRegistryInterface) *RedisStreamTask {
 	taskID := uuid.New().String()
 
 	// 如果没有传入注册表，使用全局默认注册表（向后兼容）
@@ -454,14 +454,14 @@ func (t *RedisStreamTask) setStreamRetention() {
 	defer cancel()
 
 	streams := []struct {
-		queue      external.TaskMessageQueue
+		queue      mq.TaskMessageQueue
 		streamName string
 	}{
 		{queue: t.inputStream, streamName: t.inputStreamName()},
 		{queue: t.outputStream, streamName: t.outputStreamName()},
 	}
 	for _, stream := range streams {
-		if err := stream.queue.SetRetention(ctx, stream.streamName, external.CompletedStreamRetention()); err != nil {
+		if err := stream.queue.SetRetention(ctx, stream.streamName, mq.CompletedStreamRetention()); err != nil {
 			logger.Warn("设置任务流完成保留时间失败",
 				logger.String("task_id", t.id),
 				logger.String("stream", stream.streamName),
@@ -511,14 +511,14 @@ func (t *RedisStreamTask) GetOutput(ctx context.Context, startID string, blockTi
 
 // ReadTaskOutput 从任务输出流读取事件，不要求任务仍在内存注册表中。
 // 任务完成后 runner 会被释放，但 Redis 保留窗口内仍允许 SSE 续读。
-func ReadTaskOutput(ctx context.Context, mq external.TaskMessageQueue, taskID, startID string, blockTimeout ...int) ([]*model.Event, error) {
+func ReadTaskOutput(ctx context.Context, mq mq.TaskMessageQueue, taskID, startID string, blockTimeout ...int) ([]*model.Event, error) {
 	if mq == nil {
 		return nil, fmt.Errorf("task message queue is nil")
 	}
 	return readTaskOutput(ctx, mq, taskOutputStreamName(taskID), startID, blockTimeout...)
 }
 
-func readTaskOutput(ctx context.Context, mq external.TaskMessageQueue, streamName, startID string, blockTimeout ...int) ([]*model.Event, error) {
+func readTaskOutput(ctx context.Context, queue mq.TaskMessageQueue, streamName, startID string, blockTimeout ...int) ([]*model.Event, error) {
 	ms := 0
 	if len(blockTimeout) > 0 {
 		ms = blockTimeout[0]
@@ -528,7 +528,7 @@ func readTaskOutput(ctx context.Context, mq external.TaskMessageQueue, streamNam
 	if ms > 0 {
 		timeout = time.Duration(ms) * time.Millisecond
 	} else {
-		timeout = external.DefaultBlockTimeout
+		timeout = mq.DefaultBlockTimeout
 	}
 
 	if startID == "" {
@@ -537,7 +537,7 @@ func readTaskOutput(ctx context.Context, mq external.TaskMessageQueue, streamNam
 	if !ValidStreamID(startID) {
 		return nil, fmt.Errorf("invalid stream cursor %q", startID)
 	}
-	if batchMQ, ok := mq.(external.BatchMessageQueue); ok {
+	if batchMQ, ok := queue.(mq.BatchMessageQueue); ok {
 		messages, err := batchMQ.GetBlockingBatch(ctx, streamName, startID, maxTaskOutputBatch, timeout)
 		if err != nil {
 			return nil, err
@@ -545,18 +545,18 @@ func readTaskOutput(ctx context.Context, mq external.TaskMessageQueue, streamNam
 		return parseTaskOutputMessages(messages)
 	}
 
-	id, data, err := mq.GetBlocking(ctx, streamName, startID, timeout)
+	id, data, err := queue.GetBlocking(ctx, streamName, startID, timeout)
 	if err != nil {
 		return nil, err
 	}
 	if data == nil {
 		return nil, nil
 	}
-	return parseTaskOutputMessages([]external.StreamMessage{{ID: id, Data: data}})
+	return parseTaskOutputMessages([]mq.StreamMessage{{ID: id, Data: data}})
 }
 
 // parseTaskOutputMessages 将队列消息转换为领域事件，并保持流游标顺序。
-func parseTaskOutputMessages(messages []external.StreamMessage) ([]*model.Event, error) {
+func parseTaskOutputMessages(messages []mq.StreamMessage) ([]*model.Event, error) {
 	events := make([]*model.Event, 0, len(messages))
 	for _, message := range messages {
 		if message.Data == nil {

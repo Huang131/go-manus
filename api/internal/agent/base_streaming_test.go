@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 )
@@ -13,7 +13,7 @@ type streamingAgentLLM struct {
 	mockLLM
 }
 
-func (m *streamingAgentLLM) Stream(context.Context, *external.LLMRequest) (<-chan llmcore.LLMDelta, error) {
+func (m *streamingAgentLLM) Stream(context.Context, *llm.LLMRequest) (<-chan llmcore.LLMDelta, error) {
 	ch := make(chan llmcore.LLMDelta, 3)
 	ch <- llmcore.LLMDelta{ContentText: "你"}
 	ch <- llmcore.LLMDelta{ContentText: "好"}

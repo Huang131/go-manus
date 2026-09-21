@@ -8,16 +8,16 @@ import (
 	"time"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
-	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 type connectionTestLLM struct {
-	invoke func(*external.LLMRequest) (*llmcore.LLMResponse, error)
+	invoke func(*llm.LLMRequest) (*llmcore.LLMResponse, error)
 }
 
-func (c *connectionTestLLM) Invoke(_ context.Context, req *external.LLMRequest) (*llmcore.LLMResponse, error) {
+func (c *connectionTestLLM) Invoke(_ context.Context, req *llm.LLMRequest) (*llmcore.LLMResponse, error) {
 	return c.invoke(req)
 }
 func (c *connectionTestLLM) ModelName() string    { return "demo" }
@@ -38,9 +38,9 @@ func connectionTestModel() *model.LLMModel {
 // TestLLMModelService_Test_SendsMinimalRequest 验证连接测试只发一条最小 prompt，
 // 不带 tools / response_format——这是"连接测试"与"真实对话"的关键区别。
 func TestLLMModelService_Test_SendsMinimalRequest(t *testing.T) {
-	var gotReq *external.LLMRequest
-	svc := NewLLMModelServiceWithLLMFactory(NewMockLLMModelRepository(), func(_ *external.LLMRuntimeConfig) external.LLM {
-		return &connectionTestLLM{invoke: func(req *external.LLMRequest) (*llmcore.LLMResponse, error) {
+	var gotReq *llm.LLMRequest
+	svc := NewLLMModelServiceWithLLMFactory(NewMockLLMModelRepository(), func(_ *llm.LLMRuntimeConfig) llm.LLM {
+		return &connectionTestLLM{invoke: func(req *llm.LLMRequest) (*llmcore.LLMResponse, error) {
 			gotReq = req
 			return &llmcore.LLMResponse{Message: llmcore.Message{ContentText: "连接成功"}}, nil
 		}}
@@ -69,8 +69,8 @@ func TestLLMModelService_Test_SendsMinimalRequest(t *testing.T) {
 // TestLLMModelService_Test_ReturnsResponseAndLatency 验证返回体透传内容与模型名，
 // 且 LatencyMS 确实测量了调用耗时（mock 内 sleep 10ms）。
 func TestLLMModelService_Test_ReturnsResponseAndLatency(t *testing.T) {
-	svc := NewLLMModelServiceWithLLMFactory(NewMockLLMModelRepository(), func(_ *external.LLMRuntimeConfig) external.LLM {
-		return &connectionTestLLM{invoke: func(_ *external.LLMRequest) (*llmcore.LLMResponse, error) {
+	svc := NewLLMModelServiceWithLLMFactory(NewMockLLMModelRepository(), func(_ *llm.LLMRuntimeConfig) llm.LLM {
+		return &connectionTestLLM{invoke: func(_ *llm.LLMRequest) (*llmcore.LLMResponse, error) {
 			time.Sleep(10 * time.Millisecond)
 			return &llmcore.LLMResponse{Message: llmcore.Message{ContentText: "连接成功"}}, nil
 		}}
@@ -106,8 +106,8 @@ func TestLLMModelService_Test_RequiresAPIKey(t *testing.T) {
 // TestLLMModelService_Test_MapsProviderAuthError 验证 Test 把 Invoke 的错误接到了
 // mapModelTestError 上（映射表本身由 TestMapModelTestError 逐项覆盖）。
 func TestLLMModelService_Test_MapsProviderAuthError(t *testing.T) {
-	svc := NewLLMModelServiceWithLLMFactory(NewMockLLMModelRepository(), func(_ *external.LLMRuntimeConfig) external.LLM {
-		return &connectionTestLLM{invoke: func(_ *external.LLMRequest) (*llmcore.LLMResponse, error) {
+	svc := NewLLMModelServiceWithLLMFactory(NewMockLLMModelRepository(), func(_ *llm.LLMRuntimeConfig) llm.LLM {
+		return &connectionTestLLM{invoke: func(_ *llm.LLMRequest) (*llmcore.LLMResponse, error) {
 			return nil, &llmcore.ProviderError{Kind: llmcore.KindAuth, Message: "invalid api key"}
 		}}
 	})

@@ -4,17 +4,17 @@ import (
 	"context"
 	"encoding/base64"
 
-	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/sandbox"
 )
 
 // BrowserTool 浏览器工具
 type BrowserTool struct {
-	browser external.Browser
+	browser sandbox.Browser
 }
 
 // NewBrowserTool 创建浏览器工具
-func NewBrowserTool(browser external.Browser) *BrowserTool {
+func NewBrowserTool(browser sandbox.Browser) *BrowserTool {
 	return &BrowserTool{browser: browser}
 }
 

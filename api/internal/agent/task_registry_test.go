@@ -4,13 +4,13 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/mq"
 )
 
 // TestDefaultTaskRegistry_Register 测试默认注册表的注册功能
 func TestDefaultTaskRegistry_Register(t *testing.T) {
 	registry := NewDefaultTaskRegistry()
-	mq := &external.RedisStreamMessageQueue{}
+	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 	runner := &mockTaskRunner{}
 
@@ -34,7 +34,7 @@ func TestDefaultTaskRegistry_Register(t *testing.T) {
 // TestDefaultTaskRegistry_Unregister 测试默认注册表的移除功能
 func TestDefaultTaskRegistry_Unregister(t *testing.T) {
 	registry := NewDefaultTaskRegistry()
-	mq := &external.RedisStreamMessageQueue{}
+	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 	runner := &mockTaskRunner{}
 
@@ -63,7 +63,7 @@ func TestDefaultTaskRegistry_Unregister(t *testing.T) {
 // TestDefaultTaskRegistry_List 测试列出所有任务
 func TestDefaultTaskRegistry_List(t *testing.T) {
 	registry := NewDefaultTaskRegistry()
-	mq := &external.RedisStreamMessageQueue{}
+	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 
 	// 创建多个任务
@@ -85,7 +85,7 @@ func TestDefaultTaskRegistry_List(t *testing.T) {
 // TestDefaultTaskRegistry_Count 测试任务计数
 func TestDefaultTaskRegistry_Count(t *testing.T) {
 	registry := NewDefaultTaskRegistry()
-	mq := &external.RedisStreamMessageQueue{}
+	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 
 	// 初始状态
@@ -115,7 +115,7 @@ func TestDefaultTaskRegistry_Count(t *testing.T) {
 // TestDefaultTaskRegistry_Clear 测试清空注册表
 func TestDefaultTaskRegistry_Clear(t *testing.T) {
 	registry := NewDefaultTaskRegistry()
-	mq := &external.RedisStreamMessageQueue{}
+	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 
 	// 创建多个任务
@@ -136,7 +136,7 @@ func TestDefaultTaskRegistry_Clear(t *testing.T) {
 // TestDefaultTaskRegistry_ConcurrentAccess 测试并发访问
 func TestDefaultTaskRegistry_ConcurrentAccess(t *testing.T) {
 	registry := NewDefaultTaskRegistry()
-	mq := &external.RedisStreamMessageQueue{}
+	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 
 	var wg sync.WaitGroup
@@ -186,7 +186,7 @@ func TestDefaultTaskRegistry_ConcurrentAccess(t *testing.T) {
 func TestRedisStreamTask_WithCustomRegistry(t *testing.T) {
 	// 创建自定义注册表
 	customRegistry := NewDefaultTaskRegistry()
-	mq := &external.RedisStreamMessageQueue{}
+	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 	runner := &mockTaskRunner{}
 
@@ -205,7 +205,7 @@ func TestRedisStreamTask_WithCustomRegistry(t *testing.T) {
 // TestRedisStreamTask_RegistryNotNil 测试任务持有正确的注册表引用
 func TestRedisStreamTask_RegistryNotNil(t *testing.T) {
 	registry := NewDefaultTaskRegistry()
-	mq := &external.RedisStreamMessageQueue{}
+	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 	runner := &mockTaskRunner{}
 
@@ -225,7 +225,7 @@ func TestNewRedisStreamTask_DefaultRegistry(t *testing.T) {
 	// 清理默认注册表
 	defaultTaskRegistry.Clear()
 
-	mq := &external.RedisStreamMessageQueue{}
+	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 	runner := &mockTaskRunner{}
 
@@ -246,7 +246,7 @@ func TestNewRedisStreamTask_DefaultRegistry(t *testing.T) {
 // 清理那些通过其他方式（如外部超时）标记为完成但尚未从注册表移除的任务
 func TestDefaultTaskRegistry_CleanupCompleted(t *testing.T) {
 	registry := NewDefaultTaskRegistry()
-	mq := &external.RedisStreamMessageQueue{}
+	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 
 	// 创建多个任务
@@ -281,7 +281,7 @@ func TestDefaultTaskRegistry_CleanupCompleted(t *testing.T) {
 
 func TestDefaultTaskRegistry_CleanupCompletedWaitsForFinished(t *testing.T) {
 	registry := NewDefaultTaskRegistry()
-	task := NewRedisStreamTask(&mockMQWrapper{mq: &external.RedisStreamMessageQueue{}}, &mockTaskRunner{}, registry)
+	task := NewRedisStreamTask(&mockMQWrapper{mq: &mq.RedisStreamMessageQueue{}}, &mockTaskRunner{}, registry)
 
 	task.finish("test task done")
 	if cleaned := registry.CleanupCompleted(); cleaned != 0 {
@@ -300,7 +300,7 @@ func TestDefaultTaskRegistry_CleanupCompletedWaitsForFinished(t *testing.T) {
 // TestDefaultTaskRegistry_DoubleUnregister 测试重复移除任务不会 panic
 func TestDefaultTaskRegistry_DoubleUnregister(t *testing.T) {
 	registry := NewDefaultTaskRegistry()
-	mq := &external.RedisStreamMessageQueue{}
+	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 	runner := &mockTaskRunner{}
 

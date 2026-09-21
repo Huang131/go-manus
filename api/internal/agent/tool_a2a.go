@@ -6,7 +6,7 @@ import (
 	"github.com/bytedance/sonic"
 	"sync"
 
-	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/a2a"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
@@ -15,14 +15,14 @@ import (
 // 参考 Python 版本的 A2ATool
 type A2ATool struct {
 	mu      sync.RWMutex
-	manager *external.A2AClientManager
+	manager *a2a.A2AClientManager
 	config  *A2AConfig
 }
 
 // NewA2ATool 创建 A2A 工具
 func NewA2ATool() *A2ATool {
 	return &A2ATool{
-		manager: external.NewA2AClientManager(),
+		manager: a2a.NewA2AClientManager(),
 	}
 }
 
@@ -102,11 +102,13 @@ func (t *A2ATool) listAgents(ctx context.Context, params map[string]interface{})
 	// 重组结构，将 id 填充到 agent_card 中
 	agentCards := make([]map[string]interface{}, 0, len(cards))
 	for id, card := range cards {
+		// 端点取 ResolveEndpoint，兼容 v1.0（supportedInterfaces）与 v0.3（根层 URL）。
+		endpoint, _, _ := card.ResolveEndpoint()
 		agentCard := map[string]interface{}{
 			"id":          id,
 			"name":        card.Name,
 			"description": card.Description,
-			"url":         card.URL,
+			"url":         endpoint,
 			"version":     card.Version,
 			"enabled":     card.Enabled,
 		}
@@ -173,53 +175,16 @@ func (t *A2ATool) callAgent(ctx context.Context, params map[string]interface{}) 
 		return model.NewToolError(err.Error()), nil
 	}
 
-	// 处理结果
-	if !result.Success {
-		return model.NewToolError(result.Message), nil
-	}
-
 	// 提取响应文本
-	responseText := t.extractResponseText(result.Data)
+	responseText := result.ExtractText()
+	if responseText == "" {
+		responseText = "调用成功，但无返回内容"
+	}
 
 	return model.NewToolResultWithMessage(
 		responseText,
-		result.Data,
+		result,
 	), nil
-}
-
-// extractResponseText 从 A2A 响应中提取文本内容
-func (t *A2ATool) extractResponseText(data interface{}) string {
-	if data == nil {
-		return "调用成功，但无返回内容"
-	}
-
-	// 如果是 map，尝试提取文本
-	if dataMap, ok := data.(map[string]interface{}); ok {
-		// 尝试从 result.message.parts 中提取文本
-		if result, ok := dataMap["result"].(map[string]interface{}); ok {
-			if message, ok := result["message"].(map[string]interface{}); ok {
-				if parts, ok := message["parts"].([]interface{}); ok {
-					var textBuilder string
-					for _, part := range parts {
-						if partMap, ok := part.(map[string]interface{}); ok {
-							if text, ok := partMap["text"].(string); ok {
-								textBuilder += text
-							}
-						}
-					}
-					if textBuilder != "" {
-						return textBuilder
-					}
-				}
-			}
-		}
-
-		// 尝试直接返回 JSON；序列化失败时返回明确的可读结果，避免静默空字符串。
-		return marshalResponseText(data)
-	}
-
-	// 其他类型尝试 JSON 序列化
-	return marshalResponseText(data)
 }
 
 func marshalResponseText(data interface{}) string {
@@ -243,7 +208,7 @@ func (t *A2ATool) Initialize(ctx context.Context, cfg *A2AConfig) error {
 	t.config = cfg
 
 	// 构建服务器配置
-	servers := make([]external.A2AServerConfig, 0, len(cfg.Agents))
+	servers := make([]a2a.A2AServerConfig, 0, len(cfg.Agents))
 	for _, agent := range cfg.Agents {
 		// 从 URL 中提取 base URL（去掉路径）
 		baseURL := agent.URL
@@ -251,7 +216,7 @@ func (t *A2ATool) Initialize(ctx context.Context, cfg *A2AConfig) error {
 			baseURL = baseURL[:len(baseURL)-1]
 		}
 
-		servers = append(servers, external.A2AServerConfig{
+		servers = append(servers, a2a.A2AServerConfig{
 			ID:      agent.Name, // 使用名称作为唯一 ID
 			BaseURL: baseURL,
 			Enabled: true,
@@ -259,7 +224,7 @@ func (t *A2ATool) Initialize(ctx context.Context, cfg *A2AConfig) error {
 	}
 
 	// 创建客户端管理器配置
-	config := &external.A2AClientManagerConfig{
+	config := &a2a.A2AClientManagerConfig{
 		Servers: servers,
 	}
 
@@ -288,7 +253,7 @@ func (t *A2ATool) Cleanup() error {
 }
 
 // GetManager 获取 A2A 客户端管理器（用于测试）
-func (t *A2ATool) GetManager() *external.A2AClientManager {
+func (t *A2ATool) GetManager() *a2a.A2AClientManager {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	return t.manager

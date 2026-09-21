@@ -4,7 +4,8 @@ import (
 	"context"
 	"sync"
 
-	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/sandbox"
+	"github.com/Huang131/go-manus/api/internal/search"
 
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
@@ -16,9 +17,9 @@ import (
 // 服务的其他部分只需调用 Tools() 即可得到当前可用的工具集合。
 type ToolProvider struct {
 	mu           sync.RWMutex
-	sandbox      external.Sandbox
-	browser      external.Browser
-	searchEngine external.SearchEngine
+	sandbox      sandbox.Sandbox
+	browser      sandbox.Browser
+	searchEngine search.SearchEngine
 	mcpTool      *MCPTool
 	a2aTool      *A2ATool
 	retiredMCP   []*MCPTool

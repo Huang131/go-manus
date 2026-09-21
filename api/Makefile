@@ -2,7 +2,20 @@
 # go-manus API Makefile - Go 代码开发和测试
 # ============================================================
 
-.PHONY: help build test test-cover test-integration test-up test-down lint clean run fmt deps deps-view tidy health docker-build
+.PHONY: help build test test-unit test-cover test-component test-api test-external test-race test-integration test-up test-down lint clean run fmt deps deps-view tidy health docker-build
+
+API_TEST_POSTGRES_PORT ?= 15432
+API_TEST_REDIS_PORT ?= 16379
+API_TEST_S3_PORT ?= 19000
+
+export API_TEST_POSTGRES_PORT
+export API_TEST_REDIS_PORT
+export API_TEST_S3_PORT
+export API_TEST_POSTGRES_DSN ?= postgres://postgres:postgres@127.0.0.1:$(API_TEST_POSTGRES_PORT)/manus_test?sslmode=disable
+export API_TEST_REDIS_ADDR ?= 127.0.0.1:$(API_TEST_REDIS_PORT)
+export API_TEST_REDIS_DB ?= 1
+export API_TEST_S3_ENDPOINT ?= http://127.0.0.1:$(API_TEST_S3_PORT)
+export API_TEST_S3_BUCKET ?= go-manus-test-files
 
 # 默认目标
 help:
@@ -14,10 +27,15 @@ help:
 	@echo ""
 	@echo "=== 测试 ==="
 	@echo "  make test          - 运行所有测试"
+	@echo "  make test-unit     - 运行无外部依赖的单元测试"
 	@echo "  make test-cover    - 运行测试 (生成覆盖率报告)"
-	@echo "  make test-up       - 初始化集成测试环境 (创建 manus_test DB 等)"
-	@echo "  make test-integration - 一键运行集成测试 (自动初始化环境)"
-	@echo "  make test-down     - 清理集成测试数据"
+	@echo "  make test-component - 运行真实存储组件测试"
+	@echo "  make test-api      - 运行 HTTP API 集成测试"
+	@echo "  make test-external - 运行 SenseNova 外部服务测试"
+	@echo "  make test-race     - 使用 race detector 运行单元测试"
+	@echo "  make test-integration - 运行全部内部集成测试"
+	@echo "  make test-up       - 启动独立集成测试环境"
+	@echo "  make test-down     - 删除独立集成测试环境"
 	@echo ""
 	@echo "=== 代码质量 ==="
 	@echo "  make lint          - 代码检查 (go vet + golangci-lint)"
@@ -55,6 +73,14 @@ test:
 	@echo "运行测试..."
 	go test -v -cover ./...
 
+test-unit:
+	@echo "运行单元测试..."
+	go test ./...
+
+test-race:
+	@echo "使用 race detector 运行单元测试..."
+	go test -race ./...
+
 # 带覆盖率测试
 test-cover:
 	@echo "运行测试 (覆盖率)..."
@@ -66,19 +92,37 @@ test-cover:
 # 集成测试命令
 # ============================================================
 
-# 初始化集成测试环境 (在项目根目录执行)
+# 初始化独立集成测试环境
 test-up:
 	@echo "初始化集成测试环境..."
 	cd .. && ./scripts/test-env-up.sh
 
-# 一键运行集成测试 (自动初始化环境后运行测试)
+# 运行全部内部集成测试
 test-integration: test-up
 	@echo "运行集成测试..."
-	go test -tags=integration -v ./tests/...
+	@status=0; go test -tags=integration -v ./tests/... || status=$$?; \
+		if [ $$status -ne 0 ]; then docker compose -f ../docker-compose.test.yml logs --no-color; fi; \
+		$(MAKE) test-down; exit $$status
 
-# 清理集成测试数据 (在项目根目录执行)
+test-component: test-up
+	@echo "运行存储组件测试..."
+	@status=0; go test -tags=integration -v ./tests/... -run '^Test(AppConfigRepo|FileRepo|LLMModelRepo|SessionRepo)_' || status=$$?; \
+		if [ $$status -ne 0 ]; then docker compose -f ../docker-compose.test.yml logs --no-color; fi; \
+		$(MAKE) test-down; exit $$status
+
+test-api: test-up
+	@echo "运行 HTTP API 集成测试..."
+	@status=0; go test -tags=integration -v ./tests/... -run '^Test(AppConfigAPI|ChatEndpoint|FileAPI|HealthEndpoint|LLMModelAPI|ReadFileEndpoint|ReadShellEndpoint|RenameSession|SessionAPI|SessionFilesEndpoint)' || status=$$?; \
+		if [ $$status -ne 0 ]; then docker compose -f ../docker-compose.test.yml logs --no-color; fi; \
+		$(MAKE) test-down; exit $$status
+
+test-external:
+	@echo "运行 SenseNova 外部服务测试..."
+	go test -tags=external -v ./tests/... -run '^TestSenseNova_'
+
+# 删除独立集成测试环境
 test-down:
-	@echo "清理集成测试数据..."
+	@echo "删除集成测试环境..."
 	cd .. && ./scripts/test-env-down.sh
 
 # ============================================================

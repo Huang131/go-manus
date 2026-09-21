@@ -12,22 +12,22 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
-	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
 )
 
 // HealthInvalidator 失效路由器内存健康缓存的最小接口。
-// *external.RoutedLLM 实现了它；编辑/删除模型后调用，使“编辑即新模型”立即生效。
+// *llm.RoutedLLM 实现了它；编辑/删除模型后调用，使“编辑即新模型”立即生效。
 type HealthInvalidator interface {
 	InvalidateHealth(id string)
 }
 
 // RuntimeHealthReader 读取路由器内存中的实时健康快照的最小接口。
-// *external.RoutedLLM 实现了它；API 层展示实时健康状态时调用。
+// *llm.RoutedLLM 实现了它；API 层展示实时健康状态时调用。
 type RuntimeHealthReader interface {
-	GetHealth(id string) external.LLMRuntimeHealth
+	GetHealth(id string) llm.LLMRuntimeHealth
 }
 
 // LLMModelService 多模型服务接口
@@ -55,20 +55,20 @@ type LLMModelService interface {
 type DefaultLLMModelService struct {
 	repo              repository.LLMModelRepository
 	defaultMu         sync.Mutex
-	llmFactory        external.LLMClientFactory
+	llmFactory        llm.LLMClientFactory
 	healthInvalidator HealthInvalidator
 	healthReader      RuntimeHealthReader
 }
 
 // NewLLMModelService 创建多模型服务
 func NewLLMModelService(repo repository.LLMModelRepository) LLMModelService {
-	return &DefaultLLMModelService{repo: repo, llmFactory: external.NewLLMClient}
+	return &DefaultLLMModelService{repo: repo, llmFactory: llm.NewLLMClient}
 }
 
 // NewLLMModelServiceWithLLMFactory 允许测试注入客户端，避免测试依赖外部网络。
-func NewLLMModelServiceWithLLMFactory(repo repository.LLMModelRepository, factory external.LLMClientFactory) LLMModelService {
+func NewLLMModelServiceWithLLMFactory(repo repository.LLMModelRepository, factory llm.LLMClientFactory) LLMModelService {
 	if factory == nil {
-		factory = external.NewLLMClient
+		factory = llm.NewLLMClient
 	}
 	return &DefaultLLMModelService{repo: repo, llmFactory: factory}
 }
@@ -402,11 +402,11 @@ func (s *DefaultLLMModelService) Test(ctx context.Context, m *model.LLMModel) (*
 	}
 
 	start := time.Now()
-	client := s.llmFactory(external.BuildRuntimeConfigFromModel(m, 15))
+	client := s.llmFactory(llm.BuildRuntimeConfigFromModel(m, 15))
 	if client == nil {
 		return nil, apperr.Unavailable("模型客户端初始化失败")
 	}
-	resp, err := client.Invoke(ctx, &external.LLMRequest{Messages: []llmcore.Message{
+	resp, err := client.Invoke(ctx, &llm.LLMRequest{Messages: []llmcore.Message{
 		{Role: model.RoleUser, ContentText: "连接测试：请只回复连接成功。"},
 	}})
 	if err != nil {

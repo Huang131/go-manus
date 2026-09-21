@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
-	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/model"
 )
 
@@ -304,10 +304,10 @@ func TestLLMModelService_UnsetDefault_ClearsDefaultFlag(t *testing.T) {
 
 // stubRuntimeHealthReader 注入固定健康快照的读取器
 type stubRuntimeHealthReader struct {
-	health external.LLMRuntimeHealth
+	health llm.LLMRuntimeHealth
 }
 
-func (s *stubRuntimeHealthReader) GetHealth(id string) external.LLMRuntimeHealth {
+func (s *stubRuntimeHealthReader) GetHealth(id string) llm.LLMRuntimeHealth {
 	return s.health
 }
 
@@ -340,7 +340,7 @@ func TestLLMModelService_GetRuntimeHealth_ZeroWithoutReader(t *testing.T) {
 func TestLLMModelService_GetRuntimeHealth_ReturnsReaderHealth(t *testing.T) {
 	svc, id := newHealthService(t)
 	svc.SetRuntimeHealthReader(&stubRuntimeHealthReader{
-		health: external.LLMRuntimeHealth{
+		health: llm.LLMRuntimeHealth{
 			Status:           model.HealthStateDegraded,
 			RecentFailures:   2,
 			AverageLatencyMS: 350,

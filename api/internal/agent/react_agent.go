@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/model"
 
 	"github.com/Huang131/go-manus/api/pkg/logger"
@@ -20,7 +20,7 @@ type ReActAgent struct {
 func NewReActAgent(
 	sessionID string,
 	config *AgentConfig,
-	llm external.LLM,
+	llm llm.LLM,
 	tools []Tool,
 ) *ReActAgent {
 	agent := &ReActAgent{}
@@ -128,7 +128,7 @@ func (a *ReActAgent) Summarize(ctx context.Context) (string, []string, bool, err
 
 	// 总结面向用户展示，使用非结构化文本流以便前端按 token 增量渲染。
 	// 若模型仍返回旧版 JSON，下面的解析逻辑仍可兼容并提取 message。
-	resp, emitted, err := a.invokeLLMWithEmission(ctx, &external.LLMRequest{
+	resp, emitted, err := a.invokeLLMWithEmission(ctx, &llm.LLMRequest{
 		Messages: messages,
 	}, true)
 	if err != nil {

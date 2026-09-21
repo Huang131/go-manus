@@ -6,7 +6,7 @@ import (
 	"runtime/debug"
 	"sync"
 
-	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/bytedance/sonic"
 
@@ -20,7 +20,7 @@ type PlannerReActFlow struct {
 	plan      *model.Plan
 	sessionID string
 	config    *AgentConfig
-	llm       external.LLM
+	llm       llm.LLM
 	tools     []Tool
 
 	planner *PlannerAgent
@@ -31,7 +31,7 @@ type PlannerReActFlow struct {
 func NewPlannerReActFlow(
 	sessionID string,
 	config *AgentConfig,
-	llm external.LLM,
+	llm llm.LLM,
 	tools []Tool,
 ) *PlannerReActFlow {
 	flow := &PlannerReActFlow{

@@ -10,13 +10,16 @@ import (
 
 	"github.com/Huang131/go-manus/api/config"
 	"github.com/Huang131/go-manus/api/internal/agent"
-	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/handler"
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
+	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/mq"
 	"github.com/Huang131/go-manus/api/internal/repository"
 	"github.com/Huang131/go-manus/api/internal/router"
+	"github.com/Huang131/go-manus/api/internal/sandbox"
+	"github.com/Huang131/go-manus/api/internal/search"
 	"github.com/Huang131/go-manus/api/internal/service"
 	"github.com/Huang131/go-manus/api/pkg/logger"
 	"github.com/Huang131/go-manus/api/pkg/middleware"
@@ -249,7 +252,7 @@ type App struct {
 
 	// ===== 服务层 =====
 	// 业务逻辑层，组合多个基础组件实现业务功能
-	Sandbox        *external.SandboxClient  // 代码沙箱执行器
+	Sandbox        *sandbox.SandboxClient   // 代码沙箱执行器
 	AgentService   *agent.AgentService      // AI Agent 核心服务
 	SessionService service.SessionService   // 会话管理服务
 	FileService    service.FileService      // 文件管理服务
@@ -449,7 +452,7 @@ func (a *App) initServices(cfg *config.Config) {
 //
 // 返回值：
 //   - 初始化好的 LLM 路由器，如果未启用或未配置则返回 nil
-func (a *App) initLLM(cfg *config.Config, opts Options) external.LLM {
+func (a *App) initLLM(cfg *config.Config, opts Options) llm.LLM {
 	// 前置检查：LLM 未启用或未配置 BaseURL
 	if !opts.EnableLLM || cfg.LLM.BaseURL == "" {
 		return nil
@@ -460,7 +463,7 @@ func (a *App) initLLM(cfg *config.Config, opts Options) external.LLM {
 	a.seedDefaultModelFromEnv(cfg)
 
 	// 创建 fallback 配置（基于配置文件，作为最后的保底）
-	fallbackLLMCfg := &external.LLMRuntimeConfig{
+	fallbackLLMCfg := &llm.LLMRuntimeConfig{
 		Profile:         llmcore.ModelProfile{Protocol: llmcore.ProtocolOpenAICompat},
 		BaseURL:         cfg.LLM.BaseURL,
 		APIKey:          cfg.LLM.APIKey,
@@ -471,31 +474,31 @@ func (a *App) initLLM(cfg *config.Config, opts Options) external.LLM {
 	}
 
 	// 创建路由器：目录返回全部启用模型，Auto 才能真正执行多模型排序与 fallback。
-	routed := external.NewRoutedLLM(
+	routed := llm.NewRoutedLLM(
 		// provider 函数：从数据库动态获取模型配置
-		func(ctx context.Context) ([]*external.LLMRuntimeConfig, error) {
+		func(ctx context.Context) ([]*llm.LLMRuntimeConfig, error) {
 			if a.Postgres != nil && a.repos.llmModel != nil {
 				// 优先级 1：请求上下文指定的 model_id。
 				// 用户明确选定的模型粘性路由：不存在/被禁用时显式报错，
 				// 不允许静默降级到默认模型（对齐 Cursor 的"选定不切换"语义）。
-				if mid := external.ModelIDFromContext(ctx); mid != "" {
+				if mid := llm.ModelIDFromContext(ctx); mid != "" {
 					chosen, err := a.repos.llmModel.GetByID(ctx, mid)
 					if err != nil {
-						return nil, fmt.Errorf("%w: %s: %v", external.ErrModelNotAvailable, mid, err)
+						return nil, fmt.Errorf("%w: %s: %v", llm.ErrModelNotAvailable, mid, err)
 					}
 					if chosen == nil || !chosen.IsEnabled {
-						return nil, fmt.Errorf("%w: %s", external.ErrModelNotAvailable, mid)
+						return nil, fmt.Errorf("%w: %s", llm.ErrModelNotAvailable, mid)
 					}
-					return []*external.LLMRuntimeConfig{external.BuildRuntimeConfigFromModel(chosen, cfg.LLM.ToolCallTimeout)}, nil
+					return []*llm.LLMRuntimeConfig{llm.BuildRuntimeConfigFromModel(chosen, cfg.LLM.ToolCallTimeout)}, nil
 				}
 				models, err := a.repos.llmModel.List(ctx)
 				if err != nil {
 					return nil, err
 				}
-				configs := make([]*external.LLMRuntimeConfig, 0, len(models))
+				configs := make([]*llm.LLMRuntimeConfig, 0, len(models))
 				for _, item := range models {
 					if item != nil && item.IsEnabled {
-						configs = append(configs, external.BuildRuntimeConfigFromModel(item, cfg.LLM.ToolCallTimeout))
+						configs = append(configs, llm.BuildRuntimeConfigFromModel(item, cfg.LLM.ToolCallTimeout))
 					}
 				}
 				return configs, nil
@@ -531,7 +534,7 @@ func (a *App) seedDefaultModelFromEnv(cfg *config.Config) {
 		return
 	}
 
-	protocol := external.ProtocolFromProvider("", cfg.LLM.ModelName, cfg.LLM.BaseURL)
+	protocol := llm.ProtocolFromProvider("", cfg.LLM.ModelName, cfg.LLM.BaseURL)
 	provider := "openai"
 	if protocol == llmcore.ProtocolAnthropic {
 		provider = "anthropic"
@@ -571,10 +574,10 @@ func (a *App) seedDefaultModelFromEnv(cfg *config.Config) {
 // externalClients 收拢 initExternalClients 产出的外部客户端，
 // 避免 6 值返回与 initAgent 的长参数列表（Long Parameter List）。
 type externalClients struct {
-	llm       external.LLM
-	browser   external.Browser
-	search    external.SearchEngine
-	mq        external.TaskMessageQueue
+	llm       llm.LLM
+	browser   sandbox.Browser
+	search    search.SearchEngine
+	mq        mq.TaskMessageQueue
 	mcpConfig *agent.MCPConfig
 	a2aConfig *agent.A2AConfig
 }
@@ -613,18 +616,18 @@ func (a *App) initExternalClients(cfg *config.Config, opts Options) *externalCli
 
 	// Sandbox 沙箱
 	if opts.EnableSandbox {
-		a.Sandbox = external.NewSandboxClient(&cfg.Sandbox)
+		a.Sandbox = sandbox.NewSandboxClient(&cfg.Sandbox)
 	}
 
 	// Browser 浏览器（依赖 Sandbox）
 	if opts.EnableBrowser && a.Sandbox != nil && cfg.Sandbox.Address != "" {
-		clients.browser = external.NewBrowserClient(a.Sandbox)
+		clients.browser = sandbox.NewBrowserClient(a.Sandbox)
 	}
 
 	// Search 搜索引擎（可选，需要配置 API Key）
 	if opts.EnableSearch && (cfg.Search.TavilyAPIKey != "" || cfg.Search.BochaAPIKey != "" ||
 		cfg.Search.GoogleAPIKey != "") {
-		clients.search = external.NewSearchEngine(&external.SearchConfig{
+		clients.search = search.NewSearchEngine(&search.SearchConfig{
 			Provider:       cfg.Search.Provider,
 			GoogleAPIKey:   cfg.Search.GoogleAPIKey,
 			TavilyAPIKey:   cfg.Search.TavilyAPIKey,
@@ -636,7 +639,7 @@ func (a *App) initExternalClients(cfg *config.Config, opts Options) *externalCli
 
 	// MessageQueue 消息队列（使用 Redis Streams）
 	if a.Redis != nil {
-		clients.mq = external.NewRedisStreamMessageQueue(a.Redis.Client)
+		clients.mq = mq.NewRedisStreamMessageQueue(a.Redis.Client)
 	}
 
 	clients.mcpConfig = newMCPConfig(cfg)
@@ -863,7 +866,13 @@ func (a *App) initRoutes(cfg *config.Config, opts Options) {
 	engine.Use(middleware.RequestID(), middleware.Logger(), middleware.Recovery(), middleware.CORS())
 
 	// 创建并注册路由处理器
-	sessionHandler := handler.NewSessionHandler(a.SessionService, a.AgentService, a.Sandbox)
+	// 将可选的沙箱客户端转换为 nil interface，避免 typed-nil 指针绕过
+	// handler 的未配置检查并在调用时触发空指针 panic。
+	var sandboxService sandbox.Sandbox
+	if a.Sandbox != nil {
+		sandboxService = a.Sandbox
+	}
+	sessionHandler := handler.NewSessionHandler(a.SessionService, a.AgentService, sandboxService)
 	fileHandler := handler.NewFileHandler(a.FileService, a.SessionService)
 	statusHandler := handler.NewStatusHandler(a.StatusService)
 	var appConfigHandler *handler.AppConfigHandler

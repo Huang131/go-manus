@@ -5,8 +5,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
+	"github.com/Huang131/go-manus/api/internal/mcp"
 	"github.com/Huang131/go-manus/api/internal/model"
 
 	"github.com/Huang131/go-manus/api/pkg/logger"
@@ -16,14 +16,14 @@ import (
 type MCPTool struct {
 	mu      sync.RWMutex
 	config  *MCPConfig
-	manager *external.MCPClientManager
-	tools   map[string]map[string]external.MCPToolInfo // serverName -> toolName -> toolInfo
+	manager *mcp.MCPClientManager
+	tools   map[string]map[string]mcp.MCPToolInfo // serverName -> toolName -> toolInfo
 }
 
 // NewMCPTool 创建 MCP 工具
 func NewMCPTool() *MCPTool {
 	return &MCPTool{
-		tools: make(map[string]map[string]external.MCPToolInfo),
+		tools: make(map[string]map[string]mcp.MCPToolInfo),
 	}
 }
 
@@ -154,10 +154,10 @@ func (t *MCPTool) Initialize(ctx context.Context, cfg *MCPConfig) error {
 
 	t.config = cfg
 
-	// 将 agent.MCPConfig 转换为 external.MCPConfig
-	externalConfig := &external.MCPConfig{}
+	// 将 agent.MCPConfig 转换为 mcp.MCPConfig
+	externalConfig := &mcp.MCPConfig{}
 	for _, server := range cfg.Servers {
-		externalConfig.Servers = append(externalConfig.Servers, external.MCPConfigServer{
+		externalConfig.Servers = append(externalConfig.Servers, mcp.MCPConfigServer{
 			Name:    server.Name,
 			Command: server.Command,
 			Args:    server.Args,
@@ -166,7 +166,7 @@ func (t *MCPTool) Initialize(ctx context.Context, cfg *MCPConfig) error {
 	}
 
 	// 创建 MCP 客户端管理器
-	t.manager = external.NewMCPClientManager(externalConfig)
+	t.manager = mcp.NewMCPClientManager(externalConfig)
 
 	// 初始化所有 MCP 客户端
 	if err := t.manager.Initialize(ctx); err != nil {
@@ -181,9 +181,9 @@ func (t *MCPTool) Initialize(ctx context.Context, cfg *MCPConfig) error {
 			logger.Warn("获取 MCP 工具列表失败", logger.Err(err))
 		} else {
 			// 转换为 map[string]map[string]MCPToolInfo
-			t.tools = make(map[string]map[string]external.MCPToolInfo)
+			t.tools = make(map[string]map[string]mcp.MCPToolInfo)
 			for serverName, tools := range allTools {
-				t.tools[serverName] = make(map[string]external.MCPToolInfo)
+				t.tools[serverName] = make(map[string]mcp.MCPToolInfo)
 				for _, tool := range tools {
 					t.tools[serverName][tool.Name] = tool
 				}
@@ -282,7 +282,7 @@ func (t *MCPTool) Cleanup() error {
 		t.manager.Close()
 	}
 
-	t.tools = make(map[string]map[string]external.MCPToolInfo)
+	t.tools = make(map[string]map[string]mcp.MCPToolInfo)
 	t.config = nil
 
 	return nil

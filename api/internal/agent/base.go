@@ -10,9 +10,11 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/google/uuid"
 
-	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/jsonx"
+	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/sandbox"
 
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
@@ -22,12 +24,12 @@ type BaseAgent struct {
 	name             string
 	sessionID        string
 	config           *AgentConfig
-	llm              external.LLM
+	llm              llm.LLM
 	tools            []Tool
 	memory           Memory
 	contextBuilder   *ContextBuilder
 	toolRegistry     *ToolRegistry
-	jsonParser       external.JSONParser
+	jsonParser       jsonx.JSONParser
 	eventCh          chan<- model.BaseEvent // 事件输出通道（由 Flow 注入，nil 时静默）
 	shellWatchMu     sync.Mutex
 	shellWatchCancel context.CancelFunc
@@ -35,14 +37,14 @@ type BaseAgent struct {
 }
 
 // NewBaseAgent 创建基础 Agent
-func NewBaseAgent(name, sessionID string, config *AgentConfig, llm external.LLM, tools []Tool) *BaseAgent {
+func NewBaseAgent(name, sessionID string, config *AgentConfig, llm llm.LLM, tools []Tool) *BaseAgent {
 	registry := NewToolRegistry()
 	for _, tool := range tools {
 		registry.Register(tool)
 	}
 
 	// 默认使用带修复功能的 JSON 解析器
-	jsonParser := external.NewRepairJSONParser()
+	jsonParser := jsonx.NewRepairJSONParser()
 
 	return &BaseAgent{
 		name:           name,
@@ -58,14 +60,14 @@ func NewBaseAgent(name, sessionID string, config *AgentConfig, llm external.LLM,
 }
 
 // NewBaseAgentWithParser 创建基础 Agent（带自定义 JSON 解析器）
-func NewBaseAgentWithParser(name, sessionID string, config *AgentConfig, llm external.LLM, tools []Tool, jsonParser external.JSONParser) *BaseAgent {
+func NewBaseAgentWithParser(name, sessionID string, config *AgentConfig, llm llm.LLM, tools []Tool, jsonParser jsonx.JSONParser) *BaseAgent {
 	registry := NewToolRegistry()
 	for _, tool := range tools {
 		registry.Register(tool)
 	}
 
 	if jsonParser == nil {
-		jsonParser = external.NewRepairJSONParser()
+		jsonParser = jsonx.NewRepairJSONParser()
 	}
 
 	return &BaseAgent{
@@ -158,7 +160,7 @@ type InvokeResult struct {
 //
 // 阶段 1d 改造点：messages 类型从 []map 改 []llmcore.Message。
 // llmcore.Message 是值类型，深拷贝 = 元素拷贝即可（不再 map-by-map）。
-func (a *BaseAgent) invokeWithEmptyRetry(ctx context.Context, req *external.LLMRequest, maxRetries int) (*llmcore.LLMResponse, int, error) {
+func (a *BaseAgent) invokeWithEmptyRetry(ctx context.Context, req *llm.LLMRequest, maxRetries int) (*llmcore.LLMResponse, int, error) {
 	if maxRetries < 1 {
 		maxRetries = 1
 	}
@@ -205,15 +207,15 @@ func (a *BaseAgent) invokeWithEmptyRetry(ctx context.Context, req *external.LLMR
 // invokeLLM 优先消费 provider 的 token stream，并在事件通道中发布增量；
 // 不支持流式的 mock/适配器继续走 Invoke，保证 Agent 接口保持兼容。
 // 增量只携带文本，不暴露 reasoning，工具参数仍由聚合后的完整响应处理。
-func (a *BaseAgent) invokeLLM(ctx context.Context, req *external.LLMRequest, publishDeltas bool) (*llmcore.LLMResponse, error) {
+func (a *BaseAgent) invokeLLM(ctx context.Context, req *llm.LLMRequest, publishDeltas bool) (*llmcore.LLMResponse, error) {
 	resp, _, err := a.invokeLLMWithEmission(ctx, req, publishDeltas)
 	return resp, err
 }
 
 // invokeLLMWithEmission 与 invokeLLM 相同，但额外返回本次调用是否已经向事件流发布文本增量。
 // 总结阶段据此避免同时发送 message_delta/message_done 和重复的 message 事件。
-func (a *BaseAgent) invokeLLMWithEmission(ctx context.Context, req *external.LLMRequest, publishDeltas bool) (*llmcore.LLMResponse, bool, error) {
-	streaming, ok := a.llm.(external.StreamingLLM)
+func (a *BaseAgent) invokeLLMWithEmission(ctx context.Context, req *llm.LLMRequest, publishDeltas bool) (*llmcore.LLMResponse, bool, error) {
+	streaming, ok := a.llm.(llm.StreamingLLM)
 	if !ok {
 		resp, err := a.llm.Invoke(ctx, req)
 		return resp, false, err
@@ -312,7 +314,7 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 	// 2. 循环调用 LLM 直到达到最大迭代次数或 LLM 不再调用工具
 	for iteration := 0; iteration < a.config.MaxIterations; iteration++ {
 		// 3. 调用 LLM
-		llmReq := &external.LLMRequest{
+		llmReq := &llm.LLMRequest{
 			Messages: messages,
 			Tools:    a.GetToolsForLLM(),
 		}
@@ -330,7 +332,7 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 					llmcore.Message{Role: model.RoleUser, ContentText: "AI 无响应内容，请继续。"},
 				)
 
-				llmReq = &external.LLMRequest{
+				llmReq = &llm.LLMRequest{
 					Messages: messages,
 					Tools:    a.GetToolsForLLM(),
 				}
@@ -460,7 +462,7 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 
 // shouldPublishDeltas 对非结构化响应发布文本增量。
 // 工具参数始终只在完整流聚合后解析；即使请求携带工具定义，模型返回的自然语言内容仍可即时展示。
-func shouldPublishDeltas(req *external.LLMRequest) bool {
+func shouldPublishDeltas(req *llm.LLMRequest) bool {
 	return req != nil && req.ResponseFormat == nil
 }
 
@@ -562,7 +564,7 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 		if action, _ := arguments["action"].(string); action == "exec" {
 			if sessionID, _ := arguments["session_id"].(string); sessionID != "" {
 				if data, ok := result.Data.(map[string]interface{}); ok && data["status"] == "running" {
-					if sh, ok := tool.(interface{ Sandbox() external.Sandbox }); ok && sh.Sandbox() != nil {
+					if sh, ok := tool.(interface{ Sandbox() sandbox.Sandbox }); ok && sh.Sandbox() != nil {
 						a.startShellWatch(ctx, sh.Sandbox(), sessionID)
 					}
 				}
@@ -605,7 +607,7 @@ func (a *BaseAgent) stopShellWatchLocked() {
 // startShellWatch 在 shell exec 返回 running 后启动后台轮询：
 // 周期性读取沙箱控制台记录并以 ShellOutputEvent 推送增量快照，
 // 进程结束后推一次最终快照再退出。新 watch 会顶掉旧 watch。
-func (a *BaseAgent) startShellWatch(ctx context.Context, sandbox external.Sandbox, sessionID string) {
+func (a *BaseAgent) startShellWatch(ctx context.Context, sandbox sandbox.Sandbox, sessionID string) {
 	a.shellWatchMu.Lock()
 	defer a.shellWatchMu.Unlock()
 

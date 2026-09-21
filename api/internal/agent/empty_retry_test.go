@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 )
@@ -18,12 +18,12 @@ import (
 type mockLLM struct {
 	responses []*llmcore.LLMResponse
 	errs      []error
-	calls     []*external.LLMRequest
+	calls     []*llm.LLMRequest
 }
 
-func (m *mockLLM) Invoke(ctx context.Context, req *external.LLMRequest) (*llmcore.LLMResponse, error) {
+func (m *mockLLM) Invoke(ctx context.Context, req *llm.LLMRequest) (*llmcore.LLMResponse, error) {
 	// 深拷贝请求以避免后续 mutation 干扰断言
-	dup := &external.LLMRequest{
+	dup := &llm.LLMRequest{
 		Messages: append([]llmcore.Message{}, req.Messages...),
 	}
 	if req.Tools != nil {
@@ -64,7 +64,7 @@ func TestBaseAgent_InvokeWithEmptyRetry(t *testing.T) {
 
 	agent := NewBaseAgent("test", "session-1", DefaultAgentConfig(), mock, nil)
 
-	resp, attempts, err := agent.invokeWithEmptyRetry(context.Background(), &external.LLMRequest{
+	resp, attempts, err := agent.invokeWithEmptyRetry(context.Background(), &llm.LLMRequest{
 		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
 	}, 3)
 	if err != nil {
@@ -104,7 +104,7 @@ func TestBaseAgent_InvokeWithEmptyRetry_AllEmpty(t *testing.T) {
 	}
 	agent := NewBaseAgent("test", "session-1", DefaultAgentConfig(), mock, nil)
 
-	_, _, err := agent.invokeWithEmptyRetry(context.Background(), &external.LLMRequest{
+	_, _, err := agent.invokeWithEmptyRetry(context.Background(), &llm.LLMRequest{
 		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
 	}, 2)
 	if err == nil {
@@ -121,7 +121,7 @@ func TestBaseAgent_InvokeWithEmptyRetry_FirstSuccess(t *testing.T) {
 	}
 	agent := NewBaseAgent("test", "session-1", DefaultAgentConfig(), mock, nil)
 
-	resp, attempts, err := agent.invokeWithEmptyRetry(context.Background(), &external.LLMRequest{
+	resp, attempts, err := agent.invokeWithEmptyRetry(context.Background(), &llm.LLMRequest{
 		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
 	}, 3)
 	if err != nil {

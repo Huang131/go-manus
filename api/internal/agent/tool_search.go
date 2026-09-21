@@ -3,18 +3,18 @@ package agent
 import (
 	"context"
 
-	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/search"
 )
 
 // SearchTool 搜索工具
 type SearchTool struct {
-	searchEngine external.SearchEngine
+	searchEngine search.SearchEngine
 	limit        int
 }
 
 // NewSearchTool 创建搜索工具
-func NewSearchTool(searchEngine external.SearchEngine, limit int) *SearchTool {
+func NewSearchTool(searchEngine search.SearchEngine, limit int) *SearchTool {
 	return &SearchTool{searchEngine: searchEngine, limit: limit}
 }
 

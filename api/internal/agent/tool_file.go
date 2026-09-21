@@ -3,17 +3,17 @@ package agent
 import (
 	"context"
 
-	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/sandbox"
 )
 
 // FileTool 文件工具
 type FileTool struct {
-	sandbox external.Sandbox
+	sandbox sandbox.Sandbox
 }
 
 // NewFileTool 创建文件工具
-func NewFileTool(sandbox external.Sandbox) *FileTool {
+func NewFileTool(sandbox sandbox.Sandbox) *FileTool {
 	return &FileTool{sandbox: sandbox}
 }
 

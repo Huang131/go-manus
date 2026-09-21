@@ -6,12 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/sandbox"
 )
 
 type blockingWatchSandbox struct {
-	external.Sandbox
+	sandbox.Sandbox
 	started chan struct{}
 	exited  chan struct{}
 	once    sync.Once

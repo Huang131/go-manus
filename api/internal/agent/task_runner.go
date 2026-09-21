@@ -8,7 +8,7 @@ import (
 
 	"github.com/bytedance/sonic"
 
-	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/google/uuid"
@@ -32,7 +32,7 @@ type AgentTaskRunner struct {
 	mu        sync.Mutex
 	sessionID string
 	config    *AgentConfig
-	llm       external.LLM
+	llm       llm.LLM
 	tools     []Tool
 	flow      *PlannerReActFlow
 	runtime   *SessionRuntime
@@ -43,7 +43,7 @@ type AgentTaskRunnerConfig struct {
 	SessionID       string
 	AgentConfig     *AgentConfig
 	InitialMessages []llmcore.Message
-	LLM             external.LLM
+	LLM             llm.LLM
 	Tools           []Tool
 	Runtime         *SessionRuntime
 }

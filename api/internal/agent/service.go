@@ -10,7 +10,7 @@ import (
 	"github.com/bytedance/sonic"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
-	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 
@@ -68,7 +68,7 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *llmc
 
 	// 用户选定的模型做同步预检：不存在/被禁用时快速失败（404），
 	// 而不是任务启动后在 SSE 里才报错。Auto（空 model_id）跳过。
-	if mid := external.ModelIDFromContext(ctx); mid != "" && s.repos.LLMModel != nil {
+	if mid := llm.ModelIDFromContext(ctx); mid != "" && s.repos.LLMModel != nil {
 		m, err := s.repos.LLMModel.GetByID(ctx, mid)
 		if err != nil {
 			return "", apperr.NotFound("所选模型不存在: " + mid)

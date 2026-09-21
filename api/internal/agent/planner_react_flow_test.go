@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 )
@@ -213,7 +213,7 @@ type mockLLMForTest struct {
 	response string
 }
 
-func (m *mockLLMForTest) Invoke(ctx context.Context, req *external.LLMRequest) (*llmcore.LLMResponse, error) {
+func (m *mockLLMForTest) Invoke(ctx context.Context, req *llm.LLMRequest) (*llmcore.LLMResponse, error) {
 	return &llmcore.LLMResponse{
 		ID: "mock-response",
 		Message: llmcore.Message{

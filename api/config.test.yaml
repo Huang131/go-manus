@@ -1,7 +1,7 @@
 # ============================================================
 # go-manus 测试环境配置
 # ============================================================
-# 用途：集成测试时使用，连接共享开发 Docker 的隔离资源
+# 用途：集成测试时使用，连接 docker-compose.test.yml 的独立资源
 # 数据隔离：
 #   - PostgreSQL: manus_test 数据库（由 scripts/test-env-up.sh 创建）
 #   - Redis: db 1（与开发 db 0 隔离）
@@ -22,7 +22,7 @@ log:
 
 database:
   host: localhost
-  port: 5432              # 复用开发 PostgreSQL 端口
+  port: 15432             # 独立测试 PostgreSQL 端口
   user: postgres
   password: postgres
   database: manus_test    # 与开发数据库 manus 隔离
@@ -31,13 +31,13 @@ database:
 
 redis:
   host: localhost
-  port: 6379              # 复用开发 Redis 端口
+  port: 16379             # 独立测试 Redis 端口
   db: 1                   # 与开发 db 0 隔离
   password: ""
 
 oss:
   provider: minio
-  endpoint: "http://localhost:9000"   # 复用开发 MinIO
+  endpoint: "http://localhost:19000"  # 独立测试 MinIO
   secret_id: "minioadmin"
   secret_key: "minioadmin"
   region: us-east-1

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/mq"
 )
 
 // mockTaskRunner 用于测试的 Mock TaskRunner
@@ -113,7 +113,7 @@ func TestTaskRegistry_Register(t *testing.T) {
 	defaultTaskRegistry.Clear()
 
 	// 创建 mock MessageQueue
-	mq := &external.RedisStreamMessageQueue{}
+	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 
 	// 创建 mock TaskRunner
@@ -146,7 +146,7 @@ func TestTaskRegistry_Unregister(t *testing.T) {
 	defaultTaskRegistry.Clear()
 
 	// 创建 mock MessageQueue
-	mq := &external.RedisStreamMessageQueue{}
+	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 
 	// 创建 mock TaskRunner
@@ -181,7 +181,7 @@ func TestTaskRegistry_Get(t *testing.T) {
 	defaultTaskRegistry.Clear()
 
 	// 创建多个任务
-	mq := &external.RedisStreamMessageQueue{}
+	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 
 	tasks := make([]*RedisStreamTask, 3)
@@ -217,7 +217,7 @@ func TestTaskRegistry_List(t *testing.T) {
 	defaultTaskRegistry.Clear()
 
 	// 创建多个任务
-	mq := &external.RedisStreamMessageQueue{}
+	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 
 	tasks := make([]*RedisStreamTask, 3)
@@ -243,7 +243,7 @@ func TestTaskRegistry_Clear(t *testing.T) {
 	defaultTaskRegistry.Clear()
 
 	// 创建多个任务
-	mq := &external.RedisStreamMessageQueue{}
+	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 
 	for i := 0; i < 3; i++ {
@@ -267,7 +267,7 @@ func TestTaskRegistry_Clear(t *testing.T) {
 // mockMQWrapper 用于测试的 Mock MessageQueue 包装器
 // 由于 RedisStreamMessageQueue 需要实际的 Redis 连接，我们使用一个简化的包装器
 type mockMQWrapper struct {
-	mq             *external.RedisStreamMessageQueue
+	mq             *mq.RedisStreamMessageQueue
 	mu             sync.Mutex
 	retentionCalls []retentionCall
 }
@@ -280,7 +280,7 @@ type batchTaskOutputMQ struct {
 	startID       string
 	count         int
 	timeout       time.Duration
-	messages      []external.StreamMessage
+	messages      []mq.StreamMessage
 }
 
 func (m *batchTaskOutputMQ) GetBlocking(ctx context.Context, streamName, startID string, timeout ...time.Duration) (string, interface{}, error) {
@@ -288,7 +288,7 @@ func (m *batchTaskOutputMQ) GetBlocking(ctx context.Context, streamName, startID
 	return "", nil, fmt.Errorf("unexpected single-message read")
 }
 
-func (m *batchTaskOutputMQ) GetBlockingBatch(_ context.Context, streamName, startID string, count int, timeout ...time.Duration) ([]external.StreamMessage, error) {
+func (m *batchTaskOutputMQ) GetBlockingBatch(_ context.Context, streamName, startID string, count int, timeout ...time.Duration) ([]mq.StreamMessage, error) {
 	m.batchCalls++
 	m.streamName = streamName
 	m.startID = startID
@@ -352,7 +352,7 @@ func TestRedisStreamTask_DoneChan(t *testing.T) {
 	// 清理注册表
 	defaultTaskRegistry.Clear()
 
-	mq := &external.RedisStreamMessageQueue{}
+	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 
 	runner := &mockTaskRunner{}
@@ -383,7 +383,7 @@ func TestRedisStreamTask_Invoke(t *testing.T) {
 	// 清理注册表
 	defaultTaskRegistry.Clear()
 
-	mq := &external.RedisStreamMessageQueue{}
+	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 
 	runner := &mockTaskRunner{}
@@ -452,16 +452,16 @@ func TestRedisStreamTask_FinishDestroysRunner(t *testing.T) {
 
 func TestRedisStreamTask_FinishSetsStreamRetention(t *testing.T) {
 	defaultTaskRegistry.Clear()
-	mq := &mockMQWrapper{}
-	task := NewRedisStreamTask(mq, &mockTaskRunner{})
+	queue := &mockMQWrapper{}
+	task := NewRedisStreamTask(queue, &mockTaskRunner{})
 
 	task.Cancel()
 
-	calls := mq.getRetentionCalls()
+	calls := queue.getRetentionCalls()
 	if len(calls) != 2 {
 		t.Fatalf("retention calls = %d, want 2", len(calls))
 	}
-	wantRetention := external.CompletedStreamRetention()
+	wantRetention := mq.CompletedStreamRetention()
 	for _, call := range calls {
 		if call.retention != wantRetention {
 			t.Fatalf("retention for %s = %s, want %s", call.streamName, call.retention, wantRetention)
@@ -620,7 +620,7 @@ func TestReadTaskOutputAfterTaskUnregistered(t *testing.T) {
 }
 
 func TestReadTaskOutputPrefersBatchQueue(t *testing.T) {
-	mq := &batchTaskOutputMQ{messages: []external.StreamMessage{
+	mq := &batchTaskOutputMQ{messages: []mq.StreamMessage{
 		{ID: "1710000000000-1", Data: `{"type":"message_delta","data":{"delta":"你"}}`},
 		{ID: "1710000000000-2", Data: `{"type":"message_done","data":{"content":"你好"}}`},
 	}}
@@ -647,7 +647,7 @@ func TestReadTaskOutputPrefersBatchQueue(t *testing.T) {
 }
 
 func TestParseTaskOutputMessagesBatchSkipsNilData(t *testing.T) {
-	events, err := parseTaskOutputMessages([]external.StreamMessage{
+	events, err := parseTaskOutputMessages([]mq.StreamMessage{
 		{ID: "1710000000000-1", Data: nil},
 		{ID: "1710000000000-2", Data: map[string]interface{}{
 			"type": model.EventTypeDone,
@@ -667,7 +667,7 @@ func TestRedisStreamTask_Cancel(t *testing.T) {
 	// 清理注册表
 	defaultTaskRegistry.Clear()
 
-	mq := &external.RedisStreamMessageQueue{}
+	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 
 	runner := &mockTaskRunner{}
@@ -705,7 +705,7 @@ func TestRedisStreamTask_PutInput_GetOutput(t *testing.T) {
 	// 清理注册表
 	defaultTaskRegistry.Clear()
 
-	mq := &external.RedisStreamMessageQueue{}
+	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 
 	runner := &mockTaskRunner{}
@@ -751,7 +751,7 @@ func TestRedisStreamTask_ID(t *testing.T) {
 	// 清理注册表
 	defaultTaskRegistry.Clear()
 
-	mq := &external.RedisStreamMessageQueue{}
+	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 
 	runner := &mockTaskRunner{}

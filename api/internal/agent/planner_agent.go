@@ -6,7 +6,7 @@ import (
 	"github.com/bytedance/sonic"
 	"strings"
 
-	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/pkg/logger"
@@ -21,7 +21,7 @@ type PlannerAgent struct {
 func NewPlannerAgent(
 	sessionID string,
 	config *AgentConfig,
-	llm external.LLM,
+	llm llm.LLM,
 	tools []Tool,
 ) *PlannerAgent {
 	agent := &PlannerAgent{}
@@ -57,7 +57,7 @@ func (a *PlannerAgent) CreatePlan(ctx context.Context, input *TaskInput) (*model
 	}
 
 	// 调用 LLM（与原项目对齐：planner 阶段强制 JSON 输出，抑制 CoT 泄露）
-	resp, _, err := a.invokeWithEmptyRetry(ctx, &external.LLMRequest{
+	resp, _, err := a.invokeWithEmptyRetry(ctx, &llm.LLMRequest{
 		Messages: messages,
 		ResponseFormat: &llmcore.ResponseFormat{
 			Type: llmcore.ResponseFormatJSONObject,
@@ -148,7 +148,7 @@ func (a *PlannerAgent) UpdatePlan(ctx context.Context, plan *model.Plan, complet
 	}
 
 	// 调用 LLM（planner 阶段强制 JSON 输出，与原项目对齐）
-	resp, _, err := a.invokeWithEmptyRetry(ctx, &external.LLMRequest{
+	resp, _, err := a.invokeWithEmptyRetry(ctx, &llm.LLMRequest{
 		Messages: messages,
 		ResponseFormat: &llmcore.ResponseFormat{
 			Type: llmcore.ResponseFormatJSONObject,

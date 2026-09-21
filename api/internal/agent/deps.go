@@ -1,8 +1,11 @@
 package agent
 
 import (
-	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llm"
+	"github.com/Huang131/go-manus/api/internal/mq"
 	"github.com/Huang131/go-manus/api/internal/repository"
+	"github.com/Huang131/go-manus/api/internal/sandbox"
+	"github.com/Huang131/go-manus/api/internal/search"
 	"github.com/Huang131/go-manus/api/internal/service"
 )
 
@@ -19,10 +22,10 @@ type Repositories struct {
 // 这些是"可替换的运行时协作者"（LLM、沙箱、浏览器、搜索、存储、消息队列），
 // 与数据访问（Repositories）分属不同层次，收敛后避免服务平铺十几个字段。
 type Capabilities struct {
-	LLM          external.LLM
-	Sandbox      external.Sandbox
-	Browser      external.Browser
-	SearchEngine external.SearchEngine
+	LLM          llm.LLM
+	Sandbox      sandbox.Sandbox
+	Browser      sandbox.Browser
+	SearchEngine search.SearchEngine
 	FileStorage  service.FileStorage
-	MessageQueue external.TaskMessageQueue
+	MessageQueue mq.TaskMessageQueue
 }

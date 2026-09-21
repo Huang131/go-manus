@@ -12,9 +12,10 @@ import (
 
 	"github.com/Huang131/go-manus/api/internal/agent"
 	"github.com/Huang131/go-manus/api/internal/apperr"
-	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/sandbox"
 	"github.com/Huang131/go-manus/api/internal/service"
 	"github.com/Huang131/go-manus/api/pkg/logger"
 	"github.com/Huang131/go-manus/api/pkg/response"
@@ -25,11 +26,11 @@ import (
 type SessionHandler struct {
 	service service.SessionService
 	agent   *agent.AgentService
-	sandbox external.Sandbox
+	sandbox sandbox.Sandbox
 }
 
 // NewSessionHandler 创建会话处理器
-func NewSessionHandler(svc service.SessionService, agentService *agent.AgentService, sandbox external.Sandbox) *SessionHandler {
+func NewSessionHandler(svc service.SessionService, agentService *agent.AgentService, sandbox sandbox.Sandbox) *SessionHandler {
 	return &SessionHandler{
 		service: svc,
 		agent:   agentService,
@@ -275,7 +276,7 @@ func (h *SessionHandler) sendMessage(c *gin.Context, sessionID string, req *chat
 	}
 
 	// AgentService.Chat 内部会创建自己的 context，不受 HTTP 请求影响
-	taskID, err := h.agent.Chat(external.WithModelID(c.Request.Context(), req.ModelID), sessionID, msg)
+	taskID, err := h.agent.Chat(llm.WithModelID(c.Request.Context(), req.ModelID), sessionID, msg)
 	if err != nil {
 		return "", err
 	}
@@ -431,7 +432,7 @@ func (h *SessionHandler) callSandbox(c *gin.Context, sessionID, action string, c
 }
 
 func sandboxAppError(action string, err error) error {
-	statusCode := external.SandboxErrorStatus(err)
+	statusCode := sandbox.SandboxErrorStatus(err)
 	message := action + ": " + err.Error()
 	switch statusCode {
 	case http.StatusBadRequest, http.StatusUnprocessableEntity:
@@ -454,7 +455,7 @@ func sandboxResultError(action string, result *model.ToolResult) error {
 	if result.StatusCode == 0 {
 		return apperr.Internal(result.Message)
 	}
-	return sandboxAppError(action, &external.SandboxAPIError{
+	return sandboxAppError(action, &sandbox.SandboxAPIError{
 		StatusCode: result.StatusCode,
 		Code:       result.StatusCode,
 		Message:    result.Message,

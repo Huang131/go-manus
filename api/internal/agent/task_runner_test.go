@@ -7,10 +7,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
+	"github.com/Huang131/go-manus/api/internal/sandbox"
 )
 
 func TestPopRetryConfig(t *testing.T) {
@@ -217,7 +217,7 @@ func (s *attachmentStorage) Delete(ctx context.Context, key string) error {
 }
 
 type attachmentSandbox struct {
-	external.Sandbox
+	sandbox.Sandbox
 	filepath string
 	filename string
 	data     []byte

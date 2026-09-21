@@ -11,9 +11,9 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Huang131/go-manus/api/internal/agent/attachment"
-	"github.com/Huang131/go-manus/api/internal/external"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
+	"github.com/Huang131/go-manus/api/internal/sandbox"
 	"github.com/Huang131/go-manus/api/internal/service"
 
 	"github.com/Huang131/go-manus/api/pkg/logger"
@@ -27,7 +27,7 @@ type SessionRuntime struct {
 	sessionID   string
 	sessionRep  repository.SessionRepository
 	fileRep     repository.FileRepository
-	sandbox     external.Sandbox
+	sandbox     sandbox.Sandbox
 	fileStorage service.FileStorage
 	attLoader   *attachment.Loader
 }
@@ -37,7 +37,7 @@ func NewSessionRuntime(
 	sessionID string,
 	sessionRep repository.SessionRepository,
 	fileRep repository.FileRepository,
-	sandbox external.Sandbox,
+	sandbox sandbox.Sandbox,
 	fileStorage service.FileStorage,
 ) *SessionRuntime {
 	r := &SessionRuntime{

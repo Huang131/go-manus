@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Huang131/go-manus/api/internal/external"
+	"github.com/Huang131/go-manus/api/pkg/httpconst"
 	"github.com/gin-gonic/gin"
 )
 
@@ -21,7 +21,7 @@ const (
 
 // setSSEHeaders 统一设置 SSE 响应头，避免不同流式接口出现行为漂移。
 func setSSEHeaders(c *gin.Context) {
-	c.Header("Content-Type", external.ContentTypeSSE)
+	c.Header("Content-Type", httpconst.ContentTypeSSE)
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 	c.Header("Transfer-Encoding", "chunked")
