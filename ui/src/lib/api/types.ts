@@ -254,8 +254,9 @@ export type ToolEvent = {
   args: Record<string, unknown>;
   content?: unknown;
   /**
-   * 仅 UI 展示用的数据，来自后端 ToolResult.display（如浏览器截图的 data URI）。
-   * 后端不会把它写进 LLM 上下文，因此这里可以安全承载大体积数据。
+   * 仅 UI 展示用的数据，来自后端 ToolResult.display。
+   * 大体积产物（如浏览器截图）已在后端落对象存储，这里只会出现文件引用
+   * （如 screenshot: { file_id, filename, mime_type, size }），不会出现 base64。
    */
   display?: Record<string, unknown>;
   status?: ToolEventStatus;
@@ -269,7 +270,7 @@ export type ToolResult = {
   success: boolean;
   message: string;
   data?: unknown;
-  /** 仅 UI 展示用的数据（如截图 data URI），不进入 LLM 上下文 */
+  /** 仅 UI 展示用的数据（大体积产物已落存储，这里只有文件引用），不进入 LLM 上下文 */
   display?: Record<string, unknown>;
 };
 

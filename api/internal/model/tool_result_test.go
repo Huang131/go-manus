@@ -64,15 +64,15 @@ func TestToolResult_FromSandbox(t *testing.T) {
 	}
 }
 
-// TestToolResult_LLMJSONStripsDisplay 保证仅用于 UI 的重数据不会进入 LLM 上下文。
+// TestToolResult_LLMJSONStripsDisplay 保证仅用于 UI 的展示数据不会进入 LLM 上下文。
 func TestToolResult_LLMJSONStripsDisplay(t *testing.T) {
 	result := NewToolResultWithMessage("ok", map[string]interface{}{"path": "/tmp/a.png"}).
-		WithDisplay("screenshot", "data:image/png;base64,AAAA")
+		WithDisplay("screenshot", map[string]interface{}{"file_id": "file-1"})
 
-	if !strings.Contains(result.JSON(), "data:image/png;base64,AAAA") {
+	if !strings.Contains(result.JSON(), "file-1") {
 		t.Fatalf("JSON() should keep display for UI, got %s", result.JSON())
 	}
-	if strings.Contains(result.LLMJSON(), "base64") {
+	if strings.Contains(result.LLMJSON(), "file-1") {
 		t.Fatalf("LLMJSON() should strip display, got %s", result.LLMJSON())
 	}
 	if !strings.Contains(result.LLMJSON(), "/tmp/a.png") {
@@ -93,5 +93,25 @@ func TestToolResult_LLMJSONOnNil(t *testing.T) {
 	var result *ToolResult
 	if !strings.Contains(result.LLMJSON(), "success") {
 		t.Fatalf("nil LLMJSON() = %q, want error payload", result.LLMJSON())
+	}
+}
+
+// TestToolResult_ArtifactsStayOutOfJSON 保证二进制展示产物既不会随 JSON() 进事件流，
+// 也不会随 LLMJSON() 进对话历史——它只留在内存里等运行期落存储。
+func TestToolResult_ArtifactsStayOutOfJSON(t *testing.T) {
+	result := NewToolResult(map[string]interface{}{"bytes": 17}).
+		WithArtifact("screenshot", ToolArtifact{
+			Filename: "screenshot.png",
+			MimeType: "image/png",
+			Data:     []byte("PNG-BINARY-MARKER"),
+		})
+
+	for name, payload := range map[string]string{"JSON": result.JSON(), "LLMJSON": result.LLMJSON()} {
+		if strings.Contains(payload, "PNG-BINARY-MARKER") {
+			t.Fatalf("%s() leaked artifact bytes: %s", name, payload)
+		}
+	}
+	if len(result.Artifacts) != 1 {
+		t.Fatalf("Artifacts = %#v, want kept in memory for the runtime to persist", result.Artifacts)
 	}
 }

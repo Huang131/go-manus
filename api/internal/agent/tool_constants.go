@@ -49,9 +49,15 @@ const (
 	BrowserActionConsoleView = "console_view"
 )
 
-// browserDisplayScreenshot 截图在 ToolResult.Display 中的键名：
-// data URI 只给 UI 渲染，不进入 LLM 上下文。
-const browserDisplayScreenshot = "screenshot"
+// browserScreenshotArtifact 截图产物的键名：ToolResult.Artifacts 用它挂载 PNG 字节，
+// 运行期落存储后会在 ToolResult.Display 的同名键上留下文件引用。
+const browserScreenshotArtifact = "screenshot"
+
+// 截图产物落存储时使用的元数据，UI 预览按这些信息渲染。
+const (
+	browserScreenshotFilename = "screenshot.png"
+	browserScreenshotMimeType = "image/png"
+)
 
 // A2A 工具动作。
 const (

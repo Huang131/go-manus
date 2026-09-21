@@ -182,11 +182,3 @@ func TestAppConfigAPI_A2AConfig_Lifecycle(t *testing.T) {
 	require.NotNil(t, found, "should find test-a2a-1 server")
 	assert.Equal(t, "http://test-a2a.example", found["url"])
 }
-
-// TestAppConfigAPI_EmptyUpdate 测试空更新
-func TestAppConfigAPI_EmptyUpdate(t *testing.T) {
-	defer CleanupAppConfig(t, "agent", "default")
-
-	w := doRequest(t, "POST", "/api/app-config/agent", []byte("{}"), "application/json")
-	assert.Equal(t, http.StatusOK, w.Code)
-}

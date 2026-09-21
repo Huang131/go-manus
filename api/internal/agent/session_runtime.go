@@ -123,6 +123,77 @@ func (r *SessionRuntime) SyncFileToStorage(ctx context.Context, filePath string)
 	return nil
 }
 
+// StoreToolArtifacts 把工具产出里的二进制展示数据写入对象存储，
+// 并在 Display 中用轻量文件引用替换掉原始字节。
+//
+// 工具结果会随 tool_called 事件进入 SSE 与事件库，截图之类的 base64 一旦直传
+// 就会让事件体积和 token 双双膨胀。落到对象存储后，事件里只剩文件 ID，
+// UI 走文件下载接口取内容，既有预览又能保持事件可重放。
+//
+// 预览是尽力而为的旁路能力：未配置存储或落盘失败时静默丢弃产物，
+// 不影响工具结果本身。
+func (r *SessionRuntime) StoreToolArtifacts(ctx context.Context, result *model.ToolResult) {
+	if result == nil || len(result.Artifacts) == 0 {
+		return
+	}
+	artifacts := result.Artifacts
+	result.Artifacts = nil
+
+	if r == nil || r.fileStorage == nil || r.fileRep == nil {
+		logger.WarnContext(ctx, "未配置文件存储，丢弃工具展示产物",
+			logger.Int("count", len(artifacts)))
+		return
+	}
+
+	for key, artifact := range artifacts {
+		ref := r.storeArtifact(ctx, key, artifact)
+		if ref == nil {
+			continue
+		}
+		result.WithDisplay(key, ref)
+	}
+}
+
+// storeArtifact 落盘单份产物并登记文件记录，返回 UI 所需的文件引用。
+// 任一步骤失败都只告警并返回 nil，由调用方跳过该项预览。
+func (r *SessionRuntime) storeArtifact(ctx context.Context, key string, artifact model.ToolArtifact) map[string]interface{} {
+	// 用随机文件名避免同会话多次截图互相覆盖：每次调用都应留下独立的一帧。
+	filename := uuid.New().String() + filepath.Ext(artifact.Filename)
+	objectKey := "agent/" + r.sessionID + "/artifacts/" + filename
+
+	if err := r.fileStorage.Upload(
+		ctx, objectKey, bytes.NewReader(artifact.Data), int64(len(artifact.Data)), artifact.MimeType,
+	); err != nil {
+		logger.WarnContext(ctx, "上传工具展示产物失败",
+			logger.String("artifact", key), logger.Err(err))
+		return nil
+	}
+
+	file := &model.File{
+		ID:        uuid.New().String(),
+		SessionID: r.sessionID,
+		Filename:  filename,
+		Filepath:  objectKey,
+		Key:       objectKey,
+		Extension: filepath.Ext(filename),
+		MimeType:  artifact.MimeType,
+		Size:      int64(len(artifact.Data)),
+		CreatedAt: time.Now(),
+	}
+	if err := r.fileRep.Create(ctx, file); err != nil {
+		logger.WarnContext(ctx, "登记工具展示产物失败",
+			logger.String("artifact", key), logger.Err(err))
+		return nil
+	}
+
+	return map[string]interface{}{
+		"file_id":   file.ID,
+		"filename":  file.Filename,
+		"mime_type": file.MimeType,
+		"size":      file.Size,
+	}
+}
+
 // SyncUserAttachmentsToSandbox 将用户上传文件同步到沙箱，并返回可供 LLM 使用的文件路径。
 // 这里不直接把 file_id 透传给模型，因为模型侧只能消费沙箱内可读路径。
 func (r *SessionRuntime) SyncUserAttachmentsToSandbox(ctx context.Context, attachments []model.File) ([]string, error) {

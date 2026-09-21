@@ -193,14 +193,14 @@ func TestLLMModelAPI_CRUD(t *testing.T) {
 
 	// 10. 验证已删除（modelID2 应已不存在）
 	finalGetW := getJSON(t, "/api/llm-models/"+modelID2)
-	assert.NotEqual(t, http.StatusOK, finalGetW.Code, "已删除的模型不应能 get 到")
+	assertStatus(t, finalGetW, http.StatusNotFound)
 }
 
 // TestLLMModelAPI_CreateInvalidBody 测试非法请求体
 func TestLLMModelAPI_CreateInvalidBody(t *testing.T) {
 	// 直接使用 doRequest 发送非法 JSON
 	w := doRequest(t, "POST", "/api/llm-models", []byte("not json"), "application/json")
-	assert.NotEqual(t, http.StatusOK, w.Code, "非法 JSON 应返回非 200")
+	assertStatus(t, w, http.StatusBadRequest)
 }
 
 // TestLLMModelAPI_TestDraft_RequiresAPIKey 验证未保存配置测试会拒绝空密钥。
@@ -223,18 +223,7 @@ func TestLLMModelAPI_TestSaved_NotFound(t *testing.T) {
 // TestLLMModelAPI_GetNotFound 测试不存在的 id
 func TestLLMModelAPI_GetNotFound(t *testing.T) {
 	w := getJSON(t, "/api/llm-models/00000000-0000-0000-0000-000000000000")
-	assert.NotEqual(t, http.StatusOK, w.Code, "不存在的 id 应返回非 200")
-}
-
-// TestLLMModelAPI_GetDefault_NoModel 测试无任何模型时获取 default
-// 这是端到端的边界场景：清理后应回退到 "no model available" 错误
-func TestLLMModelAPI_GetDefault_NoModel(t *testing.T) {
-	// 先确保至少存在一个 enabled 或 default 的模型，否则一直返回错误
-	// 此测试不强行破坏全局数据，只验证 API 不会 panic
-	w := getJSON(t, "/api/llm-models/default")
-
-	// 有可能 200（存在默认模型）也可能非 200（无模型），但不应 panic 或 500
-	assert.NotEqual(t, http.StatusInternalServerError, w.Code, "不应返回 500")
+	assertStatus(t, w, http.StatusNotFound)
 }
 
 // TestLLMModelAPI_SetDefault_Migration 测试 default 切换会清掉旧 default

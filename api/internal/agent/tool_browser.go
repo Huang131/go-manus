@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/base64"
 	"strings"
 
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -135,9 +134,14 @@ func (t *BrowserTool) Invoke(ctx context.Context, params map[string]interface{})
 		if err != nil {
 			return model.NewToolError(err.Error()), err
 		}
-		// 截图字节只进 Display 供 UI 预览：LLM 拿不到 base64，避免重数据污染上下文。
-		result := model.NewToolResult(map[string]interface{}{"bytes": len(data)})
-		return result.WithDisplay(browserDisplayScreenshot, pngDataURI(data)), nil
+		// 截图以二进制产物挂载：运行期落存储后 Display 里只会留下文件引用，
+		// 于是 LLM 上下文、SSE 事件与事件库都不会出现 base64。
+		return model.NewToolResult(map[string]interface{}{"bytes": len(data)}).
+			WithArtifact(browserScreenshotArtifact, model.ToolArtifact{
+				Filename: browserScreenshotFilename,
+				MimeType: browserScreenshotMimeType,
+				Data:     data,
+			}), nil
 
 	case BrowserActionClick:
 		target, toolErr := browserTargetFromParams(params)
@@ -205,9 +209,4 @@ func browserTargetFromParams(params map[string]interface{}) (sandbox.BrowserTarg
 		return target, model.NewToolError("需要 index、selector 或完整坐标之一来定位元素")
 	}
 	return target, nil
-}
-
-// pngDataURI 把 PNG 字节编码为可直接嵌入 img 的 data URI。
-func pngDataURI(data []byte) string {
-	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(data)
 }

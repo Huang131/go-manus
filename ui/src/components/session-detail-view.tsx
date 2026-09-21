@@ -486,6 +486,7 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
           <div className="flex-shrink-0 w-[600px] h-full py-2 pr-2 animate-in slide-in-from-right duration-300">
             <ToolPreviewPanel
               tool={resolvedPreviewTool}
+              sessionId={sessionId}
               onClose={handleClosePreview}
               onJumpToLatest={handleJumpToLatest}
               onOpenVNC={getToolKind(resolvedPreviewTool) === 'browser' ? handleOpenVNC : undefined}

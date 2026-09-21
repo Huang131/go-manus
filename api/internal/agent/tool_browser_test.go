@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"testing"
@@ -68,10 +69,12 @@ func (b *browserStub) ConsoleView(ctx context.Context, maxLines *int) (*model.To
 	return model.NewToolResult("ok"), nil
 }
 
-// TestBrowserToolScreenshotKeepsImageOutOfLLMData 回归：截图必须只进 Display。
-// 截图字节一旦出现在 Data 里就会随 tool 消息回灌模型，把上下文撑爆。
+// TestBrowserToolScreenshotKeepsImageOutOfLLMData 回归：截图既不能进 LLM 上下文，
+// 也不能作为 base64 直接进 JSON()（tool_called 事件会原样序列化它）。
+// 截图只以二进制产物形式挂载，等运行期落存储后换成文件引用。
 func TestBrowserToolScreenshotKeepsImageOutOfLLMData(t *testing.T) {
-	stub := &browserStub{screenshot: []byte("png-bytes")}
+	png := []byte("PNG-BINARY-MARKER")
+	stub := &browserStub{screenshot: png}
 	result, err := NewBrowserTool(stub).Invoke(context.Background(), map[string]interface{}{
 		"action": "screenshot", "full_page": true,
 	})
@@ -82,12 +85,22 @@ func TestBrowserToolScreenshotKeepsImageOutOfLLMData(t *testing.T) {
 		t.Error("Invoke() should forward full_page=true")
 	}
 
-	display, ok := result.Display[browserDisplayScreenshot].(string)
-	if !ok || !strings.HasPrefix(display, "data:image/png;base64,") {
-		t.Fatalf("display screenshot = %v, want png data URI", result.Display)
+	artifact, ok := result.Artifacts[browserScreenshotArtifact]
+	if !ok || !bytes.Equal(artifact.Data, png) {
+		t.Fatalf("artifacts = %#v, want raw png bytes", result.Artifacts)
 	}
-	if strings.Contains(result.LLMJSON(), "base64") {
-		t.Fatalf("LLMJSON leaked screenshot data: %s", result.LLMJSON())
+	if artifact.MimeType != browserScreenshotMimeType || artifact.Filename != browserScreenshotFilename {
+		t.Fatalf("artifact metadata = %+v", artifact)
+	}
+	if _, ok := result.Display[browserScreenshotArtifact]; ok {
+		t.Fatalf("screenshot should not be inlined into display before persistence: %#v", result.Display)
+	}
+	// tool_called 事件走 JSON()：产物字节一旦被序列化就会撑爆事件流与事件库。
+	if strings.Contains(result.JSON(), "PNG-BINARY-MARKER") {
+		t.Fatalf("JSON() leaked screenshot bytes: %s", result.JSON())
+	}
+	if strings.Contains(result.LLMJSON(), "PNG-BINARY-MARKER") {
+		t.Fatalf("LLMJSON leaked screenshot bytes: %s", result.LLMJSON())
 	}
 }
 

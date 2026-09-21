@@ -517,3 +517,133 @@ func TestToolCallingEvents_SSEStream_Failure(t *testing.T) {
 		}
 	}
 }
+
+// artifactMarker 是测试产物里的原始字节载荷：它只应出现在对象存储中，
+// 绝不允许出现在 tool_called 事件里。
+const artifactMarker = "PNG-BINARY-MARKER"
+
+// artifactTool 产出二进制展示产物，用来验证 runner 在序列化前完成"落存储 + 换引用"。
+type artifactTool struct {
+	mockEchoTool
+}
+
+func (t *artifactTool) Name() string { return "artifact_tool" }
+
+func (t *artifactTool) Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
+	return model.NewToolResult(map[string]interface{}{"bytes": len(artifactMarker)}).
+		WithArtifact(browserScreenshotArtifact, model.ToolArtifact{
+			Filename: browserScreenshotFilename,
+			MimeType: browserScreenshotMimeType,
+			Data:     []byte(artifactMarker),
+		}), nil
+}
+
+// TestToolCalledEvent_CarriesArtifactRefInsteadOfBytes 回归 tool_called 事件体积问题：
+// 截图字节必须先落对象存储，事件里只留文件引用。
+// output_stream 与事件库共用同一份 eventJSON（runner 先序列化再分发），
+// 因此这里断言流上的 payload 干净，即可证明落库内容同样干净。
+func TestToolCalledEvent_CarriesArtifactRefInsteadOfBytes(t *testing.T) {
+	defaultTaskRegistry.Clear()
+
+	mock := &mockLLM{
+		responses: []*llmcore.LLMResponse{
+			// planner.CreatePlan
+			{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: `{"message":"已制定计划","goal":"验证产物落存储","title":"产物事件瘦身","language":"zh","steps":[{"id":"s1","description":"调用产物工具"}]}`}},
+			// react.BaseAgent.Invoke：要求调用 artifact_tool
+			{Message: llmcore.Message{
+				Role: model.RoleAssistant,
+				ToolCalls: []llmcore.ToolCall{{
+					ID:   "call-artifact-1",
+					Type: llmcore.ToolTypeFunction,
+					Function: llmcore.ToolCallFunction{
+						Name:      "artifact_tool",
+						Arguments: `{}`,
+					},
+				}},
+			}},
+			// react.BaseAgent.Invoke：工具执行后的最终结果
+			{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: `{"success":true,"result":"产物已生成"}`}},
+			// react.Summarize
+			{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: `{"message":"任务总结","attachments":[]}`}},
+		},
+	}
+
+	storage := &attachmentStorage{}
+	fileRepo := &generatedFileRepository{}
+	mq := newInMemoryMessageQueue()
+	runner := NewAgentTaskRunner(&AgentTaskRunnerConfig{
+		SessionID:   "session-artifact-test",
+		AgentConfig: DefaultAgentConfig(),
+		LLM:         mock,
+		Tools:       []Tool{&artifactTool{}},
+		Runtime:     NewSessionRuntime("session-artifact-test", &mockSessionRepo{}, fileRepo, nil, storage),
+	})
+	task := NewRedisStreamTask(mq, runner)
+	defer task.Cancel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	if err := task.Invoke(ctx); err != nil {
+		t.Fatalf("task.Invoke() error = %v", err)
+	}
+	if _, err := task.PutInput(ctx, &model.MessageEvent{
+		Type:    model.EventTypeMessage,
+		Role:    model.RoleUser,
+		Message: "请生成一张截图",
+	}); err != nil {
+		t.Fatalf("task.PutInput() error = %v", err)
+	}
+
+	gotCalled := false
+	startID := ""
+	for {
+		events, err := task.GetOutput(ctx, startID, 500)
+		if err != nil {
+			t.Fatalf("task.GetOutput() error = %v", err)
+		}
+
+		for _, ev := range events {
+			if ev == nil {
+				continue
+			}
+			startID = ev.ID
+
+			switch ev.Type {
+			case model.EventTypeToolCalled:
+				if strings.Contains(string(ev.Data), artifactMarker) {
+					t.Fatalf("tool_called 事件泄漏了产物原始字节: %s", ev.Data)
+				}
+				var called model.ToolCalledEvent
+				if err := sonic.Unmarshal(ev.Data, &called); err != nil {
+					t.Fatalf("unmarshal ToolCalledEvent error = %v", err)
+				}
+				if called.Result == nil {
+					t.Fatal("ToolCalledEvent.Result = nil, want non-nil")
+				}
+				ref, ok := called.Result.Display[browserScreenshotArtifact].(map[string]interface{})
+				if !ok || ref["file_id"] == "" {
+					t.Fatalf("ToolCalledEvent.Display = %#v, want file reference", called.Result.Display)
+				}
+				gotCalled = true
+
+			case model.EventTypeDone:
+				// done 前必须已收到带文件引用的 tool_called，此时落存储也已完成。
+				if !gotCalled {
+					t.Fatal("done 前未收到 tool_called 事件")
+				}
+				if fileRepo.created == nil || fileRepo.created.SessionID != "session-artifact-test" {
+					t.Fatalf("file record = %+v, want artifact persisted for session", fileRepo.created)
+				}
+				if storage.uploadedSize != int64(len(artifactMarker)) || storage.uploadedType != browserScreenshotMimeType {
+					t.Fatalf("upload = size:%d type:%q, want artifact bytes", storage.uploadedSize, storage.uploadedType)
+				}
+				return
+			}
+		}
+
+		if err := ctx.Err(); err != nil {
+			t.Fatalf("等待 tool_called 事件超时: %v", err)
+		}
+	}
+}

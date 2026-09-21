@@ -204,6 +204,13 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 
 		// 处理 Flow 输出事件
 		for event := range eventChan {
+			// 工具产出的二进制展示数据（如浏览器截图）必须先落存储：
+			// 这里是 SSE 与事件库的唯一汇合点，序列化前把字节换成文件引用，
+			// 事件里才不会出现撑爆体积的 base64。
+			if called, ok := event.(*model.ToolCalledEvent); ok && r.runtime != nil {
+				r.runtime.StoreToolArtifacts(ctx, called.Result)
+			}
+
 			// 业务事件先序列化为 payload
 			eventJSON, err := sonic.Marshal(event)
 			if err != nil {

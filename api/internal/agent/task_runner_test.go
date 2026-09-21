@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 
@@ -275,6 +276,76 @@ func (s *attachmentSandbox) UploadFile(ctx context.Context, fileData []byte, fil
 	s.filename = filename
 	s.data = append([]byte(nil), fileData...)
 	return model.NewToolResult(nil), nil
+}
+
+// TestSessionRuntime_StoreToolArtifactsReplacesBytesWithFileRef 保证 tool_called 事件里
+// 只会出现文件引用：原始截图字节落存储后从结果中清除，事件不再被 base64 撑大。
+func TestSessionRuntime_StoreToolArtifactsReplacesBytesWithFileRef(t *testing.T) {
+	const marker = "PNG-BINARY-MARKER"
+	storage := &attachmentStorage{}
+	fileRepo := &generatedFileRepository{}
+	runtime := NewSessionRuntime("session-1", nil, fileRepo, nil, storage)
+
+	result := model.NewToolResult(map[string]interface{}{"bytes": len(marker)}).
+		WithArtifact(browserScreenshotArtifact, model.ToolArtifact{
+			Filename: browserScreenshotFilename,
+			MimeType: browserScreenshotMimeType,
+			Data:     []byte(marker),
+		})
+
+	runtime.StoreToolArtifacts(context.Background(), result)
+
+	if len(result.Artifacts) != 0 {
+		t.Fatalf("artifacts = %#v, want cleared after persistence", result.Artifacts)
+	}
+	ref, ok := result.Display[browserScreenshotArtifact].(map[string]interface{})
+	if !ok {
+		t.Fatalf("display = %#v, want file reference", result.Display)
+	}
+	fileID, _ := ref["file_id"].(string)
+	if fileID == "" || ref["mime_type"] != browserScreenshotMimeType || ref["size"] != int64(len(marker)) {
+		t.Fatalf("file reference = %#v", ref)
+	}
+	if fileRepo.created == nil {
+		t.Fatal("expected file record for artifact")
+	}
+	if fileRepo.created.SessionID != "session-1" || fileRepo.created.MimeType != browserScreenshotMimeType {
+		t.Fatalf("file record = %+v", fileRepo.created)
+	}
+	if fileRepo.created.Extension != ".png" {
+		t.Fatalf("file extension = %q, want .png", fileRepo.created.Extension)
+	}
+	if storage.uploadedType != browserScreenshotMimeType || storage.uploadedSize != int64(len(marker)) {
+		t.Fatalf("upload = type:%q size:%d", storage.uploadedType, storage.uploadedSize)
+	}
+	if !strings.HasPrefix(storage.uploadedKey, "agent/session-1/artifacts/") || !strings.HasSuffix(storage.uploadedKey, ".png") {
+		t.Fatalf("uploaded key = %q", storage.uploadedKey)
+	}
+
+	// 事件序列化走 JSON()：落盘后必须只带文件引用，不带原始字节。
+	if strings.Contains(result.JSON(), marker) {
+		t.Fatalf("JSON() leaked artifact bytes: %s", result.JSON())
+	}
+	if !strings.Contains(result.JSON(), fileID) {
+		t.Fatalf("JSON() should carry file reference: %s", result.JSON())
+	}
+}
+
+// TestSessionRuntime_StoreToolArtifactsDropsWithoutStorage 存储缺失时预览是尽力而为的旁路能力：
+// 产物直接丢弃，不影响工具结果本身。
+func TestSessionRuntime_StoreToolArtifactsDropsWithoutStorage(t *testing.T) {
+	runtime := NewSessionRuntime("session-1", nil, nil, nil, nil)
+	result := model.NewToolResult(nil).WithArtifact(browserScreenshotArtifact, model.ToolArtifact{
+		Filename: browserScreenshotFilename,
+		MimeType: browserScreenshotMimeType,
+		Data:     []byte("png"),
+	})
+
+	runtime.StoreToolArtifacts(context.Background(), result)
+
+	if len(result.Artifacts) != 0 || len(result.Display) != 0 {
+		t.Fatalf("result = %+v, want artifact dropped without storage", result)
+	}
 }
 
 func TestSessionRuntime_SyncUserAttachmentsToSandbox(t *testing.T) {

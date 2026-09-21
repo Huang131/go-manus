@@ -8,13 +8,27 @@ type ToolResult struct {
 	Success bool        `json:"success"` // 工具是否执行成功
 	Message string      `json:"message"` // 状态描述或错误信息
 	Data    interface{} `json:"data"`    // 工具返回的原始数据，格式由具体工具决定
-	// Display 只承载 UI 展示所需的数据（如浏览器截图的 data URI）。
-	// 它不进入 LLM 上下文：拼装 tool 消息时用 LLMJSON() 序列化，会剔除该字段，
-	// 避免把 base64 之类的重数据写进对话历史、白白消耗 token。
+	// Display 只承载 UI 展示所需的轻量数据。它不进入 LLM 上下文：
+	// 拼装 tool 消息时用 LLMJSON() 序列化，会剔除该字段。
+	// 大体积产物（如浏览器截图）不要直接放这里，改用 Artifacts 挂载。
 	Display map[string]interface{} `json:"display,omitempty"`
+	// Artifacts 承载工具产出的二进制展示产物（如浏览器截图的 PNG 字节）。
+	//
+	// 它既不进 LLM 上下文，也不进事件流：json:"-" 保证它不会被 JSON()/LLMJSON()
+	// 序列化出去。运行期会把每份产物落对象存储，只在 Display 里留下文件引用，
+	// 从而避免 base64 把 SSE 事件和事件库撑大。
+	Artifacts map[string]ToolArtifact `json:"-"`
 	// StatusCode 是外部工具返回的 HTTP/业务状态码，仅供边界层映射错误，
 	// 不暴露给 Agent 事件和 API 响应，避免把传输细节泄漏到业务数据。
 	StatusCode int `json:"-"`
+}
+
+// ToolArtifact 工具产出的二进制展示产物。
+// Filename/MimeType 必须给出：落对象存储时据此推导扩展名与内容类型。
+type ToolArtifact struct {
+	Filename string
+	MimeType string
+	Data     []byte
 }
 
 // WithDisplay 追加一项仅用于 UI 的展示数据，返回自身便于链式调用。
@@ -23,6 +37,16 @@ func (r *ToolResult) WithDisplay(key string, value interface{}) *ToolResult {
 		r.Display = make(map[string]interface{}, 1)
 	}
 	r.Display[key] = value
+	return r
+}
+
+// WithArtifact 挂载一份二进制展示产物，返回自身便于链式调用。
+// 产物不会直接出现在结果里，需由运行期落存储后转为 Display 中的文件引用。
+func (r *ToolResult) WithArtifact(key string, artifact ToolArtifact) *ToolResult {
+	if r.Artifacts == nil {
+		r.Artifacts = make(map[string]ToolArtifact, 1)
+	}
+	r.Artifacts[key] = artifact
 	return r
 }
 

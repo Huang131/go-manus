@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react'
 import type { ToolEvent } from '@/lib/api/types'
+import { fileApi } from '@/lib/api/file'
 import { getToolKind, getFriendlyToolLabel, getArg } from '@/components/tool-use/utils'
 import type { ToolKind } from '@/components/tool-use/utils'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -14,6 +15,8 @@ import { Maximize2, Monitor, Play, Terminal, Globe, Search, FileSearch, Wrench, 
 
 export interface ToolPreviewPanelProps {
   tool: ToolEvent
+  /** 会话 ID：工具产物落存储后事件里只剩文件引用，需凭它会话内下载预览内容 */
+  sessionId: string
   onClose: () => void
   onJumpToLatest?: () => void
   onOpenVNC?: () => void
@@ -22,6 +25,17 @@ export interface ToolPreviewPanelProps {
 type ConsoleRecord = { ps1: string; command: string; output: string }
 
 type SearchResultItem = { url: string; title: string; snippet: string }
+
+/** 后端把大体积产物落对象存储后，Display 里留下的轻量文件引用 */
+type ArtifactRef = { file_id?: string; filename?: string; mime_type?: string; size?: number }
+
+/** 把 Display 中的产物引用解析为会话内的文件下载地址，引用缺失时返回 null */
+function resolveArtifactUrl(ref: unknown, sessionId: string): string | null {
+  if (typeof ref !== 'object' || ref === null) return null
+  const fileId = (ref as ArtifactRef).file_id
+  if (!fileId || !sessionId) return null
+  return fileApi.getFileDownloadUrl(fileId, sessionId)
+}
 
 /* ------------------------------------------------------------------ */
 /*  Content extractors                                                 */
@@ -120,9 +134,9 @@ function ShellPreview({ tool }: { tool: ToolEvent }) {
   )
 }
 
-function BrowserPreview({ tool, onOpenVNC }: { tool: ToolEvent; onOpenVNC?: () => void }) {
-  // 截图 data URI 走后端 ToolResult.display：它只给 UI，不进 LLM 上下文
-  const screenshot = typeof tool.display?.screenshot === 'string' ? tool.display.screenshot : null
+function BrowserPreview({ tool, sessionId, onOpenVNC }: { tool: ToolEvent; sessionId: string; onOpenVNC?: () => void }) {
+  // 截图先落对象存储，display 里只留文件引用；事件流与数据库中不含 base64
+  const screenshotUrl = resolveArtifactUrl(tool.display?.screenshot, sessionId)
   const url = getArg(tool.args, 'url', 'href', 'link')
 
   return (
@@ -134,10 +148,10 @@ function BrowserPreview({ tool, onOpenVNC }: { tool: ToolEvent; onOpenVNC?: () =
         </div>
       )}
       <div className="flex-1 rounded-lg overflow-hidden border min-h-0 relative">
-        {screenshot ? (
+        {screenshotUrl ? (
           <ScrollArea className="h-full">
             <img
-              src={screenshot}
+              src={screenshotUrl}
               alt="浏览器截图"
               className="w-full h-auto"
             />
@@ -323,6 +337,7 @@ function DefaultPreview({ tool }: { tool: ToolEvent }) {
 
 export function ToolPreviewPanel({
   tool,
+  sessionId,
   onClose,
   onJumpToLatest,
   onOpenVNC,
@@ -361,7 +376,7 @@ export function ToolPreviewPanel({
       {/* Content with overlaid jump button */}
       <div className="flex-1 overflow-hidden relative">
         {kind === 'bash' && <ShellPreview tool={tool} />}
-        {kind === 'browser' && <BrowserPreview tool={tool} onOpenVNC={onOpenVNC} />}
+        {kind === 'browser' && <BrowserPreview tool={tool} sessionId={sessionId} onOpenVNC={onOpenVNC} />}
         {kind === 'search' && <SearchPreview tool={tool} />}
         {kind === 'file' && <FileToolPreview tool={tool} />}
         {kind === 'mcp' && <MCPPreview tool={tool} />}

@@ -3,6 +3,7 @@ package handler
 import (
 	"github.com/gin-gonic/gin"
 
+	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/service"
 	"github.com/Huang131/go-manus/api/pkg/response"
@@ -68,7 +69,7 @@ func (h *LLMModelHandler) GetRuntimeHealth(c *gin.Context) {
 func (h *LLMModelHandler) Create(c *gin.Context) {
 	var req model.LLMModelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.FromError(c, err)
+		response.FromError(c, apperr.BadRequest(err.Error()))
 		return
 	}
 	m, err := h.svc.Create(c.Request.Context(), req.ToModel())
@@ -84,7 +85,7 @@ func (h *LLMModelHandler) Update(c *gin.Context) {
 	id := c.Param("id")
 	var req model.LLMModelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.FromError(c, err)
+		response.FromError(c, apperr.BadRequest(err.Error()))
 		return
 	}
 	req.ID = id
@@ -129,7 +130,7 @@ func (h *LLMModelHandler) UnsetDefault(c *gin.Context) {
 func (h *LLMModelHandler) TestDraft(c *gin.Context) {
 	var req model.LLMModelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.FromError(c, err)
+		response.FromError(c, apperr.BadRequest(err.Error()))
 		return
 	}
 	result, err := h.svc.Test(c.Request.Context(), req.ToModel())
