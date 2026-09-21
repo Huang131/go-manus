@@ -7,296 +7,201 @@ import (
 	"testing"
 
 	"github.com/bytedance/sonic"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/pkg/response"
-	"github.com/gin-gonic/gin"
 )
 
-// MockSessionService 用于测试的 Service Mock
-type MockSessionServiceForHandler struct {
-	sessions map[string]*model.Session
+// sessionServiceStub 只返回预设结果并记录 handler 传入的参数。
+// 它不维护 Session 状态，避免在 handler 测试中重写 service 业务语义。
+type sessionServiceStub struct {
+	createResult *model.Session
+	createErr    error
+	getResult    *model.Session
+	getErr       error
+	listResult   []*model.Session
+	listTotal    int
+	listErr      error
+	filesResult  []*model.File
+	filesErr     error
+
+	listLimit      int
+	listOffset     int
+	deletedID      string
+	clearedID      string
+	filesSessionID string
 }
 
-func NewMockSessionServiceForHandler() *MockSessionServiceForHandler {
-	return &MockSessionServiceForHandler{
-		sessions: make(map[string]*model.Session),
-	}
+func (s *sessionServiceStub) CreateSession(context.Context) (*model.Session, error) {
+	return s.createResult, s.createErr
 }
 
-func (m *MockSessionServiceForHandler) CreateSession(ctx context.Context) (*model.Session, error) {
-	session := &model.Session{
-		ID:                 "test-session-id",
-		Title:              "新对话",
-		UnreadMessageCount: 0,
-		Events:             []model.Event{},
-		Status:             model.SessionStatusPending,
-	}
-	m.sessions[session.ID] = session
-	return session, nil
+func (s *sessionServiceStub) GetSession(context.Context, string) (*model.Session, error) {
+	return s.getResult, s.getErr
 }
 
-func (m *MockSessionServiceForHandler) GetSession(ctx context.Context, id string) (*model.Session, error) {
-	session, ok := m.sessions[id]
-	if !ok {
-		// 忠实模拟真实 SessionService：not found 返回 (nil, NotFound)
-		return nil, apperr.NotFound("会话不存在")
-	}
-	// 返回拷贝避免 handler 直接修改 mock 内部状态
-	clone := *session
-	clone.Events = append([]model.Event(nil), session.Events...)
-	return &clone, nil
+func (s *sessionServiceStub) GetAllSessions(context.Context) ([]*model.Session, error) {
+	return s.listResult, s.listErr
 }
 
-func (m *MockSessionServiceForHandler) GetAllSessions(ctx context.Context) ([]*model.Session, error) {
-	result := make([]*model.Session, 0, len(m.sessions))
-	for _, s := range m.sessions {
-		result = append(result, s)
-	}
-	return result, nil
+func (s *sessionServiceStub) ListSessions(_ context.Context, limit, offset int) ([]*model.Session, int, error) {
+	s.listLimit = limit
+	s.listOffset = offset
+	return s.listResult, s.listTotal, s.listErr
 }
 
-func (m *MockSessionServiceForHandler) ListSessions(ctx context.Context, limit, offset int) ([]*model.Session, int, error) {
-	result := make([]*model.Session, 0, len(m.sessions))
-	for _, s := range m.sessions {
-		result = append(result, s)
-	}
-	return result, len(result), nil
-}
-
-func (m *MockSessionServiceForHandler) DeleteSession(ctx context.Context, id string) error {
-	delete(m.sessions, id)
+func (s *sessionServiceStub) DeleteSession(_ context.Context, id string) error {
+	s.deletedID = id
 	return nil
 }
 
-func (m *MockSessionServiceForHandler) ClearUnreadCount(ctx context.Context, id string) error {
-	if session, ok := m.sessions[id]; ok {
-		session.UnreadMessageCount = 0
-	}
+func (s *sessionServiceStub) RenameSession(context.Context, string, string) error {
 	return nil
 }
 
-func (m *MockSessionServiceForHandler) GetSessionFiles(ctx context.Context, id string) ([]*model.File, error) {
-	return []*model.File{}, nil
-}
-
-func (m *MockSessionServiceForHandler) AppendEvent(ctx context.Context, sessionID string, event *model.Event) error {
+func (s *sessionServiceStub) ClearUnreadCount(_ context.Context, id string) error {
+	s.clearedID = id
 	return nil
 }
 
-func (m *MockSessionServiceForHandler) RenameSession(ctx context.Context, id string, title string) error {
+func (s *sessionServiceStub) GetSessionFiles(_ context.Context, id string) ([]*model.File, error) {
+	s.filesSessionID = id
+	return s.filesResult, s.filesErr
+}
+
+func (s *sessionServiceStub) AppendEvent(context.Context, string, *model.Event) error {
 	return nil
 }
 
-func (m *MockSessionServiceForHandler) GetVNCURL(ctx context.Context, sessionID string) (string, error) {
+func (s *sessionServiceStub) GetVNCURL(context.Context, string) (string, error) {
 	return "ws://sandbox.local:5901", nil
 }
 
 func setupRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	return r
+	return gin.New()
+}
+
+func decodeHandlerResponse(t *testing.T, w *httptest.ResponseRecorder) response.Response {
+	t.Helper()
+	var resp response.Response
+	require.NoError(t, sonic.Unmarshal(w.Body.Bytes(), &resp))
+	return resp
 }
 
 func TestSessionHandler_Create(t *testing.T) {
+	svc := &sessionServiceStub{createResult: &model.Session{ID: "session-1", Title: "新对话"}}
 	router := setupRouter()
-	svc := NewMockSessionServiceForHandler()
-	handler := NewSessionHandler(svc, nil, nil)
+	router.POST("/sessions", NewSessionHandler(svc, nil, nil).Create)
 
-	router.POST("/sessions", handler.Create)
-
-	req := httptest.NewRequest(http.MethodPost, "/sessions", nil)
 	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/sessions", nil))
 
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Create() status = %d, want %d", w.Code, http.StatusOK)
-	}
-
-	var resp response.Response
-	if err := sonic.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Failed to unmarshal response: %v", err)
-	}
-
-	if resp.Code != 0 {
-		t.Errorf("Response code = %d, want 0", resp.Code)
-	}
-
+	require.Equal(t, http.StatusOK, w.Code)
+	resp := decodeHandlerResponse(t, w)
+	require.Equal(t, 0, resp.Code)
 	data, ok := resp.Data.(map[string]interface{})
-	if !ok {
-		t.Fatal("Response data should be a map")
-	}
-
-	if data["title"] != "新对话" {
-		t.Errorf("Session title = %s, want 新对话", data["title"])
-	}
+	require.True(t, ok)
+	assert.Equal(t, "新对话", data["title"])
 }
 
 func TestSessionHandler_Get(t *testing.T) {
-	router := setupRouter()
-	svc := NewMockSessionServiceForHandler()
-	handler := NewSessionHandler(svc, nil, nil)
+	t.Run("returns session and clears unread count", func(t *testing.T) {
+		svc := &sessionServiceStub{getResult: &model.Session{ID: "session-1", UnreadMessageCount: 5}}
+		router := setupRouter()
+		router.GET("/sessions/:id", NewSessionHandler(svc, nil, nil).Get)
 
-	// 先创建一个会话
-	svc.CreateSession(context.Background())
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sessions/session-1", nil))
 
-	router.GET("/sessions/:id", handler.Get)
+		require.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, "session-1", svc.clearedID)
+		assert.Equal(t, 0, svc.getResult.UnreadMessageCount)
+	})
 
-	req := httptest.NewRequest(http.MethodGet, "/sessions/test-session-id", nil)
-	w := httptest.NewRecorder()
+	t.Run("maps service not found", func(t *testing.T) {
+		svc := &sessionServiceStub{getErr: apperr.NotFound("会话不存在")}
+		router := setupRouter()
+		router.GET("/sessions/:id", NewSessionHandler(svc, nil, nil).Get)
 
-	router.ServeHTTP(w, req)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sessions/missing", nil))
 
-	if w.Code != http.StatusOK {
-		t.Errorf("Get() status = %d, want %d", w.Code, http.StatusOK)
-	}
-
-	var resp response.Response
-	if err := sonic.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Failed to unmarshal response: %v", err)
-	}
-
-	if resp.Code != 0 {
-		t.Errorf("Response code = %d, want 0", resp.Code)
-	}
-}
-
-func TestSessionHandler_Get_NotFound(t *testing.T) {
-	router := setupRouter()
-	svc := NewMockSessionServiceForHandler()
-	handler := NewSessionHandler(svc, nil, nil)
-
-	router.GET("/sessions/:id", handler.Get)
-
-	req := httptest.NewRequest(http.MethodGet, "/sessions/nonexistent", nil)
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusNotFound {
-		t.Errorf("Get() status = %d, want %d", w.Code, http.StatusNotFound)
-	}
-
-	var resp response.Response
-	if err := sonic.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("Failed to unmarshal response: %v", err)
-	}
-
-	// not found 映射为 404（mock 忠实模拟真实 service 的 NotFound 契约）
-	if resp.Code != http.StatusNotFound {
-		t.Errorf("Response code = %d, want %d", resp.Code, http.StatusNotFound)
-	}
+		assert.Equal(t, http.StatusNotFound, w.Code)
+		assert.Equal(t, http.StatusNotFound, decodeHandlerResponse(t, w).Code)
+	})
 }
 
 func TestSessionHandler_List(t *testing.T) {
-	router := setupRouter()
-	svc := NewMockSessionServiceForHandler()
-	handler := NewSessionHandler(svc, nil, nil)
-
-	// 创建多个会话
-	svc.CreateSession(context.Background())
-	svc.CreateSession(context.Background())
-
-	router.GET("/sessions", handler.List)
-
-	req := httptest.NewRequest(http.MethodGet, "/sessions", nil)
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("List() status = %d, want %d", w.Code, http.StatusOK)
+	tests := []struct {
+		name       string
+		query      string
+		wantStatus int
+		wantLimit  int
+		wantOffset int
+	}{
+		{name: "defaults", wantStatus: http.StatusOK, wantLimit: 20},
+		{name: "explicit pagination", query: "?limit=10&offset=3", wantStatus: http.StatusOK, wantLimit: 10, wantOffset: 3},
+		{name: "invalid limit", query: "?limit=0", wantStatus: http.StatusBadRequest},
+		{name: "invalid offset", query: "?offset=-1", wantStatus: http.StatusBadRequest},
 	}
-}
 
-func TestSessionHandler_List_WithPagination(t *testing.T) {
-	router := setupRouter()
-	svc := NewMockSessionServiceForHandler()
-	handler := NewSessionHandler(svc, nil, nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &sessionServiceStub{listResult: []*model.Session{{ID: "session-1"}}, listTotal: 1}
+			router := setupRouter()
+			router.GET("/sessions", NewSessionHandler(svc, nil, nil).List)
 
-	router.GET("/sessions", handler.List)
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sessions"+tt.query, nil))
 
-	req := httptest.NewRequest(http.MethodGet, "/sessions?limit=10&offset=0", nil)
-	w := httptest.NewRecorder()
-
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("List() status = %d, want %d", w.Code, http.StatusOK)
+			require.Equal(t, tt.wantStatus, w.Code)
+			if tt.wantStatus == http.StatusOK {
+				assert.Equal(t, tt.wantLimit, svc.listLimit)
+				assert.Equal(t, tt.wantOffset, svc.listOffset)
+			}
+		})
 	}
 }
 
 func TestSessionHandler_Delete(t *testing.T) {
+	svc := &sessionServiceStub{}
 	router := setupRouter()
-	svc := NewMockSessionServiceForHandler()
-	handler := NewSessionHandler(svc, nil, nil)
+	router.POST("/sessions/:id/delete", NewSessionHandler(svc, nil, nil).Delete)
 
-	// 先创建一个会话
-	svc.CreateSession(context.Background())
-
-	router.POST("/sessions/:id/delete", handler.Delete)
-
-	req := httptest.NewRequest(http.MethodPost, "/sessions/test-session-id/delete", nil)
 	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/sessions/session-1/delete", nil))
 
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("Delete() status = %d, want %d", w.Code, http.StatusOK)
-	}
-
-	// 验证会话已被删除
-	if len(svc.sessions) != 0 {
-		t.Errorf("Sessions should be empty after delete, got %d", len(svc.sessions))
-	}
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "session-1", svc.deletedID)
 }
 
 func TestSessionHandler_ClearUnread(t *testing.T) {
+	svc := &sessionServiceStub{}
 	router := setupRouter()
-	svc := NewMockSessionServiceForHandler()
-	handler := NewSessionHandler(svc, nil, nil)
+	router.POST("/sessions/:id/clear-unread", NewSessionHandler(svc, nil, nil).ClearUnread)
 
-	// 先创建一个会话
-	svc.CreateSession(context.Background())
-	svc.sessions["test-session-id"].UnreadMessageCount = 5
-
-	router.POST("/sessions/:id/clear-unread", handler.ClearUnread)
-
-	req := httptest.NewRequest(http.MethodPost, "/sessions/test-session-id/clear-unread", nil)
 	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/sessions/session-1/clear-unread", nil))
 
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("ClearUnread() status = %d, want %d", w.Code, http.StatusOK)
-	}
-
-	// 验证未读数已清除
-	if svc.sessions["test-session-id"].UnreadMessageCount != 0 {
-		t.Errorf("UnreadMessageCount = %d, want 0", svc.sessions["test-session-id"].UnreadMessageCount)
-	}
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "session-1", svc.clearedID)
 }
 
 func TestSessionHandler_GetFiles(t *testing.T) {
+	svc := &sessionServiceStub{filesResult: []*model.File{}}
 	router := setupRouter()
-	svc := NewMockSessionServiceForHandler()
-	handler := NewSessionHandler(svc, nil, nil)
+	router.GET("/sessions/:id/files", NewSessionHandler(svc, nil, nil).GetFiles)
 
-	// 先创建一个会话
-	svc.CreateSession(context.Background())
-
-	router.GET("/sessions/:id/files", handler.GetFiles)
-
-	req := httptest.NewRequest(http.MethodGet, "/sessions/test-session-id/files", nil)
 	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sessions/session-1/files", nil))
 
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("GetFiles() status = %d, want %d", w.Code, http.StatusOK)
-	}
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "session-1", svc.filesSessionID)
 }
 
 func TestNewSSEContext_PreservesRequestValuesWithoutCancellation(t *testing.T) {
@@ -308,10 +213,6 @@ func TestNewSSEContext_PreservesRequestValuesWithoutCancellation(t *testing.T) {
 	eventCtx, cancel := newSSEContext(requestCtx)
 	defer cancel()
 
-	if got := eventCtx.Value(key); got != "req-123" {
-		t.Fatalf("request_id value = %v, want req-123", got)
-	}
-	if err := eventCtx.Err(); err != nil {
-		t.Fatalf("event context unexpectedly canceled: %v", err)
-	}
+	assert.Equal(t, "req-123", eventCtx.Value(key))
+	assert.NoError(t, eventCtx.Err())
 }
