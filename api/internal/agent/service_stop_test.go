@@ -83,14 +83,15 @@ func TestAgentService_StopSessionKeepsTaskMappingUntilRunnerExits(t *testing.T) 
 	case <-time.After(time.Second):
 		t.Fatal("task did not finish after runner release")
 	}
-	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
-		svc.mu.RLock()
-		_, mapped = svc.taskBySession["session-1"]
-		svc.mu.RUnlock()
-		if !mapped {
-			return
-		}
-		time.Sleep(time.Millisecond)
+	select {
+	case <-task.FinishedChan():
+	case <-time.After(time.Second):
+		t.Fatal("task did not finish cleanup")
 	}
-	t.Fatal("task mapping remained after runner exit")
+	svc.mu.RLock()
+	_, mapped = svc.taskBySession["session-1"]
+	svc.mu.RUnlock()
+	if mapped {
+		t.Fatal("task mapping remained after runner exit")
+	}
 }

@@ -27,6 +27,8 @@ type mockTaskRunner struct {
 	destroyCalled bool
 	onDoneCalled  bool
 	onDoneTask    *RedisStreamTask
+	invoked       chan struct{}
+	invokeOnce    sync.Once
 }
 
 type panicTaskRunner struct{}
@@ -63,8 +65,9 @@ func (m *mockTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) erro
 	m.invokeTask = task
 	m.mu.Unlock()
 
-	// 模拟执行，阻塞一段时间后返回
-	time.Sleep(100 * time.Millisecond)
+	if m.invoked != nil {
+		m.invokeOnce.Do(func() { close(m.invoked) })
+	}
 	return nil
 }
 
@@ -386,7 +389,7 @@ func TestRedisStreamTask_Invoke(t *testing.T) {
 	mq := &mq.RedisStreamMessageQueue{}
 	mqWrapper := &mockMQWrapper{mq: mq}
 
-	runner := &mockTaskRunner{}
+	runner := &mockTaskRunner{invoked: make(chan struct{})}
 	task := NewRedisStreamTask(mqWrapper, runner)
 
 	// 创建 context
@@ -399,8 +402,11 @@ func TestRedisStreamTask_Invoke(t *testing.T) {
 		t.Errorf("Invoke() returned error: %v", err)
 	}
 
-	// 等待一段时间让 goroutine 执行
-	time.Sleep(200 * time.Millisecond)
+	select {
+	case <-runner.invoked:
+	case <-time.After(time.Second):
+		t.Fatal("TaskRunner.Invoke() was not called")
+	}
 
 	// 验证 TaskRunner.Invoke 被调用
 	if !runner.wasInvokeCalled() {
@@ -506,13 +512,14 @@ func TestRedisStreamTask_CancelKeepsRegistryUntilRunnerExits(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("task did not finish")
 	}
-	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
-		if registry.Get(task.ID()) == nil {
-			return
-		}
-		time.Sleep(time.Millisecond)
+	select {
+	case <-task.FinishedChan():
+	case <-time.After(time.Second):
+		t.Fatal("task did not finish cleanup")
 	}
-	t.Fatal("task remained registered after runner exited")
+	if registry.Get(task.ID()) != nil {
+		t.Fatal("task remained registered after runner exited")
+	}
 }
 
 func TestRedisStreamTask_FinishedChangesAfterRunnerExit(t *testing.T) {
@@ -535,13 +542,14 @@ func TestRedisStreamTask_FinishedChangesAfterRunnerExit(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("task did not finish")
 	}
-	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
-		if task.Finished() {
-			return
-		}
-		time.Sleep(time.Millisecond)
+	select {
+	case <-task.FinishedChan():
+	case <-time.After(time.Second):
+		t.Fatal("task did not finish cleanup")
 	}
-	t.Fatal("Finished() remained false after runner exit")
+	if !task.Finished() {
+		t.Fatal("Finished() = false after runner exit")
+	}
 }
 
 func TestRedisStreamTask_GetOutputReadsBufferedEventsWhenStartIDEmpty(t *testing.T) {

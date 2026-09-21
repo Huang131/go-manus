@@ -154,6 +154,7 @@ type RedisStreamTask struct {
 	finished     atomic.Bool
 	invoked      atomic.Bool
 	doneChan     chan struct{}
+	finishedChan chan struct{}
 	doneOnce     sync.Once
 	finishOnce   sync.Once
 	destroyOnce  sync.Once
@@ -275,6 +276,7 @@ func NewRedisStreamTask(mq mq.TaskMessageQueue, runner TaskRunner, registry ...T
 		inputStream:  mq,
 		outputStream: mq,
 		doneChan:     make(chan struct{}),
+		finishedChan: make(chan struct{}),
 		registry:     reg,
 	}
 
@@ -327,6 +329,12 @@ func (t *RedisStreamTask) Finished() bool {
 // DoneChan 返回任务完成的通知 channel
 func (t *RedisStreamTask) DoneChan() <-chan struct{} {
 	return t.doneChan
+}
+
+// FinishedChan 返回任务完成清理的通知 channel。
+// 与 DoneChan 不同，它只会在 runner、注册表和流保留策略全部处理完成后关闭。
+func (t *RedisStreamTask) FinishedChan() <-chan struct{} {
+	return t.finishedChan
 }
 
 // SetOnFinished 设置任务完成后的回调。
@@ -492,6 +500,7 @@ func (t *RedisStreamTask) destroyRunner() {
 		// runner 已退出后再设置短 TTL，避免其尾部写入把完成窗口重新延长。
 		t.setStreamRetention()
 		t.finished.Store(true)
+		close(t.finishedChan)
 	})
 }
 
