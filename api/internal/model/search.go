@@ -11,6 +11,6 @@ type SearchResultItem struct {
 type SearchResults struct {
 	Query        string             `json:"query"`         // 实际发送的搜索词（可能与用户输入略有不同）
 	DateRange    string             `json:"date_range"`    // 时间范围限制，如 "r:7d"（最近7天）
-	TotalResults int                `json:"total_results"` // 搜索引擎返回的匹配总数（非实际返回条数）
+	TotalResults int                `json:"total_results"` // 实际返回的搜索结果条数（非引擎侧匹配总数）
 	Results      []SearchResultItem `json:"results"`       // 实际返回的搜索结果列表
 }

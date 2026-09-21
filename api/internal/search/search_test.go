@@ -140,13 +140,14 @@ func TestSearchDateRangeMapping(t *testing.T) {
 		in     *string
 		tavily string
 		bocha  string
+		google string
 	}{
-		{nil, "", ""},
-		{str("d"), "day", "oneDay"},
-		{str("w"), "week", "oneWeek"},
-		{str("m"), "month", "oneMonth"},
-		{str("y"), "year", "oneYear"},
-		{str("unknown"), "", ""},
+		{nil, "", "", ""},
+		{str("d"), "day", "oneDay", "d1"},
+		{str("w"), "week", "oneWeek", "w1"},
+		{str("m"), "month", "oneMonth", "m1"},
+		{str("y"), "year", "oneYear", "y1"},
+		{str("unknown"), "", "", ""},
 	}
 	for _, c := range cases {
 		if got := tavilyTimeRange(c.in); got != c.tavily {
@@ -154,6 +155,9 @@ func TestSearchDateRangeMapping(t *testing.T) {
 		}
 		if got := bochaFreshness(c.in); got != c.bocha {
 			t.Errorf("bochaFreshness(%v) = %q, want %q", c.in, got, c.bocha)
+		}
+		if got := googleDateRestrict(c.in); got != c.google {
+			t.Errorf("googleDateRestrict(%v) = %q, want %q", c.in, got, c.google)
 		}
 	}
 }
@@ -236,5 +240,54 @@ func TestGoogleSearchClient_Invoke_MissingSearchEngineID(t *testing.T) {
 	}
 	if !strings.Contains(res.Message, "Search Engine ID") {
 		t.Errorf("Message = %q, want mention Search Engine ID", res.Message)
+	}
+}
+
+// TestGoogleSearchClient_Invoke_EmptyQuery 验证空 query 在本地直接失败，
+// 与 Tavily/Bocha 的防御性校验对齐，不发出 q= 空请求。
+func TestGoogleSearchClient_Invoke_EmptyQuery(t *testing.T) {
+	c := NewGoogleSearchClientWithTimeout("key", "engine", time.Second)
+	res, err := c.Invoke(context.Background(), "", nil, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Success {
+		t.Fatal("expected failure for empty query")
+	}
+	if !strings.Contains(res.Message, "query") {
+		t.Errorf("Message = %q, want mention query", res.Message)
+	}
+}
+
+// TestGoogleSearchClient_Invoke_MapsDateRestrict 验证 d/w/m/y 被映射为 Google 的
+// d1/w1/m1/y1，且未提供或非法值不下发 dateRestrict（裸传 d 会被 Google 静默忽略）。
+func TestGoogleSearchClient_Invoke_MapsDateRestrict(t *testing.T) {
+	str := func(s string) *string { return &s }
+	for _, tc := range []struct {
+		in   *string
+		want string
+	}{
+		{str("d"), "d1"},
+		{str("w"), "w1"},
+		{str("m"), "m1"},
+		{str("y"), "y1"},
+		{nil, ""},
+		{str("unknown"), ""},
+	} {
+		var got string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			got = r.URL.Query().Get("dateRestrict")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"queries":{"request":[]},"searchInformation":{"totalResults":"0"},"items":[]}`))
+		}))
+		c := NewGoogleSearchClientWithTimeout("key", "engine", time.Second)
+		c.baseURL = srv.URL
+		if _, err := c.Invoke(context.Background(), "golang", tc.in, 10); err != nil {
+			t.Fatal(err)
+		}
+		srv.Close()
+		if got != tc.want {
+			t.Errorf("dateRestrict = %q, want %q (input %v)", got, tc.want, tc.in)
+		}
 	}
 }

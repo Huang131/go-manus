@@ -15,6 +15,11 @@ const (
 	bochaFreshnessOneWeek  = "oneWeek"
 	bochaFreshnessOneMonth = "oneMonth"
 	bochaFreshnessOneYear  = "oneYear"
+
+	googleDateRestrictDay   = "d1"
+	googleDateRestrictWeek  = "w1"
+	googleDateRestrictMonth = "m1"
+	googleDateRestrictYear  = "y1"
 )
 
 // 搜索客户端通用运行参数。

@@ -13,6 +13,7 @@ import (
 
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/pkg/httpconst"
+	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
 // SearchEngine 搜索引擎接口
@@ -80,6 +81,9 @@ func (c *GoogleSearchClient) Invoke(ctx context.Context, query string, dateRange
 	if c.searchEngineID == "" {
 		return model.NewToolError("Google Search Engine ID not configured"), nil
 	}
+	if query == "" {
+		return model.NewToolError("search query is empty"), nil
+	}
 
 	// 构建请求 URL
 	params := url.Values{}
@@ -91,8 +95,8 @@ func (c *GoogleSearchClient) Invoke(ctx context.Context, query string, dateRange
 		limit = 10
 	}
 	params.Set("num", fmt.Sprintf("%d", limit))
-	if dateRange != nil {
-		params.Set("dateRestrict", *dateRange)
+	if dr := googleDateRestrict(dateRange); dr != "" {
+		params.Set("dateRestrict", dr)
 	}
 
 	reqURL := fmt.Sprintf("%s?%s", c.baseURL, params.Encode())
@@ -128,7 +132,9 @@ func (c *GoogleSearchClient) Invoke(ctx context.Context, query string, dateRange
 
 	// 转换为标准搜索结果
 	results := &model.SearchResults{
-		Results: make([]model.SearchResultItem, 0, len(googleResp.Items)),
+		Query:        query,
+		TotalResults: len(googleResp.Items),
+		Results:      make([]model.SearchResultItem, 0, len(googleResp.Items)),
 	}
 
 	for _, item := range googleResp.Items {
@@ -141,7 +147,6 @@ func (c *GoogleSearchClient) Invoke(ctx context.Context, query string, dateRange
 
 	return model.NewToolResultWithMessage("", map[string]interface{}{
 		"results": results,
-		"total":   googleResp.SearchInformation.TotalResults,
 	}), nil
 }
 
@@ -441,6 +446,26 @@ func bochaFreshness(r *string) string {
 	}
 }
 
+// googleDateRestrict 将工具层日期范围缩写（d/w/m/y）映射为 Google dateRestrict 取值。
+// Google 要求 d[number] 格式（如 d1=过去1天），裸传 d/w/m/y 会被静默忽略。
+func googleDateRestrict(r *string) string {
+	if r == nil {
+		return ""
+	}
+	switch *r {
+	case "d":
+		return googleDateRestrictDay
+	case "w":
+		return googleDateRestrictWeek
+	case "m":
+		return googleDateRestrictMonth
+	case "y":
+		return googleDateRestrictYear
+	default:
+		return ""
+	}
+}
+
 // SearchConfig 搜索配置
 type SearchConfig struct {
 	GoogleAPIKey   string `mapstructure:"google_api_key"`
@@ -460,6 +485,10 @@ func NewSearchEngine(cfg *SearchConfig) SearchEngine {
 	case "google":
 		return NewGoogleSearchClientWithTimeout(cfg.GoogleAPIKey, cfg.SearchEngineID, timeout)
 	default:
+		if cfg.Provider != "" {
+			logger.Warn("unknown search provider configured, falling back to tavily",
+				logger.String("provider", cfg.Provider))
+		}
 		return NewTavilySearchClientWithTimeout(cfg.TavilyAPIKey, timeout)
 	}
 }
