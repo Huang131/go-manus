@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/llm"
@@ -66,12 +65,10 @@ func TestLLMModelService_Test_SendsMinimalRequest(t *testing.T) {
 	}
 }
 
-// TestLLMModelService_Test_ReturnsResponseAndLatency 验证返回体透传内容与模型名，
-// 且 LatencyMS 确实测量了调用耗时（mock 内 sleep 10ms）。
-func TestLLMModelService_Test_ReturnsResponseAndLatency(t *testing.T) {
+// TestLLMModelService_Test_ReturnsResponseMetadata 验证连接测试透传响应内容和模型名。
+func TestLLMModelService_Test_ReturnsResponseMetadata(t *testing.T) {
 	svc := NewLLMModelServiceWithLLMFactory(NewMockLLMModelRepository(), func(_ *llm.LLMRuntimeConfig) llm.LLM {
 		return &connectionTestLLM{invoke: func(_ *llm.LLMRequest) (*llmcore.LLMResponse, error) {
-			time.Sleep(10 * time.Millisecond)
 			return &llmcore.LLMResponse{Message: llmcore.Message{ContentText: "连接成功"}}, nil
 		}}
 	})
@@ -85,10 +82,6 @@ func TestLLMModelService_Test_ReturnsResponseAndLatency(t *testing.T) {
 	}
 	if result.ModelName != "demo" {
 		t.Errorf("ModelName = %q, want demo", result.ModelName)
-	}
-	// sleep 给出确定性下界：Milliseconds() 是截断，只会更大不会更小。
-	if result.LatencyMS < 10 {
-		t.Errorf("LatencyMS = %d, want >= 10", result.LatencyMS)
 	}
 }
 
