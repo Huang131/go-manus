@@ -10,15 +10,15 @@
 - `api/tests` 已有真实 PostgreSQL repository、MinIO 文件和 HTTP 路由测试。
 - PostgreSQL 测试已经覆盖部分 JSONB、软删除、事务和唯一约束。
 
-当前主要问题不是测试太少，而是测试层级和业务边界混杂：
+当前测试分层已经完成第一轮收敛：
 
 - [tests/integration_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/integration_test.go:51) 使用一个 `TestMain` 同时初始化 PostgreSQL、Redis、MinIO 和 Gin 路由。
 - [tool_event_flow_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/agent/tool_event_flow_test.go:29) 使用内存队列替身验证 Agent flow 编排；Redis Stream 协议由独立 component 测试验证。
-- [session_handler_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/handler/session_handler_test.go:17) 的 Handler mock 维护完整 Session map，重实现了部分业务状态。
-- [task_redis_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/agent/task_redis_test.go:402) 等测试依赖固定 `Sleep` 和轮询。
+- [session_handler_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/handler/session_handler_test.go:17) 已改用记录参数和预设返回值的最小 stub，不再重实现 Session 状态。
+- RedisStreamTask 生命周期测试已使用 `FinishedChan` 和显式 barrier 等待清理完成，不再依赖固定 `Sleep` 或 registry 轮询。
 - Redis component 测试已迁移到 [redis_component_integration_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/redis_component_integration_test.go:1)，使用独立 Redis 验证 `XADD/XREAD`、cursor、blocking cancel、retention 和清空；Agent 事件编排仍需后续补充续读链路。
 - Chat 集成测试只覆盖 Agent 未启用时的 412，[session_routes_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/session_routes_test.go:25) 没有成功执行链路。
-- [tests/README.md](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/README.md:19) 描述了不存在的 `truncateTables()`，且把 Redis 描述为已被真实测试使用，文档与实现不一致。
+- [tests/README.md](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/README.md:1) 已与独立 Compose 环境、分层命令和真实 Redis component 测试对齐。
 
 SenseNova 测试密钥是产品决策保留的验证资源，不列为本方案的清理项。它属于真实外部服务验证，不应被当作普通单测或本地组件测试的替代品。
 
@@ -106,14 +106,20 @@ SenseNova 测试保留现有验证用途；后续若调整入口，应使用独�
 - SSE 首事件、tool 事件顺序、done 事件和取消。
 - 外部 LLM 使用 deterministic fake，不连接真实模型。
 
-## 5. 应精简的测试
+## 5. 已完成的测试精简
 
-以下测试没有足够的运行时价值，应在确认生产引用后逐步删除或合并：
+第一轮已清理以下低收益或不稳定测试：
 
-- [memory_test.go:10](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/agent/memory_test.go:10) 仅验证容器 Add/Get/Clear，且 Add 只断言长度非零，没有验证内容和顺序；当前若保留 SimpleMemory，应补齐 `MergeMessages`、内容和顺序契约。
-- [tool_event_flow_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/agent/tool_event_flow_test.go:313) 使用统一 context 超时等待事件，避免额外维护固定 deadline。
+- 删除 MessageQueue 接口编译断言、mock 自测和重复常量测试，真实 Redis 行为由 component 测试覆盖。
+- Session Handler 改用最小契约 stub，CRUD 和分页语义由 HTTP integration 覆盖。
+- `SimpleMemory` 测试补齐 `MergeMessages`、消息内容和顺序契约。
+- Agent task 与 shell watcher 使用完成通知和 barrier，移除固定 `Sleep` 与轮询。
+- Agent flow 内存队列使用通知 channel，移除 2ms 轮询。
+- 删除文件 API 未实现路由检查、Session 列表重复测试和 TaskRegistry 重复测试。
+- 并发文件上传与并发默认模型测试只在主测试 goroutine 执行断言。
+- 删除 LLM 连接测试的人为延迟下界断言和无关测试 fixture。
 
-不要为了减少数量直接删除仍覆盖生产语义的测试。每次删除前先确认生产调用、替代测试和当前业务契约。
+后续仍按“生产调用、替代覆盖、明确业务契约”三个条件逐项判断，不以减少测试数量为目标。
 
 ## 6. 分阶段实施
 
@@ -127,13 +133,19 @@ SenseNova 测试保留现有验证用途；后续若调整入口，应使用独�
 
 建立 `IntegrationConfig/TestEnv`、测试资源安全校验和 `test-unit/test-component/test-api/test-external/test-race` Makefile 目标。新增独立 Compose test profile 或 Testcontainers 启动器，替代固定开发容器名，并同步修正 `api/tests/README.md`。此阶段不删除现有测试。
 
+状态：已完成。
+
 ### Phase 2：边界归位
 
 把 Handler mock 改为最小 stub；把 PostgreSQL、MinIO 和 HTTP 测试按职责归类；为 Redis Stream 增加真实 component integration；删除接口断言和 mock 自测。
 
+状态：已完成当前范围；SSE 断线续读随 Phase 4 的当前 Chat 成功链路补充。
+
 ### Phase 3：并发稳定性
 
 用 channel/barrier 替代固定 Sleep；测试使用独立 registry；为 registry 注销完成提供可等待信号；用 `go test -race -count=100` 验证关键生命周期测试。
+
+状态：已完成，关键 Agent 生命周期和 flow 测试已通过 race 重复验证。
 
 ### Phase 4：当前 API HTTP 契约
 
@@ -142,6 +154,8 @@ Run 生产代码尚不存在，本阶段不设计、不实现、也不提前编�
 ### Phase 5：当前低收益测试清理
 
 当前 HTTP 契约稳定后，删除已确认无生产价值的接口断言、mock 自测、宽松断言和重复生命周期测试。暂不删除仍服务当前 Session/RedisStreamTask 生产链路的测试。
+
+状态：已完成第一轮高置信清理；后续仅处理有明确替代覆盖的条目。
 
 ### Future R：Run 重构后的测试
 
