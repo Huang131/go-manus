@@ -1,0 +1,9 @@
+{
+  "name": "sandbox-browser",
+  "private": true,
+  "version": "1.0.0",
+  "description": "沙箱浏览器自动化 CLI 的 Node 依赖：仅需 playwright-core，通过 CDP 复用镜像内的 Chrome",
+  "dependencies": {
+    "playwright-core": "^1.49.0"
+  }
+}
