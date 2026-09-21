@@ -111,9 +111,6 @@ SenseNova 测试保留现有验证用途；后续若调整入口，应使用独�
 以下测试没有足够的运行时价值，应在确认生产引用后逐步删除或合并：
 
 - [memory_test.go:10](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/agent/memory_test.go:10) 仅验证容器 Add/Get/Clear，且 Add 只断言长度非零，没有验证内容和顺序；当前若保留 SimpleMemory，应补齐 `MergeMessages`、内容和顺序契约。
-- [llm_model_test.go:223](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/llm_model_test.go:223) 的 NotFound 测试只断言非 200，应精确断言 404 和业务错误码。
-- [llm_model_test.go:229](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/llm_model_test.go:229) 允许任意非 500 的宽松断言。
-- [appconfig_test.go:190](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/appconfig_test.go:190) 只断言空更新返回 200 的测试，需先明确业务契约。
 - [tool_event_flow_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/agent/tool_event_flow_test.go:313) 使用统一 context 超时等待事件，避免额外维护固定 deadline。
 
 不要为了减少数量直接删除仍覆盖生产语义的测试。每次删除前先确认生产调用、替代测试和当前业务契约。
