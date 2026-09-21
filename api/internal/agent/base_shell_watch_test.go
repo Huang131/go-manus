@@ -12,24 +12,31 @@ import (
 
 type blockingWatchSandbox struct {
 	sandbox.Sandbox
-	started chan struct{}
-	exited  chan struct{}
-	once    sync.Once
+	started        chan struct{}
+	cancelObserved chan struct{}
+	release        chan struct{}
+	exited         chan struct{}
+	once           sync.Once
 }
 
 func (s *blockingWatchSandbox) ReadShellOutput(ctx context.Context, _ string, _ bool) (*model.ToolResult, error) {
 	s.once.Do(func() { close(s.started) })
-	<-ctx.Done()
-	// Make a non-waiting StopShellWatch implementation fail deterministically.
-	time.Sleep(25 * time.Millisecond)
+	select {
+	case <-ctx.Done():
+		close(s.cancelObserved)
+	case <-s.release:
+	}
+	<-s.release
 	close(s.exited)
 	return nil, ctx.Err()
 }
 
 func TestBaseAgentStopShellWatchWaitsForWatcherExit(t *testing.T) {
 	sandbox := &blockingWatchSandbox{
-		started: make(chan struct{}),
-		exited:  make(chan struct{}),
+		started:        make(chan struct{}),
+		cancelObserved: make(chan struct{}),
+		release:        make(chan struct{}),
+		exited:         make(chan struct{}),
 	}
 	agent := NewBaseAgent("test", "session-1", DefaultAgentConfig(), nil, nil)
 	agent.SetEventCh(make(chan model.BaseEvent, 1))
@@ -41,10 +48,32 @@ func TestBaseAgentStopShellWatchWaitsForWatcherExit(t *testing.T) {
 		t.Fatal("shell watcher did not start")
 	}
 
-	agent.StopShellWatch()
+	stopReturned := make(chan struct{})
+	go func() {
+		agent.StopShellWatch()
+		close(stopReturned)
+	}()
+
+	select {
+	case <-sandbox.cancelObserved:
+	case <-time.After(time.Second):
+		t.Fatal("shell watcher did not observe cancellation")
+	}
+	select {
+	case <-stopReturned:
+		t.Fatal("StopShellWatch returned before watcher exited")
+	default:
+	}
+
+	close(sandbox.release)
 	select {
 	case <-sandbox.exited:
-	default:
-		t.Fatal("StopShellWatch returned before watcher exited")
+	case <-time.After(time.Second):
+		t.Fatal("shell watcher did not exit after release")
+	}
+	select {
+	case <-stopReturned:
+	case <-time.After(time.Second):
+		t.Fatal("StopShellWatch did not return after watcher exit")
 	}
 }
