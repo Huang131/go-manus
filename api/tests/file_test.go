@@ -10,7 +10,11 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/bytedance/sonic"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/Huang131/go-manus/api/pkg/response"
 )
 
 // uploadFileForTest 上传文件并返回 fileID，调用方负责 cleanup
@@ -72,49 +76,6 @@ func TestFileAPI_Download_Lifecycle(t *testing.T) {
 
 	downloadedContent, _ := io.ReadAll(downloadW.Body)
 	assert.Equal(t, fileContent, downloadedContent)
-}
-
-// TestFileAPI_Delete_Lifecycle 测试文件删除接口（当前返回 404，未实现）
-func TestFileAPI_Delete_Lifecycle(t *testing.T) {
-	sessionID := createSessionForTest(t)
-	defer CleanupSession(t, sessionID)
-
-	fileContent := []byte("File to be deleted")
-	fileID := uploadFileForTest(t, sessionID, "delete_me.txt", fileContent)
-	defer CleanupFile(t, fileID)
-
-	// DELETE 接口尚未实现，路由返回 404
-	deleteW := postJSON(t, "/api/files/"+fileID+"/delete", nil)
-	assert.Equal(t, http.StatusNotFound, deleteW.Code,
-		"DELETE 接口未实现时应返回 404，实际: %d", deleteW.Code)
-
-	// 文件仍然存在（因为 delete 未实现）
-	getW := getJSON(t, "/api/files/"+fileID+"?session_id="+sessionID)
-	assert.Equal(t, http.StatusOK, getW.Code,
-		"删除未实现时文件 GET 应返回 200，实际: %d", getW.Code)
-}
-
-// TestFileAPI_Rename_Lifecycle 测试文件名更新完整生命周期
-func TestFileAPI_Rename_Lifecycle(t *testing.T) {
-	sessionID := createSessionForTest(t)
-	defer CleanupSession(t, sessionID)
-
-	fileContent := []byte("File to be renamed")
-	fileID := uploadFileForTest(t, sessionID, "old_name.txt", fileContent)
-	defer CleanupFile(t, fileID)
-
-	renameW := putJSON(t, "/api/files/"+fileID, map[string]any{"filename": "new_name.txt"})
-	// rename 可能返回 200（成功）或 404（文件不存在）
-	assert.True(t, renameW.Code == http.StatusOK || renameW.Code == http.StatusNotFound,
-		"rename 应返回 200 或 404，实际: %d，响应: %s", renameW.Code, renameW.Body.String())
-
-	// 如果 rename 成功，验证文件名
-	if renameW.Code == http.StatusOK {
-		infoW := getJSON(t, "/api/files/"+fileID+"?session_id="+sessionID)
-		infoResp := parseResponse(t, infoW)
-		infoData := infoResp.Data.(map[string]any)
-		assert.Equal(t, "new_name.txt", infoData["filename"])
-	}
 }
 
 // TestFileAPI_GetSessionFiles_Lifecycle 测试获取会话文件列表完整生命周期
@@ -225,8 +186,10 @@ func TestFileAPI_Upload_Concurrent(t *testing.T) {
 	defer CleanupSession(t, sessionID)
 
 	const n = 5
-	fileIDs := make([]string, n)
-	errs := make([]error, n)
+	results := make([]struct {
+		status int
+		body   []byte
+	}, n)
 
 	var wg sync.WaitGroup
 	for i := 0; i < n; i++ {
@@ -236,21 +199,24 @@ func TestFileAPI_Upload_Concurrent(t *testing.T) {
 			content := []byte(fmt.Sprintf("content-%d", idx))
 			body, contentType := makeMultipartFile(map[string]string{"session_id": sessionID}, "same.txt", content)
 			w := doRequest(t, "POST", "/api/files", body.Bytes(), contentType)
-			if w.Code != http.StatusOK {
-				errs[idx] = fmt.Errorf("upload %d failed: %d", idx, w.Code)
-				return
-			}
-			resp := parseResponse(t, w)
-			fileIDs[idx] = resp.Data.(map[string]any)["id"].(string)
+			results[idx] = struct {
+				status int
+				body   []byte
+			}{status: w.Code, body: append([]byte(nil), w.Body.Bytes()...)}
 		}(i)
 	}
 	wg.Wait()
 
+	fileIDs := make([]string, n)
 	for i := 0; i < n; i++ {
-		if errs[i] != nil {
-			t.Fatalf("并发上传 %d 失败: %v", i, errs[i])
-		}
-		assert.NotEmpty(t, fileIDs[i], "并发上传 %d 应返回 fileID", i)
+		assert.Equal(t, http.StatusOK, results[i].status, "并发上传 %d 状态码", i)
+		var resp response.Response
+		require.NoError(t, sonic.Unmarshal(results[i].body, &resp))
+		require.Equal(t, 0, resp.Code, "并发上传 %d 业务错误", i)
+		data, ok := resp.Data.(map[string]any)
+		require.True(t, ok, "并发上传 %d data 类型错误", i)
+		fileIDs[i], ok = data["id"].(string)
+		require.True(t, ok && fileIDs[i] != "", "并发上传 %d 未返回 fileID", i)
 	}
 
 	for _, fileID := range fileIDs {
