@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/Huang131/go-manus/api/pkg/response"
-	"github.com/bytedance/sonic"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -80,24 +78,6 @@ func TestSessionAPI_Lifecycle(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
-// TestSessionAPI_CreateAndList 测试创建后会话出现在列表中
-func TestSessionAPI_CreateAndList(t *testing.T) {
-	// 1. 创建两个会话
-	_, cleanup := createSessionsForTest(t, 2)
-	defer cleanup()
-
-	// 2. 列出会话
-	w := getJSON(t, "/api/sessions")
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	resp := parseTotalResponse(t, w)
-	sessions := parseResponseDataAsArray(t, w)
-
-	// 验证创建的两个会话都在列表中
-	assert.GreaterOrEqual(t, resp.Total, 2, "应该至少有2个会话")
-	assert.GreaterOrEqual(t, len(sessions), 2, "返回的会话列表应该至少有2条")
-}
-
 // TestSessionAPI_GetNotFound 测试获取不存在的会话
 func TestSessionAPI_GetNotFound(t *testing.T) {
 	w := getJSON(t, "/api/sessions/non-existent-id")
@@ -145,23 +125,6 @@ func TestSessionAPI_ClearUnreadCount(t *testing.T) {
 	assert.Equal(t, float64(0), data["unread_message_count"])
 }
 
-// TestSessionAPI_GetAllSessions 测试 SSE 流接口能正常响应
-func TestSessionAPI_GetAllSessions(t *testing.T) {
-	_ = createSessionForTest(t)
-
-	// SSE 流测试需要外部进程管理连接生命周期，无法在单元测试中可靠验证
-	// 改为验证：创建 session 后 GET /api/sessions 确认至少有一个 session 返回
-	w := getJSON(t, "/api/sessions")
-	assert.Equal(t, http.StatusOK, w.Code)
-
-	resp := parseTotalResponse(t, w)
-	sessions, ok := resp.Data.([]any)
-	if !ok {
-		t.Fatalf("sessions 应为 []any，实际为 %T", resp.Data)
-	}
-	assert.GreaterOrEqual(t, len(sessions), 1, "至少应有 1 个 session")
-}
-
 // TestSessionAPI_List 测试会话列表基本功能
 func TestSessionAPI_List(t *testing.T) {
 	// 创建一个会话用于测试
@@ -199,7 +162,3 @@ func TestSessionAPI_GetInvalidID(t *testing.T) {
 	w := getJSON(t, "/api/sessions/invalid-uuid-format")
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
-
-// 防止 sonic 包未使用（用于类型断言）
-var _ = sonic.Marshal
-var _ = response.Response{}
