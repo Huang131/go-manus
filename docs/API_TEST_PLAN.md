@@ -16,7 +16,7 @@
 - [tool_event_integration_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/agent/tool_event_integration_test.go:29) 自己实现 Redis Stream 的内存替身，但文件没有 `integration` build tag。
 - [session_handler_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/handler/session_handler_test.go:17) 的 Handler mock 维护完整 Session map，重实现了部分业务状态。
 - [task_redis_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/agent/task_redis_test.go:402) 等测试依赖固定 `Sleep` 和轮询。
-- 当前没有真正验证 Redis `XADD/XREAD`、cursor、blocking cancel、retention 和续读的 component integration；[message_queue_redis_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/mq/message_queue_redis_test.go:8) 主要是常量测试。
+- Redis component 测试已迁移到 [redis_component_integration_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/redis_component_integration_test.go:1)，使用独立 Redis 验证 `XADD/XREAD`、cursor、blocking cancel、retention 和清空；Agent 事件编排仍需后续补充续读链路。
 - Chat 集成测试只覆盖 Agent 未启用时的 412，[session_routes_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/session_routes_test.go:25) 没有成功执行链路。
 - [tests/README.md](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/README.md:19) 描述了不存在的 `truncateTables()`，且把 Redis 描述为已被真实测试使用，文档与实现不一致。
 
@@ -110,10 +110,6 @@ SenseNova 测试保留现有验证用途；后续若调整入口，应使用独�
 
 以下测试没有足够的运行时价值，应在确认生产引用后逐步删除或合并：
 
-- [message_queue_test.go:9](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/mq/message_queue_test.go:9) 的接口编译断言。
-- [message_queue_test.go:40](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/mq/message_queue_test.go:40) 对 mock 固定返回值的测试。
-- [message_queue_test.go:62](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/mq/message_queue_test.go:62) 对 mock 自身 context 行为的测试。
-- [message_queue_test.go:73](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/mq/message_queue_test.go:73) 与 Redis 常量重复的测试。
 - [memory_test.go:10](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/agent/memory_test.go:10) 仅验证容器 Add/Get/Clear，且 Add 只断言长度非零，没有验证内容和顺序；当前若保留 SimpleMemory，应补齐 `MergeMessages`、内容和顺序契约。
 - [llm_model_test.go:223](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/llm_model_test.go:223) 的 NotFound 测试只断言非 200，应精确断言 404 和业务错误码。
 - [llm_model_test.go:229](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/llm_model_test.go:229) 允许任意非 500 的宽松断言。
