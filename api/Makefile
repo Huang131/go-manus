@@ -113,7 +113,7 @@ test-component: test-up
 
 test-api: test-up
 	@echo "运行 HTTP API 集成测试..."
-	@status=0; go test -tags=integration -v ./tests/... -run '^Test(AppConfigAPI|ChatEndpoint|FileAPI|HealthEndpoint|LLMModelAPI|ReadFileEndpoint|ReadShellEndpoint|RenameSession|SessionAPI|SessionFilesEndpoint)' || status=$$?; \
+	@status=0; go test -tags=integration -v ./tests/... -run '^Test(AppConfigAPI|ChatEndpoint|StopEndpoint|FileAPI|HealthEndpoint|LLMModelAPI|ReadFileEndpoint|ReadShellEndpoint|RenameSession|SessionAPI|SessionFilesEndpoint)' || status=$$?; \
 		if [ $$status -ne 0 ]; then docker compose -f ../docker-compose.test.yml logs --no-color; fi; \
 		$(MAKE) test-down; exit $$status
 
