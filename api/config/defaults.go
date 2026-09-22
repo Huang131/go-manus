@@ -3,7 +3,11 @@ package config
 const (
 	// LLM 默认工具调用超时时间（秒）。
 	DefaultLLMToolCallTimeoutSec = 15
-	DefaultSandboxHTTPTimeoutSec = 60
+	// 沙箱 HTTP 请求超时（秒）。必须大于沙箱侧最慢动作超时
+	// （sandbox/app/services/browser.py 的 NAVIGATE/SCREENSHOT_TIMEOUT_SECONDS = 90），
+	// 否则 Go 客户端会先于沙箱超时，只能抛 context deadline exceeded，
+	// 拿不到沙箱返回的语义化 504。
+	DefaultSandboxHTTPTimeoutSec = 120
 	DefaultSearchHTTPTimeoutSec  = 30
 
 	// HTTP 服务默认超时时间（秒）。

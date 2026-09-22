@@ -36,7 +36,8 @@ oss:
 
 sandbox:
   address: ""
-  http_timeout: 60
+  # 必须大于沙箱侧最慢动作超时（navigate/screenshot 90s），见 sandbox/app/services/browser.py
+  http_timeout: 120
 
 llm:
   base_url: "https://api.openai.com/v1"

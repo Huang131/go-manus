@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException
 
 from app.interfaces.schemas.base import Response
-from .exceptions import AppException
+from .exceptions import AppException, BusyException
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,19 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=422,
             content=Response.fail(422, msg=f"请求参数校验失败: {errors}").model_dump(),
+        )
+
+    @app.exception_handler(BusyException)
+    async def busy_exception_handler(req: Request, e: BusyException) -> JSONResponse:
+        """沙箱繁忙（锁等待耗尽）：返回 503 并携带 Retry-After 提示重试时机。
+
+        必须优先于 AppException 注册，FastAPI 按异常继承链匹配最接近的 handler。
+        """
+        logger.info(f"BusyException: {e.msg} (retry_after={e.retry_after}s)")
+        return JSONResponse(
+            status_code=e.status_code,
+            content=Response(code=e.status_code, msg=e.msg, data={}).model_dump(),
+            headers={"Retry-After": str(e.retry_after)},
         )
 
     @app.exception_handler(AppException)

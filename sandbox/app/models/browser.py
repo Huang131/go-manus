@@ -45,6 +45,7 @@ class BrowserSnapshotResult(BrowserPageResult):
     """页面快照结果"""
     elements: List[BrowserElement] = Field(default_factory=list, description="可交互元素列表")
     scroll: Optional[BrowserScrollPosition] = Field(default=None, description="滚动位置")
+    truncated: bool = Field(default=False, description="元素是否因数量上限被截断")
 
 
 class BrowserScrollResult(BrowserPageResult):
@@ -73,3 +74,4 @@ class BrowserConsoleViewResult(BaseModel):
     """控制台历史日志结果"""
     lines: List[str] = Field(default_factory=list, description="最近的日志行")
     total: int = Field(default=0, description="日志总行数")
+    truncated: bool = Field(default=False, description="日志是否因字节上限被截断")

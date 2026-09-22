@@ -146,10 +146,13 @@ type browserScreenshotData struct {
 //
 // StatusCode 是 HTTP 状态码，Code 是响应信封里的业务码；两者都保留，
 // 便于上层按状态码分类（4xx 动作错误、5xx 环境错误）。
+// RetryAfter 只在沙箱返回"繁忙"（503 + Retry-After）时非零，供上层/模型
+// 决定何时重试，而非盲目立刻重发。
 type SandboxAPIError struct {
 	StatusCode int
 	Code       int
 	Message    string
+	RetryAfter int
 }
 
 func (e *SandboxAPIError) Error() string {

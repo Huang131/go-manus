@@ -67,6 +67,7 @@ make test-down
 | `file_test.go` | File API：上传、下载、获取信息（真实 MinIO，含并发上传） |
 | `appconfig_test.go` | AppConfig API：LLM、Agent、MCP、A2A 配置 CRUD |
 | `llm_model_test.go` | LLMModel API：CRUD + UnsetDefault + 健康上报 + default 切换 + 并发 |
+| `sandbox_external_test.go` | 真实沙箱协议契约（`external` tag）：Shell 执行、文件读写/查找/删除、读取截断上限、业务错误映射、浏览器截图 |
 
 ## 常见问题
 
@@ -108,9 +109,31 @@ go test -tags=integration -v -run TestFileAPI ./tests/...
 | `make test-api` | 启动独立环境并运行 HTTP API 集成测试 |
 | `make test-integration` | 启动独立环境并运行全部内部集成测试 |
 | `make test-external` | 只运行显式 `external` 标签的 SenseNova 测试 |
+| `make test-sandbox` | 运行真实沙箱 external smoke，复用已启动的 sandbox 服务 |
 | `make test-race` | 使用 race detector 运行普通测试 |
 | `make test-up` | 启动独立测试环境并执行 migration |
 | `make test-down` | 删除独立测试容器、网络和 volume |
+
+## 真实沙箱外部测试
+
+`sandbox_external_test.go`（`external` build tag）验证 Go 客户端与真实沙箱部署之间的协议契约：
+响应信封解析、读取截断上限、业务错误映射、二进制截图通道。它不进 `go test ./...` 门禁，
+也不使用 `docker-compose.test.yml`，而是复用开发环境里已在运行的 sandbox：
+
+```bash
+# 1. 启动沙箱（宿主机 8090 → 容器 8080）
+docker compose -f ../docker-compose.yml up -d sandbox
+
+# 2. 运行
+cd api && make test-sandbox
+```
+
+沙箱不可达时测试会明确 skip。改动 `sandbox/` 的路由或服务代码后需要重建镜像，否则测试会命中旧行为：
+
+```bash
+docker compose -f ../docker-compose.yml build sandbox
+docker compose -f ../docker-compose.yml up -d sandbox
+```
 
 ## CI 集成
 

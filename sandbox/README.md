@@ -18,8 +18,7 @@
 | 进程 | 端口 | 说明 |
 |------|------|------|
 | FastAPI | 8080 | REST API（文件操作、Shell 执行） |
-| Chrome | 8222 (内部) | 浏览器实例 |
-| socat | 9222 | Chrome DevTools Protocol 代理 |
+| Chrome | 8222 (内部回环) | 浏览器实例，Node CLI 直连 |
 | Xvfb | - | 虚拟显示器 (:1) |
 | x11vnc | 5900 | VNC 服务 |
 | websockify | 5901 | WebSocket VNC 代理 |
@@ -80,7 +79,6 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 生产环境建议删除 `ports` 映射，仅保留容器网络访问：
 
 - `8080` - FastAPI REST API
-- `9222` - Chrome DevTools Protocol
 - `5900` - VNC RFB
 - `5901` - WebSocket VNC（API 服务通过此端口代理 VNC 到前端）
 

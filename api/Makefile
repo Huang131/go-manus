@@ -2,7 +2,7 @@
 # go-manus API Makefile - Go 代码开发和测试
 # ============================================================
 
-.PHONY: help build test test-unit test-cover test-component test-api test-external test-race test-integration test-up test-down lint clean run fmt deps deps-view tidy health docker-build
+.PHONY: help build test test-unit test-cover test-component test-api test-external test-sandbox test-race test-integration test-up test-down lint clean run fmt deps deps-view tidy health docker-build
 
 API_TEST_POSTGRES_PORT ?= 15432
 API_TEST_REDIS_PORT ?= 16379
@@ -32,6 +32,7 @@ help:
 	@echo "  make test-component - 运行真实存储组件测试"
 	@echo "  make test-api      - 运行 HTTP API 集成测试"
 	@echo "  make test-external - 运行 SenseNova 外部服务测试"
+	@echo "  make test-sandbox  - 运行真实沙箱外部服务测试"
 	@echo "  make test-race     - 使用 race detector 运行单元测试"
 	@echo "  make test-integration - 运行全部内部集成测试"
 	@echo "  make test-up       - 启动独立集成测试环境"
@@ -119,6 +120,13 @@ test-api: test-up
 test-external:
 	@echo "运行 SenseNova 外部服务测试..."
 	go test -tags=external -v ./tests/... -run '^TestSenseNova_'
+
+# 真实沙箱 external smoke：复用 docker compose 里已运行的 sandbox 服务
+# （宿主机 8090 → 容器 8080），不单独创建测试环境。
+test-sandbox:
+	@echo "运行真实沙箱外部服务测试（需要 sandbox 已启动）..."
+	@echo "  未启动时执行: docker compose -f ../docker-compose.yml up -d sandbox"
+	go test -tags=external -v ./tests/... -run '^TestSandbox_'
 
 # 删除独立集成测试环境
 test-down:

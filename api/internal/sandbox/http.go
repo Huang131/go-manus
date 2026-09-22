@@ -10,6 +10,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"strconv"
+	"time"
 
 	"github.com/bytedance/sonic"
 
@@ -38,6 +40,25 @@ func (c *SandboxClient) endpoint(action string) string {
 	return fmt.Sprintf("%s/api/%s", c.address, action)
 }
 
+// timeoutBudget 计算可传播给沙箱的剩余预算（Deadline 传播）。
+//
+// 预算取"客户端超时"与"上下文剩余时间"的较小值，再扣除往返余量：
+// 这保证下发的数值是沙箱真正可用的执行时间，而不是会被序列化/网络
+// 吃掉的毛预算。上下文无 deadline 时（如后台任务）回落客户端超时。
+func (c *SandboxClient) timeoutBudget(ctx context.Context) time.Duration {
+	budget := c.httpClient.Timeout
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining < budget {
+			budget = remaining
+		}
+	}
+	budget -= budgetReserve
+	if budget <= 0 {
+		return 0
+	}
+	return budget
+}
+
 // postJSON 发送 JSON 请求并把响应 data 解码到 out，返回沙箱提示消息。
 //
 // 这是所有 JSON 端点的唯一出口：状态码判断、信封解码、错误构造都收敛在这里，
@@ -57,6 +78,9 @@ func (c *SandboxClient) postJSON(ctx context.Context, action string, body any, o
 		return "", fmt.Errorf("create %s request: %w", action, err)
 	}
 	httpReq.Header.Set("Content-Type", httpconst.ContentTypeJSON)
+	if budget := c.timeoutBudget(ctx); budget > 0 {
+		httpReq.Header.Set(SandboxTimeoutHeader, strconv.FormatInt(budget.Milliseconds(), 10))
+	}
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -70,7 +94,7 @@ func (c *SandboxClient) postJSON(ctx context.Context, action string, body any, o
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", newAPIError(resp.StatusCode, raw)
+		return "", newAPIError(resp.StatusCode, raw, resp.Header)
 	}
 
 	var env envelope
@@ -120,7 +144,7 @@ func (c *SandboxClient) downloadBytes(ctx context.Context, filepath string) ([]b
 
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-		return nil, newAPIError(resp.StatusCode, raw)
+		return nil, newAPIError(resp.StatusCode, raw, resp.Header)
 	}
 
 	// 多读 1 字节用于判断是否超限，避免把超大文件整个读进内存
@@ -173,7 +197,7 @@ func (c *SandboxClient) uploadFile(ctx context.Context, filepath, filename strin
 		return toolResultErr(err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return toolResultErr(newAPIError(resp.StatusCode, raw))
+		return toolResultErr(newAPIError(resp.StatusCode, raw, resp.Header))
 	}
 
 	var env envelope
@@ -203,8 +227,9 @@ func decodeMapQuietly(raw json.RawMessage) map[string]interface{} {
 	return data
 }
 
-// newAPIError 由非 200 响应构造统一错误：优先取信封里的 msg 与 code
-func newAPIError(statusCode int, raw []byte) error {
+// newAPIError 由非 200 响应构造统一错误：优先取信封里的 msg 与 code。
+// header 用于提取 Retry-After（沙箱"繁忙"时的重试建议），其余场景忽略。
+func newAPIError(statusCode int, raw []byte, header http.Header) error {
 	message := ""
 	code := statusCode
 	var env envelope
@@ -216,7 +241,15 @@ func newAPIError(statusCode int, raw []byte) error {
 	} else {
 		message = string(raw)
 	}
-	return &SandboxAPIError{StatusCode: statusCode, Code: code, Message: message}
+	retryAfter := 0
+	if header != nil {
+		if v := header.Get("Retry-After"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				retryAfter = n
+			}
+		}
+	}
+	return &SandboxAPIError{StatusCode: statusCode, Code: code, Message: message, RetryAfter: retryAfter}
 }
 
 // SandboxErrorStatus 从错误中提取 HTTP 状态码，便于 handler 映射响应

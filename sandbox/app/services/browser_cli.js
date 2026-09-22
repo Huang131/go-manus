@@ -16,8 +16,8 @@
 const fs = require('fs');
 const path = require('path');
 
-// CDP 调试地址：Chrome 监听 8222，由 socat 转发到 9222
-const CDP_ADDRESS = process.env.SANDBOX_CDP_ADDRESS || 'http://127.0.0.1:9222';
+// CDP 调试地址：Chrome 监听 8222（只绑回环），Node CLI 与 Chrome 同容器直连
+const CDP_ADDRESS = process.env.SANDBOX_CDP_ADDRESS || 'http://127.0.0.1:8222';
 // 控制台日志文件，与 Python 侧 BROWSER_CONSOLE_LOG 保持一致
 const CONSOLE_LOG = process.env.SANDBOX_CONSOLE_LOG || '/tmp/browser/console.log';
 
@@ -28,6 +28,10 @@ const MAX_LOGS = 200; // 单次动作收集的日志条数上限
 const MAX_LOG_ITEM = 500; // 单条日志截断长度
 const MAX_EXEC_RESULT = 8000; // console_exec 返回值截断长度
 const MAX_VIEW_LINES = 1000; // console_view 最多回传行数
+const MAX_SNAPSHOT_ELEMENTS = 200; // snapshot 最多回传元素数，超出截断并标记 truncated
+// console_view 返回日志的总字节上限（超出从最旧一行丢弃），可用 SANDBOX_MAX_VIEW_BYTES 覆盖，
+// 便于契约测试构造 >64KB 管道缓冲的大输出，验证 writeResult「刷盘回调再退出」不会截断
+const MAX_VIEW_BYTES = parseInt(process.env.SANDBOX_MAX_VIEW_BYTES || '20000', 10);
 
 // 可交互元素选择器：快照编号与点击/输入定位共用同一集合，保证 index 语义一致
 const INTERACTIVE_SELECTOR = [
@@ -48,9 +52,23 @@ const INTERACTIVE_SELECTOR = [
 /** 业务动作错误：页面元素找不到、参数缺失等，上层应回 4xx 让模型自行修正 */
 class ActionError extends Error {}
 
+/**
+ * 输出单行 JSON 结果并结束进程。
+ *
+ * 两个约束决定了不能写完就退出：
+ * 1. 结果可能大于管道缓冲区（64KB，snapshot 元素多或 console_view 回传长日志时），
+ *    此时 stdout 写入是异步的，立即 process.exit() 会把输出截断，上层只能拿到半截
+ *    JSON 并报"返回了非法结果"；必须在写入回调里退出。
+ * 2. 本进程持有一条 CDP 长连接，事件循环不会被清空，因此也不能只设 process.exitCode
+ *    等待自然退出——那样进程会永久挂起，直到上层超时后才被 kill。
+ */
+function writeResult(text, code) {
+  process.stdout.write(text, () => process.exit(code));
+}
+
 /** 输出成功结果并结束进程 */
 function succeed(payload) {
-  process.stdout.write(JSON.stringify(Object.assign({ ok: true }, payload)) + '\n');
+  writeResult(JSON.stringify(Object.assign({ ok: true }, payload)) + '\n', 0);
 }
 
 /**
@@ -59,8 +77,7 @@ function succeed(payload) {
  * 上层据此决定是把错误回灌给模型还是上报服务异常。
  */
 function fail(message, kind) {
-  process.stdout.write(JSON.stringify({ ok: false, kind: kind || 'env', error: String(message) }) + '\n');
-  process.exitCode = 1;
+  writeResult(JSON.stringify({ ok: false, kind: kind || 'env', error: String(message) }) + '\n', 1);
 }
 
 /** 延迟加载 Playwright：模块缺失时给出可诊断的错误而非进程级堆栈 */
@@ -211,8 +228,14 @@ async function opSnapshot() {
   const collector = attachLogCollector(page);
   try {
     const data = await page.evaluate(snapshotExpr());
+    // 输出预算：元素数量设上限，超出截断并标记，避免超大页面撑爆管道与上下文
+    let truncated = false;
+    if (data.elements.length > MAX_SNAPSHOT_ELEMENTS) {
+      data.elements = data.elements.slice(0, MAX_SNAPSHOT_ELEMENTS);
+      truncated = true;
+    }
     const info = await pageInfo(page);
-    succeed(Object.assign(info, data, { logs: collector.logs.slice(-20) }));
+    succeed(Object.assign(info, data, { truncated: truncated, logs: collector.logs.slice(-20) }));
   } finally {
     collector.flush();
   }
@@ -352,14 +375,22 @@ async function opConsoleExec(params) {
 function opConsoleView(params) {
   const want = Number(params.max_lines);
   const limit = Number.isFinite(want) && want > 0 ? Math.min(want, MAX_VIEW_LINES) : 100;
-  let lines = [];
+  let all = [];
   try {
-    lines = fs.readFileSync(CONSOLE_LOG, 'utf8').split('\n').filter((line) => line.trim() !== '');
+    all = fs.readFileSync(CONSOLE_LOG, 'utf8').split('\n').filter((line) => line.trim() !== '');
   } catch (err) {
     if (err.code !== 'ENOENT') throw err;
-    lines = [];
+    all = [];
   }
-  succeed({ lines: lines.slice(-limit), total: lines.length });
+  // 输出预算：在行数上限的基础上，再按总字节数从最旧一行起裁剪，
+  // 避免单行超长日志把返回体积撑爆管道与上下文
+  let tail = all.slice(-limit);
+  let truncated = false;
+  while (tail.length > 1 && Buffer.byteLength(tail.join('\n')) > MAX_VIEW_BYTES) {
+    tail = tail.slice(1);
+    truncated = true;
+  }
+  succeed({ lines: tail, total: all.length, truncated: truncated });
 }
 
 /** 动作分发表：新增动作只需在此登记并在 Python 侧补端点 */

@@ -23,7 +23,7 @@ RUN sed -i 's|http://archive.ubuntu.com/ubuntu/|http://mirrors.aliyun.com/ubuntu
     apt-get update && \
     apt-get install -y --no-install-recommends \
         sudo bc curl wget gnupg software-properties-common supervisor \
-        xterm socat xvfb x11vnc websockify \
+        xterm xvfb x11vnc websockify \
         fonts-noto-cjk fonts-noto-color-emoji language-pack-zh-hans locales && \
     locale-gen zh_CN.UTF-8 && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -36,8 +36,9 @@ RUN useradd -m -d /home/ubuntu -s /bin/bash ubuntu && \
 # 阶段2: Python 3.10
 # 利用缓存: Python 版本不常变化
 # ============================================================
-RUN add-apt-repository ppa:deadsnakes/ppa -y && \
-    apt-get update && \
+# Ubuntu 22.04 (jammy) 原生自带 Python 3.10，无需依赖外部 deadsnakes PPA
+# （该 PPA 的 GPG key 偶发不可用，会导致构建不稳定，已于此处移除）
+RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         python3.10 python3.10-venv python3.10-dev python3-pip && \
     update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 && \
@@ -94,7 +95,7 @@ COPY . .
 
 COPY supervisord.conf /etc/supervisor/conf.d/sandbox.conf
 
-EXPOSE 8080 9222 5900 5901
+EXPOSE 8080 5900 5901
 
 # 健康检查：检查 /health 端点
 HEALTHCHECK --interval=15s --timeout=10s --start-period=10s --retries=3 \
