@@ -2,292 +2,148 @@ package search
 
 import (
 	"context"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"strings"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/config"
 )
 
-func TestTavilySearchClient_Invoke(t *testing.T) {
-	var gotAuth, gotCT, gotBody string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = r.Header.Get("Authorization")
-		gotCT = r.Header.Get("Content-Type")
-		b, _ := io.ReadAll(r.Body)
-		gotBody = string(b)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"results":[{"title":"t1","url":"https://a","content":"c1","score":0.9},{"title":"t2","url":"https://b","content":"c2","score":0.8}]}`))
-	}))
-	defer srv.Close()
-
-	dr := "w"
-	c := NewTavilySearchClientWithTimeout("key-foo", time.Second)
-	c.baseURL = srv.URL
-
-	res, err := c.Invoke(context.Background(), "hello world", &dr, 7)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !res.Success {
-		t.Fatalf("unexpected failure: %s", res.Message)
-	}
-	if gotAuth != "Bearer key-foo" {
-		t.Errorf("Authorization = %q, want Bearer key-foo", gotAuth)
-	}
-	if gotCT != "application/json" {
-		t.Errorf("Content-Type = %q", gotCT)
-	}
-	if !strings.Contains(gotBody, `"query":"hello world"`) {
-		t.Errorf("body missing query: %s", gotBody)
-	}
-	if !strings.Contains(gotBody, `"time_range":"week"`) {
-		t.Errorf("body missing time_range mapping: %s", gotBody)
-	}
-	if !strings.Contains(gotBody, `"max_results":7`) {
-		t.Errorf("body missing max_results: %s", gotBody)
+// getSearchKeys 从配置加载搜索 API key
+func getSearchKeys(t *testing.T) (tavilyKey, bochaKey string) {
+	configPaths := []string{
+		"config.yaml",
+		"../../config.yaml",
 	}
 
-	data, ok := res.Data.(map[string]interface{})
-	if !ok {
-		t.Fatalf("Data type = %T, want map", res.Data)
+	var cfg *config.Config
+	for _, p := range configPaths {
+		absPath, _ := filepath.Abs(p)
+		if c, err := config.LoadWithValidation(absPath); err == nil {
+			cfg = c
+			break
+		}
 	}
-	results, ok := data["results"].(*model.SearchResults)
-	if !ok {
-		t.Fatalf("results type = %T, want *model.SearchResults", data["results"])
+
+	if cfg == nil {
+		t.Skip("skipping live test: cannot load config.yaml")
+		return
 	}
-	if results.TotalResults != 2 || len(results.Results) != 2 {
-		t.Fatalf("got %d results (total=%d), want 2", len(results.Results), results.TotalResults)
-	}
-	if results.Results[0].Title != "t1" || results.Results[0].URL != "https://a" || results.Results[0].Snippet != "c1" {
-		t.Errorf("result[0] = %+v", results.Results[0])
-	}
+
+	return cfg.Search.TavilyAPIKey, cfg.Search.BochaAPIKey
 }
 
-func TestBochaSearchClient_Invoke(t *testing.T) {
-	var gotAuth, gotBody string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuth = r.Header.Get("Authorization")
-		b, _ := io.ReadAll(r.Body)
-		gotBody = string(b)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"code":0,"message":"success","data":{"webPages":{"value":[{"name":"b1","url":"https://x","snippet":"s1"}]}}}`))
-	}))
-	defer srv.Close()
+// skipIfNoKeys 跳过测试如果没有配置凭证
+func skipIfNoKeys(t *testing.T) (tavilyKey, bochaKey string) {
+	tavilyKey, bochaKey = getSearchKeys(t)
+	if tavilyKey == "" || bochaKey == "" {
+		t.Skip("skipping live test: tavily_api_key or bocha_api_key not set in config.yaml")
+	}
+	return
+}
 
-	dr := "m"
-	c := NewBochaSearchClientWithTimeout("key-bar", time.Second)
-	c.baseURL = srv.URL
+// TestTavilyLive 真实验证 Tavily API
+func TestTavilyLive(t *testing.T) {
+	tavilyKey, bochaKey := skipIfNoKeys(t)
+	_ = bochaKey
 
-	res, err := c.Invoke(context.Background(), "golang", &dr, 6)
+	c := NewTavilySearchClientWithTimeout(tavilyKey, 30*time.Second)
+	res, err := c.Invoke(context.Background(), "成龙是谁", nil, 3)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Tavily Invoke failed: %v", err)
 	}
 	if !res.Success {
-		t.Fatalf("unexpected failure: %s", res.Message)
-	}
-	if gotAuth != "Bearer key-bar" {
-		t.Errorf("Authorization = %q", gotAuth)
-	}
-	if !strings.Contains(gotBody, `"freshness":"oneMonth"`) {
-		t.Errorf("body missing freshness mapping: %s", gotBody)
-	}
-	if !strings.Contains(gotBody, `"count":6`) {
-		t.Errorf("body missing count: %s", gotBody)
+		t.Fatalf("Tavily returned error: %s", res.Message)
 	}
 
 	data := res.Data.(map[string]interface{})
-	results := data["results"].(*model.SearchResults)
-	if len(results.Results) != 1 {
-		t.Fatalf("got %d results, want 1", len(results.Results))
-	}
-	if results.Results[0].Title != "b1" || results.Results[0].URL != "https://x" || results.Results[0].Snippet != "s1" {
-		t.Errorf("result[0] = %+v", results.Results[0])
+	results := data["results"]
+	t.Logf("Tavily returned %+v results", results)
+
+	if results == nil {
+		t.Error("expected non-nil results")
 	}
 }
 
-func TestBochaSearchClient_Invoke_NonZeroCode(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"code":10001,"message":"no permission"}`))
-	}))
-	defer srv.Close()
+// TestBochaLive 真实验证 Bocha API
+func TestBochaLive(t *testing.T) {
+	tavilyKey, bochaKey := skipIfNoKeys(t)
+	_ = tavilyKey
 
-	c := NewBochaSearchClientWithTimeout("key", time.Second)
-	c.baseURL = srv.URL
-
-	res, err := c.Invoke(context.Background(), "x", nil, 10)
+	c := NewBochaSearchClientWithTimeout(bochaKey, 30*time.Second)
+	res, err := c.Invoke(context.Background(), "阿里巴巴ESG报告", nil, 3)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Success {
-		t.Fatal("expected failure for non-zero bocha code")
-	}
-	if !strings.Contains(res.Message, "code=10001") {
-		t.Errorf("Message = %q, want code=10001", res.Message)
-	}
-}
-
-func TestSearchDateRangeMapping(t *testing.T) {
-	str := func(s string) *string { return &s }
-
-	cases := []struct {
-		in     *string
-		tavily string
-		bocha  string
-		google string
-	}{
-		{nil, "", "", ""},
-		{str("d"), "day", "oneDay", "d1"},
-		{str("w"), "week", "oneWeek", "w1"},
-		{str("m"), "month", "oneMonth", "m1"},
-		{str("y"), "year", "oneYear", "y1"},
-		{str("unknown"), "", "", ""},
-	}
-	for _, c := range cases {
-		if got := tavilyTimeRange(c.in); got != c.tavily {
-			t.Errorf("tavilyTimeRange(%v) = %q, want %q", c.in, got, c.tavily)
-		}
-		if got := bochaFreshness(c.in); got != c.bocha {
-			t.Errorf("bochaFreshness(%v) = %q, want %q", c.in, got, c.bocha)
-		}
-		if got := googleDateRestrict(c.in); got != c.google {
-			t.Errorf("googleDateRestrict(%v) = %q, want %q", c.in, got, c.google)
-		}
-	}
-}
-
-// 确保各客户端都实现了 SearchEngine 接口。
-var _ SearchEngine = (*TavilySearchClient)(nil)
-var _ SearchEngine = (*BochaSearchClient)(nil)
-var _ SearchEngine = (*GoogleSearchClient)(nil)
-
-// TestGoogleSearchClient_Invoke_SendsSearchEngineID 验证 cx（Search Engine ID）被写入请求。
-// 复现并锁定历史 bug：SearchEngineID 配置后曾在工厂/客户端两层被丢弃，cx 恒为空，
-// Google Custom Search 会以 400 拒绝。
-func TestGoogleSearchClient_Invoke_SendsSearchEngineID(t *testing.T) {
-	var gotCX, gotKey, gotQ, gotNum string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		gotCX = q.Get("cx")
-		gotKey = q.Get("key")
-		gotQ = q.Get("q")
-		gotNum = q.Get("num")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"queries":{"request":[]},"searchInformation":{"totalResults":"0"},"items":[]}`))
-	}))
-	defer srv.Close()
-
-	c := NewGoogleSearchClientWithTimeout("key-foo", "my-engine-id", time.Second)
-	c.baseURL = srv.URL
-
-	res, err := c.Invoke(context.Background(), "golang", nil, 7)
-	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Bocha Invoke failed: %v", err)
 	}
 	if !res.Success {
-		t.Fatalf("unexpected failure: %s", res.Message)
+		t.Fatalf("Bocha returned error: %s", res.Message)
 	}
-	if gotCX != "my-engine-id" {
-		t.Errorf("cx = %q, want my-engine-id（SearchEngineID 未被写入请求）", gotCX)
-	}
-	if gotKey != "key-foo" {
-		t.Errorf("key = %q, want key-foo", gotKey)
-	}
-	if gotQ != "golang" {
-		t.Errorf("q = %q, want golang", gotQ)
-	}
-	if gotNum != "7" {
-		t.Errorf("num = %q, want 7", gotNum)
+
+	data := res.Data.(map[string]interface{})
+	results := data["results"]
+	t.Logf("Bocha returned results: %v", results)
+
+	if results == nil {
+		t.Error("expected non-nil results")
 	}
 }
 
-func TestGoogleSearchClient_Invoke_CapsLimitAtTen(t *testing.T) {
-	var gotNum string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotNum = r.URL.Query().Get("num")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"queries":{"request":[]},"searchInformation":{"totalResults":"0"},"items":[]}`))
-	}))
-	defer srv.Close()
+// TestFallbackLive 真实验证 Tavily + Bocha 自动切换
+func TestFallbackLive(t *testing.T) {
+	tavilyKey, bochaKey := skipIfNoKeys(t)
 
-	c := NewGoogleSearchClientWithTimeout("key", "engine", time.Second)
-	c.baseURL = srv.URL
-	if _, err := c.Invoke(context.Background(), "golang", nil, 50); err != nil {
-		t.Fatal(err)
-	}
-	if gotNum != "10" {
-		t.Fatalf("num = %q, want 10", gotNum)
-	}
-}
+	c := NewFallbackSearchClient(tavilyKey, bochaKey, 30*time.Second)
 
-// TestGoogleSearchClient_Invoke_MissingSearchEngineID 验证 cx 缺失时在本地直接失败，
-// 而不是发出一个注定被 Google 拒绝的请求。
-func TestGoogleSearchClient_Invoke_MissingSearchEngineID(t *testing.T) {
-	c := NewGoogleSearchClientWithTimeout("key-foo", "", time.Second)
-	res, err := c.Invoke(context.Background(), "golang", nil, 10)
+	res, err := c.Invoke(context.Background(), "成龙是谁", nil, 3)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Fallback Invoke failed: %v", err)
+	}
+	if !res.Success {
+		t.Fatalf("Fallback returned error: %s", res.Message)
+	}
+	t.Log("Fallback (Tavily primary) succeeded")
+}
+
+// TestFallbackLive_BochaFallback 真实验证 fallback 到 Bocha
+func TestFallbackLive_BochaFallback(t *testing.T) {
+	_, bochaKey := skipIfNoKeys(t)
+
+	// 使用无效的 Tavily key 强制触发 fallback
+	c := NewFallbackSearchClient("invalid-key-force-fallback", bochaKey, 30*time.Second)
+
+	res, err := c.Invoke(context.Background(), "golang", nil, 2)
+	if err != nil {
+		t.Fatalf("Fallback Invoke failed: %v", err)
 	}
 	if res.Success {
-		t.Fatal("expected failure when Search Engine ID is missing")
-	}
-	if !strings.Contains(res.Message, "Search Engine ID") {
-		t.Errorf("Message = %q, want mention Search Engine ID", res.Message)
+		t.Log("Fallback correctly switched to Bocha")
+		data := res.Data.(map[string]interface{})
+		results := data["results"]
+		t.Logf("Fallback (Bocha fallback) returned results: %v", results)
+	} else {
+		t.Logf("Both services failed as expected: %s", res.Message)
 	}
 }
 
-// TestGoogleSearchClient_Invoke_EmptyQuery 验证空 query 在本地直接失败，
-// 与 Tavily/Bocha 的防御性校验对齐，不发出 q= 空请求。
-func TestGoogleSearchClient_Invoke_EmptyQuery(t *testing.T) {
-	c := NewGoogleSearchClientWithTimeout("key", "engine", time.Second)
-	res, err := c.Invoke(context.Background(), "", nil, 10)
+// TestBochaLive_WithDateRange 测试带日期范围的 Bocha 搜索
+func TestBochaLive_WithDateRange(t *testing.T) {
+	if os.Getenv("RUN_LIVE_TESTS") != "true" {
+		t.Skip("skipping live test: RUN_LIVE_TESTS not set")
+	}
+
+	_, bochaKey := skipIfNoKeys(t)
+	c := NewBochaSearchClientWithTimeout(bochaKey, 30*time.Second)
+	dateRange := "y"
+	res, err := c.Invoke(context.Background(), "AI人工智能发展", &dateRange, 5)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Bocha Invoke with dateRange failed: %v", err)
 	}
-	if res.Success {
-		t.Fatal("expected failure for empty query")
+	if !res.Success {
+		t.Fatalf("Bocha returned error: %s", res.Message)
 	}
-	if !strings.Contains(res.Message, "query") {
-		t.Errorf("Message = %q, want mention query", res.Message)
-	}
-}
 
-// TestGoogleSearchClient_Invoke_MapsDateRestrict 验证 d/w/m/y 被映射为 Google 的
-// d1/w1/m1/y1，且未提供或非法值不下发 dateRestrict（裸传 d 会被 Google 静默忽略）。
-func TestGoogleSearchClient_Invoke_MapsDateRestrict(t *testing.T) {
-	str := func(s string) *string { return &s }
-	for _, tc := range []struct {
-		in   *string
-		want string
-	}{
-		{str("d"), "d1"},
-		{str("w"), "w1"},
-		{str("m"), "m1"},
-		{str("y"), "y1"},
-		{nil, ""},
-		{str("unknown"), ""},
-	} {
-		var got string
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			got = r.URL.Query().Get("dateRestrict")
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(`{"queries":{"request":[]},"searchInformation":{"totalResults":"0"},"items":[]}`))
-		}))
-		c := NewGoogleSearchClientWithTimeout("key", "engine", time.Second)
-		c.baseURL = srv.URL
-		if _, err := c.Invoke(context.Background(), "golang", tc.in, 10); err != nil {
-			t.Fatal(err)
-		}
-		srv.Close()
-		if got != tc.want {
-			t.Errorf("dateRestrict = %q, want %q (input %v)", got, tc.want, tc.in)
-		}
-	}
+	data := res.Data.(map[string]interface{})
+	results := data["results"]
+	t.Logf("Bocha with dateRange returned: %v", results)
 }

@@ -15,15 +15,13 @@ const (
 	bochaFreshnessOneWeek  = "oneWeek"
 	bochaFreshnessOneMonth = "oneMonth"
 	bochaFreshnessOneYear  = "oneYear"
-
-	googleDateRestrictDay   = "d1"
-	googleDateRestrictWeek  = "w1"
-	googleDateRestrictMonth = "m1"
-	googleDateRestrictYear  = "y1"
 )
 
-// 搜索客户端通用运行参数。
+// 搜索客户端通用运行参数
 const (
-	// defaultSearchHTTPTimeout 是搜索客户端缺省的 HTTP 请求超时。
+	// 是搜索客户端缺省的 HTTP 请求超时。
 	defaultSearchHTTPTimeout = 30 * time.Second
+
+	// 限制各搜索 API 响应体大小，防止上游返回超大 payload 耗尽内存。
+	MaxResponseBodyBytes = 1 << 20 // 1 MiB
 )

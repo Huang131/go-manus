@@ -47,12 +47,10 @@ llm:
   max_tokens: 4096
 
 search:
-  provider: "tavily"
+  provider: "fallback"  # "tavily" | "bocha" | "fallback"
   http_timeout: 30
   tavily_api_key: "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"
   bocha_api_key: ""
-  google_api_key: ""
-  search_engine_id: ""
 
 mcp:
   servers:

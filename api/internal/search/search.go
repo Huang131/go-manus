@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/bytedance/sonic"
 
+	"github.com/Huang131/go-manus/api/config"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/pkg/httpconst"
 	"github.com/Huang131/go-manus/api/pkg/logger"
@@ -39,168 +39,14 @@ func resolveSearchTimeout(timeout time.Duration) time.Duration {
 	return timeout
 }
 
-// toolResultErr 将底层错误映射为 (ToolResult, error)，供搜索客户端统一返回失败结果。
-func toolResultErr(err error) (*model.ToolResult, error) {
-	return model.NewToolError(err.Error()), err
-}
-
-// GoogleSearchClient Google 搜索客户端。
-// Google Custom Search 要求同时提供 apiKey 与 searchEngineID（即请求参数 cx），
-// 缺一不可；cx 为空时 Google 会以 400 拒绝请求。
-type GoogleSearchClient struct {
-	apiKey         string
-	searchEngineID string
-	baseURL        string
-	httpClient     *http.Client
-}
-
-// NewGoogleSearchClient 创建 Google 搜索客户端
-func NewGoogleSearchClient(apiKey, searchEngineID string) *GoogleSearchClient {
-	return NewGoogleSearchClientWithTimeout(apiKey, searchEngineID, defaultSearchHTTPTimeout)
-}
-
-// NewGoogleSearchClientWithTimeout 创建带请求超时的 Google 客户端。
-// baseURL 预置为 Google Custom Search 端点，测试中可覆盖为 httptest 地址。
-func NewGoogleSearchClientWithTimeout(apiKey, searchEngineID string, timeout time.Duration) *GoogleSearchClient {
-	timeout = resolveSearchTimeout(timeout)
-	return &GoogleSearchClient{
-		apiKey:         apiKey,
-		searchEngineID: searchEngineID,
-		baseURL:        "https://www.googleapis.com/customsearch/v1",
-		httpClient: &http.Client{
-			Timeout: timeout,
-		},
-	}
-}
-
-// Invoke 调用 Google 搜索
-func (c *GoogleSearchClient) Invoke(ctx context.Context, query string, dateRange *string, limit int) (*model.ToolResult, error) {
-	if c.apiKey == "" {
-		return model.NewToolError("Google API key not configured"), nil
-	}
-	if c.searchEngineID == "" {
-		return model.NewToolError("Google Search Engine ID not configured"), nil
-	}
-	if query == "" {
-		return model.NewToolError("search query is empty"), nil
-	}
-
-	// 构建请求 URL
-	params := url.Values{}
-	params.Set("key", c.apiKey)
-	params.Set("q", query)
-	params.Set("cx", c.searchEngineID)
-	params.Set("hl", "zh-CN")
-	if limit = normalizeSearchLimit(limit); limit > 10 {
-		limit = 10
-	}
-	params.Set("num", fmt.Sprintf("%d", limit))
-	if dr := googleDateRestrict(dateRange); dr != "" {
-		params.Set("dateRestrict", dr)
-	}
-
-	reqURL := fmt.Sprintf("%s?%s", c.baseURL, params.Encode())
-
-	// 创建请求
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
-	if err != nil {
-		return toolResultErr(err)
-	}
-
-	// 发送请求
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return toolResultErr(err)
-	}
-	defer resp.Body.Close()
-
-	// 读取响应
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return toolResultErr(err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return model.NewToolError(fmt.Sprintf("Google API error: status=%d, body=%s", resp.StatusCode, string(body))), nil
-	}
-
-	// 解析响应
-	var googleResp googleSearchResponse
-	if err := sonic.Unmarshal(body, &googleResp); err != nil {
-		return toolResultErr(err)
-	}
-
-	// 转换为标准搜索结果
-	results := &model.SearchResults{
-		Query:        query,
-		TotalResults: len(googleResp.Items),
-		Results:      make([]model.SearchResultItem, 0, len(googleResp.Items)),
-	}
-
-	for _, item := range googleResp.Items {
-		results.Results = append(results.Results, model.SearchResultItem{
-			Title:   item.Title,
-			URL:     item.Link,
-			Snippet: item.Snippet,
-		})
-	}
-
-	return model.NewToolResultWithMessage("", map[string]interface{}{
-		"results": results,
-	}), nil
-}
-
-// googleSearchResponse Google 搜索响应
-type googleSearchResponse struct {
-	Kind string `json:"kind"`
-	URLs struct {
-		Type     string `json:"type"`
-		Template string `json:"template"`
-	} `json:"url"`
-	Queries struct {
-		Request []struct {
-			Title        string `json:"title"`
-			TotalResults string `json:"totalResults"`
-			SearchTerms  string `json:"searchTerms"`
-			Count        int    `json:"count"`
-			StartIndex   int    `json:"startIndex"`
-		} `json:"request"`
-	} `json:"queries"`
-	SearchInformation struct {
-		SearchTime            float64 `json:"searchTime"`
-		FormattedSearchTime   string  `json:"formattedSearchTime"`
-		TotalResults          string  `json:"totalResults"`
-		FormattedTotalResults string  `json:"formattedTotalResults"`
-	} `json:"searchInformation"`
-	Items []struct {
-		Kind             string                              `json:"kind"`
-		Title            string                              `json:"title"`
-		HTMLTitle        string                              `json:"htmlTitle"`
-		Link             string                              `json:"link"`
-		DisplayLink      string                              `json:"displayLink"`
-		Snippet          string                              `json:"snippet"`
-		HTMLSnippet      string                              `json:"htmlSnippet"`
-		CacheID          string                              `json:"cacheId"`
-		FormattedURL     string                              `json:"formattedUrl"`
-		HTMLFormattedURL string                              `json:"htmlFormattedUrl"`
-		Pagemap          map[string][]map[string]interface{} `json:"pagemap"`
-	} `json:"items"`
-}
-
-// TavilySearchClient Tavily 搜索客户端。
-// Tavily 面向 LLM agent 设计，直连国内可访问，返回已提取的正文内容而非裸链接。
+// Tavily 面向 LLM agent 设计，返回已提取的正文内容而非裸链接。
 type TavilySearchClient struct {
 	apiKey     string
 	baseURL    string
 	httpClient *http.Client
 }
 
-// NewTavilySearchClient 创建 Tavily 搜索客户端。
-func NewTavilySearchClient(apiKey string) *TavilySearchClient {
-	return NewTavilySearchClientWithTimeout(apiKey, defaultSearchHTTPTimeout)
-}
-
-// NewTavilySearchClientWithTimeout 创建带请求超时的 Tavily 客户端。
+// 创建带请求超时的 Tavily 客户端。
 func NewTavilySearchClientWithTimeout(apiKey string, timeout time.Duration) *TavilySearchClient {
 	timeout = resolveSearchTimeout(timeout)
 	return &TavilySearchClient{
@@ -229,25 +75,25 @@ func (c *TavilySearchClient) Invoke(ctx context.Context, query string, dateRange
 		TimeRange:   tavilyTimeRange(dateRange),
 	})
 	if err != nil {
-		return toolResultErr(err)
+		return model.NewToolError(err.Error()), err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL, bytes.NewReader(body))
 	if err != nil {
-		return toolResultErr(err)
+		return model.NewToolError(err.Error()), err
 	}
 	req.Header.Set("Authorization", httpconst.AuthBearerPrefix+c.apiKey)
 	req.Header.Set("Content-Type", httpconst.ContentTypeJSON)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return toolResultErr(err)
+		return model.NewToolError(err.Error()), err
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBodyBytes))
 	if err != nil {
-		return toolResultErr(err)
+		return model.NewToolError(err.Error()), err
 	}
 	if resp.StatusCode != http.StatusOK {
 		return model.NewToolError(fmt.Sprintf("Tavily API error: status=%d, body=%s", resp.StatusCode, string(respBody))), nil
@@ -255,19 +101,22 @@ func (c *TavilySearchClient) Invoke(ctx context.Context, query string, dateRange
 
 	var tavilyResp tavilySearchResponse
 	if err := sonic.Unmarshal(respBody, &tavilyResp); err != nil {
-		return toolResultErr(err)
+		return model.NewToolError(err.Error()), err
 	}
 
 	results := &model.SearchResults{
-		Query:        query,
-		TotalResults: len(tavilyResp.Results),
-		Results:      make([]model.SearchResultItem, 0, len(tavilyResp.Results)),
+		Query:          query,
+		TotalResults:   len(tavilyResp.Results),
+		ResponseTime:   tavilyResp.ResponseTime,
+		TotalEstimated: 0, // Tavily 不返回总数估计
+		Results:        make([]model.SearchResultItem, 0, len(tavilyResp.Results)),
 	}
 	for _, item := range tavilyResp.Results {
 		results.Results = append(results.Results, model.SearchResultItem{
 			Title:   item.Title,
 			URL:     item.URL,
 			Snippet: item.Content,
+			Score:   item.Score,
 		})
 	}
 
@@ -276,16 +125,14 @@ func (c *TavilySearchClient) Invoke(ctx context.Context, query string, dateRange
 	}), nil
 }
 
-// tavilySearchRequest Tavily 搜索请求体。
 type tavilySearchRequest struct {
 	Query       string `json:"query"`
-	SearchDepth string `json:"search_depth"`
+	SearchDepth string `json:"search_depth"` // 搜索深度
 	MaxResults  int    `json:"max_results"`
 	Topic       string `json:"topic"`
 	TimeRange   string `json:"time_range,omitempty"`
 }
 
-// tavilySearchResponse Tavily 搜索响应体。
 type tavilySearchResponse struct {
 	Results []struct {
 		Title   string  `json:"title"`
@@ -293,9 +140,9 @@ type tavilySearchResponse struct {
 		Content string  `json:"content"`
 		Score   float64 `json:"score"`
 	} `json:"results"`
+	ResponseTime float64 `json:"response_time"`
 }
 
-// BochaSearchClient 博查搜索客户端。
 // 国内直连、中文场景最优，作为 Tavily 直连不稳时的付费兜底。
 type BochaSearchClient struct {
 	apiKey     string
@@ -303,17 +150,12 @@ type BochaSearchClient struct {
 	httpClient *http.Client
 }
 
-// NewBochaSearchClient 创建博查搜索客户端。
-func NewBochaSearchClient(apiKey string) *BochaSearchClient {
-	return NewBochaSearchClientWithTimeout(apiKey, defaultSearchHTTPTimeout)
-}
-
-// NewBochaSearchClientWithTimeout 创建带请求超时的博查客户端。
+// 创建带请求超时的博查客户端。
 func NewBochaSearchClientWithTimeout(apiKey string, timeout time.Duration) *BochaSearchClient {
 	timeout = resolveSearchTimeout(timeout)
 	return &BochaSearchClient{
 		apiKey:  apiKey,
-		baseURL: "https://api.bochaai.com/v1/web-search",
+		baseURL: "https://api.bocha.cn/v1/web-search",
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
@@ -333,27 +175,28 @@ func (c *BochaSearchClient) Invoke(ctx context.Context, query string, dateRange 
 		Query:     query,
 		Count:     normalizeSearchLimit(limit),
 		Freshness: bochaFreshness(dateRange),
+		Summary:   true, // 开启 AI 摘要
 	})
 	if err != nil {
-		return toolResultErr(err)
+		return model.NewToolError(err.Error()), err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL, bytes.NewReader(body))
 	if err != nil {
-		return toolResultErr(err)
+		return model.NewToolError(err.Error()), err
 	}
 	req.Header.Set("Authorization", httpconst.AuthBearerPrefix+c.apiKey)
 	req.Header.Set("Content-Type", httpconst.ContentTypeJSON)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return toolResultErr(err)
+		return model.NewToolError(err.Error()), err
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, MaxResponseBodyBytes))
 	if err != nil {
-		return toolResultErr(err)
+		return model.NewToolError(err.Error()), err
 	}
 	if resp.StatusCode != http.StatusOK {
 		return model.NewToolError(fmt.Sprintf("Bocha API error: status=%d, body=%s", resp.StatusCode, string(respBody))), nil
@@ -361,23 +204,29 @@ func (c *BochaSearchClient) Invoke(ctx context.Context, query string, dateRange 
 
 	var bochaResp bochaSearchResponse
 	if err := sonic.Unmarshal(respBody, &bochaResp); err != nil {
-		return toolResultErr(err)
+		return model.NewToolError(err.Error()), err
 	}
-	if bochaResp.Code != 0 {
-		return model.NewToolError(fmt.Sprintf("Bocha API error: code=%d, message=%s", bochaResp.Code, bochaResp.Message)), nil
+	if bochaResp.Code != 200 {
+		return model.NewToolError(fmt.Sprintf("Bocha API error: code=%d, msg=%s", bochaResp.Code, bochaResp.Msg)), nil
 	}
 
 	values := bochaResp.Data.WebPages.Value
 	results := &model.SearchResults{
-		Query:        query,
-		TotalResults: len(values),
-		Results:      make([]model.SearchResultItem, 0, len(values)),
+		Query:          query,
+		TotalResults:   len(values),
+		TotalEstimated: bochaResp.Data.WebPages.TotalEstimatedMatches,
+		ResponseTime:   0, // Bocha 不返回响应时间
+		Results:        make([]model.SearchResultItem, 0, len(values)),
 	}
 	for _, item := range values {
 		results.Results = append(results.Results, model.SearchResultItem{
-			Title:   item.Name,
-			URL:     item.URL,
-			Snippet: item.Snippet,
+			Title:         item.Name,
+			URL:           item.URL,
+			Snippet:       item.Snippet,
+			Summary:       item.Summary,
+			SiteName:      item.SiteName,
+			SiteIcon:      item.SiteIcon,
+			DatePublished: item.DatePublished,
 		})
 	}
 
@@ -386,23 +235,29 @@ func (c *BochaSearchClient) Invoke(ctx context.Context, query string, dateRange 
 	}), nil
 }
 
-// bochaSearchRequest 博查搜索请求体。freshness 为空时服务端按 noLimit 处理。
+// 博查搜索请求体。freshness 为空时服务端按 noLimit 处理。
 type bochaSearchRequest struct {
 	Query     string `json:"query"`
 	Count     int    `json:"count"`
 	Freshness string `json:"freshness,omitempty"`
+	Summary   bool   `json:"summary,omitempty"`
 }
 
-// bochaSearchResponse 博查搜索响应体。
+// 博查搜索响应体。
 type bochaSearchResponse struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-	Data    struct {
+	Code int    `json:"code"`
+	Msg  string `json:"msg"`
+	Data struct {
 		WebPages struct {
-			Value []struct {
-				Name    string `json:"name"`
-				URL     string `json:"url"`
-				Snippet string `json:"snippet"`
+			TotalEstimatedMatches int64 `json:"totalEstimatedMatches"`
+			Value                 []struct {
+				Name          string `json:"name"`
+				URL           string `json:"url"`
+				Snippet       string `json:"snippet"`
+				Summary       string `json:"summary"`
+				SiteName      string `json:"siteName"`
+				SiteIcon      string `json:"siteIcon"`
+				DatePublished string `json:"datePublished"`
 			} `json:"value"`
 		} `json:"webPages"`
 	} `json:"data"`
@@ -446,44 +301,68 @@ func bochaFreshness(r *string) string {
 	}
 }
 
-// googleDateRestrict 将工具层日期范围缩写（d/w/m/y）映射为 Google dateRestrict 取值。
-// Google 要求 d[number] 格式（如 d1=过去1天），裸传 d/w/m/y 会被静默忽略。
-func googleDateRestrict(r *string) string {
-	if r == nil {
-		return ""
-	}
-	switch *r {
-	case "d":
-		return googleDateRestrictDay
-	case "w":
-		return googleDateRestrictWeek
-	case "m":
-		return googleDateRestrictMonth
-	case "y":
-		return googleDateRestrictYear
-	default:
-		return ""
+// FallbackSearchClient Tavily + Bocha 自动切换客户端。
+// 当主客户端（Tavily）调用失败时，自动切换到备选客户端（Bocha）。
+type FallbackSearchClient struct {
+	primary  *TavilySearchClient
+	fallback *BochaSearchClient
+}
+
+// NewFallbackSearchClient 创建支持自动 fallback 的搜索客户端。
+func NewFallbackSearchClient(tavilyKey, bochaKey string, timeout time.Duration) *FallbackSearchClient {
+	return &FallbackSearchClient{
+		primary:  NewTavilySearchClientWithTimeout(tavilyKey, timeout),
+		fallback: NewBochaSearchClientWithTimeout(bochaKey, timeout),
 	}
 }
 
-// SearchConfig 搜索配置
-type SearchConfig struct {
-	GoogleAPIKey   string `mapstructure:"google_api_key"`
-	TavilyAPIKey   string `mapstructure:"tavily_api_key"`
-	BochaAPIKey    string `mapstructure:"bocha_api_key"`
-	SearchEngineID string `mapstructure:"search_engine_id"`
-	Provider       string `mapstructure:"provider"` // "tavily" | "bocha" | "google"
-	HTTPTimeout    int    `mapstructure:"http_timeout"`
+// Invoke 先调用 Tavily，失败后自动切换到 Bocha。
+func (c *FallbackSearchClient) Invoke(ctx context.Context, query string, dateRange *string, limit int) (*model.ToolResult, error) {
+	// 尝试主客户端（Tavily）
+	result, err := c.primary.Invoke(ctx, query, dateRange, limit)
+	if err == nil && result.Success {
+		return result, nil
+	}
+
+	// 主客户端失败，记录日志并切换到 fallback（Bocha）
+	var errMsg string
+	if err != nil {
+		errMsg = err.Error()
+	} else {
+		errMsg = result.Message
+	}
+	logger.Warn("Tavily search failed, falling back to Bocha",
+		logger.String("error", errMsg),
+		logger.String("query", query))
+
+	fallbackResult, fallbackErr := c.fallback.Invoke(ctx, query, dateRange, limit)
+	if fallbackErr == nil && fallbackResult.Success {
+		return fallbackResult, nil
+	}
+
+	// 两个都失败，返回 fallback 的错误结果和错误信息
+	var fallbackErrMsg string
+	if fallbackErr != nil {
+		fallbackErrMsg = fallbackErr.Error()
+	} else {
+		fallbackErrMsg = fallbackResult.Message
+	}
+	logger.Error("Both search engines failed",
+		logger.String("primary_error", errMsg),
+		logger.String("fallback_error", fallbackErrMsg),
+		logger.String("query", query))
+
+	return fallbackResult, fmt.Errorf("search failed: primary Tavily failed (%s), fallback Bocha also failed (%s)", errMsg, fallbackErrMsg)
 }
 
 // NewSearchEngine 根据配置创建搜索引擎客户端
-func NewSearchEngine(cfg *SearchConfig) SearchEngine {
+func NewSearchEngine(cfg *config.SearchConfig) SearchEngine {
 	timeout := time.Duration(cfg.HTTPTimeout) * time.Second
 	switch cfg.Provider {
 	case "bocha":
 		return NewBochaSearchClientWithTimeout(cfg.BochaAPIKey, timeout)
-	case "google":
-		return NewGoogleSearchClientWithTimeout(cfg.GoogleAPIKey, cfg.SearchEngineID, timeout)
+	case "fallback":
+		return NewFallbackSearchClient(cfg.TavilyAPIKey, cfg.BochaAPIKey, timeout)
 	default:
 		if cfg.Provider != "" {
 			logger.Warn("unknown search provider configured, falling back to tavily",
