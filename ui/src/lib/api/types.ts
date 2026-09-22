@@ -74,7 +74,7 @@ export type AgentConfig = {
  * MCP 服务器列表项（GET 响应）
  */
 export type ListMCPServerItem = {
-  server_name: string;
+  name: string;
   enabled: boolean;
   command?: string;
   args?: string[];
@@ -92,7 +92,7 @@ export type MCPServersData = {
  * MCP 服务器配置（POST 请求体中单个服务器的配置）
  */
 export type MCPServerConfig = {
-  server_name: string;
+  name: string;
   enabled?: boolean;
   env?: Record<string, string>;
   command?: string;

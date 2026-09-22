@@ -34,7 +34,7 @@ export function normalizeMCPConfig(value: unknown): MCPConfig {
   }
   const servers = Object.entries(raw.mcpServers as Record<string, MCPServerConfig>).map(([name, config]) => ({
     ...config,
-    server_name: name,
+    name,
     enabled: config.enabled ?? true,
   }))
   return {servers}
@@ -161,11 +161,11 @@ export function MCPSetting({servers, loading, onToggleEnabled, onDelete, onAdd}:
           {!loading && servers.length > 0 && (
             <ItemGroup className="gap-3">
               {servers.map((server) => (
-                <Item key={server.server_name} variant="outline">
+                <Item key={server.name} variant="outline">
                   <ItemContent>
                     <ItemTitle className="w-full flex justify-between items-center text-md font-bold text-gray-700">
                       <div className="flex gap-2 items-center">
-                        {server.server_name}
+                        {server.name}
                         <Badge>stdio</Badge>
                         {!server.enabled && <Badge>禁用</Badge>}
                       </div>
@@ -175,13 +175,13 @@ export function MCPSetting({servers, loading, onToggleEnabled, onDelete, onAdd}:
                           variant="ghost"
                           size="icon-xs"
                           className="cursor-pointer"
-                          onClick={() => onDelete(server.server_name)}
+                          onClick={() => onDelete(server.name)}
                         >
                           <Trash/>
                         </Button>
                         <Switch
                           checked={server.enabled}
-                          onCheckedChange={(checked) => onToggleEnabled(server.server_name, checked)}
+                          onCheckedChange={(checked) => onToggleEnabled(server.name, checked)}
                         />
                       </div>
                     </ItemTitle>

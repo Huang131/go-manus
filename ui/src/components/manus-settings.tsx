@@ -143,7 +143,7 @@ export function ManusSettings() {
   const handleMCPToggle = useCallback(async (serverName: string, enabled: boolean) => {
     // 乐观更新
     setMcpServers((prev) =>
-      prev.map((s) => (s.server_name === serverName ? {...s, enabled} : s)),
+      prev.map((s) => (s.name === serverName ? {...s, enabled} : s)),
     )
     try {
       await configApi.updateMCPServerEnabled(serverName, enabled)
@@ -151,7 +151,7 @@ export function ManusSettings() {
     } catch {
       // 回滚
       setMcpServers((prev) =>
-        prev.map((s) => (s.server_name === serverName ? {...s, enabled: !enabled} : s)),
+        prev.map((s) => (s.name === serverName ? {...s, enabled: !enabled} : s)),
       )
       toast.error(`操作失败，请重试`)
     }
@@ -160,7 +160,7 @@ export function ManusSettings() {
   const handleMCPDelete = useCallback(async (serverName: string) => {
     const prev = mcpServers
     // 乐观更新
-    setMcpServers((list) => list.filter((s) => s.server_name !== serverName))
+    setMcpServers((list) => list.filter((s) => s.name !== serverName))
     try {
       await configApi.deleteMCPServer(serverName)
       toast.success(`已删除 MCP 服务器「${serverName}」`)
