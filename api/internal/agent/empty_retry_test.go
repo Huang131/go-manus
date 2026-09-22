@@ -134,3 +134,39 @@ func TestBaseAgent_InvokeWithEmptyRetry_FirstSuccess(t *testing.T) {
 		t.Errorf("resp.Message.ContentText = %q", resp.Message.ContentText)
 	}
 }
+
+func TestBaseAgent_InvokeWithEmptyRetry_StopsOnCancellation(t *testing.T) {
+	mock := &mockLLM{errs: []error{context.Canceled, context.Canceled, context.Canceled}}
+	agent := NewBaseAgent("test", "session-1", DefaultAgentConfig(), mock, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, _, err := agent.invokeWithEmptyRetry(ctx, &llm.LLMRequest{
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
+	}, 3)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	if len(mock.calls) != 1 {
+		t.Fatalf("LLM calls = %d, want 1 after cancellation", len(mock.calls))
+	}
+}
+
+func TestBaseAgent_InvokeWithEmptyRetry_RejectsLateSuccessAfterCancellation(t *testing.T) {
+	mock := &mockLLM{responses: []*llmcore.LLMResponse{
+		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: "late success"}},
+	}}
+	agent := NewBaseAgent("test", "session-1", DefaultAgentConfig(), mock, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, _, err := agent.invokeWithEmptyRetry(ctx, &llm.LLMRequest{
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
+	}, 3)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
+	}
+	if len(mock.calls) != 1 {
+		t.Fatalf("LLM calls = %d, want 1 after cancellation", len(mock.calls))
+	}
+}

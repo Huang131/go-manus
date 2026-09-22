@@ -204,6 +204,9 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 
 		// 处理 Flow 输出事件
 		for event := range eventChan {
+			if ctx.Err() != nil {
+				break
+			}
 			// 工具产出的二进制展示数据（如浏览器截图）必须先落存储：
 			// 这里是 SSE 与事件库的唯一汇合点，序列化前把字节换成文件引用，
 			// 事件里才不会出现撑爆体积的 base64。
@@ -309,6 +312,11 @@ func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) err
 		//   - Completed/Failed/Idle：本轮任务已到终态，退出 runner 触发 task 完成清理链
 		//     （onDone -> destroy -> registry 摘除 -> 短 TTL），否则 task 永远不算完成
 		status := r.flow.GetStatus()
+		if ctx.Err() != nil || status == FlowStatusCancelled {
+			logger.InfoContext(ctx, "Flow 已取消，runner 退出",
+				logger.String("task_id", task.ID()))
+			return ctx.Err()
+		}
 		switch status {
 		case FlowStatusWaiting:
 			logger.InfoContext(ctx, "Flow 等待用户输入，runner 继续监听输入流",

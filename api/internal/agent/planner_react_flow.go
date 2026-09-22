@@ -59,6 +59,10 @@ func (f *PlannerReActFlow) setStatus(s FlowStatus) {
 
 // emitEvent 将事件发送给下游；请求取消后立即停止，避免消费者退出时阻塞 flow goroutine。
 func (f *PlannerReActFlow) emitEvent(ctx context.Context, ch chan<- model.BaseEvent, event model.BaseEvent) bool {
+	if ctx.Err() != nil {
+		f.setStatus(FlowStatusCancelled)
+		return false
+	}
 	select {
 	case ch <- event:
 		return true
@@ -129,6 +133,10 @@ func (f *PlannerReActFlow) Invoke(ctx context.Context, input *TaskInput) <-chan 
 		// 初始状态不强制重置：Waiting 表示上一轮在等用户输入，本轮 Invoke 携带新消息
 		// 从 Waiting 恢复继续执行，而不是重新规划。
 		for {
+			if ctx.Err() != nil {
+				f.setStatus(FlowStatusCancelled)
+				return
+			}
 			status := f.currentStatus()
 			var stop bool
 			switch status {
@@ -189,6 +197,10 @@ func (f *PlannerReActFlow) handleIdle() bool {
 func (f *PlannerReActFlow) handlePlanning(ctx context.Context, input *TaskInput, ch chan<- model.BaseEvent) bool {
 	plan, planMsg, err := f.planner.CreatePlan(ctx, input)
 	if err != nil {
+		if ctx.Err() != nil {
+			f.setStatus(FlowStatusCancelled)
+			return true
+		}
 		logger.ErrorContext(ctx, "Planner 创建计划失败", logger.Err(err))
 		if !f.emitEvent(ctx, ch, model.NewErrorEvent(err.Error())) {
 			return true
@@ -251,6 +263,10 @@ func (f *PlannerReActFlow) handleExecuting(ctx context.Context, input *TaskInput
 		logger.String("description", step.Description))
 
 	if err := f.react.ExecuteStep(ctx, plan, step, input); err != nil {
+		if ctx.Err() != nil {
+			f.setStatus(FlowStatusCancelled)
+			return true
+		}
 		if err == ErrWaitForUser {
 			// 需要等待用户输入：先把步骤状态（含 UserQuestion）写回 flow，
 			// 然后终止本轮 goroutine。flow 停在 Waiting，runner 继续等下一条输入；
@@ -331,6 +347,10 @@ func (f *PlannerReActFlow) handleUpdating(ctx context.Context, ch chan<- model.B
 	if completedStep != nil {
 		updatedPlan, err := f.planner.UpdatePlan(ctx, plan, completedStep)
 		if err != nil {
+			if ctx.Err() != nil {
+				f.setStatus(FlowStatusCancelled)
+				return true
+			}
 			logger.WarnContext(ctx, "Planner 更新计划失败", logger.Err(err))
 		} else {
 			f.setPlan(updatedPlan)
@@ -352,6 +372,10 @@ func (f *PlannerReActFlow) handleSummarizing(ctx context.Context, ch chan<- mode
 	if plan != nil && len(plan.Steps) > 0 {
 		summary, attachments, emitted, err := f.react.Summarize(ctx)
 		if err != nil {
+			if ctx.Err() != nil {
+				f.setStatus(FlowStatusCancelled)
+				return true
+			}
 			logger.WarnContext(ctx, "ReActAgent 总结任务失败", logger.Err(err))
 		} else {
 			if !emitted && !f.emitEvent(ctx, ch, model.NewMessageEvent(model.RoleAssistant, summary)) {

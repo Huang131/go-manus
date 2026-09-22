@@ -2,7 +2,9 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
@@ -74,5 +76,47 @@ func TestReActAgentSummarizeReportsWhetherDeltasWereEmitted(t *testing.T) {
 	}
 	if len(got) != 3 || got[0] != model.EventTypeMessageDelta || got[2] != model.EventTypeMessageDone {
 		t.Fatalf("stream events = %v, want delta/delta/done", got)
+	}
+}
+
+type blockingStreamingAgentLLM struct {
+	streamStarted chan struct{}
+}
+
+func (m *blockingStreamingAgentLLM) Invoke(context.Context, *llm.LLMRequest) (*llmcore.LLMResponse, error) {
+	return nil, context.Canceled
+}
+
+func (m *blockingStreamingAgentLLM) ModelName() string    { return "blocking" }
+func (m *blockingStreamingAgentLLM) Temperature() float64 { return 0 }
+func (m *blockingStreamingAgentLLM) MaxTokens() int       { return 0 }
+
+func (m *blockingStreamingAgentLLM) Stream(context.Context, *llm.LLMRequest) (<-chan llmcore.LLMDelta, error) {
+	close(m.streamStarted)
+	return make(chan llmcore.LLMDelta), nil
+}
+
+func TestBaseAgentInvokeStreamingStopsWhenProviderLeavesStreamOpen(t *testing.T) {
+	mock := &blockingStreamingAgentLLM{streamStarted: make(chan struct{})}
+	agent := NewBaseAgent("react", "session-1", DefaultAgentConfig(), mock, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	resultCh := make(chan error, 1)
+	go func() {
+		_, _, err := agent.invokeLLMWithEmission(ctx, &llm.LLMRequest{}, false)
+		resultCh <- err
+	}()
+
+	<-mock.streamStarted
+	cancel()
+
+	select {
+	case err := <-resultCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("invokeLLMWithEmission() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("invokeLLMWithEmission() did not stop after context cancellation")
 	}
 }

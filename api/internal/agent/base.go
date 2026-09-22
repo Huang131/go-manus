@@ -176,6 +176,9 @@ func (a *BaseAgent) invokeWithEmptyRetry(ctx context.Context, req *llm.LLMReques
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		resp, err := a.invokeLLM(ctx, &current, false)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, attempt, ctx.Err()
+			}
 			lastErr = err
 			// LLM 错误：注入空 assistant + 重试提示，然后继续
 			current.Messages = append(current.Messages,
@@ -218,6 +221,9 @@ func (a *BaseAgent) invokeLLMWithEmission(ctx context.Context, req *llm.LLMReque
 	streaming, ok := a.llm.(llm.StreamingLLM)
 	if !ok {
 		resp, err := a.llm.Invoke(ctx, req)
+		if err == nil && ctx.Err() != nil {
+			return nil, false, ctx.Err()
+		}
 		return resp, false, err
 	}
 
@@ -233,7 +239,24 @@ func (a *BaseAgent) invokeLLMWithEmission(ctx context.Context, req *llm.LLMReque
 	sequence := 0
 	hasText := false
 	var streamErr string
-	for delta := range deltas {
+
+streamLoop:
+	for {
+		// 某些 provider 在取消后不会及时关闭响应流；不能用 range 等待其关闭，
+		// 否则 StopSession 会被上游连接生命周期拖住。
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
+		var delta llmcore.LLMDelta
+		var ok bool
+		select {
+		case <-ctx.Done():
+			return nil, false, ctx.Err()
+		case delta, ok = <-deltas:
+			if !ok {
+				break streamLoop
+			}
+		}
 		if delta.Error != "" {
 			if streamErr == "" {
 				streamErr = delta.Error
@@ -320,6 +343,9 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 		}
 		resp, err := a.invokeLLM(ctx, llmReq, publishDeltas && shouldPublishDeltas(llmReq))
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			// LLM 调用失败，尝试重试
 			for retry := 0; retry < a.config.MaxRetries; retry++ {
 				logger.WarnContext(ctx, "LLM 调用失败，执行重试",
@@ -339,6 +365,9 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 				resp, err = a.invokeLLM(ctx, llmReq, publishDeltas && shouldPublishDeltas(llmReq))
 				if err == nil {
 					break
+				}
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
 				}
 			}
 

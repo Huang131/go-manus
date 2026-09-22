@@ -136,12 +136,20 @@ func TestPlannerReActFlow_StatusGetters(t *testing.T) {
 }
 
 func TestPlannerReActFlow_EmitEventStopsWhenContextCanceled(t *testing.T) {
-	flow := &PlannerReActFlow{}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+	for i := 0; i < 100; i++ {
+		flow := &PlannerReActFlow{}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		events := make(chan model.BaseEvent, 1)
 
-	if flow.emitEvent(ctx, make(chan model.BaseEvent), model.NewDoneEvent()) {
-		t.Fatal("emitEvent() = true, want false for canceled context")
+		if flow.emitEvent(ctx, events, model.NewDoneEvent()) {
+			t.Fatal("emitEvent() = true, want false for canceled context")
+		}
+		select {
+		case event := <-events:
+			t.Fatalf("emitEvent() wrote %T after context cancellation", event)
+		default:
+		}
 	}
 }
 
