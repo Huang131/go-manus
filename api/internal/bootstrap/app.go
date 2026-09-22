@@ -153,6 +153,8 @@ type Factories struct {
 	NewPostgres             func(*config.DatabaseConfig) (*infrastructure.Postgres, error) // PostgreSQL 构造器
 	NewRedis                func(*config.RedisConfig) (*infrastructure.Redis, error)       // Redis 构造器
 	NewOSS                  func(*config.ObjectStorageConfig) (*infrastructure.OSS, error) // OSS 构造器
+	// NewLLM 允许 API 集成测试注入确定性模型，生产环境为空时使用默认路由器。
+	NewLLM                  func(*llm.LLMRuntimeConfig) llm.LLM
 	NewFileCleanupScheduler func(
 		cleanupService service.FileCleanupService, // 清理服务
 		expireDuration string, // 过期时间，如 "24h", "7d"
@@ -452,7 +454,7 @@ func (a *App) initServices(cfg *config.Config) {
 //
 // 返回值：
 //   - 初始化好的 LLM 路由器，如果未启用或未配置则返回 nil
-func (a *App) initLLM(cfg *config.Config, opts Options) llm.LLM {
+func (a *App) initLLM(cfg *config.Config, opts Options, factory llm.LLMClientFactory) llm.LLM {
 	// 前置检查：LLM 未启用或未配置 BaseURL
 	if !opts.EnableLLM || cfg.LLM.BaseURL == "" {
 		return nil
@@ -504,7 +506,7 @@ func (a *App) initLLM(cfg *config.Config, opts Options) llm.LLM {
 				return configs, nil
 			}
 			return nil, nil
-		}, fallbackLLMCfg, nil)
+		}, fallbackLLMCfg, factory)
 
 	// 把路由器的内存健康缓存入口注入模型服务：
 	// - 失效器：编辑/删除模型后立即作废旧健康快照（编辑即新模型）。
@@ -608,11 +610,11 @@ func resolveAgentConfig(persisted *model.AgentConfig) *agent.AgentConfig {
 //   - A2A：Agent-to-Agent 通信配置
 //
 // 这些组件被传递给 Agent 服务，供 Agent 调用外部能力。
-func (a *App) initExternalClients(cfg *config.Config, opts Options) *externalClients {
+func (a *App) initExternalClients(cfg *config.Config, opts Options, factories Factories) *externalClients {
 	clients := &externalClients{}
 
 	// LLM 路由器
-	clients.llm = a.initLLM(cfg, opts)
+	clients.llm = a.initLLM(cfg, opts, factories.NewLLM)
 
 	// Sandbox 沙箱
 	if opts.EnableSandbox {
@@ -996,7 +998,7 @@ func BuildWithFactories(cfg *config.Config, opts Options, factories Factories) (
 	app.initServices(cfg)
 
 	// 初始化外部客户端
-	clients := app.initExternalClients(cfg, opts)
+	clients := app.initExternalClients(cfg, opts, factories)
 
 	// 初始化 Agent 服务
 	if err := app.initAgent(opts, clients); err != nil {

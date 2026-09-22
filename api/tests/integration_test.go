@@ -134,11 +134,16 @@ func assertSuccess(t *testing.T, w *httptest.ResponseRecorder) response.Response
 
 // CleanupSession 清理测试会话
 func CleanupSession(t *testing.T, sessionID string) {
+	CleanupSessionWithDB(t, testApp.Postgres, sessionID)
+}
+
+// CleanupSessionWithDB 使用创建会话的应用所连接的数据库清理测试数据。
+func CleanupSessionWithDB(t *testing.T, db *infrastructure.Postgres, sessionID string) {
 	t.Helper()
 	ctx, cancel := NewTestContext()
 	defer cancel()
 
-	_, err := testApp.Postgres.Pool.Exec(ctx, "DELETE FROM sessions WHERE id = $1", sessionID)
+	_, err := db.Pool.Exec(ctx, "DELETE FROM sessions WHERE id = $1", sessionID)
 	if err != nil {
 		t.Logf("清理会话 %s 失败: %v", sessionID, err)
 	}
@@ -198,6 +203,27 @@ func postJSON(t *testing.T, path string, body any) *httptest.ResponseRecorder {
 		t.Fatalf("序列化请求体失败: %v", err)
 	}
 	return doRequest(t, http.MethodPost, path, bodyJSON, "application/json")
+}
+
+// postJSONWithServer 向指定测试应用发送 JSON 请求，供需要独立装配的集成测试使用。
+func postJSONWithServer(t *testing.T, server http.Handler, path string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	bodyJSON, err := sonic.Marshal(body)
+	if err != nil {
+		t.Fatalf("序列化请求体失败: %v", err)
+	}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(bodyJSON))
+	req.Header.Set("Content-Type", "application/json")
+	server.ServeHTTP(w, req)
+	return w
+}
+
+func createSessionWithServer(t *testing.T, server http.Handler) string {
+	t.Helper()
+	w := postJSONWithServer(t, server, "/api/sessions", nil)
+	assertOK(t, w)
+	return parseResponseDataAsMap(t, w)["id"].(string)
 }
 
 // getJSON 发送 GET 请求

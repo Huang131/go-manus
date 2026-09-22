@@ -109,7 +109,7 @@ func TestInitExternalClientsDoesNotCreateBrowserWithoutSandboxAddress(t *testing
 	clients := app.initExternalClients(&config.Config{}, Options{
 		EnableSandbox: true,
 		EnableBrowser: true,
-	})
+	}, Factories{})
 	if clients.browser != nil {
 		t.Fatal("browser should be nil when sandbox address is empty")
 	}
