@@ -37,21 +37,6 @@ type AgentConfig struct {
 	MaxSearchResults int `json:"max_search_results"` // 搜索工具返回的最大结果数
 }
 
-// MCPConfig MCP 配置
-type MCPConfig struct {
-	Servers []MCPServer `json:"servers"`
-}
-
-// MCPServer MCP (Model Context Protocol) 服务器配置。
-// MCP 是连接 AI 模型与外部数据源/工具的标准协议。
-type MCPServer struct {
-	ServerName string            `json:"server_name"` // MCP 服务器名称，用于工具调用时的标识
-	Enabled    bool              `json:"enabled"`     // 是否启用该服务器
-	Command    string            `json:"command,omitempty"`
-	Args       []string          `json:"args,omitempty"`
-	Env        map[string]string `json:"env,omitempty"`
-}
-
 // A2AConfig A2A 配置
 type A2AConfig struct {
 	Servers []A2AServer `json:"servers"`

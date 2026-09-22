@@ -31,12 +31,28 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # ============================================================
 FROM alpine:3.19 AS runner
 
-# 安装 ca-certificates (用于 HTTPS 请求) 和 tzdata
-RUN apk add --no-cache ca-certificates tzdata && \
+# 安装基础工具 + Node.js + Python + uv (支持 MCP 服务器)
+# - Node.js + npm: 支持 npx 运行 @modelcontextprotocol/server-xxx
+# - Python + uv: 支持 uvx 运行 Python 版 MCP 服务器
+RUN apk add --no-cache \
+        ca-certificates \
+        tzdata \
+        nodejs \
+        npm \
+        python3 \
+        py3-pip \
+        curl \
+    && \
+    # 安装 uv（快速 Python 包管理器，支持 uvx 运行 MCP 服务器）
+    curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    ln -s /root/.local/bin/uv /usr/local/bin/uv && \
     # 创建非 root 用户
     adduser -D -g '' appuser
 
 WORKDIR /app
+
+# 创建 MCP 服务器工作目录
+RUN mkdir -p /tmp/mcp-files && chown -R appuser:appuser /tmp
 
 # 从 builder 阶段复制文件
 # 注意：不再拷贝 /build/pkg，静态编译不需要源码

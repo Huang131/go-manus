@@ -98,7 +98,7 @@ func TestAppConfigService_UpdateMCPConfig(t *testing.T) {
 	// 先创建默认 MCP 配置
 	mcpConfig := &model.MCPConfig{
 		Servers: []model.MCPServer{
-			{ServerName: "server-1", Enabled: true, Command: "server-one"},
+			{Name: "server-1", Enabled: true, Command: "server-one"},
 		},
 	}
 	configValue, _ := sonic.Marshal(mcpConfig)
@@ -112,8 +112,8 @@ func TestAppConfigService_UpdateMCPConfig(t *testing.T) {
 	// 添加新服务器（测试同名覆盖 + 新增场景）
 	newConfig := &model.MCPConfig{
 		Servers: []model.MCPServer{
-			{ServerName: "server-1", Enabled: true, Command: "server-one"},
-			{ServerName: "server-2", Enabled: false, Command: "server-two"},
+			{Name: "server-1", Enabled: true, Command: "server-one"},
+			{Name: "server-2", Enabled: false, Command: "server-two"},
 		},
 	}
 
@@ -131,8 +131,8 @@ func TestAppConfigService_UpdateMCPConfig(t *testing.T) {
 func TestAppConfigService_UpdateMCPConfigRejectsMissingCommand(t *testing.T) {
 	svc := NewAppConfigService(NewMockAppConfigRepository())
 	err := svc.UpdateMCPConfig(context.Background(), &model.MCPConfig{Servers: []model.MCPServer{{
-		ServerName: "missing-command",
-		Enabled:    true,
+		Name:    "missing-command",
+		Enabled: true,
 	}}})
 	if err == nil {
 		t.Fatal("UpdateMCPConfig() error = nil, want validation error")
@@ -158,8 +158,8 @@ func TestAppConfigService_DeleteMCPServer(t *testing.T) {
 	// 先创建默认 MCP 配置
 	mcpConfig := &model.MCPConfig{
 		Servers: []model.MCPServer{
-			{ServerName: "server-1", Enabled: true, Command: "server-one"},
-			{ServerName: "server-2", Enabled: true, Command: "server-two"},
+			{Name: "server-1", Enabled: true, Command: "server-one"},
+			{Name: "server-2", Enabled: true, Command: "server-two"},
 		},
 	}
 	configValue, _ := sonic.Marshal(mcpConfig)
@@ -180,8 +180,8 @@ func TestAppConfigService_DeleteMCPServer(t *testing.T) {
 	if len(updated.Servers) != 1 {
 		t.Errorf("Updated MCPConfig.Servers length = %d, want 1", len(updated.Servers))
 	}
-	if updated.Servers[0].ServerName != "server-2" {
-		t.Errorf("Remaining server should be server-2, got %s", updated.Servers[0].ServerName)
+	if updated.Servers[0].Name != "server-2" {
+		t.Errorf("Remaining server should be server-2, got %s", updated.Servers[0].Name)
 	}
 }
 
@@ -208,7 +208,7 @@ func TestAppConfigService_DeleteMCPServer_NotFoundWithoutConfig(t *testing.T) {
 func TestAppConfigService_UpdateMCPServerEnabled(t *testing.T) {
 	repo := NewMockAppConfigRepository()
 	svc := NewAppConfigService(repo)
-	if err := svc.UpdateMCPConfig(context.Background(), &model.MCPConfig{Servers: []model.MCPServer{{ServerName: "s", Enabled: false, Command: "server"}}}); err != nil {
+	if err := svc.UpdateMCPConfig(context.Background(), &model.MCPConfig{Servers: []model.MCPServer{{Name: "s", Enabled: false, Command: "server"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := svc.UpdateMCPServerEnabled(context.Background(), "s", true); err != nil {

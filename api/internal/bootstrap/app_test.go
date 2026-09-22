@@ -130,10 +130,10 @@ func (s runtimeConfigServiceStub) GetA2AConfig(context.Context) (*model.A2AConfi
 }
 
 func TestLoadRuntimeToolConfigsPrefersPersistedSettings(t *testing.T) {
-	yamlMCP := &agent.MCPConfig{Servers: []agent.MCPServer{{Name: "yaml", Command: "yaml-command"}}}
+	yamlMCP := &model.MCPConfig{Servers: []model.MCPServer{{Name: "yaml", Command: "yaml-command"}}}
 	yamlA2A := &agent.A2AConfig{Agents: []agent.A2AAgent{{Name: "yaml", URL: "https://yaml.example"}}}
 	svc := runtimeConfigServiceStub{
-		mcp: &model.MCPConfig{Servers: []model.MCPServer{{ServerName: "db", Enabled: true, Command: "db-command"}}},
+		mcp: &model.MCPConfig{Servers: []model.MCPServer{{Name: "db", Enabled: true, Command: "db-command"}}},
 		a2a: &model.A2AConfig{Servers: []model.A2AServer{{ID: "db", Enabled: true, URL: "https://db.example"}}},
 	}
 

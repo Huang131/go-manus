@@ -3,6 +3,7 @@ package mcp
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -10,36 +11,64 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/pkg/logger"
 	"github.com/bytedance/sonic"
 )
 
+// MCP 客户端错误
+var (
+	ErrClientClosed         = errors.New("MCP client is closed")
+	ErrClientNotInitialized = errors.New("MCP client not initialized")
+	ErrInvalidResponse      = errors.New("invalid response format")
+	// 响应 channel 已关闭
+	ErrResponseChannelClosed = errors.New("response channel closed")
+)
+
+// MCPServerError 服务器返回的错误
+type MCPServerError struct {
+	Code    int
+	Message string
+}
+
+func (e *MCPServerError) Error() string {
+	return fmt.Sprintf("MCP server error [%d]: %s", e.Code, e.Message)
+}
+
 // MCPClient MCP 客户端接口
 type MCPClient interface {
-	// Connect 连接到 MCP 服务器
+	// 连接到 MCP 服务器
 	Connect(ctx context.Context) error
 
-	// ListTools 获取工具列表
+	// 获取工具列表
 	ListTools(ctx context.Context) ([]MCPToolInfo, error)
 
-	// CallTool 调用工具
+	// 调用工具
 	CallTool(ctx context.Context, name string, args map[string]interface{}) (*MCPToolResult, error)
 
-	// Close 关闭连接
+	// 关闭连接
 	Close() error
 }
 
-// MCPToolInfo MCP 工具信息
+// MCP 工具信息
 type MCPToolInfo struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description,omitempty"`
 	InputSchema map[string]interface{} `json:"inputSchema,omitempty"`
 }
 
-// MCPToolResult MCP 工具调用结果
+// MCP 工具调用结果
 type MCPToolResult struct {
 	Content []MCPContent `json:"content,omitempty"`
 	IsError bool         `json:"isError,omitempty"`
+}
+
+// 将工具调用错误转换为标准错误
+func (r *MCPToolResult) MCPToolError() error {
+	if !r.IsError || len(r.Content) == 0 {
+		return nil
+	}
+	return errors.New(r.Content[0].Text)
 }
 
 // MCPContent MCP 内容项
@@ -56,8 +85,8 @@ type MCPContent struct {
 //   - 不需要 sync.Mutex，所有并发安全由 atomic + 资源回收顺序保证
 type StdioMCPClient struct {
 	cmd        *exec.Cmd
-	stdin      io.Writer
-	stdout     io.Reader
+	stdin      io.WriteCloser
+	stdout     io.ReadCloser
 	reader     *bufio.Reader
 	nextID     int
 	mu         sync.Mutex // 串行化 ID 分配与请求-响应读取（共享 bufio 不允许并发）
@@ -66,14 +95,14 @@ type StdioMCPClient struct {
 	env        map[string]string
 }
 
-// StdioMCPClientConfig stdio MCP 客户端配置
+// stdio MCP 客户端配置
 type StdioMCPClientConfig struct {
 	Command string
 	Args    []string
 	Env     map[string]string
 }
 
-// NewStdioMCPClient 创建 stdio MCP 客户端
+// 创建 stdio MCP 客户端
 func NewStdioMCPClient(serverName string, cfg StdioMCPClientConfig) *StdioMCPClient {
 	return &StdioMCPClient{
 		serverName: serverName,
@@ -83,10 +112,10 @@ func NewStdioMCPClient(serverName string, cfg StdioMCPClientConfig) *StdioMCPCli
 	}
 }
 
-// Connect 连接到 MCP 服务器
+// 连接到 MCP 服务器
 func (c *StdioMCPClient) Connect(ctx context.Context) error {
 	if c.cmd == nil {
-		return fmt.Errorf("MCP client not initialized")
+		return ErrClientNotInitialized
 	}
 
 	// 设置环境变量
@@ -137,7 +166,7 @@ func (c *StdioMCPClient) Connect(ctx context.Context) error {
 	if err := c.sendInitialize(ctx); err != nil {
 		// 错误路径：标记 closed + 回收进程。不调 c.Close()，避免重复清理
 		c.closed.Store(true)
-		c.terminateProcess()
+		c.cleanup()
 		return fmt.Errorf("failed to initialize MCP server: %w", err)
 	}
 
@@ -148,7 +177,26 @@ func (c *StdioMCPClient) Connect(ctx context.Context) error {
 	return nil
 }
 
-// terminateProcess 强制终止子进程并等待回收。设计为无锁调用，供错误路径使用。
+// cleanup 清理所有资源（内部使用，不检查 closed 状态）
+func (c *StdioMCPClient) cleanup() {
+	// 关闭 stdin
+	if c.stdin != nil {
+		c.stdin.Close()
+		c.stdin = nil
+	}
+
+	// 关闭 stdout
+	if c.stdout != nil {
+		c.stdout.Close()
+		c.stdout = nil
+	}
+
+	// 终止进程
+	c.terminateProcess()
+}
+
+// terminateProcess 强制终止子进程并等待回收。
+// 设计为无锁调用，供错误路径使用。
 // 不要在持锁状态下调用，否则 cmd.Wait() 可能在持锁状态下阻塞。
 func (c *StdioMCPClient) terminateProcess() {
 	if c.cmd == nil || c.cmd.Process == nil {
@@ -157,9 +205,10 @@ func (c *StdioMCPClient) terminateProcess() {
 	_ = c.cmd.Process.Kill()
 	// Wait 不能漏：否则子进程会变成 zombie
 	_ = c.cmd.Wait()
+	c.cmd = nil
 }
 
-// getEnv 返回配置中的环境变量。
+// 返回配置中的环境变量
 func (c *StdioMCPClient) getEnv() map[string]string {
 	if c.env == nil {
 		return map[string]string{}
@@ -167,11 +216,28 @@ func (c *StdioMCPClient) getEnv() map[string]string {
 	return c.env
 }
 
-// call 在串行锁内分配请求 ID、发送一条 JSON-RPC 请求并读取一条响应，
+// Close 关闭连接
+//
+// 幂等设计：用 atomic.Bool.CompareAndSwap 保证只清理一次。
+// 不持锁，可从任何 goroutine 调用（包括持锁代码路径），不会自递归死锁。
+func (c *StdioMCPClient) Close() error {
+	if !c.closed.CompareAndSwap(false, true) {
+		return nil // 已关闭，幂等返回
+	}
+
+	// cmd.Wait() 在 CAS 之后无锁调用，可以安全阻塞
+	c.cleanup()
+
+	logger.Info("MCP 服务器已关闭", logger.String("server", c.serverName))
+	return nil
+}
+
+// 在串行锁内分配请求 ID、发送一条 JSON-RPC 请求并读取一条响应，
 // 供 initialize / ListTools / CallTool 复用，消除重复的请求-响应样板。
 func (c *StdioMCPClient) call(ctx context.Context, method string, params map[string]interface{}) (*MCPResponse, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	req := MCPRequest{
 		JSONRPC: mcpJSONRPCVersion,
 		ID:      c.nextID,
@@ -179,10 +245,73 @@ func (c *StdioMCPClient) call(ctx context.Context, method string, params map[str
 		Params:  params,
 	}
 	c.nextID++
+
 	if err := c.sendRequest(req); err != nil {
 		return nil, err
 	}
 	return c.readResponse(ctx)
+}
+
+// 发送请求
+func (c *StdioMCPClient) sendRequest(req MCPRequest) error {
+	data, err := sonic.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	data = append(data, '\n')
+	if _, err := c.stdin.Write(data); err != nil {
+		return fmt.Errorf("failed to write request: %w", err)
+	}
+
+	return nil
+}
+
+// readResponse 读取响应。
+// - 使用 goroutineDone channel 通知读取 goroutine 退出
+// - ctx 取消时，关闭 goroutineDone，读取 goroutine 可安全退出
+// - 避免 ctx 取消后，读取 goroutine 永久阻塞
+func (c *StdioMCPClient) readResponse(ctx context.Context) (*MCPResponse, error) {
+	type readResult struct {
+		line []byte
+		err  error
+	}
+
+	done := make(chan readResult, 1)
+	goroutineDone := make(chan struct{}) // 用于通知读取 goroutine 退出
+
+	go func() {
+		line, err := c.reader.ReadBytes('\n')
+		select {
+		case <-goroutineDone:
+			// 已被通知退出，不发送结果
+			return
+		case done <- readResult{line: line, err: err}:
+			// 结果已发送，等待 goroutineDone 关闭后退出
+			<-goroutineDone
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		close(goroutineDone) // 通知读取 goroutine 退出
+		return nil, fmt.Errorf("read response: %w", ctx.Err())
+
+	case r, ok := <-done:
+		close(goroutineDone) // 通知读取 goroutine 可以安全退出
+		if !ok {
+			return nil, ErrResponseChannelClosed
+		}
+		if r.err != nil {
+			return nil, fmt.Errorf("failed to read response: %w", r.err)
+		}
+
+		var resp MCPResponse
+		if err := sonic.Unmarshal(r.line, &resp); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+		}
+		return &resp, nil
+	}
 }
 
 // sendInitialize 发送初始化请求
@@ -203,7 +332,7 @@ func (c *StdioMCPClient) sendInitialize(ctx context.Context) error {
 // ListTools 获取工具列表
 func (c *StdioMCPClient) ListTools(ctx context.Context) ([]MCPToolInfo, error) {
 	if c.closed.Load() {
-		return nil, fmt.Errorf("MCP client is closed")
+		return nil, ErrClientClosed
 	}
 
 	resp, err := c.call(ctx, mcpMethodListTools, nil)
@@ -211,44 +340,23 @@ func (c *StdioMCPClient) ListTools(ctx context.Context) ([]MCPToolInfo, error) {
 		return nil, err
 	}
 
+	// 统一错误处理：MCP 服务器错误返回 error
 	if resp.Error != nil {
-		return nil, fmt.Errorf("MCP error: %s", resp.Error.Message)
+		return nil, &MCPServerError{
+			Code:    resp.Error.Code,
+			Message: resp.Error.Message,
+		}
 	}
 
 	// 解析工具列表
 	result, ok := resp.Result.(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("invalid response format")
+		return nil, ErrInvalidResponse
 	}
 
-	toolsRaw, ok := result["tools"]
-	if !ok {
-		return []MCPToolInfo{}, nil
-	}
-
-	toolsArr, ok := toolsRaw.([]interface{})
-	if !ok {
-		return []MCPToolInfo{}, nil
-	}
-
-	tools := make([]MCPToolInfo, 0, len(toolsArr))
-	for _, t := range toolsArr {
-		toolMap, ok := t.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		tool := MCPToolInfo{}
-		if name, ok := toolMap["name"].(string); ok {
-			tool.Name = name
-		}
-		if desc, ok := toolMap["description"].(string); ok {
-			tool.Description = desc
-		}
-		if schema, ok := toolMap["inputSchema"].(map[string]interface{}); ok {
-			tool.InputSchema = schema
-		}
-		tools = append(tools, tool)
+	tools, err := parseToolInfos(result)
+	if err != nil {
+		return nil, err
 	}
 
 	logger.Info("获取 MCP 工具列表成功",
@@ -258,10 +366,10 @@ func (c *StdioMCPClient) ListTools(ctx context.Context) ([]MCPToolInfo, error) {
 	return tools, nil
 }
 
-// CallTool 调用工具
+// 调用工具
 func (c *StdioMCPClient) CallTool(ctx context.Context, name string, args map[string]interface{}) (*MCPToolResult, error) {
 	if c.closed.Load() {
-		return nil, fmt.Errorf("MCP client is closed")
+		return nil, ErrClientClosed
 	}
 
 	resp, err := c.call(ctx, mcpMethodCallTool, map[string]interface{}{
@@ -272,104 +380,96 @@ func (c *StdioMCPClient) CallTool(ctx context.Context, name string, args map[str
 		return nil, err
 	}
 
+	// 统一错误处理：MCP 服务器错误返回 error
 	if resp.Error != nil {
-		return &MCPToolResult{
-			Content: []MCPContent{{Type: mcpContentTypeText, Text: resp.Error.Message}},
-			IsError: true,
-		}, nil
+		return nil, &MCPServerError{
+			Code:    resp.Error.Code,
+			Message: resp.Error.Message,
+		}
 	}
 
 	// 解析结果
 	result, ok := resp.Result.(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("invalid response format")
+		return nil, ErrInvalidResponse
 	}
 
-	toolResult := &MCPToolResult{}
+	return parseToolResult(result), nil
+}
 
-	if contentRaw, ok := result["content"]; ok {
-		contentArr, ok := contentRaw.([]interface{})
-		if ok {
-			for _, item := range contentArr {
-				itemMap, ok := item.(map[string]interface{})
-				if !ok {
-					continue
-				}
-				content := MCPContent{}
-				if t, ok := itemMap["type"].(string); ok {
-					content.Type = t
-				}
-				if text, ok := itemMap["text"].(string); ok {
-					content.Text = text
-				}
-				toolResult.Content = append(toolResult.Content, content)
-			}
+// 解析工具列表
+func parseToolInfos(result map[string]interface{}) ([]MCPToolInfo, error) {
+	toolsRaw, ok := result["tools"]
+	if !ok {
+		return []MCPToolInfo{}, nil
+	}
+
+	toolsArr, ok := toolsRaw.([]interface{})
+	if !ok {
+		return nil, ErrInvalidResponse
+	}
+
+	tools := make([]MCPToolInfo, 0, len(toolsArr))
+	for _, t := range toolsArr {
+		tool, ok := t.(map[string]interface{})
+		if !ok {
+			continue
 		}
-	}
 
-	return toolResult, nil
-}
-
-// Close 关闭连接
-//
-// 幂等设计：用 atomic.Bool.CompareAndSwap 保证只清理一次。
-// 不持锁，可从任何 goroutine 调用（包括持锁代码路径），不会自递归死锁。
-func (c *StdioMCPClient) Close() error {
-	if !c.closed.CompareAndSwap(false, true) {
-		return nil // 已关闭，幂等返回
-	}
-
-	// cmd.Wait() 在 CAS 之后无锁调用，可以安全阻塞
-	c.terminateProcess()
-
-	logger.Info("MCP 服务器已关闭", logger.String("server", c.serverName))
-	return nil
-}
-
-// sendRequest 发送请求
-func (c *StdioMCPClient) sendRequest(req MCPRequest) error {
-	data, err := sonic.Marshal(req)
-	if err != nil {
-		return fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	data = append(data, '\n')
-	if _, err := c.stdin.Write(data); err != nil {
-		return fmt.Errorf("failed to write request: %w", err)
-	}
-
-	return nil
-}
-
-// readResponse 读取响应。
-// 关键：必须接受 ctx 并响应取消/超时，否则进程异常退出后 ReadBytes 会永久阻塞。
-// 实现思路：把 ctx 转换为 read deadline，超时或取消时 ReadBytes 立即返回错误。
-func (c *StdioMCPClient) readResponse(ctx context.Context) (*MCPResponse, error) {
-	type readResult struct {
-		line []byte
-		err  error
-	}
-	done := make(chan readResult, 1)
-
-	go func() {
-		line, err := c.reader.ReadBytes('\n')
-		done <- readResult{line: line, err: err}
-	}()
-
-	select {
-	case <-ctx.Done():
-		return nil, fmt.Errorf("read response: %w", ctx.Err())
-	case r := <-done:
-		if r.err != nil {
-			return nil, fmt.Errorf("failed to read response: %w", r.err)
+		info := MCPToolInfo{}
+		if name, ok := tool["name"].(string); ok {
+			info.Name = name
 		}
-		var resp MCPResponse
-		if err := sonic.Unmarshal(r.line, &resp); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal response: %w", err)
+		if desc, ok := tool["description"].(string); ok {
+			info.Description = desc
 		}
-		return &resp, nil
+		if schema, ok := tool["inputSchema"].(map[string]interface{}); ok {
+			info.InputSchema = schema
+		}
+		tools = append(tools, info)
 	}
+
+	return tools, nil
 }
+
+// 解析工具调用结果
+func parseToolResult(result map[string]interface{}) *MCPToolResult {
+	toolResult := &MCPToolResult{
+		Content: []MCPContent{}, // 确保始终返回空 slice 而非 nil
+	}
+
+	contentRaw, ok := result["content"]
+	if !ok {
+		return toolResult
+	}
+
+	contentArr, ok := contentRaw.([]interface{})
+	if !ok {
+		return toolResult
+	}
+
+	for _, item := range contentArr {
+		itemMap, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		content := MCPContent{}
+		if t, ok := itemMap["type"].(string); ok {
+			content.Type = t
+		}
+		if text, ok := itemMap["text"].(string); ok {
+			content.Text = text
+		}
+		toolResult.Content = append(toolResult.Content, content)
+	}
+
+	return toolResult
+}
+
+// ============================================================================
+// JSON-RPC 类型
+// ============================================================================
 
 // MCPRequest MCP JSON-RPC 请求
 type MCPRequest struct {
@@ -393,28 +493,19 @@ type MCPError struct {
 	Message string `json:"message"`
 }
 
-// MCPConfig MCP 配置
-type MCPConfig struct {
-	Servers []MCPConfigServer
-}
-
-// MCPConfigServer MCP 服务器配置
-type MCPConfigServer struct {
-	Name    string
-	Command string
-	Args    []string
-	Env     map[string]string
-}
+// ============================================================================
+// MCPClientManager 实现
+// ============================================================================
 
 // MCPClientManager MCP 客户端管理器
 type MCPClientManager struct {
 	mu      sync.RWMutex
 	clients map[string]MCPClient
-	config  *MCPConfig
+	config  *model.MCPConfig
 }
 
 // NewMCPClientManager 创建 MCP 客户端管理器
-func NewMCPClientManager(cfg *MCPConfig) *MCPClientManager {
+func NewMCPClientManager(cfg *model.MCPConfig) *MCPClientManager {
 	return &MCPClientManager{
 		clients: make(map[string]MCPClient),
 		config:  cfg,

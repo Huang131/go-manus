@@ -41,7 +41,7 @@ func NewAgentService(
 	repos Repositories,
 	caps Capabilities,
 	agentConfig *AgentConfig,
-	mcpConfig *MCPConfig,
+	mcpConfig *model.MCPConfig,
 	a2aConfig *A2AConfig,
 ) *AgentService {
 	agentConfig = NormalizeAgentConfig(agentConfig)
@@ -248,7 +248,7 @@ func (s *AgentService) ReloadAgentConfig(cfg *AgentConfig) {
 }
 
 // ReloadMCPConfig 重建 MCP 客户端，确保配置接口保存后立即生效。
-func (s *AgentService) ReloadMCPConfig(ctx context.Context, cfg *MCPConfig) error {
+func (s *AgentService) ReloadMCPConfig(ctx context.Context, cfg *model.MCPConfig) error {
 	return s.toolsProvider.ReloadMCPConfig(ctx, cfg)
 }
 

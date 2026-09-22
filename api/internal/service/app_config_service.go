@@ -140,7 +140,7 @@ func (s *DefaultAppConfigService) mergeAndSaveMCPConfig(ctx context.Context, cfg
 func validateMCPConfig(cfg *model.MCPConfig) error {
 	seen := make(map[string]struct{}, len(cfg.Servers))
 	for _, server := range cfg.Servers {
-		name := strings.TrimSpace(server.ServerName)
+		name := strings.TrimSpace(server.Name)
 		if name == "" {
 			return apperr.BadRequest("MCP服务器名称不能为空")
 		}
@@ -155,7 +155,7 @@ func validateMCPConfig(cfg *model.MCPConfig) error {
 	return nil
 }
 
-// mergeMCPServers 按 ServerName 合并新旧服务器列表。
+// mergeMCPServers 按 Name 合并新旧服务器列表。
 // 新传入的服务器覆盖同名的旧服务器；旧配置原有的顺序保持不变，新传入的新增项追加在末尾。
 func mergeMCPServers(oldServers, incoming []model.MCPServer) []model.MCPServer {
 	if len(oldServers) == 0 {
@@ -164,24 +164,24 @@ func mergeMCPServers(oldServers, incoming []model.MCPServer) []model.MCPServer {
 	// 覆盖合并：后写的值生效（incoming 覆盖 old）
 	serverMap := make(map[string]model.MCPServer, len(oldServers)+len(incoming))
 	for _, server := range oldServers {
-		serverMap[server.ServerName] = server
+		serverMap[server.Name] = server
 	}
 	for _, server := range incoming {
-		serverMap[server.ServerName] = server
+		serverMap[server.Name] = server
 	}
 	// 顺序重建：先遍历旧配置（保持稳定顺序），再追加 incoming 中新增的服务器。
 	merged := make([]model.MCPServer, 0, len(serverMap))
 	seen := make(map[string]bool, len(serverMap))
 	for _, server := range oldServers {
-		if !seen[server.ServerName] {
-			seen[server.ServerName] = true
-			merged = append(merged, serverMap[server.ServerName])
+		if !seen[server.Name] {
+			seen[server.Name] = true
+			merged = append(merged, serverMap[server.Name])
 		}
 	}
 	for _, server := range incoming {
-		if !seen[server.ServerName] {
-			seen[server.ServerName] = true
-			merged = append(merged, serverMap[server.ServerName])
+		if !seen[server.Name] {
+			seen[server.Name] = true
+			merged = append(merged, serverMap[server.Name])
 		}
 	}
 	return merged
@@ -207,7 +207,7 @@ func (s *DefaultAppConfigService) deleteMCPServer(ctx context.Context, serverNam
 	found := false
 	newServers := make([]model.MCPServer, 0, len(cfg.Servers))
 	for _, server := range cfg.Servers {
-		if server.ServerName == serverName {
+		if server.Name == serverName {
 			found = true
 			continue
 		}
@@ -241,7 +241,7 @@ func (s *DefaultAppConfigService) updateMCPServerEnabled(ctx context.Context, se
 		return apperr.NotFound("MCP服务器不存在")
 	}
 	for i := range cfg.Servers {
-		if cfg.Servers[i].ServerName == serverName {
+		if cfg.Servers[i].Name == serverName {
 			cfg.Servers[i].Enabled = enabled
 			return s.mergeAndSaveMCPConfig(ctx, cfg)
 		}

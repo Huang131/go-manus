@@ -19,7 +19,7 @@ type AppConfigHandler struct {
 
 type configRuntimeReloader interface {
 	ReloadAgentConfig(*agent.AgentConfig)
-	ReloadMCPConfig(context.Context, *agent.MCPConfig) error
+	ReloadMCPConfig(context.Context, *model.MCPConfig) error
 	ReloadA2AConfig(context.Context, *agent.A2AConfig) error
 }
 

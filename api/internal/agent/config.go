@@ -41,24 +41,6 @@ func NormalizeAgentConfig(cfg *AgentConfig) *AgentConfig {
 	return &normalized
 }
 
-// MCPConfig MCP 配置
-type MCPConfig struct {
-	// Servers MCP 服务器列表
-	Servers []MCPServer `json:"servers"`
-}
-
-// MCPServer MCP 服务器配置
-type MCPServer struct {
-	// Name 服务器名称
-	Name string `json:"name"`
-	// Command 启动命令
-	Command string `json:"command"`
-	// Args 命令参数
-	Args []string `json:"args"`
-	// Env 环境变量
-	Env map[string]string `json:"env"`
-}
-
 // A2AConfig A2A 配置
 type A2AConfig struct {
 	// Agents A2A Agent 列表
@@ -75,23 +57,26 @@ type A2AAgent struct {
 
 // RuntimeMCPConfig converts the persisted control-plane model into an isolated
 // runtime snapshot. Disabled servers never reach the client manager.
-func RuntimeMCPConfig(cfg *model.MCPConfig) *MCPConfig {
+// 直接使用 model.MCPConfig 的 ToRuntime 方法进行转换。
+func RuntimeMCPConfig(cfg *model.MCPConfig) *model.MCPConfig {
 	if cfg == nil {
 		return nil
 	}
-	runtimeCfg := &MCPConfig{Servers: make([]MCPServer, 0, len(cfg.Servers))}
-	for _, server := range cfg.Servers {
-		if !server.Enabled {
-			continue
-		}
-		runtimeCfg.Servers = append(runtimeCfg.Servers, MCPServer{
-			Name:    server.ServerName,
-			Command: server.Command,
-			Args:    append([]string(nil), server.Args...),
-			Env:     cloneStringMap(server.Env),
-		})
+	// 深拷贝以避免后续修改影响原始配置
+	runtime := cfg.ToRuntime()
+	if runtime == nil || len(runtime.Servers) == 0 {
+		return runtime
 	}
-	return runtimeCfg
+	// 深拷贝 Args 和 Env
+	for i := range runtime.Servers {
+		if len(runtime.Servers[i].Args) > 0 {
+			runtime.Servers[i].Args = append([]string(nil), runtime.Servers[i].Args...)
+		}
+		if runtime.Servers[i].Env != nil {
+			runtime.Servers[i].Env = cloneStringMap(runtime.Servers[i].Env)
+		}
+	}
+	return runtime
 }
 
 // RuntimeA2AConfig converts persisted A2A settings into an isolated runtime snapshot.

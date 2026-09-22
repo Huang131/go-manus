@@ -150,9 +150,9 @@ func DefaultOptions() Options {
 //	}
 //	app, _ := BuildWithFactories(cfg, opts, factories)
 type Factories struct {
-	NewPostgres             func(*config.DatabaseConfig) (*infrastructure.Postgres, error) // PostgreSQL 构造器
-	NewRedis                func(*config.RedisConfig) (*infrastructure.Redis, error)       // Redis 构造器
-	NewOSS                  func(*config.ObjectStorageConfig) (*infrastructure.OSS, error) // OSS 构造器
+	NewPostgres func(*config.DatabaseConfig) (*infrastructure.Postgres, error) // PostgreSQL 构造器
+	NewRedis    func(*config.RedisConfig) (*infrastructure.Redis, error)       // Redis 构造器
+	NewOSS      func(*config.ObjectStorageConfig) (*infrastructure.OSS, error) // OSS 构造器
 	// NewLLM 允许 API 集成测试注入确定性模型，生产环境为空时使用默认路由器。
 	NewLLM                  func(*llm.LLMRuntimeConfig) llm.LLM
 	NewFileCleanupScheduler func(
@@ -580,7 +580,7 @@ type externalClients struct {
 	browser   sandbox.Browser
 	search    search.SearchEngine
 	mq        mq.TaskMessageQueue
-	mcpConfig *agent.MCPConfig
+	mcpConfig *model.MCPConfig
 	a2aConfig *agent.A2AConfig
 }
 
@@ -627,15 +627,12 @@ func (a *App) initExternalClients(cfg *config.Config, opts Options, factories Fa
 	}
 
 	// Search 搜索引擎（可选，需要配置 API Key）
-	if opts.EnableSearch && (cfg.Search.TavilyAPIKey != "" || cfg.Search.BochaAPIKey != "" ||
-		cfg.Search.GoogleAPIKey != "") {
-		clients.search = search.NewSearchEngine(&search.SearchConfig{
-			Provider:       cfg.Search.Provider,
-			GoogleAPIKey:   cfg.Search.GoogleAPIKey,
-			TavilyAPIKey:   cfg.Search.TavilyAPIKey,
-			BochaAPIKey:    cfg.Search.BochaAPIKey,
-			SearchEngineID: cfg.Search.SearchEngineID,
-			HTTPTimeout:    cfg.Search.HTTPTimeout,
+	if opts.EnableSearch && (cfg.Search.TavilyAPIKey != "" || cfg.Search.BochaAPIKey != "") {
+		clients.search = search.NewSearchEngine(&config.SearchConfig{
+			Provider:     cfg.Search.Provider,
+			TavilyAPIKey: cfg.Search.TavilyAPIKey,
+			BochaAPIKey:  cfg.Search.BochaAPIKey,
+			HTTPTimeout:  cfg.Search.HTTPTimeout,
 		})
 	}
 
@@ -649,23 +646,18 @@ func (a *App) initExternalClients(cfg *config.Config, opts Options, factories Fa
 	return clients
 }
 
-// newMCPConfig 从配置创建 MCP（Model Context Protocol）配置。
+// newMCPConfig 从配置读取 MCP（Model Context Protocol）服务器列表。
 //
 // MCP 是一种让 LLM 与外部工具交互的协议标准。
-// 此函数从配置文件读取 MCP 服务器列表。
+// 直接引用 config 中的 model.MCPConfig，避免逐字段拷贝导致遗漏。
 //
 // 如果没有配置任何 MCP 服务器，返回 nil。
-func newMCPConfig(cfg *config.Config) *agent.MCPConfig {
+func newMCPConfig(cfg *config.Config) *model.MCPConfig {
 	if len(cfg.MCP.Servers) == 0 {
 		return nil
 	}
-	servers := make([]agent.MCPServer, len(cfg.MCP.Servers))
-	for i, server := range cfg.MCP.Servers {
-		servers[i] = agent.MCPServer{
-			Name: server.Name, Command: server.Command, Args: server.Args, Env: server.Env,
-		}
-	}
-	return &agent.MCPConfig{Servers: servers}
+	mcp := cfg.MCP
+	return &mcp
 }
 
 // newA2AConfig 从配置创建 A2A（Agent-to-Agent）通信配置。
@@ -688,9 +680,9 @@ func newA2AConfig(cfg *config.Config) *agent.A2AConfig {
 func loadRuntimeToolConfigs(
 	ctx context.Context,
 	configService service.AppConfigService,
-	fallbackMCP *agent.MCPConfig,
+	fallbackMCP *model.MCPConfig,
 	fallbackA2A *agent.A2AConfig,
-) (*agent.MCPConfig, *agent.A2AConfig, error) {
+) (*model.MCPConfig, *agent.A2AConfig, error) {
 	if configService == nil {
 		return fallbackMCP, fallbackA2A, nil
 	}

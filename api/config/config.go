@@ -7,6 +7,8 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/spf13/viper"
+
+	"github.com/Huang131/go-manus/api/internal/model"
 )
 
 // 环境常量
@@ -43,7 +45,7 @@ type Config struct {
 	Search SearchConfig `mapstructure:"search"`
 
 	// MCP 配置
-	MCP MCPConfig `mapstructure:"mcp"`
+	MCP model.MCPConfig `mapstructure:"mcp"`
 
 	// A2A 配置
 	A2A A2AConfig `mapstructure:"a2a"`
@@ -155,19 +157,6 @@ type SearchConfig struct {
 	TavilyAPIKey string `mapstructure:"tavily_api_key"`
 	BochaAPIKey  string `mapstructure:"bocha_api_key"`
 	HTTPTimeout  int    `mapstructure:"http_timeout" validate:"gte=0"` // 搜索 HTTP 请求超时（秒）
-}
-
-// MCPConfig MCP 配置
-type MCPConfig struct {
-	Servers []MCPServer `mapstructure:"servers"`
-}
-
-// MCPServer MCP 服务器配置
-type MCPServer struct {
-	Name    string            `mapstructure:"name"`
-	Command string            `mapstructure:"command"`
-	Args    []string          `mapstructure:"args"`
-	Env     map[string]string `mapstructure:"env"`
 }
 
 // A2AConfig A2A 配置

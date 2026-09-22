@@ -29,7 +29,7 @@ func (r *configReloaderStub) ReloadAgentConfig(cfg *agent.AgentConfig) {
 	r.agentConfig = cfg
 }
 
-func (*configReloaderStub) ReloadMCPConfig(context.Context, *agent.MCPConfig) error { return nil }
+func (*configReloaderStub) ReloadMCPConfig(context.Context, *model.MCPConfig) error { return nil }
 func (*configReloaderStub) ReloadA2AConfig(context.Context, *agent.A2AConfig) error { return nil }
 
 func TestUpdateAgentConfigReloadsSearchLimit(t *testing.T) {

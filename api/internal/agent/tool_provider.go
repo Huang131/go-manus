@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/sandbox"
 	"github.com/Huang131/go-manus/api/internal/search"
 
@@ -27,7 +28,7 @@ type ToolProvider struct {
 }
 
 // NewToolProvider 构造工具提供器，并按需初始化 MCP/A2A 客户端。
-func NewToolProvider(ctx context.Context, caps Capabilities, mcpConfig *MCPConfig, a2aConfig *A2AConfig) *ToolProvider {
+func NewToolProvider(ctx context.Context, caps Capabilities, mcpConfig *model.MCPConfig, a2aConfig *A2AConfig) *ToolProvider {
 	p := &ToolProvider{
 		sandbox:      caps.Sandbox,
 		browser:      caps.Browser,
@@ -103,7 +104,7 @@ func (p *ToolProvider) Tools(searchLimit int) []Tool {
 }
 
 // ReloadMCPConfig 重建 MCP 客户端，确保配置接口保存后立即生效。
-func (p *ToolProvider) ReloadMCPConfig(ctx context.Context, cfg *MCPConfig) error {
+func (p *ToolProvider) ReloadMCPConfig(ctx context.Context, cfg *model.MCPConfig) error {
 	if cfg == nil || len(cfg.Servers) == 0 {
 		p.mu.Lock()
 		oldTool := p.mcpTool

@@ -15,7 +15,7 @@ import (
 // MCPTool MCP 工具 (Model Context Protocol)
 type MCPTool struct {
 	mu      sync.RWMutex
-	config  *MCPConfig
+	config  *model.MCPConfig
 	manager *mcp.MCPClientManager
 	tools   map[string]map[string]mcp.MCPToolInfo // serverName -> toolName -> toolInfo
 }
@@ -144,7 +144,7 @@ func parseMCPInvokeParams(params map[string]interface{}) (string, string, map[st
 }
 
 // Initialize 初始化 MCP 工具
-func (t *MCPTool) Initialize(ctx context.Context, cfg *MCPConfig) error {
+func (t *MCPTool) Initialize(ctx context.Context, cfg *model.MCPConfig) error {
 	if cfg == nil {
 		return nil
 	}
@@ -154,19 +154,8 @@ func (t *MCPTool) Initialize(ctx context.Context, cfg *MCPConfig) error {
 
 	t.config = cfg
 
-	// 将 agent.MCPConfig 转换为 mcp.MCPConfig
-	externalConfig := &mcp.MCPConfig{}
-	for _, server := range cfg.Servers {
-		externalConfig.Servers = append(externalConfig.Servers, mcp.MCPConfigServer{
-			Name:    server.Name,
-			Command: server.Command,
-			Args:    server.Args,
-			Env:     server.Env,
-		})
-	}
-
-	// 创建 MCP 客户端管理器
-	t.manager = mcp.NewMCPClientManager(externalConfig)
+	// agent.MCPConfig 已经是 model.MCPConfig，直接传递
+	t.manager = mcp.NewMCPClientManager(cfg)
 
 	// 初始化所有 MCP 客户端
 	if err := t.manager.Initialize(ctx); err != nil {

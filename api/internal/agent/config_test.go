@@ -9,8 +9,8 @@ import (
 
 func TestRuntimeMCPConfigFiltersDisabledServersAndCopiesValues(t *testing.T) {
 	persisted := &model.MCPConfig{Servers: []model.MCPServer{
-		{ServerName: "enabled", Enabled: true, Command: "cmd", Args: []string{"one"}, Env: map[string]string{"KEY": "value"}},
-		{ServerName: "disabled", Enabled: false, Command: "ignored"},
+		{Name: "enabled", Enabled: true, Command: "cmd", Args: []string{"one"}, Env: map[string]string{"KEY": "value"}},
+		{Name: "disabled", Enabled: false, Command: "ignored"},
 	}}
 
 	got := RuntimeMCPConfig(persisted)
@@ -25,7 +25,7 @@ func TestRuntimeMCPConfigFiltersDisabledServersAndCopiesValues(t *testing.T) {
 }
 
 func TestToolProviderOmitsEmptyDynamicTools(t *testing.T) {
-	provider := NewToolProvider(context.Background(), Capabilities{}, &MCPConfig{}, &A2AConfig{})
+	provider := NewToolProvider(context.Background(), Capabilities{}, &model.MCPConfig{}, &A2AConfig{})
 	tools := provider.Tools(DefaultAgentConfig().MaxSearchResults)
 	if len(tools) != 1 || tools[0].Name() != ToolNameMessage {
 		t.Fatalf("Tools() = %v, want message tool only", toolNames(tools))
