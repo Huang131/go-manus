@@ -617,7 +617,8 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(file_service_module, "MAX_READ_BYTES", 1024):
             result = await FileService.read_file(filepath, max_length=10)
         self.assertTrue(result.truncated)
-        self.assertEqual(result.content, "abcdefgh\nab")
+        # max_length 统计的是真实返回字符数（含换行），截断到文件前 10 个字符即为 "abcdefgh\na"
+        self.assertEqual(result.content, "abcdefgh\na")
 
     async def test_read_file_handles_a_single_line_larger_than_chunk_size(self):
         import app.services.file as file_service_module
