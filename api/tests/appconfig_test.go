@@ -58,10 +58,10 @@ func TestAppConfigAPI_MCPConfig_Lifecycle(t *testing.T) {
 	mcpConfig := map[string]any{
 		"servers": []map[string]any{
 			{
-				"server_name": "test-filesystem",
-				"enabled":     true,
-				"command":     "test-mcp-server",
-				"args":        []string{"--stdio"},
+				"name":    "test-filesystem",
+				"enabled": true,
+				"command": "test-mcp-server",
+				"args":    []string{"--stdio"},
 			},
 		},
 	}
@@ -84,7 +84,7 @@ func TestAppConfigAPI_MCPConfig_Lifecycle(t *testing.T) {
 	// 找到我们刚添加的 server
 	var found map[string]any
 	for _, s := range servers {
-		if srv, ok := s.(map[string]any); ok && srv["server_name"] == "test-filesystem" {
+		if srv, ok := s.(map[string]any); ok && srv["name"] == "test-filesystem" {
 			found = srv
 			break
 		}
@@ -101,9 +101,9 @@ func TestAppConfigAPI_MCPConfig_Delete(t *testing.T) {
 	mcpConfig := map[string]any{
 		"servers": []map[string]any{
 			{
-				"server_name": "temp-server-to-delete",
-				"enabled":     true,
-				"command":     "temporary-mcp-server",
+				"name":    "temp-server-to-delete",
+				"enabled": true,
+				"command": "temporary-mcp-server",
 			},
 		},
 	}
@@ -126,7 +126,7 @@ func TestAppConfigAPI_MCPConfig_Delete(t *testing.T) {
 	if data, ok := resp.Data.(map[string]any); ok {
 		if servers, ok := data["servers"].([]any); ok {
 			for _, s := range servers {
-				if srv, ok := s.(map[string]any); ok && srv["server_name"] == "temp-server-to-delete" {
+				if srv, ok := s.(map[string]any); ok && srv["name"] == "temp-server-to-delete" {
 					t.Fatalf("server should be deleted, but still exists")
 				}
 			}
