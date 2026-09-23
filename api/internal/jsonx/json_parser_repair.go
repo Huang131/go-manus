@@ -11,14 +11,15 @@ import (
 
 // Repair 描述一次修复操作
 type Repair struct {
-	Stage string // 发生阶段：preprocess/repair/extract
-	Type  string // 修复类型：remove_markdown/complete_brackets/json_repair/extract_json
+	Stage string // 发生阶段：preprocess/repair
+	Type  string // 修复类型：complete_brackets/json_repair
 }
 
 // ParseRepairs 包含所有修复步骤的详情
 type ParseRepairs struct {
-	Repairs     []Repair // 按执行顺序排列的修复步骤
-	WasRepaired bool     // 是否进行了任何修复
+	Repairs      []Repair // 按执行顺序排列的修复步骤
+	WasRepaired  bool     // 是否进行了任何修复
+	StrategyUsed string   // 实际使用的修复策略：complete_brackets/json_repair
 }
 
 // RepairJSONParser 带修复功能的 JSON 解析器
@@ -45,67 +46,50 @@ func (p *RepairJSONParser) ParseWithRepairs(text string, v interface{}) (*ParseR
 		return result, fmt.Errorf("json text is empty")
 	}
 
-	// 预处理：移除 markdown 代码块标记
+	// 规范化：移除 markdown 代码块
 	cleaned := removeMarkdownCodeBlocks(text)
-	if cleaned != text {
-		if err := sonic.UnmarshalString(cleaned, v); err == nil {
-			result.Repairs = append(result.Repairs, Repair{Stage: "preprocess", Type: "remove_markdown"})
-			result.WasRepaired = true
-			return result, nil
-		}
-		// markdown 移除后解析失败，基于 cleaned 继续后续修复
-		text = cleaned
+	cleaned = strings.TrimSpace(cleaned)
+
+	// 尝试直接解析（最快路径，干净 JSON 直接返回）
+	if err := sonic.UnmarshalString(cleaned, v); err == nil {
+		return result, nil // 无需修复，WasRepaired=false
 	}
 
-	// 尝试直接解析
-	if err := sonic.UnmarshalString(text, v); err == nil {
-		return result, nil
-	}
+	// 尝试修复，按"轻量优先"顺序执行
+	// 原则：每次修复成功后立即记录 Strategy，避免依赖最终状态推断
 
-	// 兜底：补全截断 JSON 的结尾括号（在 json-repair 前优先尝试）
-	// 仅在 brackets 真正补全且解析成功时才记录 repair
-	if completed := completeTruncatedJSON(text); completed != text {
+	// 策略 1：补全截断 JSON 的括号
+	if completed := completeTruncatedJSON(cleaned); completed != cleaned {
 		if err := sonic.UnmarshalString(completed, v); err == nil {
-			result.Repairs = append(result.Repairs, Repair{Stage: "preprocess", Type: "complete_brackets"})
+			result.Repairs = append(result.Repairs,
+				Repair{Stage: "preprocess", Type: "complete_brackets"})
+			result.StrategyUsed = "complete_brackets"
 			result.WasRepaired = true
 			return result, nil
 		}
-		// bracket 补全未成功，用 completed 文本继续（可能需要 json-repair 进一步修复）
-		text = completed
+		// bracket 补全后仍需其他策略继续修复
+		cleaned = completed
 	}
 
-	// 使用 json-repair 修复（基于当前 text，可能经过了 bracket 补全）
-	fixed, err := jsonrepair.RepairJSON(text)
-	if err == nil && fixed != text {
+	// 策略 2：json-repair 修复
+	if fixed, err := jsonrepair.RepairJSON(cleaned); err == nil && fixed != cleaned {
 		if err := sonic.UnmarshalString(fixed, v); err == nil {
-			result.Repairs = append(result.Repairs, Repair{Stage: "repair", Type: "json_repair"})
+			result.Repairs = append(result.Repairs,
+				Repair{Stage: "repair", Type: "json_repair"})
+			result.StrategyUsed = "json_repair"
 			result.WasRepaired = true
 			return result, nil
 		}
+		cleaned = fixed // json-repair 改变了文本，继续用修复结果
 	}
 
-	// 尝试提取 JSON 部分（回到 cleaned 避免 bracket 补全的干扰）
-	extracted := extractJSON(cleaned)
-	if extracted != cleaned {
-		if err := sonic.UnmarshalString(extracted, v); err == nil {
-			result.Repairs = append(result.Repairs, Repair{Stage: "extract", Type: "extract_json"})
-			result.WasRepaired = true
-			return result, nil
-		}
-		// 提取后仍需 json-repair 修复
-		if fixedExtracted, err := jsonrepair.RepairJSON(extracted); err == nil && fixedExtracted != extracted {
-			if err := sonic.UnmarshalString(fixedExtracted, v); err == nil {
-				result.Repairs = append(result.Repairs, Repair{Stage: "extract", Type: "extract_json"})
-				result.WasRepaired = true
-				return result, nil
-			}
-		}
-	}
-
-	// 尝试对 cleaned 直接 json-repair（edge case：既不是截断也不是嵌入前后文）
-	if fixedCleaned, err := jsonrepair.RepairJSON(cleaned); err == nil && fixedCleaned != cleaned {
-		if err := sonic.UnmarshalString(fixedCleaned, v); err == nil {
-			result.Repairs = append(result.Repairs, Repair{Stage: "repair", Type: "json_repair"})
+	// 策略 3：最终兜底——对 cleaned 再 json-repair 一次（edge case）
+	// 进入这里说明 cleaned 已经经过 bracket 补全和/或 json-repair，但仍无法解析
+	if fixed, err := jsonrepair.RepairJSON(cleaned); err == nil && fixed != cleaned {
+		if err := sonic.UnmarshalString(fixed, v); err == nil {
+			result.Repairs = append(result.Repairs,
+				Repair{Stage: "repair", Type: "json_repair"})
+			result.StrategyUsed = "json_repair"
 			result.WasRepaired = true
 			return result, nil
 		}
@@ -235,65 +219,4 @@ var markdownCodeBlockRe = regexp.MustCompile("```(?:json)?\\s*([\\s\\S]*?)```")
 // removeMarkdownCodeBlocks 移除 markdown 代码块标记
 func removeMarkdownCodeBlocks(text string) string {
 	return markdownCodeBlockRe.ReplaceAllString(text, "$1")
-}
-
-// extractJSON 从文本中提取 JSON 对象/数组（处理 LLM 输出带前后说明文字的场景）
-func extractJSON(text string) string {
-	trimmed := strings.TrimSpace(text)
-
-	startIdx := -1
-	for i, r := range trimmed {
-		if r == '{' || r == '[' {
-			startIdx = i
-			break
-		}
-	}
-
-	if startIdx == -1 {
-		return text
-	}
-
-	var endIdx int
-	depth := 0
-	inString := false
-	escape := false
-
-	for i := startIdx; i < len(trimmed); i++ {
-		c := rune(trimmed[i])
-
-		if escape {
-			escape = false
-			continue
-		}
-
-		if c == '\\' {
-			escape = true
-			continue
-		}
-
-		if c == '"' {
-			inString = !inString
-			continue
-		}
-
-		if inString {
-			continue
-		}
-
-		if c == '{' || c == '[' {
-			depth++
-		} else if c == '}' || c == ']' {
-			depth--
-			if depth == 0 {
-				endIdx = i + 1
-				break
-			}
-		}
-	}
-
-	if endIdx > startIdx {
-		return trimmed[startIdx:endIdx]
-	}
-
-	return text
 }
