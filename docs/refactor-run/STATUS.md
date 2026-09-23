@@ -47,6 +47,7 @@
 ## 最近一次验证
 
 - `GOCACHE=/private/tmp/go-manus-gocache make test-api`：通过，包含 Chat 成功、SSE 顺序、MCP 配置和取消终态契约。
+- `TestChatEndpoint_LastEventIDResumesWithoutDuplicatesOrGaps`：使用真实 HTTP socket 和 Redis 验证 exclusive cursor，重连后的事件无重复、无丢失；定向测试 `-count=3` 通过。
 - Run/Session 方案检查：生产源码中无 `RunStatus`、`Run` 表、Run Repository 或 Run API。
 - 当前配置治理和基础 ContextBuilder 的提交均已在当前分支，阶段 1/2 的未完成项仍可按各自检查点独立实施。
 

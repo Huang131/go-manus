@@ -18,7 +18,6 @@
 ## 已知限制
 
 - Planner 依赖模型结构化输出；模型不遵守 JSON 契约时应返回明确错误并保留可诊断信息。
-- 当前 HTTP 集成测试尚未端到端覆盖携带 `Last-Event-ID` 的断线续读；Redis exclusive cursor 已有真实组件测试。
 - Run/Session 重构仍处于方案阶段；当前生产语义仍是 Session/RedisStreamTask。
 - 历史 review 中的性能数字、接口示例和 TODO 不代表当前实现，修改前必须以代码和测试为准。
 

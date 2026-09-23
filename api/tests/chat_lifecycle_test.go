@@ -3,9 +3,12 @@
 package integration
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +19,8 @@ import (
 	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/mq"
+	"github.com/bytedance/sonic"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -147,6 +152,45 @@ func eventIndex(events []sseEvent, eventType string, start int) int {
 	return -1
 }
 
+func readSSEEvent(t *testing.T, reader *bufio.Reader) sseEvent {
+	t.Helper()
+	var event sseEvent
+	for {
+		line, err := reader.ReadString('\n')
+		require.NoError(t, err)
+		line = strings.TrimRight(line, "\r\n")
+		if line == "" {
+			return event
+		}
+		switch {
+		case strings.HasPrefix(line, "id: "):
+			event.ID = strings.TrimPrefix(line, "id: ")
+		case strings.HasPrefix(line, "event: "):
+			event.Type = strings.TrimPrefix(line, "event: ")
+		case strings.HasPrefix(line, "data: "):
+			event.Data = strings.TrimPrefix(line, "data: ")
+		}
+	}
+}
+
+func appendTaskEvent(t *testing.T, queue *mq.RedisStreamMessageQueue, taskID string, eventType model.EventType, payload map[string]any) string {
+	t.Helper()
+	data, err := sonic.Marshal(payload)
+	require.NoError(t, err)
+	wrapper, err := sonic.Marshal(&model.Event{
+		Type:      eventType,
+		CreatedAt: time.Now(),
+		Data:      data,
+	})
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	id, err := queue.Put(ctx, "task:output:"+taskID, string(wrapper))
+	require.NoError(t, err)
+	return id
+}
+
 func TestChatEndpoint_SuccessStreamsOrderedEvents(t *testing.T) {
 	fake := &scriptedLLM{responses: []string{
 		`{"message":"已制定计划","goal":"回答测试请求","title":"测试计划","language":"zh","steps":[{"id":"s1","description":"生成答案"}]}`,
@@ -195,6 +239,76 @@ func TestChatEndpoint_SuccessStreamsOrderedEvents(t *testing.T) {
 	session, err := app.SessionService.GetSession(ctx, sessionID)
 	require.NoError(t, err)
 	assert.Equal(t, model.SessionStatusCompleted, session.Status)
+}
+
+// TestChatEndpoint_LastEventIDResumesWithoutDuplicatesOrGaps 守护 HTTP SSE 断线续读契约：
+// Last-Event-ID 是 exclusive Redis cursor，重连后只返回严格位于该游标之后的事件。
+func TestChatEndpoint_LastEventIDResumesWithoutDuplicatesOrGaps(t *testing.T) {
+	fake := &blockingLLM{started: make(chan struct{}), returned: make(chan struct{})}
+	app := newChatTestApp(t, fake)
+
+	sessionID := createSessionWithServer(t, app.Engine)
+	defer CleanupSessionWithDB(t, app.Postgres, sessionID)
+
+	taskID, err := app.AgentService.Chat(context.Background(), sessionID, &llmcore.Message{
+		Role:        model.RoleUser,
+		ContentText: "验证 SSE 断线续读",
+	})
+	require.NoError(t, err)
+	select {
+	case <-fake.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("fake LLM did not start")
+	}
+
+	queue := mq.NewRedisStreamMessageQueue(app.Redis.Client)
+	beforeDisconnectID := appendTaskEvent(t, queue, taskID, model.EventTypeTitle, map[string]any{"title": "before disconnect"})
+
+	server := httptest.NewServer(app.Engine)
+	defer server.Close()
+	chatURL := server.URL + "/api/sessions/" + sessionID + "/chat"
+
+	firstReq, err := http.NewRequest(http.MethodPost, chatURL, strings.NewReader(`{}`))
+	require.NoError(t, err)
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstResp, err := server.Client().Do(firstReq)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, firstResp.StatusCode)
+	firstEvent := readSSEEvent(t, bufio.NewReader(firstResp.Body))
+	require.Equal(t, beforeDisconnectID, firstEvent.ID)
+	require.Equal(t, string(model.EventTypeTitle), firstEvent.Type)
+	require.NoError(t, firstResp.Body.Close())
+
+	afterDisconnectID := appendTaskEvent(t, queue, taskID, model.EventTypePlan, map[string]any{"plan": "after disconnect"})
+	doneID := appendTaskEvent(t, queue, taskID, model.EventTypeDone, map[string]any{"success": true})
+
+	resumeReq, err := http.NewRequest(http.MethodPost, chatURL, strings.NewReader(`{}`))
+	require.NoError(t, err)
+	resumeReq.Header.Set("Content-Type", "application/json")
+	resumeReq.Header.Set("Last-Event-ID", beforeDisconnectID)
+	resumeResp, err := server.Client().Do(resumeReq)
+	require.NoError(t, err)
+	defer resumeResp.Body.Close()
+	require.Equal(t, http.StatusOK, resumeResp.StatusCode)
+	resumedBody, err := io.ReadAll(resumeResp.Body)
+	require.NoError(t, err)
+
+	resumed := parseSSEEvents(t, string(resumedBody))
+	require.Len(t, resumed, 2, "resume must return every event after the cursor exactly once")
+	assert.Equal(t, []string{afterDisconnectID, doneID}, []string{resumed[0].ID, resumed[1].ID})
+	assert.Equal(t, []string{string(model.EventTypePlan), string(model.EventTypeDone)}, []string{resumed[0].Type, resumed[1].Type})
+	for _, event := range resumed {
+		assert.NotEqual(t, beforeDisconnectID, event.ID, "Last-Event-ID must be exclusive")
+	}
+
+	// 任务仍由 blocking fake 持有，显式停止并等待 runner 退出，避免 t.Cleanup 关闭 Redis 后
+	// 后台收尾再尝试设置 stream retention，产生与测试契约无关的资源关闭告警。
+	require.NoError(t, app.AgentService.StopSession(context.Background(), sessionID))
+	select {
+	case <-fake.returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("fake LLM did not stop after SSE resume test")
+	}
 }
 
 func parseStreamID(t *testing.T, id string) (int64, int64) {

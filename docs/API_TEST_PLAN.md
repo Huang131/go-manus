@@ -16,7 +16,7 @@
 - [tool_event_flow_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/agent/tool_event_flow_test.go:29) 使用内存队列替身验证 Agent flow 编排；Redis Stream 协议由独立 component 测试验证。
 - [session_handler_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/internal/handler/session_handler_test.go:17) 已改用记录参数和预设返回值的最小 stub，不再重实现 Session 状态。
 - RedisStreamTask 生命周期测试已使用 `FinishedChan` 和显式 barrier 等待清理完成，不再依赖固定 `Sleep` 或 registry 轮询。
-- Redis component 测试已迁移到 [redis_component_integration_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/redis_component_integration_test.go:1)，使用独立 Redis 验证 `XADD/XREAD`、exclusive cursor、blocking cancel、retention 和清空。HTTP 层携带 `Last-Event-ID` 断线重连的端到端契约仍未覆盖。
+- Redis component 测试已迁移到 [redis_component_integration_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/redis_component_integration_test.go:1)，使用独立 Redis 验证 `XADD/XREAD`、exclusive cursor、blocking cancel、retention 和清空。[chat_lifecycle_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/chat_lifecycle_test.go:1) 进一步通过真实 HTTP socket 与 Redis 验证 `Last-Event-ID` 断线重连，不重复也不丢失游标后的事件。
 - [chat_lifecycle_test.go](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/chat_lifecycle_test.go:150) 已使用 deterministic fake LLM 覆盖 Chat 成功执行、SSE 事件顺序、Redis 游标递增和最终完成状态；同文件的取消用例覆盖 `/stop` 取消活跃 LLM 及 cancelled 终态不可被后台收尾覆盖。
 - [tests/README.md](/Users/huanghao2/GolandProjects/study/imooc-mas/go-manus/api/tests/README.md:1) 已与独立 Compose 环境、分层命令和真实 Redis component 测试对齐。
 
@@ -139,7 +139,7 @@ SenseNova 测试保留现有验证用途；后续若调整入口，应使用独�
 
 把 Handler mock 改为最小 stub；把 PostgreSQL、MinIO 和 HTTP 测试按职责归类；为 Redis Stream 增加真实 component integration；删除接口断言和 mock 自测。
 
-状态：已完成当前 component 范围。Redis exclusive cursor 已有真实组件测试；HTTP `Last-Event-ID` 断线重连端到端覆盖列为独立后续项。
+状态：已完成当前范围。Redis exclusive cursor 有真实组件测试，HTTP `Last-Event-ID` 断线重连也已覆盖真实 socket → Handler → AgentService → Redis XREAD 链路。
 
 ### Phase 3：并发稳定性
 
@@ -190,9 +190,9 @@ test(api): remove low-value legacy tests
 | PostgreSQL、Redis、MinIO component 测试可独立启动和清理 | Phase 1 | 已完成 |
 | HTTP integration 覆盖当前 Session/Agent 完整业务链路 | Phase 4 | 已完成 |
 | 真实外部服务测试显式启用、可单独运行 | Phase 1 | 已完成 |
-| 事务、唯一约束、取消竞争和主要 SSE 顺序契约有明确覆盖 | Phase 2-4 | 已完成当前范围 |
+| 事务、唯一约束、取消竞争、SSE 顺序和 `Last-Event-ID` 续读有明确覆盖 | Phase 2-4 | 已完成 |
 | 测试失败能定位到 unit、repository、Redis、storage、HTTP 或 external 层 | Phase 1 | 已完成 |
 
-当前测试重构主体已经完成。剩余高收益缺口是用真实 Redis 和 HTTP 空流续读验证 `Last-Event-ID`：断开后从最后一个 SSE id 重连，只返回后续事件且不重复、不丢失。该项不阻塞当前 Phase 4 完成，也不应提前引入尚未实现的 Run 契约。
+当前 Session/Agent 测试重构已经完成。`TestChatEndpoint_LastEventIDResumesWithoutDuplicatesOrGaps` 使用真实 HTTP socket 和 Redis：第一个连接读取游标后主动断开，第二个连接只通过 `Last-Event-ID` 续读，并逐项断言游标之后的事件无重复、无丢失。后续测试工作随生产需求或已证实缺陷增加，不提前引入尚未实现的 Run 契约。
 
 Run 的状态迁移、幂等、单活约束和 interrupted 恢复属于 Future R，不作为当前测试重构的完成标准。
