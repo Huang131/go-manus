@@ -24,7 +24,7 @@ func (t *MessageTool) Name() string {
 
 // Description 返回工具描述
 func (t *MessageTool) Description() string {
-	return "用于生成消息。可以向用户发送消息或询问。"
+	return "向用户发送消息或提问。"
 }
 
 // ReadOnly message 工具会向用户发消息或提问，保守视为有副作用。
@@ -38,13 +38,13 @@ func (t *MessageTool) GetTools() []map[string]interface{} {
 		{
 			"type":        llmcore.ToolTypeFunction,
 			"name":        MessageFunctionNotifyUser,
-			"description": "向用户发送消息，且无需用户回复。用于确认收到消息、提供进度更新、报告任务完成情况，或解释处理方式的变更。",
+			"description": "向用户发送消息（无需回复）。",
 			"parameters": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
 					"text": map[string]interface{}{
 						"type":        "string",
-						"description": "要显示给用户的消息文本",
+						"description": "消息文本",
 					},
 				},
 				"required": []string{"text"},
@@ -53,25 +53,25 @@ func (t *MessageTool) GetTools() []map[string]interface{} {
 		{
 			"type":        llmcore.ToolTypeFunction,
 			"name":        MessageFunctionAskUser,
-			"description": "向用户提问并等待回复。用于：请求澄清、寻求确认、或收集额外信息。",
+			"description": "向用户提问并等待回复。",
 			"parameters": map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
 					"text": map[string]interface{}{
 						"type":        "string",
-						"description": "要展示给用户的问题文本",
+						"description": "问题文本",
 					},
 					"attachments": map[string]interface{}{
 						"anyOf": []map[string]interface{}{
 							{"type": "string"},
 							{"type": "array", "items": map[string]interface{}{"type": "string"}},
 						},
-						"description": "(可选)与问题相关的文件或参考资料",
+						"description": "相关文件或参考资料（可选）",
 					},
 					"suggest_user_takeover": map[string]interface{}{
 						"type":        "string",
 						"enum":        []string{"none", "browser"},
-						"description": "(可选)建议用户接管的操作（例如由用户在浏览器中手动完成某些事）",
+						"description": "建议用户接管",
 					},
 				},
 				"required": []string{"text"},

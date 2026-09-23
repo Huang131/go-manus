@@ -29,8 +29,7 @@ func (t *BrowserTool) Name() string {
 
 // Description 返回工具描述
 func (t *BrowserTool) Description() string {
-	return "用于控制浏览器。访问网页后先执行 snapshot 获取带编号的可交互元素，" +
-		"再按编号 click/input；支持滚动、按键、执行 JavaScript、读取控制台日志与截图。"
+	return "控制浏览器。先 snapshot 获取元素编号，再按编号 click/input；支持滚动、按键、执行 JS、读日志、截图。"
 }
 
 // Parameters 返回工具参数定义
@@ -40,7 +39,7 @@ func (t *BrowserTool) Parameters() map[string]interface{} {
 		"properties": map[string]interface{}{
 			"action": map[string]interface{}{
 				"type":        "string",
-				"description": "操作类型: navigate, snapshot, screenshot, click, input, press_key, scroll, console_exec, console_view",
+				"description": "操作类型",
 				"enum": []string{
 					BrowserActionNavigate, BrowserActionSnapshot, BrowserActionScreenshot,
 					BrowserActionClick, BrowserActionInput, BrowserActionPressKey,
@@ -49,56 +48,56 @@ func (t *BrowserTool) Parameters() map[string]interface{} {
 			},
 			"url": map[string]interface{}{
 				"type":        "string",
-				"description": "要访问的 URL (navigate)",
+				"description": "要访问的 URL",
 			},
 			"index": map[string]interface{}{
 				"type":        "integer",
-				"description": "元素编号，取自最近一次 snapshot 结果 (click/input)",
+				"description": "元素编号（取自最近 snapshot）",
 			},
 			"selector": map[string]interface{}{
 				"type":        "string",
-				"description": "CSS 选择器，编号不可用时的兜底定位方式 (click/input)",
+				"description": "CSS 选择器兜底定位",
 			},
 			"coordinate_x": map[string]interface{}{
 				"type":        "number",
-				"description": "X 坐标，无明确元素时的兜底定位方式 (click/input)",
+				"description": "X 坐标兜底定位",
 			},
 			"coordinate_y": map[string]interface{}{
 				"type":        "number",
-				"description": "Y 坐标，无明确元素时的兜底定位方式 (click/input)",
+				"description": "Y 坐标兜底定位",
 			},
 			"text": map[string]interface{}{
 				"type":        "string",
-				"description": "要输入的文本 (input)",
+				"description": "要输入的文本",
 			},
 			"press_enter": map[string]interface{}{
 				"type":        "boolean",
-				"description": "输入完成后是否按回车 (input)，如提交搜索框",
+				"description": "输入后是否按回车",
 			},
 			"key": map[string]interface{}{
 				"type":        "string",
-				"description": "按键标识，如 Enter/Escape/Tab/ArrowDown (press_key)",
+				"description": "按键标识，如 Enter/Tab",
 			},
 			"direction": map[string]interface{}{
 				"type":        "string",
-				"description": "滚动方向: up/down (scroll)",
+				"description": "滚动方向",
 				"enum":        []string{sandbox.ScrollDirectionUp, sandbox.ScrollDirectionDown},
 			},
 			"to_end": map[string]interface{}{
 				"type":        "boolean",
-				"description": "是否直达顶部/底部，否则只滚动一屏 (scroll)",
+				"description": "是否直达顶部/底部",
 			},
 			"full_page": map[string]interface{}{
 				"type":        "boolean",
-				"description": "是否整页截图，默认仅当前视口 (screenshot)",
+				"description": "是否整页截图",
 			},
 			"javascript": map[string]interface{}{
 				"type":        "string",
-				"description": "要在页面上下文执行的 JavaScript 表达式 (console_exec)",
+				"description": "要执行的 JS 表达式",
 			},
 			"max_lines": map[string]interface{}{
 				"type":        "integer",
-				"description": "返回最近多少行控制台日志 (console_view)",
+				"description": "返回日志行数",
 			},
 		},
 		// session_id 不暴露给模型：沙箱浏览器无需会话标识，由沙箱侧统一管理。

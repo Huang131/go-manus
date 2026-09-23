@@ -33,7 +33,7 @@ func (t *A2ATool) Name() string {
 
 // Description 返回工具描述
 func (t *A2ATool) Description() string {
-	return "用于与其他 Agent 进行通信。可以调用其他 Agent 处理特定任务。"
+	return "调用其他 Agent 处理任务。"
 }
 
 // Parameters 返回工具参数定义
@@ -43,20 +43,20 @@ func (t *A2ATool) Parameters() map[string]interface{} {
 		"properties": map[string]interface{}{
 			"action": map[string]interface{}{
 				"type":        "string",
-				"description": "操作类型: list_agents, call_agent",
+				"description": "操作类型",
 				"enum":        []string{A2AActionListAgents, A2AActionCallAgent},
 			},
 			"agent_id": map[string]interface{}{
 				"type":        "string",
-				"description": "Agent 唯一标识 (调用 list_agents 获取)",
+				"description": "Agent 唯一标识（来自 list_agents）",
 			},
 			"task": map[string]interface{}{
 				"type":        "string",
-				"description": "要分配给远程 Agent 完成的任务/需求描述",
+				"description": "任务描述",
 			},
 			"context": map[string]interface{}{
 				"type":        "object",
-				"description": "(可选) 任务上下文信息",
+				"description": "任务上下文（可选）",
 			},
 		},
 		"required": []string{"action"},

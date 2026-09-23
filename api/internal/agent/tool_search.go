@@ -25,7 +25,7 @@ func (t *SearchTool) Name() string {
 
 // Description 返回工具描述
 func (t *SearchTool) Description() string {
-	return "用于搜索互联网信息。可以搜索关键词获取相关网页结果。"
+	return "搜索网络信息。"
 }
 
 // Parameters 返回工具参数定义

@@ -24,7 +24,7 @@ func (t *ShellTool) Name() string {
 
 // Description 返回工具描述
 func (t *ShellTool) Description() string {
-	return "用于执行 Shell 命令。可以在终端中运行命令、读取输出、写入输入、等待进程执行、杀死进程等。"
+	return "执行 Shell 命令、读写终端、管理进程。"
 }
 
 // Parameters 返回工具参数定义
@@ -34,7 +34,7 @@ func (t *ShellTool) Parameters() map[string]interface{} {
 		"properties": map[string]interface{}{
 			"action": map[string]interface{}{
 				"type":        "string",
-				"description": "操作类型: exec, read, write, wait, kill",
+				"description": "操作类型",
 				"enum":        []string{ShellActionExec, ShellActionRead, ShellActionWrite, ShellActionWait, ShellActionKill},
 			},
 			"exec_dir": map[string]interface{}{
@@ -43,23 +43,23 @@ func (t *ShellTool) Parameters() map[string]interface{} {
 			},
 			"command": map[string]interface{}{
 				"type":        "string",
-				"description": "要执行的命令 (仅 exec 操作)",
+				"description": "要执行的命令",
 			},
 			"console": map[string]interface{}{
 				"type":        "boolean",
-				"description": "是否返回控制台记录 (仅 read 操作)",
+				"description": "是否返回控制台记录",
 			},
 			"input_text": map[string]interface{}{
 				"type":        "string",
-				"description": "输入文本 (仅 write 操作)",
+				"description": "输入文本",
 			},
 			"press_enter": map[string]interface{}{
 				"type":        "boolean",
-				"description": "是否按回车键 (仅 write 操作)",
+				"description": "是否按回车键",
 			},
 			"seconds": map[string]interface{}{
 				"type":        "integer",
-				"description": "等待秒数 (仅 wait 操作)",
+				"description": "等待秒数",
 			},
 		},
 		// session_id 不暴露给模型：沙箱会话与本次对话一一对应，由 Agent 执行前注入，

@@ -34,7 +34,7 @@ func (t *MCPTool) Name() string {
 
 // Description 返回工具描述
 func (t *MCPTool) Description() string {
-	return "用于调用 MCP (Model Context Protocol) 服务器提供的工具。"
+	return "调用 MCP 服务器提供的工具。"
 }
 
 // Parameters 返回工具参数定义

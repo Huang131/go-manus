@@ -24,7 +24,7 @@ func (t *FileTool) Name() string {
 
 // Description 返回工具描述
 func (t *FileTool) Description() string {
-	return "用于读取、写入、搜索和管理文件。可以查看文件内容、创建新文件、修改现有文件、搜索文件内容等。"
+	return "读写、搜索和管理文件。"
 }
 
 // Parameters 返回工具参数定义
@@ -34,7 +34,7 @@ func (t *FileTool) Parameters() map[string]interface{} {
 		"properties": map[string]interface{}{
 			"action": map[string]interface{}{
 				"type":        "string",
-				"description": "操作类型: read, write, delete, exists, list, search, replace",
+				"description": "操作类型",
 				"enum":        []string{FileActionRead, FileActionWrite, FileActionDelete, FileActionExists, FileActionList, FileActionSearch, FileActionReplace},
 			},
 			"filepath": map[string]interface{}{
@@ -43,7 +43,7 @@ func (t *FileTool) Parameters() map[string]interface{} {
 			},
 			"content": map[string]interface{}{
 				"type":        "string",
-				"description": "写入文件的内容 (仅 write 操作)",
+				"description": "写入的文件内容",
 			},
 			"append": map[string]interface{}{
 				"type":        "boolean",
@@ -51,31 +51,31 @@ func (t *FileTool) Parameters() map[string]interface{} {
 			},
 			"regex": map[string]interface{}{
 				"type":        "string",
-				"description": "搜索正则表达式 (仅 search 操作)",
+				"description": "搜索正则表达式",
 			},
 			"old_str": map[string]interface{}{
 				"type":        "string",
-				"description": "要替换的旧字符串 (仅 replace 操作)",
+				"description": "要替换的旧字符串",
 			},
 			"new_str": map[string]interface{}{
 				"type":        "string",
-				"description": "新字符串 (仅 replace 操作)",
+				"description": "替换后的新字符串",
 			},
 			"dir_path": map[string]interface{}{
 				"type":        "string",
-				"description": "目录路径 (仅 list 操作)",
+				"description": "目录路径",
 			},
 			"glob_pattern": map[string]interface{}{
 				"type":        "string",
-				"description": "文件匹配模式 (仅 find 操作)",
+				"description": "文件匹配模式",
 			},
 			"start_line": map[string]interface{}{
 				"type":        "integer",
-				"description": "起始行号 (仅 read 操作)",
+				"description": "起始行号",
 			},
 			"end_line": map[string]interface{}{
 				"type":        "integer",
-				"description": "结束行号 (仅 read 操作)",
+				"description": "结束行号",
 			},
 			"max_length": map[string]interface{}{
 				"type":        "integer",

@@ -16,10 +16,12 @@ type ContextPolicy struct {
 	MaxInputTokens int
 }
 
+// ContextBuilder 构建对话上下文
 type ContextBuilder struct {
 	policy ContextPolicy
 }
 
+// NewContextBuilder 创建上下文构建器
 func NewContextBuilder(policy ContextPolicy) *ContextBuilder {
 	if policy.MaxInputTokens <= 0 {
 		policy.MaxInputTokens = defaultMaxInputTokens
