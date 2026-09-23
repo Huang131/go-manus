@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/Huang131/go-manus/api/internal/model"
+
+	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
 )
 
 func TestRuntimeMCPConfigFiltersDisabledServersAndCopiesValues(t *testing.T) {
@@ -25,10 +27,10 @@ func TestRuntimeMCPConfigFiltersDisabledServersAndCopiesValues(t *testing.T) {
 }
 
 func TestToolProviderOmitsEmptyDynamicTools(t *testing.T) {
-	provider := NewToolProvider(context.Background(), Capabilities{}, &model.MCPConfig{}, &A2AConfig{})
-	tools := provider.Tools(DefaultAgentConfig().MaxSearchResults)
-	if len(tools) != 1 || tools[0].Name() != ToolNameMessage {
-		t.Fatalf("Tools() = %v, want message tool only", toolNames(tools))
+	provider := toolspkg.NewToolProvider(context.Background(), nil, nil, nil, &model.MCPConfig{}, &toolspkg.A2AConfig{})
+	got := provider.Tools(DefaultAgentConfig().MaxSearchResults)
+	if len(got) != 1 || got[0].Name() != toolspkg.ToolNameMessage {
+		t.Fatalf("Tools() = %v, want message tool only", got)
 	}
 }
 

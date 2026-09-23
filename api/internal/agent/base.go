@@ -16,6 +16,8 @@ import (
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/sandbox"
 
+	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
+
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
@@ -25,10 +27,10 @@ type BaseAgent struct {
 	sessionID        string
 	config           *AgentConfig
 	llm              llm.LLM
-	tools            []Tool
+	tools            []toolspkg.Tool
 	memory           Memory
 	contextBuilder   *ContextBuilder
-	toolRegistry     *ToolRegistry
+	toolRegistry     *toolspkg.ToolRegistry
 	jsonParser       jsonx.JSONParser
 	eventCh          chan<- model.BaseEvent // 事件输出通道（由 Flow 注入，nil 时静默）
 	shellWatchMu     sync.Mutex
@@ -37,8 +39,8 @@ type BaseAgent struct {
 }
 
 // NewBaseAgent 创建基础 Agent
-func NewBaseAgent(name, sessionID string, config *AgentConfig, llm llm.LLM, tools []Tool) *BaseAgent {
-	registry := NewToolRegistry()
+func NewBaseAgent(name, sessionID string, config *AgentConfig, llm llm.LLM, tools []toolspkg.Tool) *BaseAgent {
+	registry := toolspkg.NewToolRegistry()
 	for _, tool := range tools {
 		registry.Register(tool)
 	}
@@ -60,8 +62,8 @@ func NewBaseAgent(name, sessionID string, config *AgentConfig, llm llm.LLM, tool
 }
 
 // NewBaseAgentWithParser 创建基础 Agent（带自定义 JSON 解析器）
-func NewBaseAgentWithParser(name, sessionID string, config *AgentConfig, llm llm.LLM, tools []Tool, jsonParser jsonx.JSONParser) *BaseAgent {
-	registry := NewToolRegistry()
+func NewBaseAgentWithParser(name, sessionID string, config *AgentConfig, llm llm.LLM, tools []toolspkg.Tool, jsonParser jsonx.JSONParser) *BaseAgent {
+	registry := toolspkg.NewToolRegistry()
 	for _, tool := range tools {
 		registry.Register(tool)
 	}
@@ -527,8 +529,8 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 	tool, ok := a.toolRegistry.Get(functionName)
 	if !ok {
 		// 可能是 MCP 工具，格式为 mcp_serverName_toolName
-		if strings.HasPrefix(functionName, MCPFunctionPrefix) {
-			tool, ok = a.toolRegistry.Get(ToolNameMCP)
+		if strings.HasPrefix(functionName, toolspkg.MCPFunctionPrefix) {
+			tool, ok = a.toolRegistry.Get(toolspkg.ToolNameMCP)
 		}
 		if !ok {
 			return nil, fmt.Errorf("未知工具: %s", functionName)
@@ -543,7 +545,7 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 	// session_id 由 Agent 注入，不交给模型填写：沙箱会话与本次对话一一对应，
 	// 模型自行编造 session_id 会在共享沙箱里串到别的会话。
 	// 必须在发出 tool_calling 之前注入，前端才能用它关联 shell_output 增量。
-	if functionName == ToolNameShell {
+	if functionName == toolspkg.ToolNameShell {
 		arguments["session_id"] = a.sessionID
 	}
 
@@ -553,7 +555,7 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 	a.emitEvent(ctx, callingEvent)
 
 	// 特殊处理 message_ask_user 工具
-	if functionName == MessageFunctionAskUser {
+	if functionName == toolspkg.MessageFunctionAskUser {
 		// 返回成功结果，并标记需要等待用户输入
 		return &ToolCallResult{
 			ToolCallID:   toolCallID,
@@ -570,7 +572,7 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 	// 失败交由模型根据错误结果自行决策是否换个方式重试。
 	var result *model.ToolResult
 	var err error
-	if multiTool, ok := tool.(MultiFunctionTool); ok {
+	if multiTool, ok := tool.(toolspkg.MultiFunctionTool); ok {
 		result, err = multiTool.InvokeWithName(functionName, ctx, arguments)
 	} else {
 		result, err = tool.Invoke(ctx, arguments)

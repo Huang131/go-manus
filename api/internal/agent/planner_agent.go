@@ -9,6 +9,7 @@ import (
 	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
+	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
@@ -22,7 +23,7 @@ func NewPlannerAgent(
 	sessionID string,
 	config *AgentConfig,
 	llm llm.LLM,
-	tools []Tool,
+	tools []toolspkg.Tool,
 ) *PlannerAgent {
 	agent := &PlannerAgent{}
 	agent.BaseAgent = *NewBaseAgent("planner", sessionID, config, llm, tools)

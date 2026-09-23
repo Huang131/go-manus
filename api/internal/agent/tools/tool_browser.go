@@ -1,4 +1,4 @@
-package agent
+package tools
 
 import (
 	"context"
@@ -136,11 +136,11 @@ func (t *BrowserTool) Invoke(ctx context.Context, params map[string]interface{})
 		// 截图以二进制产物挂载：运行期落存储后 Display 里只会留下文件引用，
 		// 于是 LLM 上下文、SSE 事件与事件库都不会出现 base64。
 		return model.NewToolResult(map[string]interface{}{"bytes": len(data)}).
-			WithArtifact(browserScreenshotArtifact, model.ToolArtifact{
-				Filename: browserScreenshotFilename,
-				MimeType: browserScreenshotMimeType,
-				Data:     data,
-			}), nil
+				WithArtifact(BrowserScreenshotArtifact, model.ToolArtifact{
+					Filename: BrowserScreenshotFilename,
+					MimeType: BrowserScreenshotMimeType,
+					Data:     data,
+				}), nil
 
 	case BrowserActionClick:
 		target, toolErr := browserTargetFromParams(params)

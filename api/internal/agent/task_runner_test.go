@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
@@ -72,7 +73,7 @@ func TestAgentServiceChatUsesDetachedContextForMessagePersistence(t *testing.T) 
 		repos:         Repositories{Session: repo},
 		caps:          Capabilities{LLM: &mockLLM{}, MessageQueue: mq},
 		agentConfig:   DefaultAgentConfig(),
-		toolsProvider: &ToolProvider{},
+		toolsProvider: &toolspkg.ToolProvider{},
 		taskBySession: make(map[string]*RedisStreamTask),
 	}
 
@@ -169,7 +170,7 @@ func TestAgentService_GetActiveTaskIDClearsCompletedTask(t *testing.T) {
 }
 
 func TestMessageTool_NotifyUserSchema(t *testing.T) {
-	tool := NewMessageTool()
+	tool := toolspkg.NewMessageTool()
 	functions := tool.GetTools()
 	if len(functions) == 0 {
 		t.Fatal("message tool schema is empty")
@@ -287,9 +288,9 @@ func TestSessionRuntime_StoreToolArtifactsReplacesBytesWithFileRef(t *testing.T)
 	runtime := NewSessionRuntime("session-1", nil, fileRepo, nil, storage)
 
 	result := model.NewToolResult(map[string]interface{}{"bytes": len(marker)}).
-		WithArtifact(browserScreenshotArtifact, model.ToolArtifact{
-			Filename: browserScreenshotFilename,
-			MimeType: browserScreenshotMimeType,
+		WithArtifact(toolspkg.BrowserScreenshotArtifact, model.ToolArtifact{
+			Filename: toolspkg.BrowserScreenshotFilename,
+			MimeType: toolspkg.BrowserScreenshotMimeType,
 			Data:     []byte(marker),
 		})
 
@@ -298,24 +299,24 @@ func TestSessionRuntime_StoreToolArtifactsReplacesBytesWithFileRef(t *testing.T)
 	if len(result.Artifacts) != 0 {
 		t.Fatalf("artifacts = %#v, want cleared after persistence", result.Artifacts)
 	}
-	ref, ok := result.Display[browserScreenshotArtifact].(map[string]interface{})
+	ref, ok := result.Display[toolspkg.BrowserScreenshotArtifact].(map[string]interface{})
 	if !ok {
 		t.Fatalf("display = %#v, want file reference", result.Display)
 	}
 	fileID, _ := ref["file_id"].(string)
-	if fileID == "" || ref["mime_type"] != browserScreenshotMimeType || ref["size"] != int64(len(marker)) {
+	if fileID == "" || ref["mime_type"] != toolspkg.BrowserScreenshotMimeType || ref["size"] != int64(len(marker)) {
 		t.Fatalf("file reference = %#v", ref)
 	}
 	if fileRepo.created == nil {
 		t.Fatal("expected file record for artifact")
 	}
-	if fileRepo.created.SessionID != "session-1" || fileRepo.created.MimeType != browserScreenshotMimeType {
+	if fileRepo.created.SessionID != "session-1" || fileRepo.created.MimeType != toolspkg.BrowserScreenshotMimeType {
 		t.Fatalf("file record = %+v", fileRepo.created)
 	}
 	if fileRepo.created.Extension != ".png" {
 		t.Fatalf("file extension = %q, want .png", fileRepo.created.Extension)
 	}
-	if storage.uploadedType != browserScreenshotMimeType || storage.uploadedSize != int64(len(marker)) {
+	if storage.uploadedType != toolspkg.BrowserScreenshotMimeType || storage.uploadedSize != int64(len(marker)) {
 		t.Fatalf("upload = type:%q size:%d", storage.uploadedType, storage.uploadedSize)
 	}
 	if !strings.HasPrefix(storage.uploadedKey, "agent/session-1/artifacts/") || !strings.HasSuffix(storage.uploadedKey, ".png") {
@@ -335,9 +336,9 @@ func TestSessionRuntime_StoreToolArtifactsReplacesBytesWithFileRef(t *testing.T)
 // 产物直接丢弃，不影响工具结果本身。
 func TestSessionRuntime_StoreToolArtifactsDropsWithoutStorage(t *testing.T) {
 	runtime := NewSessionRuntime("session-1", nil, nil, nil, nil)
-	result := model.NewToolResult(nil).WithArtifact(browserScreenshotArtifact, model.ToolArtifact{
-		Filename: browserScreenshotFilename,
-		MimeType: browserScreenshotMimeType,
+	result := model.NewToolResult(nil).WithArtifact(toolspkg.BrowserScreenshotArtifact, model.ToolArtifact{
+		Filename: toolspkg.BrowserScreenshotFilename,
+		MimeType: toolspkg.BrowserScreenshotMimeType,
 		Data:     []byte("png"),
 	})
 

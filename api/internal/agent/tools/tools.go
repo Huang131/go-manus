@@ -1,4 +1,7 @@
-package agent
+// Package tools 实现 Agent 可调用工具系统：Shell/File/Browser/Search 基础工具、
+// MCP/A2A 外部代理工具，以及负责工具组装、MCP/A2A 热重载与清理的 ToolProvider。
+// 本包不依赖 agent 编排层，仅依赖 sandbox、search、model 等基础能力，保持依赖单向。
+package tools
 
 import (
 	"context"

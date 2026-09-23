@@ -1,3 +1,6 @@
+// Package agent 实现 Agent 编排层：Planner 规划、ReAct 执行、任务生命周期与事件流。
+// 工具系统（Shell/File/Browser/Search 基础工具与 MCP/A2A 代理工具）已下沉到
+// 子包 agent/tools，本包通过 ToolProvider 单向依赖它，避免 agent ↔ tools 循环依赖。
 package agent
 
 import (
@@ -14,6 +17,8 @@ import (
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 
+	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
+
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
@@ -29,7 +34,7 @@ type AgentService struct {
 	repos         Repositories
 	caps          Capabilities
 	agentConfig   *AgentConfig
-	toolsProvider *ToolProvider
+	toolsProvider *toolspkg.ToolProvider
 
 	// Session 与 Task 的映射（用于对接 Task 架构）
 	taskBySession map[string]*RedisStreamTask
@@ -49,7 +54,7 @@ func NewAgentService(
 		repos:         repos,
 		caps:          caps,
 		agentConfig:   agentConfig,
-		toolsProvider: NewToolProvider(ctx, caps, mcpConfig, a2aConfig),
+		toolsProvider: toolspkg.NewToolProvider(ctx, caps.Sandbox, caps.Browser, caps.SearchEngine, mcpConfig, a2aConfig),
 		taskBySession: make(map[string]*RedisStreamTask),
 	}
 }
@@ -259,7 +264,7 @@ func (s *AgentService) ReloadA2AConfig(ctx context.Context, cfg *A2AConfig) erro
 
 // getOrCreateTask 获取或创建 RedisStreamTask
 // 对齐 Python: task = await RedisStreamTask.create(task_runner)
-func (s *AgentService) getOrCreateTask(ctx context.Context, session *model.Session, tools []Tool) (*RedisStreamTask, error) {
+func (s *AgentService) getOrCreateTask(ctx context.Context, session *model.Session, tools []toolspkg.Tool) (*RedisStreamTask, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

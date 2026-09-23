@@ -1,4 +1,4 @@
-package agent
+package tools
 
 import (
 	"context"
@@ -28,11 +28,20 @@ type ToolProvider struct {
 }
 
 // NewToolProvider 构造工具提供器，并按需初始化 MCP/A2A 客户端。
-func NewToolProvider(ctx context.Context, caps Capabilities, mcpConfig *model.MCPConfig, a2aConfig *A2AConfig) *ToolProvider {
+// 只接收工具真正依赖的三个能力（沙箱、浏览器、搜索），不引入 agent 层的 Capabilities，
+// 保持 agent → tools 单向依赖。
+func NewToolProvider(
+	ctx context.Context,
+	sandbox sandbox.Sandbox,
+	browser sandbox.Browser,
+	searchEngine search.SearchEngine,
+	mcpConfig *model.MCPConfig,
+	a2aConfig *A2AConfig,
+) *ToolProvider {
 	p := &ToolProvider{
-		sandbox:      caps.Sandbox,
-		browser:      caps.Browser,
-		searchEngine: caps.SearchEngine,
+		sandbox:      sandbox,
+		browser:      browser,
+		searchEngine: searchEngine,
 	}
 
 	if mcpConfig != nil && len(mcpConfig.Servers) > 0 {

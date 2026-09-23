@@ -13,6 +13,8 @@ import (
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/google/uuid"
 
+	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
+
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
@@ -33,7 +35,7 @@ type AgentTaskRunner struct {
 	sessionID string
 	config    *AgentConfig
 	llm       llm.LLM
-	tools     []Tool
+	tools     []toolspkg.Tool
 	flow      *PlannerReActFlow
 	runtime   *SessionRuntime
 }
@@ -44,7 +46,7 @@ type AgentTaskRunnerConfig struct {
 	AgentConfig     *AgentConfig
 	InitialMessages []llmcore.Message
 	LLM             llm.LLM
-	Tools           []Tool
+	Tools           []toolspkg.Tool
 	Runtime         *SessionRuntime
 }
 

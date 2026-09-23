@@ -1,4 +1,4 @@
-package agent
+package tools
 
 import (
 	"context"
@@ -30,7 +30,7 @@ func TestSearchToolForwardsConfiguredLimit(t *testing.T) {
 
 func TestToolProviderReloadSearchLimitAffectsNewTools(t *testing.T) {
 	search := &searchEngineStub{}
-	provider := NewToolProvider(context.Background(), Capabilities{SearchEngine: search}, nil, nil)
+	provider := NewToolProvider(context.Background(), nil, nil, search, nil, nil)
 
 	var searchTool *SearchTool
 	for _, tool := range provider.Tools(9) {

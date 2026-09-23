@@ -11,6 +11,7 @@ import (
 
 	"github.com/bytedance/sonic"
 
+	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
@@ -283,7 +284,7 @@ func TestToolCallingEvents_SSEStream(t *testing.T) {
 		SessionID:   "session-tool-event-test",
 		AgentConfig: DefaultAgentConfig(),
 		LLM:         mock,
-		Tools:       []Tool{&mockEchoTool{}},
+		Tools:       []toolspkg.Tool{&mockEchoTool{}},
 		Runtime:     NewSessionRuntime("session-tool-event-test", mockRepo, nil, nil, nil),
 	})
 	task := NewRedisStreamTask(mq, runner)
@@ -422,7 +423,7 @@ func TestToolCallingEvents_SSEStream_Failure(t *testing.T) {
 		SessionID:   "session-tool-event-fail-test",
 		AgentConfig: DefaultAgentConfig(),
 		LLM:         mock,
-		Tools:       []Tool{&mockFailingTool{}},
+		Tools:       []toolspkg.Tool{&mockFailingTool{}},
 		Runtime:     NewSessionRuntime("session-tool-event-fail-test", mockRepo, nil, nil, nil),
 	})
 	task := NewRedisStreamTask(mq, runner)
@@ -532,9 +533,9 @@ func (t *artifactTool) Name() string { return "artifact_tool" }
 
 func (t *artifactTool) Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
 	return model.NewToolResult(map[string]interface{}{"bytes": len(artifactMarker)}).
-		WithArtifact(browserScreenshotArtifact, model.ToolArtifact{
-			Filename: browserScreenshotFilename,
-			MimeType: browserScreenshotMimeType,
+		WithArtifact(toolspkg.BrowserScreenshotArtifact, model.ToolArtifact{
+			Filename: toolspkg.BrowserScreenshotFilename,
+			MimeType: toolspkg.BrowserScreenshotMimeType,
 			Data:     []byte(artifactMarker),
 		}), nil
 }
@@ -576,7 +577,7 @@ func TestToolCalledEvent_CarriesArtifactRefInsteadOfBytes(t *testing.T) {
 		SessionID:   "session-artifact-test",
 		AgentConfig: DefaultAgentConfig(),
 		LLM:         mock,
-		Tools:       []Tool{&artifactTool{}},
+		Tools:       []toolspkg.Tool{&artifactTool{}},
 		Runtime:     NewSessionRuntime("session-artifact-test", &mockSessionRepo{}, fileRepo, nil, storage),
 	})
 	task := NewRedisStreamTask(mq, runner)
@@ -622,7 +623,7 @@ func TestToolCalledEvent_CarriesArtifactRefInsteadOfBytes(t *testing.T) {
 				if called.Result == nil {
 					t.Fatal("ToolCalledEvent.Result = nil, want non-nil")
 				}
-				ref, ok := called.Result.Display[browserScreenshotArtifact].(map[string]interface{})
+				ref, ok := called.Result.Display[toolspkg.BrowserScreenshotArtifact].(map[string]interface{})
 				if !ok || ref["file_id"] == "" {
 					t.Fatalf("ToolCalledEvent.Display = %#v, want file reference", called.Result.Display)
 				}
@@ -636,7 +637,7 @@ func TestToolCalledEvent_CarriesArtifactRefInsteadOfBytes(t *testing.T) {
 				if fileRepo.created == nil || fileRepo.created.SessionID != "session-artifact-test" {
 					t.Fatalf("file record = %+v, want artifact persisted for session", fileRepo.created)
 				}
-				if storage.uploadedSize != int64(len(artifactMarker)) || storage.uploadedType != browserScreenshotMimeType {
+				if storage.uploadedSize != int64(len(artifactMarker)) || storage.uploadedType != toolspkg.BrowserScreenshotMimeType {
 					t.Fatalf("upload = size:%d type:%q, want artifact bytes", storage.uploadedSize, storage.uploadedType)
 				}
 				return

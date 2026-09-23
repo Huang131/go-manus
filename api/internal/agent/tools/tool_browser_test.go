@@ -1,4 +1,4 @@
-package agent
+package tools
 
 import (
 	"bytes"
@@ -85,14 +85,14 @@ func TestBrowserToolScreenshotKeepsImageOutOfLLMData(t *testing.T) {
 		t.Error("Invoke() should forward full_page=true")
 	}
 
-	artifact, ok := result.Artifacts[browserScreenshotArtifact]
+	artifact, ok := result.Artifacts[BrowserScreenshotArtifact]
 	if !ok || !bytes.Equal(artifact.Data, png) {
 		t.Fatalf("artifacts = %#v, want raw png bytes", result.Artifacts)
 	}
-	if artifact.MimeType != browserScreenshotMimeType || artifact.Filename != browserScreenshotFilename {
+	if artifact.MimeType != BrowserScreenshotMimeType || artifact.Filename != BrowserScreenshotFilename {
 		t.Fatalf("artifact metadata = %+v", artifact)
 	}
-	if _, ok := result.Display[browserScreenshotArtifact]; ok {
+	if _, ok := result.Display[BrowserScreenshotArtifact]; ok {
 		t.Fatalf("screenshot should not be inlined into display before persistence: %#v", result.Display)
 	}
 	// tool_called 事件走 JSON()：产物字节一旦被序列化就会撑爆事件流与事件库。

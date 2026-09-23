@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
 	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -186,7 +187,7 @@ func TestPlannerReActFlow_InvokeContext(t *testing.T) {
 		"test-session",
 		config,
 		llm,
-		[]Tool{},
+		[]toolspkg.Tool{},
 	)
 
 	// 创建已取消的上下文

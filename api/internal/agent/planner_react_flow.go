@@ -10,6 +10,8 @@ import (
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/bytedance/sonic"
 
+	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
+
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
@@ -21,7 +23,7 @@ type PlannerReActFlow struct {
 	sessionID string
 	config    *AgentConfig
 	llm       llm.LLM
-	tools     []Tool
+	tools     []toolspkg.Tool
 
 	planner *PlannerAgent
 	react   *ReActAgent
@@ -32,7 +34,7 @@ func NewPlannerReActFlow(
 	sessionID string,
 	config *AgentConfig,
 	llm llm.LLM,
-	tools []Tool,
+	tools []toolspkg.Tool,
 ) *PlannerReActFlow {
 	flow := &PlannerReActFlow{
 		status:    FlowStatusIdle,

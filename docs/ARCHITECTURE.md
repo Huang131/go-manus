@@ -12,7 +12,7 @@ HTTP API -> service -> agent flow -> Planner -> ReAct -> Tool/MCP/A2A
 
 - `api/internal/handler` 负责 HTTP 入参、鉴权错误映射和响应 envelope。
 - `api/internal/service` 负责配置、会话和模型管理，不直接拼装 provider 请求。
-- `api/internal/agent` 负责规划、工具执行、记忆和事件流。
+- `api/internal/agent` 负责规划、任务生命周期、记忆和事件流；工具系统下沉到 `api/internal/agent/tools`。
 - `api/internal/llmcore` 定义统一消息、工具、响应、模型画像和计划 Schema。
 - `api/internal/external` 实现 OpenAI 兼容、Anthropic、动态模型和流式适配器。
 

@@ -1,6 +1,9 @@
 package agent
 
-import "github.com/Huang131/go-manus/api/internal/model"
+import (
+	"github.com/Huang131/go-manus/api/internal/agent/tools"
+	"github.com/Huang131/go-manus/api/internal/model"
+)
 
 // AgentConfig Agent 配置
 type AgentConfig struct {
@@ -41,19 +44,10 @@ func NormalizeAgentConfig(cfg *AgentConfig) *AgentConfig {
 	return &normalized
 }
 
-// A2AConfig A2A 配置
-type A2AConfig struct {
-	// Agents A2A Agent 列表
-	Agents []A2AAgent `json:"agents"`
-}
-
-// A2AAgent A2A Agent 配置
-type A2AAgent struct {
-	// Name Agent 名称
-	Name string `json:"name"`
-	// URL Agent 服务地址
-	URL string `json:"url"`
-}
+// A2AConfig / A2AAgent 类型别名：handler / bootstrap 仍通过 agent.A2AConfig 访问，
+// 实际定义已下沉到 tools 包，避免 agent → tools 反向依赖形成循环。
+type A2AConfig = tools.A2AConfig
+type A2AAgent = tools.A2AAgent
 
 // RuntimeMCPConfig converts the persisted control-plane model into an isolated
 // runtime snapshot. Disabled servers never reach the client manager.

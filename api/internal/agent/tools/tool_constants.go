@@ -1,4 +1,4 @@
-package agent
+package tools
 
 // 工具名称是 Agent 与 LLM 之间的稳定协议值。
 const (
@@ -49,14 +49,15 @@ const (
 	BrowserActionConsoleView = "console_view"
 )
 
-// browserScreenshotArtifact 截图产物的键名：ToolResult.Artifacts 用它挂载 PNG 字节，
+// BrowserScreenshotArtifact 截图产物的键名：ToolResult.Artifacts 用它挂载 PNG 字节，
 // 运行期落存储后会在 ToolResult.Display 的同名键上留下文件引用。
-const browserScreenshotArtifact = "screenshot"
+// 它是 browser 工具与上层落存储逻辑共享的稳定协议值，故导出。
+const BrowserScreenshotArtifact = "screenshot"
 
 // 截图产物落存储时使用的元数据，UI 预览按这些信息渲染。
 const (
-	browserScreenshotFilename = "screenshot.png"
-	browserScreenshotMimeType = "image/png"
+	BrowserScreenshotFilename = "screenshot.png"
+	BrowserScreenshotMimeType = "image/png"
 )
 
 // A2A 工具动作。

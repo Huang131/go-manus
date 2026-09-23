@@ -8,6 +8,8 @@ import (
 	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/model"
 
+	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
+
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
@@ -21,7 +23,7 @@ func NewReActAgent(
 	sessionID string,
 	config *AgentConfig,
 	llm llm.LLM,
-	tools []Tool,
+	tools []toolspkg.Tool,
 ) *ReActAgent {
 	agent := &ReActAgent{}
 	agent.BaseAgent = *NewBaseAgent("react", sessionID, config, llm, tools)
