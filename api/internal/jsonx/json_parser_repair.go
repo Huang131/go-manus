@@ -111,7 +111,59 @@ func isTruncatedJSON(text string) bool {
 		return false
 	}
 
-	depth := 0
+	depth := 0        // 当前嵌套深度，遇到 {/[ 加 1，遇到 }/] 减 1
+	inString := false // 当前是否在字符串内（字符串内的括号不计入深度）
+	escape := false   // 前一个字符是否是转义符 \
+
+	for i := 0; i < len(trimmed); i++ {
+		c := trimmed[i]
+
+		// 前一个字符是 \，当前字符是转义后的内容
+		if escape {
+			escape = false
+			continue
+		}
+
+		// 遇到 \ 且在字符串内，开启转义模式
+		if c == '\\' && inString {
+			escape = true
+			continue
+		}
+
+		// 遇到双引号，切换字符串上下文
+		if c == '"' {
+			inString = !inString
+			continue
+		}
+
+		// 在字符串内部，跳过所有括号计数
+		if inString {
+			continue
+		}
+
+		switch c {
+		case '{', '[':
+			depth++
+		case '}', ']':
+			depth--
+		}
+	}
+
+	return depth > 0
+}
+
+// completeTruncatedJSON 补全截断 JSON 的结尾括号
+// 使用栈记录开括号的顺序，截断时栈中残留未闭括号。
+// 反向栈得到正确闭括号顺序（后开先闭，LIFO）。
+func completeTruncatedJSON(text string) string {
+	if !isTruncatedJSON(text) {
+		return text
+	}
+
+	trimmed := strings.TrimSpace(text)
+
+	// 栈：记录不在字符串内的开括号顺序（append 方向为出现顺序）
+	var stack []byte
 	inString := false
 	escape := false
 
@@ -139,74 +191,29 @@ func isTruncatedJSON(text string) bool {
 
 		switch c {
 		case '{', '[':
-			depth++
+			stack = append(stack, c) // 入栈：记录开括号
 		case '}', ']':
-			depth--
+			if len(stack) > 0 { // 出栈：匹配到闭括号，弹出一个开括号
+				stack = stack[:len(stack)-1]
+			}
+			// 不匹配时（如输入 {]}）直接跳过，保持容错
 		}
 	}
 
-	return depth > 0
-}
-
-// completeTruncatedJSON 补全截断 JSON 的结尾括号
-func completeTruncatedJSON(text string) string {
-	if !isTruncatedJSON(text) {
+	if len(stack) == 0 {
 		return text
 	}
 
-	trimmed := strings.TrimSpace(text)
-
-	openCurly, closeCurly, openBracket, closeBracket := 0, 0, 0, 0
-	inString := false
-	escape := false
-
-	for i := 0; i < len(trimmed); i++ {
-		c := trimmed[i]
-
-		if escape {
-			escape = false
-			continue
-		}
-
-		if c == '\\' && inString {
-			escape = true
-			continue
-		}
-
-		if c == '"' {
-			inString = !inString
-			continue
-		}
-
-		if inString {
-			continue
-		}
-
-		switch c {
-		case '{':
-			openCurly++
-		case '}':
-			closeCurly++
-		case '[':
-			openBracket++
-		case ']':
-			closeBracket++
-		}
-	}
-
+	// 此时 stack 中是从"第一个开"到"最后一个开但未闭"的顺序
+	// 反向遍历，得到"最后一个开"到"第一个开"的顺序，即正确的闭括号顺序
 	var suffix strings.Builder
-	missingCurly := openCurly - closeCurly
-	missingBracket := openBracket - closeBracket
-
-	for i := 0; i < missingBracket; i++ {
-		suffix.WriteString("]")
-	}
-	for i := 0; i < missingCurly; i++ {
-		suffix.WriteString("}")
-	}
-
-	if suffix.Len() == 0 {
-		return text
+	for i := len(stack) - 1; i >= 0; i-- {
+		switch stack[i] {
+		case '{':
+			suffix.WriteByte('}')
+		case '[':
+			suffix.WriteByte(']')
+		}
 	}
 
 	return trimmed + suffix.String()

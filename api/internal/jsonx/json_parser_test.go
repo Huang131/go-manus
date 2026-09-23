@@ -295,9 +295,17 @@ func TestCompleteTruncatedJSON(t *testing.T) {
 		{name: "missing two braces", input: `{"x": {"a": 1`, expect: `{"x": {"a": 1}}`},
 		// 缺一个 ]
 		{name: "missing one bracket", input: `[1, 2, 3`, expect: `[1, 2, 3]`},
-		// 对象内嵌数组，缺 ] 和 }
+		// 对象内嵌数组，缺 ] 和 } → 交替补全 ]}
 		{name: "mixed object and array", input: `[{"a": 1}`, expect: `[{"a": 1}]`},
-		// 非截断场景（unquoted key），原样返回
+		// 对象内嵌数组截断，栈 ['{','[']，反向闭合为 ]}
+		{name: "object with nested array truncated", input: `{"items": [1, 2,`, expect: `{"items": [1, 2,]}`},
+		// 三层嵌套 { [ [ ，栈 ['{','[','{','[']，反向闭合为 ]]]}
+		{name: "three levels nested", input: `{"x": [{"a": [1, 2,`, expect: `{"x": [{"a": [1, 2,]}]}`},
+		// 数组内嵌对象数组，栈 ['[','{','[']，反向闭合为 ]}]
+		{name: "array of objects with nested array truncated", input: `[{"items": [1, 2,`, expect: `[{"items": [1, 2,]}]`},
+		// 两层数组，栈 ['[','[']，反向闭合为 ]]
+		{name: "double nested array truncated", input: `[[1, 2,`, expect: `[[1, 2,]]`},
+		// 非截断场景，原样返回
 		{name: "unquoted key not truncation", input: `{name: John}`, expect: `{name: John}`},
 	}
 
