@@ -428,9 +428,13 @@ func (f *PlannerReActFlow) finish(ctx context.Context, ch chan<- model.BaseEvent
 	if !f.emitEvent(ctx, ch, model.NewDoneEvent()) {
 		return true
 	}
+	status := f.currentStatus()
 	logger.InfoContext(ctx, "PlannerReActFlow 执行结束",
 		logger.String("session_id", f.sessionID),
-		logger.String("flow_status", string(f.currentStatus())))
+		logger.String("flow_status", string(status)))
+	logger.InfoContext(ctx, "metric.task_complete",
+		logger.String("session_id", f.sessionID),
+		logger.Bool("success", status == FlowStatusCompleted))
 	return true
 }
 

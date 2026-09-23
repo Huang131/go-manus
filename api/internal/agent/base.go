@@ -326,6 +326,14 @@ func (a *BaseAgent) InvokeWithoutStreaming(ctx context.Context, systemPrompt, qu
 }
 
 func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publishDeltas bool) (*InvokeResult, error) {
+	// 指标埋点：记录本轮 ReAct 实际迭代次数，用于对比上下文精简前后的工具调用收敛效果
+	iteration := 0
+	defer func() {
+		logger.InfoContext(ctx, "metric.react_iterations",
+			logger.String("session_id", a.sessionID),
+			logger.Int("iterations", iteration))
+	}()
+
 	// 1. 构建初始消息：system + 记忆 + 本次用户消息
 	messages, err := a.buildConversationMessages(systemPrompt, query)
 	if err != nil {
@@ -335,7 +343,8 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 	mergeFrom := len(messages) - 1
 
 	// 2. 循环调用 LLM 直到达到最大迭代次数或 LLM 不再调用工具
-	for iteration := 0; iteration < a.config.MaxIterations; iteration++ {
+	for iteration < a.config.MaxIterations {
+		iteration++
 		// 3. 调用 LLM
 		llmReq := &llm.LLMRequest{
 			Messages: messages,
@@ -568,6 +577,12 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 	}
 
 	if err != nil {
+		logger.WarnContext(ctx, "metric.tool_call",
+			logger.String("session_id", a.sessionID),
+			logger.String("function", functionName),
+			logger.Bool("success", false),
+			logger.Err(err))
+
 		// 失败也发出 tool_called 事件，携带错误结果，前端可展示失败详情
 		calledEvent := model.NewToolCalledEvent(toolCallID, functionName, arguments, model.NewToolError(err.Error()))
 		calledEvent.Name = tool.Name()
@@ -600,6 +615,11 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 			}
 		}
 	}
+
+	logger.InfoContext(ctx, "metric.tool_call",
+		logger.String("session_id", a.sessionID),
+		logger.String("function", functionName),
+		logger.Bool("success", result != nil && result.Success))
 
 	return &ToolCallResult{
 		ToolCallID:   toolCallID,
