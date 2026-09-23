@@ -33,10 +33,11 @@ type scriptedLLM struct {
 
 // blockingLLM 让一次模型调用停在流式阶段，供 HTTP stop 取消契约测试使用。
 type blockingLLM struct {
-	started    chan struct{}
-	returned   chan struct{}
-	startOnce  sync.Once
-	returnOnce sync.Once
+	started     chan struct{}
+	returned    chan struct{}
+	allowReturn chan struct{}
+	startOnce   sync.Once
+	returnOnce  sync.Once
 }
 
 func (f *blockingLLM) Invoke(ctx context.Context, _ *llm.LLMRequest) (*llmcore.LLMResponse, error) {
@@ -46,6 +47,9 @@ func (f *blockingLLM) Invoke(ctx context.Context, _ *llm.LLMRequest) (*llmcore.L
 func (f *blockingLLM) Stream(ctx context.Context, _ *llm.LLMRequest) (<-chan llmcore.LLMDelta, error) {
 	f.startOnce.Do(func() { close(f.started) })
 	<-ctx.Done()
+	if f.allowReturn != nil {
+		<-f.allowReturn
+	}
 	f.returnOnce.Do(func() { close(f.returned) })
 	return nil, ctx.Err()
 }
@@ -323,13 +327,17 @@ func parseStreamID(t *testing.T, id string) (int64, int64) {
 }
 
 func TestStopEndpoint_CancelsActiveAgentAndPreservesCancelledStatus(t *testing.T) {
-	fake := &blockingLLM{started: make(chan struct{}), returned: make(chan struct{})}
+	fake := &blockingLLM{
+		started:     make(chan struct{}),
+		returned:    make(chan struct{}),
+		allowReturn: make(chan struct{}),
+	}
 	app := newChatTestApp(t, fake)
 
 	sessionID := createSessionWithServer(t, app.Engine)
 	defer CleanupSessionWithDB(t, app.Postgres, sessionID)
 
-	_, err := app.AgentService.Chat(context.Background(), sessionID, &llmcore.Message{
+	taskID, err := app.AgentService.Chat(context.Background(), sessionID, &llmcore.Message{
 		Role:        model.RoleUser,
 		ContentText: "请停止这个请求",
 	})
@@ -344,20 +352,28 @@ func TestStopEndpoint_CancelsActiveAgentAndPreservesCancelledStatus(t *testing.T
 	stopResponse := postJSONWithServer(t, app.Engine, "/api/sessions/"+sessionID+"/stop", nil)
 	assertOK(t, stopResponse)
 
-	select {
-	case <-fake.returned:
-	case <-time.After(5 * time.Second):
-		t.Fatal("stop did not cancel the active LLM call")
-	}
-
+	// Stop 已写入 cancelled，但故意让 LLM 暂不返回，以构造“取消先完成、runner 后收尾”的竞争顺序。
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	session, err := app.SessionService.GetSession(ctx, sessionID)
 	require.NoError(t, err)
 	assert.Equal(t, model.SessionStatusCancelled, session.Status)
 
-	// 等待后台收尾后再次读取，验证 runner 的终态投影不会覆盖 cancelled。
-	time.Sleep(100 * time.Millisecond)
+	close(fake.allowReturn)
+
+	select {
+	case <-fake.returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop did not cancel the active LLM call")
+	}
+
+	// finished 只在 runner 退出、注册表清理且流保留策略切换后成立。
+	// 通过输入流 TTL 观察这条生产生命周期边界，避免固定 Sleep 或只等待模型返回。
+	require.Eventually(t, func() bool {
+		ttl, ttlErr := app.Redis.Client.TTL(ctx, "task:input:"+taskID).Result()
+		return ttlErr == nil && ttl > 0 && ttl <= mq.CompletedStreamRetention()
+	}, 5*time.Second, 10*time.Millisecond, "task did not finish cleanup after stop")
+
 	session, err = app.SessionService.GetSession(ctx, sessionID)
 	require.NoError(t, err)
 	assert.Equal(t, model.SessionStatusCancelled, session.Status)

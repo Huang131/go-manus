@@ -1,3 +1,5 @@
+//go:build external
+
 package search
 
 import (
@@ -10,8 +12,8 @@ import (
 	"github.com/Huang131/go-manus/api/config"
 )
 
-// getSearchKeys 从配置加载搜索 API key
-func getSearchKeys(t *testing.T) (tavilyKey, bochaKey string) {
+// loadSearchKeys 从配置加载仅供 external smoke 使用的搜索 API key。
+func loadSearchKeys(t *testing.T) (tavilyKey, bochaKey string) {
 	configPaths := []string{
 		"config.yaml",
 		"../../config.yaml",
@@ -34,19 +36,47 @@ func getSearchKeys(t *testing.T) (tavilyKey, bochaKey string) {
 	return cfg.Search.TavilyAPIKey, cfg.Search.BochaAPIKey
 }
 
-// skipIfNoKeys 跳过测试如果没有配置凭证
-func skipIfNoKeys(t *testing.T) (tavilyKey, bochaKey string) {
-	tavilyKey, bochaKey = getSearchKeys(t)
-	if tavilyKey == "" || bochaKey == "" {
-		t.Skip("skipping live test: tavily_api_key or bocha_api_key not set in config.yaml")
+// requireExternalSearchTests 防止直接执行 external build tag 时意外调用真实服务。
+func requireExternalSearchTests(t *testing.T) {
+	t.Helper()
+	if os.Getenv("RUN_EXTERNAL_TESTS") != "1" {
+		t.Skip("skipping search external smoke: RUN_EXTERNAL_TESTS=1 is required")
 	}
-	return
+}
+
+func requireTavilyKey(t *testing.T) string {
+	t.Helper()
+	requireExternalSearchTests(t)
+	tavilyKey, _ := loadSearchKeys(t)
+	if tavilyKey == "" {
+		t.Skip("skipping Tavily external smoke: tavily_api_key is not configured")
+	}
+	return tavilyKey
+}
+
+func requireBochaKey(t *testing.T) string {
+	t.Helper()
+	requireExternalSearchTests(t)
+	_, bochaKey := loadSearchKeys(t)
+	if bochaKey == "" {
+		t.Skip("skipping Bocha external smoke: bocha_api_key is not configured")
+	}
+	return bochaKey
+}
+
+func requireFallbackKeys(t *testing.T) (tavilyKey, bochaKey string) {
+	t.Helper()
+	requireExternalSearchTests(t)
+	tavilyKey, bochaKey = loadSearchKeys(t)
+	if tavilyKey == "" || bochaKey == "" {
+		t.Skip("skipping fallback external smoke: tavily_api_key and bocha_api_key are required")
+	}
+	return tavilyKey, bochaKey
 }
 
 // TestTavilyLive 真实验证 Tavily API
 func TestTavilyLive(t *testing.T) {
-	tavilyKey, bochaKey := skipIfNoKeys(t)
-	_ = bochaKey
+	tavilyKey := requireTavilyKey(t)
 
 	c := NewTavilySearchClientWithTimeout(tavilyKey, 30*time.Second)
 	res, err := c.Invoke(context.Background(), "成龙是谁", nil, 3)
@@ -68,8 +98,7 @@ func TestTavilyLive(t *testing.T) {
 
 // TestBochaLive 真实验证 Bocha API
 func TestBochaLive(t *testing.T) {
-	tavilyKey, bochaKey := skipIfNoKeys(t)
-	_ = tavilyKey
+	bochaKey := requireBochaKey(t)
 
 	c := NewBochaSearchClientWithTimeout(bochaKey, 30*time.Second)
 	res, err := c.Invoke(context.Background(), "阿里巴巴ESG报告", nil, 3)
@@ -91,7 +120,7 @@ func TestBochaLive(t *testing.T) {
 
 // TestFallbackLive 真实验证 Tavily + Bocha 自动切换
 func TestFallbackLive(t *testing.T) {
-	tavilyKey, bochaKey := skipIfNoKeys(t)
+	tavilyKey, bochaKey := requireFallbackKeys(t)
 
 	c := NewFallbackSearchClient(tavilyKey, bochaKey, 30*time.Second)
 
@@ -107,7 +136,7 @@ func TestFallbackLive(t *testing.T) {
 
 // TestFallbackLive_BochaFallback 真实验证 fallback 到 Bocha
 func TestFallbackLive_BochaFallback(t *testing.T) {
-	_, bochaKey := skipIfNoKeys(t)
+	bochaKey := requireBochaKey(t)
 
 	// 使用无效的 Tavily key 强制触发 fallback
 	c := NewFallbackSearchClient("invalid-key-force-fallback", bochaKey, 30*time.Second)
@@ -128,11 +157,7 @@ func TestFallbackLive_BochaFallback(t *testing.T) {
 
 // TestBochaLive_WithDateRange 测试带日期范围的 Bocha 搜索
 func TestBochaLive_WithDateRange(t *testing.T) {
-	if os.Getenv("RUN_LIVE_TESTS") != "true" {
-		t.Skip("skipping live test: RUN_LIVE_TESTS not set")
-	}
-
-	_, bochaKey := skipIfNoKeys(t)
+	bochaKey := requireBochaKey(t)
 	c := NewBochaSearchClientWithTimeout(bochaKey, 30*time.Second)
 	dateRange := "y"
 	res, err := c.Invoke(context.Background(), "AI人工智能发展", &dateRange, 5)

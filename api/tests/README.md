@@ -68,6 +68,7 @@ make test-down
 | `appconfig_test.go` | AppConfig API：LLM、Agent、MCP、A2A 配置 CRUD |
 | `llm_model_test.go` | LLMModel API：CRUD + UnsetDefault + 健康上报 + default 切换 + 并发 |
 | `sandbox_external_test.go` | 真实沙箱协议契约（`external` tag）：Shell 执行、文件读写/查找/删除、读取截断上限、业务错误映射、浏览器截图 |
+| `internal/search/search_test.go` | 真实 Tavily/Bocha 与 fallback 协议（`external` tag，由 `make test-external` 显式运行） |
 
 ## 常见问题
 
@@ -108,11 +109,14 @@ go test -tags=integration -v -run TestFileAPI ./tests/...
 | `make test-component` | 启动独立环境并运行 repository component 测试 |
 | `make test-api` | 启动独立环境并运行 HTTP API 集成测试 |
 | `make test-integration` | 启动独立环境并运行全部内部集成测试 |
-| `make test-external` | 只运行显式 `external` 标签的 SenseNova 测试 |
+| `make test-external` | 运行显式 `external` 标签的 SenseNova 与 Search 测试 |
 | `make test-sandbox` | 运行真实沙箱 external smoke，复用已启动的 sandbox 服务 |
 | `make test-race` | 使用 race detector 运行普通测试 |
 | `make test-up` | 启动独立测试环境并执行 migration |
 | `make test-down` | 删除独立测试容器、网络和 volume |
+
+`make test-race` 不包含 `integration` 和 `external` build tag。真实存储或 HTTP
+集成链路只有在出现明确并发风险时，才应启动测试环境后对目标用例单独运行 `-race`。
 
 ## 真实沙箱外部测试
 

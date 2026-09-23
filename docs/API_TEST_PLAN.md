@@ -32,7 +32,7 @@ SenseNova 测试密钥是产品决策保留的验证资源，不列为本方案�
 | Storage component | 独立 MinIO/S3 | 上传、下载、删除、bucket 隔离、session ownership、清理 | 业务错误补偿的全部组合 |
 | HTTP integration | Gin + 真实内部依赖 + deterministic fake 外部服务 | 路由、DTO、错误码、事务边界、SSE 事件顺序、核心业务生命周期 | 真实 LLM 稳定性、第三方限流 |
 | External smoke | 显式启用的 SenseNova、Search、Sandbox 等 | provider 协议兼容性、部署环境连通性 | 普通回归门禁、数据库正确性 |
-| Server smoke | 独立 build tag、回环临时端口 | 真实进程启动、健康检查、优雅关闭、超时 | 大量业务场景、固定端口 |
+| Server smoke（Future） | 独立 build tag、回环临时端口 | 真实进程启动、健康检查、优雅关闭、超时 | 大量业务场景、固定端口 |
 
 Service 单测可以使用 Repository fake，但 fake 只能验证调用参数、调用顺序和错误传播，不能模拟 SQL 分页、事务或并发约束。真实数据库行为必须由 repository/component integration 验证。
 
@@ -65,11 +65,17 @@ make test-external
 make test-race
 ```
 
+`make test-race` 只对不带 build tag 的普通测试执行 race detector，不代表
+`integration` 或 `external` 测试已经通过 race。需要排查特定集成并发问题时，
+应先启动独立测试环境，再对明确的测试集合单独增加 `-race`，避免把高成本门禁默认化。
+
 配置加载器会校验测试资源：数据库名称必须包含独立的 `test` 段，Redis 禁止使用 DB 0，bucket 名称必须包含独立的 `test` 段。当前实现还没有消费 Redis prefix；在 prefix 真正接入读写链路前，不把它列为可用配置。CI 使用独立 service container 或每个 job 的唯一 namespace，不依赖固定开发容器名。
 
 Phase 1 已落地独立 `docker-compose.test.yml`：不使用固定容器名，使用独立端口、网络和 volume，并在成功或失败后清理。CI 并行任务可通过 `API_TEST_COMPOSE_PROJECT` 和 `API_TEST_*_PORT` 使用唯一 namespace。启动脚本负责 migration 和 MinIO bucket 初始化；Makefile 在测试失败时输出容器日志，并始终调用 `test-down` 删除环境。
 
-SenseNova 测试保留现有验证用途；后续若调整入口，应使用独立 external profile 和显式命令，不能让普通 `go test ./...` 触发外部调用。
+SenseNova 与 Search 真实服务测试使用 `external` build tag，并由 `make test-external`
+显式设置 `RUN_EXTERNAL_TESTS=1` 后运行。Sandbox 使用独立的 `make test-sandbox`。
+普通 `go test ./...` 不编译这些真实服务测试。
 
 ## 4. 高收益测试契约
 

@@ -38,7 +38,8 @@ description: API 测试编写、重构和评审规则
 
 ## 外部环境
 
-- `go test ./...` 必须无外部依赖、无固定端口、无真实网络调用。
+- `go test ./...` 必须无外部依赖、无固定端口、无外部网络调用；允许使用
+  `httptest` 或 `127.0.0.1:0` 的进程内临时监听验证 HTTP/WebSocket 协议。
 - 集成配置通过集中式 `TestEnv/IntegrationConfig` 读取环境变量，不在测试函数中散落读取。
 - 测试配置必须校验数据库、Redis db、bucket 和 key prefix 属于测试资源。
 - 外部 smoke 未配置凭证时可以明确 skip；限流、服务错误和协议错误不能无条件转换为通过。

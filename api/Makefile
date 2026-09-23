@@ -31,7 +31,7 @@ help:
 	@echo "  make test-cover    - 运行测试 (生成覆盖率报告)"
 	@echo "  make test-component - 运行真实存储组件测试"
 	@echo "  make test-api      - 运行 HTTP API 集成测试"
-	@echo "  make test-external - 运行 SenseNova 外部服务测试"
+	@echo "  make test-external - 运行 SenseNova 与 Search 外部服务测试"
 	@echo "  make test-sandbox  - 运行真实沙箱外部服务测试"
 	@echo "  make test-race     - 使用 race detector 运行单元测试"
 	@echo "  make test-integration - 运行全部内部集成测试"
@@ -118,8 +118,8 @@ test-api: test-up
 		$(MAKE) test-down; exit $$status
 
 test-external:
-	@echo "运行 SenseNova 外部服务测试..."
-	go test -tags=external -v ./tests/... -run '^TestSenseNova_'
+	@echo "运行 SenseNova 与 Search 外部服务测试..."
+	RUN_EXTERNAL_TESTS=1 go test -tags=external -v ./internal/search ./tests/... -run '^(Test(Tavily|Bocha|Fallback)|TestSenseNova_)'
 
 # 真实沙箱 external smoke：复用 docker compose 里已运行的 sandbox 服务
 # （宿主机 8090 → 容器 8080），不单独创建测试环境。
