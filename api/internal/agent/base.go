@@ -61,6 +61,18 @@ func NewBaseAgent(name, sessionID string, config *AgentConfig, llm llm.LLM, tool
 	}
 }
 
+// formatRepairTypes 将修复步骤列表格式化为逗号分隔的字符串
+func formatRepairTypes(repairs []jsonx.Repair) string {
+	if len(repairs) == 0 {
+		return ""
+	}
+	types := make([]string, 0, len(repairs))
+	for _, r := range repairs {
+		types = append(types, r.Type)
+	}
+	return strings.Join(types, ",")
+}
+
 // NewBaseAgentWithParser 创建基础 Agent（带自定义 JSON 解析器）
 func NewBaseAgentWithParser(name, sessionID string, config *AgentConfig, llm llm.LLM, tools []toolspkg.Tool, jsonParser jsonx.JSONParser) *BaseAgent {
 	registry := toolspkg.NewToolRegistry()
@@ -517,10 +529,29 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 	// 解析参数（Arguments 是 JSON 字符串）
 	var arguments map[string]interface{}
 	if toolCall.Function.Arguments != "" {
-		if err := a.jsonParser.Parse(toolCall.Function.Arguments, &arguments); err != nil {
-			// 尝试直接解析
-			if err := sonic.Unmarshal([]byte(toolCall.Function.Arguments), &arguments); err != nil {
+		if repairParser, ok := a.jsonParser.(*jsonx.RepairJSONParser); ok {
+			// 带修复埋点的解析路径
+			repairs, err := repairParser.ParseWithRepairs(toolCall.Function.Arguments, &arguments)
+			if err != nil && repairs != nil && repairs.WasRepaired {
+				// 修复后仍失败，但有修复记录则埋点
+				logger.WarnContext(ctx, "json.parse.repaired.failed",
+					logger.String("session_id", a.sessionID),
+					logger.String("function", functionName),
+					logger.String("repair_types", formatRepairTypes(repairs.Repairs)))
 				arguments = make(map[string]interface{})
+			} else if err == nil && repairs != nil && repairs.WasRepaired {
+				// 成功但经过了修复，记录 info 便于观测
+				logger.InfoContext(ctx, "json.parse.repaired",
+					logger.String("session_id", a.sessionID),
+					logger.String("function", functionName),
+					logger.String("repair_types", formatRepairTypes(repairs.Repairs)))
+			}
+		} else {
+			// 非 RepairJSONParser，降级到普通解析
+			if err := a.jsonParser.Parse(toolCall.Function.Arguments, &arguments); err != nil {
+				if err := sonic.Unmarshal([]byte(toolCall.Function.Arguments), &arguments); err != nil {
+					arguments = make(map[string]interface{})
+				}
 			}
 		}
 	}

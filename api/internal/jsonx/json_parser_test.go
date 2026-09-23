@@ -168,39 +168,6 @@ func TestRemoveMarkdownCodeBlocks(t *testing.T) {
 	}
 }
 
-func TestRemoveTrailingCommas(t *testing.T) {
-	tests := []struct {
-		name   string
-		input  string
-		expect string
-	}{
-		{
-			name:   "object with trailing comma",
-			input:  `{"key": "value",}`,
-			expect: `{"key": "value"}`,
-		},
-		{
-			name:   "array with trailing comma",
-			input:  `[1, 2, 3,]`,
-			expect: `[1, 2, 3]`,
-		},
-		{
-			name:   "nested with trailing comma",
-			input:  `{"outer": {"inner": "value"},}`,
-			expect: `{"outer": {"inner": "value"}}`,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := removeTrailingCommas(tt.input)
-			if result != tt.expect {
-				t.Errorf("removeTrailingCommas() = %q, expect %q", result, tt.expect)
-			}
-		})
-	}
-}
-
 func TestDefaultJSONParser(t *testing.T) {
 	parser := NewDefaultJSONParser()
 

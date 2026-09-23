@@ -12,7 +12,6 @@ type JSONParser interface {
 	Parse(text string, v interface{}) error
 }
 
-// DefaultJSONParser 默认 JSON 解析器（标准库）
 type DefaultJSONParser struct{}
 
 // NewDefaultJSONParser 创建默认 JSON 解析器
@@ -22,5 +21,5 @@ func NewDefaultJSONParser() *DefaultJSONParser {
 
 // Parse 解析 JSON 字符串
 func (p *DefaultJSONParser) Parse(text string, v interface{}) error {
-	return sonic.Unmarshal([]byte(text), v)
+	return sonic.UnmarshalString(text, v)
 }
