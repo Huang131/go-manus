@@ -1,8 +1,10 @@
 # 阶段 6：遗留执行基础设施与 Session 执行字段清理
 
+> 当前源码校准（2026-09）：本阶段尚未具备删除条件。`AgentService`、`RedisStreamTask`、全局 registry、Session 执行字段和旧 SSE 路由仍在生产路径使用；只有阶段 4/5 完成并通过引用扫描后，下面的删除清单才可执行。
+
 ## 目标
 
-在阶段 5 的 Run API/UI 已稳定运行后，物理删除不可达的旧任务模型、全局任务注册表、Session 执行字段和伪记忆持久化，收紧包依赖并更新架构文档。完成后代码库只保留一套 Run 业务语义。
+在阶段 5 的 Run API/UI 已稳定运行后，物理删除不可达的旧任务模型、全局任务注册表和 Session 执行字段，收紧包依赖并更新架构文档。当前不存在独立的 Session 记忆持久化接口，消息持久化由阶段 3 的 MessageRepository 承担。完成后代码库只保留一套 Run 业务语义。
 
 ## 非目标
 
@@ -24,7 +26,7 @@
 - `api/internal/agent/task.go`：`Task`、`Stream` 接口。
 - `api/internal/agent/task_redis.go`：`TaskStream`、`RedisStreamTask`、`DefaultTaskRegistry` 及相关注册表逻辑。
 - `api/internal/agent/task_runner.go`：旧 Runner。阶段 4 的 `agent.Engine` 已承接仍需保留的 Flow 驱动逻辑，本阶段直接删除该文件。
-- `api/internal/agent/service.go`：旧 AgentService 已在阶段 4 从生产装配移除，阶段 5 的旧路由也已删除，本阶段删除整个文件及专用测试。
+- `api/internal/agent/service.go`：仅在阶段 4 已从生产装配移除、阶段 5 旧路由已删除且 Run 链路回归通过后，删除整个文件及专用测试。
 - `api/internal/agent/deps.go` 中旧 Repository 聚合和 TaskMessageQueue 字段；保留 EngineFactory 真正消费的能力接口，并移到使用方附近。
 - `api/internal/agent/session_runtime.go` 中 Session 状态/事件更新方法；保留文件能力协作者或并入 RunExecutor。
 
@@ -33,7 +35,7 @@
 - `agent.Service` 中 `taskBySession`、`GetActiveTaskID`、`StopSession`、`CleanupCompleted` 等任务注册表方法。
 - `AgentTaskRunner.Done/GetStatus/GetPlan`，以及只为这些方法存在的 Flow 投影函数。
 - `external.TaskMessageQueue` 别名和仅服务旧 Task 的队列方法；保留 RunEventStream 所需最小 Redis 接口。
-- `SessionRepository.GetMemory/SaveMemory/UpdateStatus/AppendEvent`；保留消息、标题、未读数、软删除和文件查询。
+- `SessionRepository.UpdateStatus/AppendEvent`；当前仓储没有 `GetMemory/SaveMemory` 方法，保留消息、标题、未读数、软删除和文件查询。
 
 删除模型字段：
 
@@ -43,7 +45,7 @@
 
 删除数据库列与仓储方法：
 
-- `sessions.memories` 列以及 `SessionRepository.GetMemory/SaveMemory`。该列不对应 `model.Session` 字段，而是由仓储方法单独读写。
+- 不新增或迁移不存在的 `sessions.memories` 列；当前仓储没有 `GetMemory/SaveMemory` 方法。消息持久化由阶段 3 的 MessageRepository 负责。
 - `sessions.status/events/task_id` 列以及对应的状态、事件和任务查询/更新 SQL。
 
 删除配置与路由：
@@ -59,7 +61,6 @@
 ALTER TABLE sessions
     DROP COLUMN IF EXISTS task_id,
     DROP COLUMN IF EXISTS events,
-    DROP COLUMN IF EXISTS memories,
     DROP COLUMN IF EXISTS status;
 DROP INDEX IF EXISTS idx_sessions_status;
 DROP INDEX IF EXISTS idx_sessions_task_id;
@@ -110,7 +111,7 @@ GOCACHE=/private/tmp/go-manus-gocache go test -race ./internal/agent ./internal/
 GOCACHE=/private/tmp/go-manus-gocache go vet ./...
 if go list -deps ./internal/model | rg -q 'sonic|logger'; then exit 1; fi
 if rg -q 'internal/(service|repository)' internal/agent --glob '*.go'; then exit 1; fi
-rg -n 'RedisStreamTask|TaskRegistry|taskBySession|SessionStatus|ExecutionStatus|ErrWaitForUser|CompactMemory|UpdateStatus|AppendEvent|GetMemory|SaveMemory|memories|\.Events|\.TaskID' internal ../ui/src
+rg -n 'RedisStreamTask|TaskRegistry|taskBySession|SessionStatus|ExecutionStatus|ErrWaitForUser|UpdateStatus|AppendEvent|\.Events|\.TaskID' internal ../ui/src
 cd ../ui
 npm run lint
 npm run build
@@ -130,7 +131,7 @@ git diff --check
 
 ## 完成定义
 
-- 生产代码无 Task/Stream/RedisStreamTask、全局任务 registry、Session 执行字段和伪记忆持久化。
+- 生产代码无 Task/Stream/RedisStreamTask、全局任务 registry、Session 执行字段；不存在的 `memories` 伪链路不应重新引入。
 - model 仅依赖标准库，RunService 是状态唯一写入口。
 - 开发数据库已应用 006，Run/Message 数据模型和 API/UI 通过完整回归。
 - A/B/C 提交、验证结果、migration 版本和最终依赖检查已写入 `STATUS.md`。

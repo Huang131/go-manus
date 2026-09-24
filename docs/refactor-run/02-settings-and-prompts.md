@@ -1,5 +1,7 @@
 # 阶段 1：Settings 与 Prompt 单一来源
 
+> 当前源码校准（2026-09）：启动加载 Agent 配置、Handler 传递 `max_search_results`、Tavily/Bocha 的 limit 透传已经存在；本阶段不应重复实现这些链路。尚未完成的是唯一 Settings 类型、严格校验、任务级快照、`max_plan_steps` 和 PromptCatalog。详见 [00-current-review-2026-09.md](./00-current-review-2026-09.md)。
+
 ## 目标
 
 完成 Agent 运行时配置和 Prompt 的治理，但保持现有 Session/RedisStreamTask 生产语义与 HTTP 契约不变。本阶段结束后，所有新建任务读取同一个不可变的 `AgentSettings` 快照，搜索结果数量真正由配置传入上游，Prompt 有稳定的文件来源和 hash。
@@ -32,7 +34,7 @@
 - `api/internal/model/app_config.go`：删除 `model.AgentConfig`；AppConfigService 的 Agent settings 方法迁到 `agent.SettingsManager`，不在 model 保留迁移 DTO。
 - `api/internal/agent/config.go`：删除 `AgentConfig` 和 Prompt 字段，保留 MCP/A2A 配置类型，避免出现第二份默认值。
 - `api/internal/agent/base.go`、`planner_agent.go`、`react_agent.go`、`planner_react_flow.go`、`task_runner.go`、`service.go`：参数统一改为 `*AgentSettings`，Prompt 从 Catalog 获取。
-- `api/internal/agent/tool_search.go`、`api/internal/external/search.go`：Search 接口增加显式 `limit` 参数；Tavily/Bocha/Google 请求使用该值。
+- `api/internal/agent/tools/tool_search.go`、`api/internal/search/search.go`：在现有 limit 透传基础上补齐统一校验和 provider 上限；Tavily/Bocha 已消费该值，Google 若启用必须校验 1–10。
 - `api/internal/service/app_config_service.go`、`api/internal/handler/app_config_handler.go`：Agent 配置读写改为 SettingsManager 的唯一入口，更新后原子替换。
 - `api/internal/bootstrap/app.go`：构造 SettingsManager，启动时加载默认值/数据库值，并把同一实例注入 AgentService 与配置 Handler。
 - `api/internal/agent/*_test.go`：将旧 `DefaultAgentConfig` 引用替换为 `DefaultAgentSettings`。

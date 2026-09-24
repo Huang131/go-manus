@@ -1,5 +1,7 @@
 # 阶段 5：Run API、UI 与 SSE 契约切换
 
+> 当前源码校准（2026-09）：Run API 尚不存在。当前 SSE 仍是 `GET/POST /api/sessions/:id/chat` 的 task stream 契约，支持 `Last-Event-ID` 和兼容 body `event_id`；本文的 `/runs/{id}/events`、snapshot_required 和 UI 切换均为阶段 5 目标。
+
 ## 目标
 
 发布面向 Run 的最终 HTTP 契约，把 UI 的状态、输入、停止和断线恢复全部切到 Run，并删除阶段 4 的旧 chat/stop 适配路由。本阶段结束后 Session API 只返回会话信息，执行状态只通过 Run API 表达。

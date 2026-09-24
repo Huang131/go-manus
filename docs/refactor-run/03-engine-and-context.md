@@ -1,8 +1,10 @@
 # 阶段 2：Engine 结果契约与 ContextBuilder
 
+> 当前源码校准（2026-09）：`ContextBuilder` 已在 `api/internal/agent/context_builder.go` 接入生产 Agent，但预算仍固定为 32,000，估算器仍是 rune/4 近似值；`StepOutcome` 尚不存在，`ErrWaitForUser` 仍被 Flow/React/Task 链使用。本文是后续增量设计，不代表这些目标契约已经存在。
+
 ## 目标
 
-把 Agent 执行内核从“用特殊 error 表达等待输入、用固定 10 条消息压缩上下文”改为显式结果契约和预算化 ContextBuilder。本阶段只替换 Engine 内部协作方式，仍由现有 AgentService、AgentTaskRunner 和 RedisStreamTask 驱动，外部 Session API 行为不变。
+把 Agent 执行内核从“用特殊 error 表达等待输入”改为显式结果契约，并继续完善已经接入的预算化 ContextBuilder。本阶段只替换 Engine 内部协作方式，仍由现有 AgentService、AgentTaskRunner 和 RedisStreamTask 驱动，外部 Session API 行为不变。
 
 ## 非目标
 
@@ -30,7 +32,7 @@
 
 - `api/internal/agent/react_agent.go`：`ExecuteStep` 返回 `StepOutcome, error`，不再修改 Step 来传递等待语义。
 - `api/internal/agent/planner_react_flow.go`：按 outcome 更新 Step/Flow；等待输入仍投影成现有 wait 事件和 Session waiting 状态。
-- `api/internal/agent/base.go`：LLM 请求统一经 ContextBuilder 构建；删除 `LoadMemory`、`CompactMemory` 和固定 `keepCount=10`。
+- `api/internal/agent/base.go`：保持所有 LLM 请求经过现有 ContextBuilder；补齐模型预算策略，并在迁移完成后删除仍存在的 `ErrWaitForUser` 识别。当前代码已经没有 `LoadMemory`、`CompactMemory`、`maxSize` 或固定 `keepCount=10`。
 - `api/internal/agent/memory.go`：收敛为并发安全的运行期消息缓冲，不包含容量、Compact 或持久化承诺；如无独立价值可改名为 `conversation.go`。
 - `api/internal/agent/planner_agent.go`、`react_agent.go`：规划、执行、更新计划、总结均使用同一 ContextBuilder 入口。
 - `api/internal/agent/task_runner.go`：保持外部循环，适配 Flow 新结果；不得继续识别 `ErrWaitForUser`。
@@ -41,7 +43,7 @@
 - `api/internal/agent/base.go` 中 `ErrWaitForUser`、`LoadMemory`、`CompactMemory`。
 - `Memory.Compact`、`SimpleMemory.maxSize` 和只保留 10 条消息的实现。
 
-阶段 6 才删除 SessionRepository 的 GetMemory/SaveMemory，因为本阶段不扩大仓储接口改动范围；从本阶段起生产执行代码不得调用它们。
+当前 SessionRepository 没有 `GetMemory/SaveMemory` 接口，数据库 migration 也没有 `sessions.memories` 列；后续消息持久化设计应直接以 Message/Run 模型为准，不要为不存在的记忆链路补兼容代码。
 
 ## 关键契约
 
@@ -127,7 +129,7 @@ git diff --check
 
 ## 完成定义
 
-- 生产代码不存在 `ErrWaitForUser`、固定 `keepCount=10` 和无效 maxSize。
+- 生产代码不存在固定 `keepCount=10` 和无效 maxSize；Outcome 检查点完成后再删除 `ErrWaitForUser`。
 - 所有 LLM 请求通过 ContextBuilder；工具消息不会被拆对。
 - 业务失败、等待输入和系统错误具有不同类型。
 - Session/Task 外部契约未改变，全量 test、race、vet 通过。

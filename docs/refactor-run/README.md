@@ -2,7 +2,9 @@
 
 本文档集把一次大范围重构拆成六个可以独立实施、验证、提交和回滚的工作包。设计基于当前单实例部署，不引入分布式 Worker、Lease、Outbox 或永久事件溯源。
 
-本目录描述未来目标和实施顺序，不代表当前代码已经采用 Run 模型。真实进度只看 [STATUS.md](./STATUS.md)；当前架构只看 [`../ARCHITECTURE.md`](../ARCHITECTURE.md)。
+本目录描述未来目标和实施顺序，不代表当前代码已经采用 Run 模型。当前源码事实、证据和已推翻的旧结论以 [00-current-review-2026-09.md](./00-current-review-2026-09.md) 为准；真实进度只看 [STATUS.md](./STATUS.md)。`../ARCHITECTURE.md` 是较早的架构说明，若与当前审查冲突，以 00 文档和源码为准。
+
+当前生产语义仍是 `Session + RedisStreamTask`。截至当前分支，生产代码中没有 `Run`、`RunStatus`、`RunService`、`RunExecutor`、Run migration 或 Run API；Run 相关阶段必须先完成领域 spec 和 migration，不能把目标接口当作已有代码。
 
 ## 目标
 
@@ -20,14 +22,14 @@
 
 | 阶段 | 文档 | 交付结果 | 依赖 |
 |---|---|---|---|
-| 1 | [02-settings-and-prompts.md](./02-settings-and-prompts.md) | Agent 配置单一来源，搜索数量真实生效，Prompt 可版本化 | 无 |
-| 2 | [03-engine-and-context.md](./03-engine-and-context.md) | 显式 StepOutcome，ContextBuilder 替换伪记忆容量 | 阶段 1 |
+| 1 | [02-settings-and-prompts.md](./02-settings-and-prompts.md) | 在已接通启动加载和搜索 limit 的基础上，统一 Settings 来源并让 Prompt 可版本化 | 无 |
+| 2 | [03-engine-and-context.md](./03-engine-and-context.md) | 显式 StepOutcome，完善已接入的 ContextBuilder 预算策略 | 阶段 1 |
 | 3 | [04-run-domain-and-storage.md](./04-run-domain-and-storage.md) | Run 状态机、表和 Repository 完成，但暂不接生产请求 | 阶段 1 |
 | 4 | [05-run-execution-cutover.md](./05-run-execution-cutover.md) | 后端生产写路径全部切到 RunService/RunExecutor | 阶段 2、3 |
 | 5 | [06-api-ui-sse-cutover.md](./06-api-ui-sse-cutover.md) | UI 和公开 API 切到 Run 契约，旧路由删除 | 阶段 4 |
-| 6 | [07-legacy-removal.md](./07-legacy-removal.md) | 删除 RedisStreamTask、Session 执行字段和死代码 | 阶段 5 |
+| 6 | [07-legacy-removal.md](./07-legacy-removal.md) | 在确认生产不可达后删除 RedisStreamTask、Session 执行字段和死代码 | 阶段 5 |
 
-阶段 2 和阶段 3 在阶段 1 完成后可以分别实施，但不要并行修改同一工作树。阶段 4 是唯一的业务语义切换点。
+阶段 2 和阶段 3 在阶段 1 完成后可以分别实施，但不要并行修改同一工作树。阶段 3 开始前必须先阅读 00 审查；阶段 4 是唯一的业务语义切换点。
 
 ## 每个工作包的硬门禁
 
@@ -69,7 +71,7 @@ sed -n '1,240p' docs/refactor-run/STATUS.md
 然后：
 
 1. 找到 `STATUS.md` 中第一个 `pending` 或 `in_progress` 阶段；若为 `in_progress`，从第一个未完成检查点继续。
-2. 阅读本 `README`、[01-architecture.md](./01-architecture.md) 和该阶段文档。
+2. 阅读本 `README`、[00-current-review-2026-09.md](./00-current-review-2026-09.md)、[01-architecture.md](./01-architecture.md) 和该阶段文档。
 3. 核对上一阶段记录的提交 SHA 是否仍在当前分支。
 4. 运行上一阶段的“恢复基线命令”。
 5. 只实施当前工作包，不提前修改后续阶段文件。
@@ -79,6 +81,7 @@ sed -n '1,240p' docs/refactor-run/STATUS.md
 ## 文档与代码的更新规则
 
 - 当前实现完成一个阶段后，更新 `STATUS.md`，不要改写已完成阶段的目标。
+- 如果当前源码与阶段文档前提不一致，先修正文档或增加决策记录，再开始编码；不能用静态命中把基础设施接口判为死代码。
 - 实际实现与方案有合理偏差时，在 `STATUS.md` 的“决策偏差”记录原因和最终接口。
 - 如果发现设计前提错误，停止当前阶段，新增决策记录；不要静默引入另一套状态或配置模型。
 - `docs/重构.md` 是历史原始提案，仅用于追溯；本目录是 Run 重构的实施依据。

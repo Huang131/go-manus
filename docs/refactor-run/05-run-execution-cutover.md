@@ -1,10 +1,12 @@
 # 阶段 4：后端生产执行语义切换
 
+> 当前源码校准（2026-09）：本阶段尚未开始。当前 bootstrap 仍构造 `AgentService`，`SessionHandler` 仍调用旧 Chat/Stop，生产链仍创建 `RedisStreamTask`。以下“切换完成后”均为验收目标，不能作为当前实现描述。
+
 ## 目标
 
 这是唯一的生产业务语义切换点。把创建、继续、等待、完成、失败、取消和重启中断全部切到 RunService + 进程内 RunExecutor。切换完成后 PostgreSQL 的 Run 是执行状态唯一事实来源，Session 只保存对话容器信息，Redis 只保存 `run:{runID}:events` 短期流。
 
-本阶段保留旧 `/sessions/:id/chat` 和 `/stop` 路由以便现有 UI 继续工作，但它们必须是 RunService 的薄适配器，不得创建 RedisStreamTask 或更新 `sessions.status/events/memories/task_id`。
+本阶段保留旧 `/sessions/:id/chat` 和 `/stop` 路由以便现有 UI 继续工作，但它们必须是 RunService 的薄适配器，不得创建 RedisStreamTask 或更新 `sessions.status/events/task_id`。当前数据库没有 `sessions.memories` 列。
 
 ## 非目标
 
@@ -126,7 +128,7 @@ waiting_input 时保存包含问题的 Plan 快照，再 `running -> waiting_inp
 
 ### B. 原子切换生产装配
 
-在同一个提交中修改 bootstrap、SessionHandler、SessionService：停止构造旧 AgentService，将旧路由全部委托 RunService，并删除所有生产 `UpdateStatus/AppendEvent/SaveMemory/TaskID` 调用。提交建议：`refactor(api): switch execution state to runs`。这个提交是唯一切换边界，不允许拆成一个双写中间提交。
+在同一个提交中修改 bootstrap、SessionHandler、SessionService：停止构造旧 AgentService，将旧路由全部委托 RunService，并删除所有生产 `UpdateStatus/AppendEvent/TaskID` 调用。提交建议：`refactor(api): switch execution state to runs`。这个提交是唯一切换边界，不允许拆成一个双写中间提交。
 
 ### C. 并发、重启与回归加固
 
@@ -139,7 +141,7 @@ waiting_input 时保存包含问题的 Plan 快照，再 `running -> waiting_inp
 - waiting：问题和 Plan 先持久化，输入只在 waiting 接受，resume 后能完成。
 - restart/shutdown：遗留 pending/running/waiting 全变 interrupted；终态保持不变。
 - stream：key/TTL/游标正确，Redis 失败不改变 Run 终态。
-- compatibility：旧 chat/stop 只调用 RunService；Session 表 mock 断言 `UpdateStatus/AppendEvent/SaveMemory` 调用次数为 0。
+- compatibility：旧 chat/stop 只调用 RunService；Session 表 mock 断言 `UpdateStatus/AppendEvent` 调用次数为 0。当前仓储没有 `SaveMemory` 方法。
 - 删除 Session：活跃 Run 成功取消后才能软删。
 
 ## 阶段验证命令
@@ -150,7 +152,7 @@ GOCACHE=/private/tmp/go-manus-gocache go test ./internal/service ./internal/agen
 GOCACHE=/private/tmp/go-manus-gocache go test ./...
 GOCACHE=/private/tmp/go-manus-gocache go test -race ./internal/agent ./internal/service ./internal/repository -count=1
 GOCACHE=/private/tmp/go-manus-gocache go vet ./...
-rg -n 'UpdateStatus|AppendEvent|SaveMemory|getOrCreateTask|defaultTaskRegistry|taskBySession|NewRedisStreamTask|NewAgentService' internal --glob '*.go'
+rg -n 'UpdateStatus|AppendEvent|getOrCreateTask|defaultTaskRegistry|taskBySession|NewRedisStreamTask|NewAgentService' internal --glob '*.go'
 cd ..
 git diff --check
 ```

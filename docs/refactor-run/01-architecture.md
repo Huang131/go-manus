@@ -7,9 +7,9 @@
 - `model.Session` 同时保存对话字段、`Events` 和执行 `Status`。
 - `AgentService` 通过 `taskBySession` 把一个 Session 绑定到一个 `RedisStreamTask`。
 - 等待用户输入通过 `ErrWaitForUser` 表达。
-- 用户停止任务后，会话可能被记录为 completed。
-- Agent 动态配置、默认配置和搜索客户端参数不是同一份生效数据。
-- 进程内 Memory 声明 token 上限，但实际只固定保留若干消息。
+- 用户停止任务已经有取消优先的收敛逻辑，但终态仍通过 Flow 投影写回 Session，状态事实没有独立边界。
+- Agent 动态配置已经能从数据库加载并把搜索 limit 传给 provider，但仍有 `model.AgentConfig`/`agent.AgentConfig` 两份类型，没有任务级快照。
+- 进程内 `SimpleMemory` 只是运行期消息缓存；ContextBuilder 已按近似 token 预算裁剪，但尚无模型画像和输出预留。
 
 本方案重建这些业务边界，同时保持当前模块化单体目录。
 
@@ -267,12 +267,11 @@ bootstrap -> all concrete constructors
 - `taskBySession`。
 - `AgentTaskRunner.Done/GetStatus/GetPlan`。
 - `Session.Status`、`Session.Events`。
-- `sessions.status/events/memories/task_id`。
-- `SessionRepository.GetMemory/SaveMemory`。
-- `SimpleMemory` 中无效的大小字段和固定 10 条压缩。
+- `sessions.status/events/task_id`（当前 schema 没有 `memories` 列）。
+- `SimpleMemory` 仅在 Run 链路切换后评估是否保留为缓存；当前没有可删除的大小字段或固定 10 条压缩实现。
 - `BaseEvent.ToJSON` 以及 model 对 logger/sonic 的依赖。
 - `/sessions/:id/chat`、`/sessions/:id/stop`。
-- `/app-config/llm` 旧配置接口。
+- 只有在确认没有其它动态模型管理消费者后，才评估遗留 LLM 配置入口；当前 `cfg.LLM` 仍用于 fallback、seed、timeout 和开关。
 
 ## 13. 架构验收
 

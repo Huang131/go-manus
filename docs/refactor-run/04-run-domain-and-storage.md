@@ -1,5 +1,7 @@
 # 阶段 3：Run 领域模型与 PostgreSQL 存储
 
+> 开工前置事实：当前生产源码中没有 `Run`、`RunStatus`、`PlanSnapshot`、`RunRepository`、`MessageRepository` 或 Run migration。必须先按本文定义并验证领域契约，再实现测试和存储；不能让测试从不存在的生产类型反推契约。阶段 3 全部能力在接入生产前都属于新代码，生产唯一语义仍是 Session/RedisStreamTask。
+
 ## 目标
 
 建立 Run、Plan、Step 的领域状态、数据库表和仓储原语，为下一阶段一次性切换生产执行语义提供稳定基础。本阶段的 Run 能力只由单元/集成测试调用，生产 Handler、AgentService 和任务执行链不得创建或更新 Run。
@@ -7,7 +9,7 @@
 ## 非目标
 
 - 不接生产请求，不新增 Run Handler/公开路由。
-- 不修改 Session.Status、Events、task_id 或 memories。
+- 不修改 Session.Status、Events 或 task_id；当前 migration 中不存在 `memories` 列，不为它新增兼容结构。
 - 不创建 Worker、lease、outbox、run_events 或永久 token 事件表。
 - 不实现自动恢复 interrupted Run；首期只准确标记中断。
 

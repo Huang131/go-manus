@@ -6,7 +6,7 @@
 
 | 阶段 | 状态 | 提交 SHA | 验证结果 |
 |---|---|---|---|
-| 1. Settings 与 Prompt | in_progress | `1d9d5cd`, `236972f` | 配置加载和搜索 limit 已接通；PromptCatalog、SettingsManager 未完成 |
+| 1. Settings 与 Prompt | in_progress | `1d9d5cd`, `236972f` | 启动加载和搜索 limit 已接通；PromptCatalog、SettingsManager、任务快照和 max_plan_steps 未完成 |
 | 2. Engine 与 Context | in_progress | `fa64e78` | 基础 ContextBuilder 已接入；模型预算来源、StepOutcome 未完成 |
 | 3. Run 领域与存储 | pending | - | - |
 | 4. 后端执行切换 | pending | - | - |
@@ -17,9 +17,9 @@
 
 ## 当前入口
 
-- 下一入口：阶段 1 检查点 1A（PromptCatalog）
+- 下一入口：先阅读 [00-current-review-2026-09.md](./00-current-review-2026-09.md)，再进入阶段 1 检查点 1A（PromptCatalog）
 - 方案文档：[02-settings-and-prompts.md](./02-settings-and-prompts.md)
-- 状态核对基线：`77496cc`
+- 状态核对基线：当前分支 `911c89c`；阶段文档中的历史 SHA 只用于追溯，不作为当前源码前提
 - 生产业务语义：现有 Session/RedisStreamTask；Run 模型、表、Repository、API 和 UI 均未开始切换
 
 ## 阶段内检查点
@@ -46,8 +46,9 @@
 
 ## 最近一次验证
 
-- `GOCACHE=/private/tmp/go-manus-gocache make test-api`：通过，包含 Chat 成功、SSE 顺序、MCP 配置和取消终态契约。
-- `TestChatEndpoint_LastEventIDResumesWithoutDuplicatesOrGaps`：使用真实 HTTP socket 和 Redis 验证 exclusive cursor，重连后的事件无重复、无丢失；定向测试 `-count=3` 通过。
+- `GOCACHE=/private/tmp/go-manus-gocache make test-api`：历史检查点记录；重新实施前必须在当前分支重跑。
+- `TestChatEndpoint_LastEventIDResumesWithoutDuplicatesOrGaps`：历史检查点记录，验证旧 Session/RedisStreamTask SSE 契约，不代表 Run SSE 已实现。
+- 当前工作区验证：`GOCACHE=/private/tmp/go-manus-review-cache go test ./...` 在受限环境下因回环临时端口权限导致 `internal/handler`、`internal/sandbox` 两个测试失败；其余包通过。最终门禁需在允许本地监听的开发终端完成。
 - Run/Session 方案检查：生产源码中无 `RunStatus`、`Run` 表、Run Repository 或 Run API。
 - 当前配置治理和基础 ContextBuilder 的提交均已在当前分支，阶段 1/2 的未完成项仍可按各自检查点独立实施。
 
@@ -55,6 +56,7 @@
 
 - 本方案形成前，配置加载/搜索 limit（`1d9d5cd`、`236972f`）和基础 ContextBuilder（`fa64e78`）已独立落地。当前 Builder 仍使用固定默认预算，未完成阶段 2A 设计中的模型画像预算与输出预留；状态表按实际能力回填，不把这些提交追认成完整阶段交付。
 - 当前取消生命周期已由 `2535c3c`、`e45c48c` 加固，并由 `a0f1965` 覆盖 HTTP 契约；这仍属于旧 Session/RedisStreamTask 语义，不等同于检查点 4C 的 Run 生命周期加固。
+- 最新源码核对：`agent.Task`、`Stream`、`RedisStreamTask`、`defaultTaskRegistry`、`cfg.LLM`、MCP/A2A runtime 和 `SimpleMemory` 都仍有生产消费者，暂不删除；`PlannerReActFlow.Invoke` 已拆为状态处理函数。
 
 ## 阻塞记录
 
