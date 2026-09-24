@@ -21,7 +21,7 @@ func WithModelID(ctx context.Context, modelID string) context.Context {
 	return context.WithValue(ctx, llmModelIDKey{}, modelID)
 }
 
-// ModelIDFromContext 读取 ctx 中的 modelID，未设置时返回空字符串。
+// 读取 ctx 中的 modelID，未设置时返回空字符串。
 func ModelIDFromContext(ctx context.Context) string {
 	if v, ok := ctx.Value(llmModelIDKey{}).(string); ok {
 		return v
@@ -39,7 +39,7 @@ func streamContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, llmStreamOverallTimeout)
 }
 
-// LLMRequest LLM 请求参数（阶段 1d：Messages / Tools / ResponseFormat 改用 llmcore 强类型）
+// LLMRequest LLM 请求参数。
 //
 // 业务侧只看到 llmcore 类型，看不到任何厂商协议；Adapter 负责把 llmcore 转 wire format。
 type LLMRequest struct {
@@ -74,6 +74,11 @@ type StreamingLLM interface {
 // LLMConfigProvider 每次调用前获取最新 LLM 配置。
 // 返回 (nil, nil) 表示当前无 DB 配置，DynamicLLM 应回退到 fallback。
 // 返回 error 表示读取失败，DynamicLLM 同样回退到 fallback。
+//
+// 设计决策：DynamicLLM 是单模型配置，不支持 ctx.ModelID 粘性路由。
+// - ctx.ModelID 粘性路由由 RoutedLLM.plan() 处理（多模型 + 健康排序场景）
+// - DynamicLLM 从 provider 获取的是完整配置，运行时切换由 provider 决定
+// - 如果需要粘性路由，应使用 RoutedLLM 而非 DynamicLLM
 type LLMConfigProvider func(ctx context.Context) (*LLMRuntimeConfig, error)
 
 // DynamicLLM 动态配置 LLM 客户端。
@@ -84,9 +89,9 @@ type LLMConfigProvider func(ctx context.Context) (*LLMRuntimeConfig, error)
 // ModelName/Temperature/MaxTokens 三个 getter 仅返回 fallback 值，
 // 生产代码不依赖它们做运行时决策（仅在测试中使用）。
 type DynamicLLM struct {
-	provider LLMConfigProvider
-	factory  LLMClientFactory
-	fallback *LLMRuntimeConfig
+	provider LLMConfigProvider // 配置提供者
+	factory  LLMClientFactory  // 客户端工厂
+	fallback *LLMRuntimeConfig // 兜底配置
 }
 
 var _ StreamingLLM = (*DynamicLLM)(nil)
@@ -94,21 +99,7 @@ var _ StreamingLLM = (*DynamicLLM)(nil)
 // LLMClientFactory 根据运行时配置创建具体 LLM 客户端。
 type LLMClientFactory func(cfg *LLMRuntimeConfig) LLM
 
-// NewDynamicLLM 创建动态配置 LLM 客户端。
-func NewDynamicLLM(provider LLMConfigProvider, fallback *LLMRuntimeConfig) *DynamicLLM {
-	if fallback == nil {
-		fallback = &LLMRuntimeConfig{
-			Profile: llmcore.ModelProfile{Protocol: llmcore.ProtocolOpenAICompat},
-		}
-	}
-	return &DynamicLLM{
-		provider: provider,
-		factory:  defaultLLMClientFactory,
-		fallback: fallback,
-	}
-}
-
-// NewDynamicLLMWithFactory 创建可注入工厂的动态配置客户端，便于测试和扩展。
+// 创建可注入工厂的动态配置客户端，便于测试和扩展。
 func NewDynamicLLMWithFactory(provider LLMConfigProvider, fallback *LLMRuntimeConfig, factory LLMClientFactory) *DynamicLLM {
 	if fallback == nil {
 		fallback = &LLMRuntimeConfig{
@@ -125,38 +116,25 @@ func NewDynamicLLMWithFactory(provider LLMConfigProvider, fallback *LLMRuntimeCo
 	}
 }
 
-// Invoke 调用 LLM，调用前先加载最新配置。
-//
-// 阶段 1d 改造点：去掉 NormalizeLLMResponse 调用。
-// Reasoning→Content 兜底是 agent 消费方（react_agent / planner_agent）的责任，
-// 由调用方基于 LLMResponse.ReasoningContent 字段自行决定是否兜底。
-// 协议层只保证"上游给什么字段就如实返回什么字段"。
-func (d *DynamicLLM) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMResponse, error) {
+// resolveConfig 每次调用前加载最新配置：provider 成功且配置完整时用它，否则回退 fallback。
+func (d *DynamicLLM) resolveConfig(ctx context.Context) *LLMRuntimeConfig {
 	cfg := d.fallback
 	if d.provider != nil {
 		if c, err := d.provider(ctx); err == nil && c != nil && c.BaseURL != "" {
 			cfg = c
 		}
 	}
-	if d.factory != nil {
-		return d.factory(cfg).Invoke(ctx, req)
-	}
-	return NewOpenAIClient(runtimeConfigToOpenAIClientConfig(cfg)).Invoke(ctx, req)
+	return cfg
+}
+
+// Invoke 调用 LLM，调用前先加载最新配置。
+func (d *DynamicLLM) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMResponse, error) {
+	return d.factory(d.resolveConfig(ctx)).Invoke(ctx, req)
 }
 
 // Stream 使用当前动态配置执行流式请求。
 func (d *DynamicLLM) Stream(ctx context.Context, req *LLMRequest) (<-chan llmcore.LLMDelta, error) {
-	cfg := d.fallback
-	if d.provider != nil {
-		if c, err := d.provider(ctx); err == nil && c != nil && c.BaseURL != "" {
-			cfg = c
-		}
-	}
-	factory := d.factory
-	if factory == nil {
-		factory = defaultLLMClientFactory
-	}
-	client := factory(cfg)
+	client := d.factory(d.resolveConfig(ctx))
 	if client == nil {
 		return nil, fmt.Errorf("llm client factory returned nil")
 	}
