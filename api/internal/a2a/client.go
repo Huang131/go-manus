@@ -1,7 +1,6 @@
 package a2a
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -14,6 +13,7 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/google/uuid"
 
+	"github.com/Huang131/go-manus/api/internal/llm/sse"
 	"github.com/Huang131/go-manus/api/pkg/httpconst"
 )
 
@@ -231,7 +231,7 @@ func (c *A2AClient) StreamMessage(ctx context.Context, endpoint string, message 
 		return fmt.Errorf("调用远程 Agent 出错: HTTP %d: %s", resp.StatusCode, string(b))
 	}
 
-	return c.consumeSSE(resp.Body, handler)
+	return c.consumeSSE(ctx, resp.Body, handler)
 }
 
 // GetTask 查询任务状态（tasks/get）。
@@ -310,37 +310,18 @@ func (c *A2AClient) doRPC(ctx context.Context, endpoint, method string, params i
 	return &rpcResp, nil
 }
 
-// consumeSSE 逐行解析 text/event-stream，回调 handler。
-func (c *A2AClient) consumeSSE(r io.Reader, handler func(A2AStreamEvent) error) error {
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
-	var dataLines []string
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
-			// 空行标志一个 SSE 事件结束。
-			if len(dataLines) == 0 {
-				continue
-			}
-			if err := c.handleSSEData(strings.Join(dataLines, "\n"), handler); err != nil {
-				return err
-			}
-			dataLines = dataLines[:0]
-			continue
+// consumeSSE 使用统一的 SSE 解析层解析 text/event-stream，回调 handler。
+// handler 返回错误会提前终止流。
+func (c *A2AClient) consumeSSE(ctx context.Context, r io.Reader, handler func(A2AStreamEvent) error) error {
+	return sse.ParseWithContext(ctx, r, sse.DefaultConfig, func(ctx context.Context, frame sse.Frame) bool {
+		// 跳过空 data 帧；[DONE] 标记由 handleSSEData 内部统一处理
+		if len(frame.Data) == 0 {
+			return true
 		}
-		if strings.HasPrefix(line, "data:") {
-			dataLines = append(dataLines, strings.TrimPrefix(line, "data:"))
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("读取 SSE 流失败: %w", err)
-	}
-	// 处理末尾可能缺少空行的事件。
-	if len(dataLines) > 0 {
-		return c.handleSSEData(strings.Join(dataLines, "\n"), handler)
-	}
-	return nil
+		// 内部 handler 错误转换为 bool 返回值
+		err := c.handleSSEData(string(frame.Data), handler)
+		return err == nil
+	})
 }
 
 func (c *A2AClient) handleSSEData(data string, handler func(A2AStreamEvent) error) error {
