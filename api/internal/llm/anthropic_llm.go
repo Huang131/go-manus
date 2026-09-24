@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/bytedance/sonic"
 
+	"github.com/Huang131/go-manus/api/internal/llm/sse"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/pkg/httpconst"
@@ -22,14 +22,14 @@ import (
 // anthropicProvider 是 ProviderError 的 provider 标识。
 const anthropicProvider = "anthropic"
 
-// AnthropicClient Anthropic API 客户端
+// Anthropic API 客户端
 type AnthropicClient struct {
 	baseURL         string
 	apiKey          string
 	modelName       string
 	temperature     float64
 	maxTokens       int
-	requestPolicy   llmcore.RequestPolicy
+	requestPolicy   llmcore.RequestPolicy // 模型级请求策略
 	costPolicy      model.CostPolicy
 	httpClient      *http.Client
 	version         string        // API 版本
@@ -38,7 +38,7 @@ type AnthropicClient struct {
 
 var _ StreamingLLM = (*AnthropicClient)(nil)
 
-// AnthropicClientConfig Anthropic 客户端配置
+// Anthropic 客户端配置
 type AnthropicClientConfig struct {
 	BaseURL         string                `mapstructure:"base_url"`
 	APIKey          string                `mapstructure:"api_key"`
@@ -51,7 +51,7 @@ type AnthropicClientConfig struct {
 	ToolCallTimeout int                   `mapstructure:"tool_call_timeout"` // tool calling 请求超时秒数，默认 15
 }
 
-// AnthropicRequest Anthropic API 请求（wire format）
+// Anthropic API 请求
 type AnthropicRequest struct {
 	Model       string                   `json:"model"`
 	Messages    []AnthropicMessage       `json:"messages"`
@@ -63,15 +63,15 @@ type AnthropicRequest struct {
 	Stream      bool                     `json:"stream,omitempty"`
 }
 
-// AnthropicMessage Anthropic 消息格式（wire）。
+// Anthropic 消息格式。
 // Content 既可以是纯字符串，也可以是内容块数组（assistant 的 tool_use、
-// user 的 tool_result / 多模态 part 都要求块数组形状）。
+// user 的 tool_result / 多模态 part 都要求块数组形状）
 type AnthropicMessage struct {
 	Role    string      `json:"role"`
 	Content interface{} `json:"content"`
 }
 
-// AnthropicContent Anthropic 内容块（请求与响应共用）
+// Anthropic 内容块（请求与响应共用）
 type AnthropicContent struct {
 	Type string `json:"type"`
 	// text / thinking 块
@@ -90,28 +90,28 @@ type AnthropicContent struct {
 
 // AnthropicImageSource 图片来源（URL 引用）
 type AnthropicImageSource struct {
-	Type string `json:"type"` // "url"
+	Type string `json:"type"`
 	URL  string `json:"url"`
 }
 
-// AnthropicResponse Anthropic API 响应（wire）
+// Anthropic API 响应
 type AnthropicResponse struct {
 	ID           string             `json:"id"`
-	Type         string             `json:"type"`
-	Role         string             `json:"role"`
+	Type         string             `json:"type"` // 固定 "message"
+	Role         string             `json:"role"` // 固定 "assistant"
 	Content      []AnthropicContent `json:"content"`
-	StopReason   string             `json:"stop_reason"`
-	StopSequence string             `json:"stop_sequence"`
+	StopReason   string             `json:"stop_reason"`   // 终止原因
+	StopSequence string             `json:"stop_sequence"` // 触发的 stop 序列
 	Usage        AnthropicUsage     `json:"usage"`
 }
 
-// AnthropicUsage Anthropic 使用量
+// Anthropic 使用量
 type AnthropicUsage struct {
 	InputTokens  int `json:"input_tokens"`
 	OutputTokens int `json:"output_tokens"`
 }
 
-// NewAnthropicClient 创建 Anthropic 客户端
+// 创建 Anthropic 客户端
 func NewAnthropicClient(cfg *AnthropicClientConfig) *AnthropicClient {
 	version := cfg.Version
 	if version == "" {
@@ -125,7 +125,7 @@ func NewAnthropicClient(cfg *AnthropicClientConfig) *AnthropicClient {
 
 	toolCallTimeout := cfg.ToolCallTimeout
 	if toolCallTimeout == 0 {
-		toolCallTimeout = 15
+		toolCallTimeout = DefaultToolCallTimeout
 	}
 
 	return &AnthropicClient{
@@ -253,7 +253,7 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 				Type: llmcore.ToolTypeFunction,
 				Function: llmcore.ToolCallFunction{
 					Name:      block.Name,
-					Arguments: string(mustMarshalMap(block.Input)),
+					Arguments: mustMarshalString(block.Input),
 				},
 			})
 		default:
@@ -272,8 +272,8 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 	return result, nil
 }
 
-// normalizeAnthropicStopReason 把 Anthropic 的 stop_reason 翻译为 llmcore canonical 值。
-// 未知值原样透传，保留可观测性（不猜测语义）。
+// 把 Anthropic 的 stop_reason 翻译为 llmcore canonical 值。
+// 未知值原样透传，保留可观测性
 func normalizeAnthropicStopReason(raw string) string {
 	switch raw {
 	case anthropicStopReasonToolUse:
@@ -289,33 +289,31 @@ func normalizeAnthropicStopReason(raw string) string {
 
 // anthropicStreamEvent 是 Anthropic SSE 事件的通用载体。
 type anthropicStreamEvent struct {
-	Type  string `json:"type"`
-	Error struct {
-		Message string `json:"message"`
-		Type    string `json:"type"`
+	Type  string   `json:"type"` // 事件类型（如 "message_start"）
+	Error struct { // 错误信息（error 事件）
+		Message string `json:"message"` // 错误描述
+		Type    string `json:"type"`    // 错误类型
 	} `json:"error"`
-	Index int `json:"index"`
-	Delta struct {
-		Type        string `json:"type"`
-		Text        string `json:"text"`
-		Thinking    string `json:"thinking"`
-		PartialJSON string `json:"partial_json"`
-		StopReason  string `json:"stop_reason"`
+	Index int      `json:"index"` // 内容块索引（用于 tool_use）
+	Delta struct { // 内容增量
+		Type        string `json:"type"`         // delta 类型
+		Text        string `json:"text"`         // 文本增量
+		Thinking    string `json:"thinking"`     // 思考增量
+		PartialJSON string `json:"partial_json"` // JSON 参数增量
+		StopReason  string `json:"stop_reason"`  // 终止原因
 	} `json:"delta"`
-	ContentBlock struct {
-		Type string `json:"type"`
-		ID   string `json:"id"`
-		Name string `json:"name"`
+	ContentBlock struct { // 内容块元信息（content_block_start）
+		Type string `json:"type"` // 块类型（tool_use / text / thinking）
+		ID   string `json:"id"`   // tool_use 的唯一 ID
+		Name string `json:"name"` // 工具名称
 	} `json:"content_block"`
-	Usage *struct {
+	Usage *struct { // 使用量（message_delta 事件）
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
 	} `json:"usage,omitempty"`
-	// Message 仅 message_start 事件携带，其中的 usage.input_tokens 是
-	// 本次请求的 prompt token 总量；message_delta 里的 usage 只有 output_tokens。
-	Message struct {
+	Message struct { // 消息元信息（message_start）
 		Usage struct {
-			InputTokens  int `json:"input_tokens"`
+			InputTokens  int `json:"input_tokens"` // prompt token 总数
 			OutputTokens int `json:"output_tokens"`
 		} `json:"usage"`
 	} `json:"message"`
@@ -330,14 +328,17 @@ func (c *AnthropicClient) Stream(ctx context.Context, req *LLMRequest) (<-chan l
 	tools := make([]map[string]interface{}, 0, len(req.Tools))
 	for _, tool := range req.Tools {
 		tools = append(tools, map[string]interface{}{
-			"name": tool.Function.Name, "description": tool.Function.Description,
+			"name":         tool.Function.Name,
+			"description":  tool.Function.Description,
 			"input_schema": tool.Function.Parameters,
 		})
 	}
 	requestBody, err := sonic.Marshal(AnthropicRequest{
 		Model: c.modelName, Messages: messages, System: systemMessage, Tools: tools,
-		MaxTokens: c.effectiveMaxTokens(), Temperature: c.effectiveTemperature(),
-		Thinking: c.effectiveThinking(), Stream: true,
+		MaxTokens:   c.effectiveMaxTokens(),
+		Temperature: c.effectiveTemperature(),
+		Thinking:    c.effectiveThinking(),
+		Stream:      true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("marshal stream request: %w", err)
@@ -379,27 +380,29 @@ func (c *AnthropicClient) readAnthropicStream(ctx context.Context, body io.ReadC
 	defer cancel()
 	defer close(deltas)
 	defer body.Close()
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 4096), 1024*1024)
-	eventType := ""
+
 	// message_start 携带的 prompt token 总量，message_delta 阶段拼回 usage
 	inputTokens := 0
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, "event:") {
-			eventType = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
-			continue
+	currentEventType := ""
+
+	err := sse.ParseWithContext(ctx, body, sse.DefaultConfig, func(ctx context.Context, frame sse.Frame) bool {
+		// 保存事件类型
+		if frame.Event != "" {
+			currentEventType = frame.Event
 		}
-		if !strings.HasPrefix(line, "data:") {
-			continue
+
+		// 空 data 帧跳过
+		if len(frame.Data) == 0 {
+			return true
 		}
+
+		// 解析 JSON
 		var event anthropicStreamEvent
-		if err := sonic.UnmarshalString(strings.TrimSpace(strings.TrimPrefix(line, "data:")), &event); err != nil {
+		if err := sonic.Unmarshal(frame.Data, &event); err != nil {
 			sendStreamDelta(ctx, deltas, llmcore.LLMDelta{Error: fmt.Sprintf("decode anthropic stream: %v", err)})
-			return
+			return false
 		}
-		currentEventType := eventType
-		eventType = ""
+
 		delta := llmcore.LLMDelta{}
 		switch currentEventType {
 		case anthropicEventError:
@@ -409,7 +412,15 @@ func (c *AnthropicClient) readAnthropicStream(ctx context.Context, body io.ReadC
 			inputTokens = event.Message.Usage.InputTokens
 		case anthropicEventContentBlockStart:
 			if event.ContentBlock.Type == anthropicContentTypeToolUse {
-				delta.ToolCalls = []llmcore.ToolCallDelta{{Index: event.Index, ID: event.ContentBlock.ID, Type: llmcore.ToolTypeFunction, Name: event.ContentBlock.Name}}
+				// 工具调用开始：发送 ID 和名称
+				delta.ToolCalls = []llmcore.ToolCallDelta{
+					{
+						Index: event.Index,
+						ID:    event.ContentBlock.ID,
+						Type:  llmcore.ToolTypeFunction,
+						Name:  event.ContentBlock.Name,
+					},
+				}
 			}
 		case anthropicEventContentBlockDelta:
 			switch event.Delta.Type {
@@ -430,23 +441,31 @@ func (c *AnthropicClient) readAnthropicStream(ctx context.Context, body io.ReadC
 				}
 			}
 		}
+
+		// 清空事件类型，防止跨行污染
+		currentEventType = ""
+
 		if delta.Error != "" {
 			_ = sendStreamDelta(ctx, deltas, delta)
-			return
+			return false
 		}
+
+		// 跳过无意义增量（如 message_start）
 		if delta.ContentText == "" && delta.Reasoning == "" && len(delta.ToolCalls) == 0 && delta.FinishReason == "" && delta.Usage == nil {
-			continue
+			return true
 		}
-		if !sendStreamDelta(ctx, deltas, delta) {
-			return
-		}
-	}
-	if err := scanner.Err(); err != nil {
+
+		// 调用方已取消 context
+		return sendStreamDelta(ctx, deltas, delta)
+	})
+
+	// context 已取消时下游早已收不到错误，静默退出即可，其余错误才上报。
+	if err != nil && !errors.Is(err, context.Canceled) {
 		sendStreamDelta(ctx, deltas, llmcore.LLMDelta{Error: fmt.Sprintf("read anthropic stream: %v", err)})
 	}
 }
 
-// toAnthropicMessages 将 llmcore 消息列表转为 Anthropic wire 格式。
+// 将 llmcore 消息列表转为 Anthropic wire 格式。
 // 返回值第二个是抽取出来的 system 文本。
 func (c *AnthropicClient) toAnthropicMessages(reqMessages []llmcore.Message) ([]AnthropicMessage, string) {
 	messages := make([]AnthropicMessage, 0, len(reqMessages))
@@ -567,19 +586,19 @@ func userContent(msg llmcore.Message) interface{} {
 func parseJSONMap(arguments string) map[string]interface{} {
 	input := make(map[string]interface{})
 	if arguments != "" {
-		_ = sonic.Unmarshal([]byte(arguments), &input)
+		_ = sonic.UnmarshalString(arguments, &input)
 	}
 	return input
 }
 
-// mustMarshalMap 把 input map 序列化回 JSON 字符串（与 openai 协议的 Arguments 形状保持一致）
-func mustMarshalMap(input map[string]interface{}) []byte {
+// 把 input map 序列化回 JSON 字符串（与 openai 协议的 Arguments 形状保持一致）
+func mustMarshalString(input map[string]interface{}) string {
 	if input == nil {
-		return []byte("{}")
+		return "{}"
 	}
-	data, err := sonic.Marshal(input)
+	data, err := sonic.MarshalString(input)
 	if err != nil {
-		return []byte("{}")
+		return "{}"
 	}
 	return data
 }
@@ -622,14 +641,14 @@ func (c *AnthropicClient) effectiveThinking() map[string]interface{} {
 	case model.ReasoningOff:
 		return map[string]interface{}{"type": anthropicThinkingTypeDisabled}
 	case model.ReasoningLow, model.ReasoningAuto, model.ReasoningHigh:
-		budget := 2048
+		budget := ThinkingBudgetLow
 		if c.requestPolicy.ReasoningMode == model.ReasoningHigh {
-			budget = 8192
+			budget = ThinkingBudgetHigh
 		}
 		if maxTokens := c.effectiveMaxTokens(); maxTokens <= budget {
 			budget = maxTokens / 2
 		}
-		if budget < 1024 {
+		if budget < ThinkingMinBudget {
 			// max_tokens 过小，无法启用扩展思考
 			return nil
 		}

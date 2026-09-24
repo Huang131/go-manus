@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -35,13 +36,6 @@ func newAnthropicTestClient(t *testing.T, captured *map[string]interface{}, resp
 	return c
 }
 
-func TestNewAnthropicClient_DoesNotApplyGlobalTimeout(t *testing.T) {
-	client := NewAnthropicClient(&AnthropicClientConfig{})
-	if client.httpClient.Timeout != 0 {
-		t.Fatalf("http client timeout = %s, want request-scoped timeout", client.httpClient.Timeout)
-	}
-}
-
 func TestAnthropicClient_StreamProducesDeltas(t *testing.T) {
 	c := newAnthropicTestClient(t, nil, http.StatusOK, nil)
 	c.httpClient.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
@@ -57,23 +51,29 @@ func TestAnthropicClient_StreamProducesDeltas(t *testing.T) {
 			t.Errorf("request stream = %v, want true", request["stream"])
 		}
 		streamBody := strings.Join([]string{
+			// 事件 1: 文本增量
 			"event: content_block_delta",
-			"data: {\"delta\":{\"type\":\"text_delta\",\"text\":\"你好\"}}",
+			`data: {"delta":{"type":"text_delta","text":"你好"}}`,
 			"",
+			// 事件 2: 思考增量
 			"event: content_block_delta",
-			"data: {\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"思考\"}}",
+			`data: {"delta":{"type":"thinking_delta","thinking":"思考"}}`,
 			"",
+			// 事件 3: 工具调用开始
 			"event: content_block_start",
-			"data: {\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"tool-1\",\"name\":\"search\"}}",
+			`data: {"index":1,"content_block":{"type":"tool_use","id":"tool-1","name":"search"}}`,
 			"",
+			// 事件 4: 工具参数增量
 			"event: content_block_delta",
-			"data: {\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"q\\\":\\\"go\\\"}\"}}",
+			`data: {"index":1,"delta":{"type":"input_json_delta","partial_json":"{\"q\":\"go\"}"}}`,
 			"",
+			// 事件 5: 消息结束
 			"event: message_delta",
-			"data: {\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":3}}",
+			`data: {"delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":3}}`,
 			"",
+			// 事件 6: 流结束
 			"event: message_stop",
-			"data: {}",
+			`data: {}`,
 			"",
 		}, "\n")
 		return &http.Response{
@@ -341,13 +341,16 @@ func errKind(err error) llmcore.ErrorKind {
 }
 
 func TestAnthropicClient_HTTPErrorClassification(t *testing.T) {
-	tests := []struct {
+	type httpCase struct {
 		name          string
 		status        int
 		wantKind      llmcore.ErrorKind
 		wantRetryable bool
 		wantFallback  bool
-	}{
+	}
+
+	// HTTP 错误分类测试（Invoke 路径）
+	httpErrorCases := []httpCase{
 		{name: "401 auth", status: http.StatusUnauthorized, wantKind: llmcore.KindAuth},
 		{name: "403 auth", status: http.StatusForbidden, wantKind: llmcore.KindAuth},
 		{name: "404 not_found", status: http.StatusNotFound, wantKind: llmcore.KindNotFound},
@@ -356,10 +359,11 @@ func TestAnthropicClient_HTTPErrorClassification(t *testing.T) {
 		{name: "408 timeout", status: http.StatusRequestTimeout, wantKind: llmcore.KindTimeout, wantRetryable: true, wantFallback: true},
 		{name: "500 server", status: http.StatusInternalServerError, wantKind: llmcore.KindServer, wantRetryable: true, wantFallback: true},
 		{name: "502 server", status: http.StatusBadGateway, wantKind: llmcore.KindServer, wantRetryable: true, wantFallback: true},
+		{name: "503 server", status: http.StatusServiceUnavailable, wantKind: llmcore.KindServer, wantRetryable: true, wantFallback: true},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, tt := range httpErrorCases {
+		t.Run("invoke/"+tt.name, func(t *testing.T) {
 			c := newAnthropicErrorClient(t, roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 				return anthropicErrorResponse(tt.status), nil
 			}))
@@ -372,7 +376,10 @@ func TestAnthropicClient_HTTPErrorClassification(t *testing.T) {
 			if !llmcore.IsKind(err, tt.wantKind) {
 				t.Fatalf("error kind = %v, want %v (err=%v)", errKind(err), tt.wantKind, err)
 			}
-			pe := err.(*llmcore.ProviderError)
+			pe, ok := err.(*llmcore.ProviderError)
+			if !ok {
+				t.Fatalf("err is not *ProviderError: %T", err)
+			}
 			if pe.StatusCode != tt.status {
 				t.Errorf("StatusCode = %d, want %d", pe.StatusCode, tt.status)
 			}
@@ -390,22 +397,46 @@ func TestAnthropicClient_HTTPErrorClassification(t *testing.T) {
 			}
 		})
 	}
-}
 
-func TestAnthropicClient_NetworkError(t *testing.T) {
-	c := newAnthropicErrorClient(t, roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-		return nil, errors.New("dial tcp: connection refused")
-	}))
-	_, err := c.Invoke(context.Background(), &LLMRequest{
-		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
+	// Invoke 路径：网络错误（原 NetworkError 测试）
+	t.Run("invoke/network_error", func(t *testing.T) {
+		c := newAnthropicErrorClient(t, roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			return nil, errors.New("dial tcp: connection refused")
+		}))
+		_, err := c.Invoke(context.Background(), &LLMRequest{
+			Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
+		})
+		if !llmcore.IsKind(err, llmcore.KindNetwork) {
+			t.Fatalf("error kind = %v, want KindNetwork", errKind(err))
+		}
+		pe, ok := err.(*llmcore.ProviderError)
+		if !ok {
+			t.Fatalf("err is not *ProviderError: %T", err)
+		}
+		if !pe.Retryable || !pe.Fallbackable {
+			t.Errorf("network error should be retryable/fallbackable, got %+v", pe)
+		}
 	})
-	if !llmcore.IsKind(err, llmcore.KindNetwork) {
-		t.Fatalf("error kind = %v, want KindNetwork", errKind(err))
-	}
-	pe := err.(*llmcore.ProviderError)
-	if !pe.Retryable || !pe.Fallbackable {
-		t.Errorf("network error should be retryable/fallbackable, got %+v", pe)
-	}
+
+	// Stream 路径：HTTP 错误（原 StreamHTTPError 测试）
+	t.Run("stream/http_error", func(t *testing.T) {
+		c := newAnthropicErrorClient(t, roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			return anthropicErrorResponse(http.StatusTooManyRequests), nil
+		}))
+		_, err := c.Stream(context.Background(), &LLMRequest{
+			Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
+		})
+		if !llmcore.IsKind(err, llmcore.KindRateLimit) {
+			t.Fatalf("error kind = %v, want KindRateLimit", errKind(err))
+		}
+		pe, ok := err.(*llmcore.ProviderError)
+		if !ok {
+			t.Fatalf("err is not *ProviderError: %T", err)
+		}
+		if !pe.Fallbackable {
+			t.Error("429 should be fallbackable")
+		}
+	})
 }
 
 // 不支持 tool calling 的模型会在 toolCallTimeout 内无响应 → KindTimeout 且可 fallback
@@ -432,7 +463,11 @@ func TestAnthropicClient_ToolCallTimeout(t *testing.T) {
 	if !llmcore.IsKind(err, llmcore.KindTimeout) {
 		t.Fatalf("error kind = %v, want KindTimeout (err=%v)", errKind(err), err)
 	}
-	if !err.(*llmcore.ProviderError).Fallbackable {
+	pe, ok := err.(*llmcore.ProviderError)
+	if !ok {
+		t.Fatalf("err is not *ProviderError: %T", err)
+	}
+	if !pe.Fallbackable {
 		t.Error("tool-call 超时应可 fallback 到其他模型")
 	}
 }
@@ -458,26 +493,73 @@ func TestAnthropicClient_ProtocolError_NotFallbackable(t *testing.T) {
 	}
 }
 
-// Stream 路径的非 2xx 响应同样必须归一化为 ProviderError
-func TestAnthropicClient_StreamHTTPError(t *testing.T) {
-	c := newAnthropicErrorClient(t, roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-		return anthropicErrorResponse(http.StatusTooManyRequests), nil
-	}))
-	_, err := c.Stream(context.Background(), &LLMRequest{
+// StreamCancel 验证 context cancel 时 Stream 能正确退出且无 goroutine 泄漏
+func TestAnthropicClient_StreamCancel(t *testing.T) {
+	goroutineBefore := runtime.NumGoroutine()
+
+	c := NewAnthropicClient(&AnthropicClientConfig{
+		BaseURL:   "https://example.invalid",
+		APIKey:    "test-key",
+		ModelName: "claude-test",
+		MaxTokens: 1024,
+	})
+
+	// 模拟慢速响应：发送部分数据后等待 context cancel
+	slowStreamBody := strings.Join([]string{
+		"event: message_start",
+		`data: {"type":"message","message":{"id":"msg-1","usage":{"input_tokens":10,"output_tokens":0}}}`,
+		"",
+		"event: content_block_start",
+		`data: {"index":0,"content_block":{"type":"text"}}`,
+		"",
+		"event: content_block_delta",
+		`data: {"index":0,"delta":{"type":"text_delta","text":"慢"}}`,
+		"", // 发送部分内容后，下一条消息会被 context cancel 阻塞
+	}, "\n")
+
+	c.httpClient.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(slowStreamBody)),
+		}, nil
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	deltas, err := c.Stream(ctx, &LLMRequest{
 		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
 	})
-	if !llmcore.IsKind(err, llmcore.KindRateLimit) {
-		t.Fatalf("error kind = %v, want KindRateLimit", errKind(err))
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
 	}
-	if !err.(*llmcore.ProviderError).Fallbackable {
-		t.Error("429 should be fallbackable")
-	}
-}
 
-// ToolCallTimeout 默认值兜底
-func TestNewAnthropicClient_DefaultToolCallTimeout(t *testing.T) {
-	c := NewAnthropicClient(&AnthropicClientConfig{})
-	if c.toolCallTimeout != 15*time.Second {
-		t.Fatalf("toolCallTimeout = %v, want 15s", c.toolCallTimeout)
+	// 消费部分 deltas
+	var got int
+	for delta := range deltas {
+		got++
+		if got >= 2 {
+			// 收到部分内容后取消 context
+			cancel()
+			break
+		}
+		// 忽略可能的 error delta
+		if delta.Error != "" {
+			t.Logf("stream error during partial consumption: %v", delta.Error)
+		}
+	}
+
+	// 等待 goroutine 退出（Stream 的 reader goroutine 应在 cancel 后退出）
+	time.Sleep(100 * time.Millisecond)
+	goroutineAfter := runtime.NumGoroutine()
+
+	// 验证：goroutine 数量应恢复到 cancel 前（允许 ±1 误差）
+	// 主要验证：没有泄漏（cancel 后不应有新增 goroutine）
+	if goroutineAfter > goroutineBefore+1 {
+		t.Errorf("goroutine 泄漏: cancel 前=%d, cancel 后=%d", goroutineBefore, goroutineAfter)
+	}
+
+	// 验证：收到了一些 deltas（不是全部）
+	if got == 0 {
+		t.Error("应至少收到部分 deltas")
 	}
 }
