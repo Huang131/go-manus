@@ -472,6 +472,42 @@ func TestAnthropicClient_ToolCallTimeout(t *testing.T) {
 	}
 }
 
+// 父 ctx 先到期时不能归因为 "模型不支持 tool calling"（排障语义守护）
+func TestAnthropicClient_ParentDeadlineNotMisattributedToToolCalling(t *testing.T) {
+	c := NewAnthropicClient(&AnthropicClientConfig{
+		BaseURL:         "https://example.invalid",
+		APIKey:          "test-key",
+		ModelName:       "claude-slow",
+		MaxTokens:       1024,
+		ToolCallTimeout: 5, // 子超时（秒）远大于父超时
+	})
+	c.httpClient.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Context().Err() != nil {
+			return nil, r.Context().Err()
+		}
+		<-r.Context().Done()
+		return nil, r.Context().Err()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	<-ctx.Done() // 等父 ctx 真正到期，消除与子超时的同时刻竞争
+
+	_, err := c.Invoke(ctx, &LLMRequest{
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
+		Tools: []llmcore.ToolSpec{{
+			Type:     llmcore.ToolTypeFunction,
+			Function: llmcore.ToolSpecFunction{Name: "search"},
+		}},
+	})
+	if !llmcore.IsKind(err, llmcore.KindTimeout) {
+		t.Fatalf("error kind = %v, want KindTimeout (err=%v)", errKind(err), err)
+	}
+	if strings.Contains(err.Error(), "tool calling") {
+		t.Fatalf("父 ctx 到期不应归因为 tool calling 不支持，got: %v", err)
+	}
+}
+
 // 200 + 非法 JSON 属于协议错误：不重试、不 fallback（避免对坏模型反复熔断/切换）
 func TestAnthropicClient_ProtocolError_NotFallbackable(t *testing.T) {
 	c := newAnthropicErrorClient(t, roundTripperFunc(func(r *http.Request) (*http.Response, error) {
@@ -526,6 +562,9 @@ func TestAnthropicClient_StreamCancel(t *testing.T) {
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
+	// defer 兜底：流若在收到 2 个 delta 前提前结束，循环内的 cancel 不会执行，
+	// context 将泄漏（vet lostcancel）。cancel 幂等，双调无害。
+	defer cancel()
 	deltas, err := c.Stream(ctx, &LLMRequest{
 		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
 	})
@@ -561,5 +600,55 @@ func TestAnthropicClient_StreamCancel(t *testing.T) {
 	// 验证：收到了一些 deltas（不是全部）
 	if got == 0 {
 		t.Error("应至少收到部分 deltas")
+	}
+}
+
+// === userContent：ContentText 与 ContentParts 互斥，避免文本重复 ===
+
+func TestAnthropicClient_UserContentTextNotDuplicated(t *testing.T) {
+	// ContentParts 非空且同时设置了 ContentText：只应保留 ContentParts 里的文本块，
+	// 不再额外追加 ContentText，避免同一段文本被发送两次。
+	msg := llmcore.Message{
+		ContentText: "来自 ContentText 的文本",
+		ContentParts: []llmcore.ContentPart{
+			{Type: llmcore.ContentTypeText, Text: "来自 ContentParts 的文本"},
+			{Type: llmcore.ContentTypeImageURL, ImageURL: &llmcore.ImageURL{URL: "https://example.com/a.png"}},
+		},
+	}
+
+	got := userContent(msg)
+	blocks, ok := got.([]AnthropicContent)
+	if !ok {
+		t.Fatalf("多模态分支应返回 []AnthropicContent, got %T", got)
+	}
+
+	var textBlocks []string
+	var imageBlocks int
+	for _, b := range blocks {
+		switch b.Type {
+		case anthropicContentTypeText:
+			textBlocks = append(textBlocks, b.Text)
+		case anthropicContentTypeImage:
+			imageBlocks++
+		}
+	}
+
+	if len(textBlocks) != 1 {
+		t.Fatalf("文本块数量 = %d, want 1（不应重复发送 ContentText）: %v", len(textBlocks), blocks)
+	}
+	if textBlocks[0] != "来自 ContentParts 的文本" {
+		t.Errorf("文本块 = %q, want 来自 ContentParts 的文本", textBlocks[0])
+	}
+	if imageBlocks != 1 {
+		t.Errorf("图片块数量 = %d, want 1", imageBlocks)
+	}
+}
+
+func TestAnthropicClient_UserContentTextOnlyUsesContentText(t *testing.T) {
+	// ContentParts 为空：直接返回 ContentText 字符串，保持纯文本 string 形状。
+	msg := llmcore.Message{ContentText: "纯文本"}
+	got := userContent(msg)
+	if s, ok := got.(string); !ok || s != "纯文本" {
+		t.Fatalf("纯文本分支应返回 string, got %T: %v", got, got)
 	}
 }

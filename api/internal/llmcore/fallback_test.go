@@ -69,38 +69,95 @@ func TestCanFallbackTo_CapabilityEquivalent(t *testing.T) {
 	}
 }
 
-// TestCanFallbackAfterToolUse_NoTools
-// 业务期望：没工具 → 允许 fallback
-func TestCanFallbackAfterToolUse_NoTools(t *testing.T) {
-	if !CanFallbackAfterToolUse(nil) {
-		t.Fatal("expected true: no tools executed")
-	}
-	if !CanFallbackAfterToolUse([]ToolSpec{}) {
-		t.Fatal("expected true: empty tools executed")
-	}
-}
-
-// TestCanFallbackAfterToolUse_AllReadOnly
-// 业务期望：全 ReadOnly → 允许 fallback
-func TestCanFallbackAfterToolUse_AllReadOnly(t *testing.T) {
-	tools := []ToolSpec{
-		{ReadOnly: true, Function: ToolSpecFunction{Name: "search"}},
-		{ReadOnly: true, Function: ToolSpecFunction{Name: "grep"}},
-	}
-	if !CanFallbackAfterToolUse(tools) {
-		t.Fatal("expected true: all read-only")
-	}
-}
-
-// TestCanFallbackAfterToolUse_HasWriteTool
-// 业务期望：有非 ReadOnly 工具 → 禁止 fallback
-func TestCanFallbackAfterToolUse_HasWriteTool(t *testing.T) {
+// TestCanFallbackAfterToolUse_NoToolsExecuted
+// 业务期望：没有任何工具执行过（无 RoleTool 消息）→ 允许 fallback，
+// 即使本次声明的 tools 里有写工具（声明 ≠ 执行）。
+func TestCanFallbackAfterToolUse_NoToolsExecuted(t *testing.T) {
 	tools := []ToolSpec{
 		{ReadOnly: true, Function: ToolSpecFunction{Name: "search"}},
 		{ReadOnly: false, Function: ToolSpecFunction{Name: "shell"}},
 	}
-	if CanFallbackAfterToolUse(tools) {
-		t.Fatal("expected false: shell is not read-only")
+	if !CanFallbackAfterToolUse(nil, tools) {
+		t.Fatal("expected true: no tools executed")
+	}
+	if !CanFallbackAfterToolUse([]Message{
+		{Role: model.RoleUser, ContentText: "hi"},
+		{Role: model.RoleAssistant, ContentText: "hello"},
+	}, tools) {
+		t.Fatal("expected true: no RoleTool in history")
+	}
+}
+
+// TestCanFallbackAfterToolUse_DeclaredWriteToolBlocks
+// 场景 A 守护（声明即禁止）：历史只执行过只读工具，但本次声明的 tools
+// 含非 ReadOnly 工具（尚未执行）→ 禁止 fallback。
+// 跨模型续接会改变写工具的调用决策，行为漂移不可控，宁可保守。
+func TestCanFallbackAfterToolUse_DeclaredWriteToolBlocks(t *testing.T) {
+	tools := []ToolSpec{
+		{ReadOnly: true, Function: ToolSpecFunction{Name: "search"}},
+		{ReadOnly: false, Function: ToolSpecFunction{Name: "shell"}}, // 声明未执行
+	}
+	messages := []Message{
+		{Role: model.RoleTool, Name: "search", ToolCallID: "call-1", ContentText: "result"},
+	}
+	if CanFallbackAfterToolUse(messages, tools) {
+		t.Fatal("expected false: declared write tool blocks fallback even before execution")
+	}
+}
+
+// TestCanFallbackAfterToolUse_ExecutedWriteTool
+// 业务期望：已执行非 ReadOnly 工具 → 禁止 fallback。
+func TestCanFallbackAfterToolUse_ExecutedWriteTool(t *testing.T) {
+	tools := []ToolSpec{
+		{ReadOnly: true, Function: ToolSpecFunction{Name: "search"}},
+		{ReadOnly: false, Function: ToolSpecFunction{Name: "shell"}},
+	}
+	messages := []Message{
+		{Role: model.RoleTool, Name: "shell", ToolCallID: "call-1", ContentText: "done"},
+	}
+	if CanFallbackAfterToolUse(messages, tools) {
+		t.Fatal("expected false: shell executed (write side effect)")
+	}
+}
+
+// TestCanFallbackAfterToolUse_ToolsNarrowedAfterWriteExecution
+// 场景 C 守护：历史执行过写工具，但本次 tools 被收窄（不含该工具）→
+// 查不到 ReadOnly 声明，必须保守禁止，不能因为"当前 tools 全只读"而放行。
+func TestCanFallbackAfterToolUse_ToolsNarrowedAfterWriteExecution(t *testing.T) {
+	narrowed := []ToolSpec{
+		{ReadOnly: true, Function: ToolSpecFunction{Name: "search"}},
+	}
+	messages := []Message{
+		{Role: model.RoleTool, Name: "shell", ToolCallID: "call-1", ContentText: "done"}, // 之前执行过 shell
+	}
+	if CanFallbackAfterToolUse(messages, narrowed) {
+		t.Fatal("expected false: executed tool missing from declared tools (narrowed)")
+	}
+}
+
+// TestCanFallbackAfterToolUse_ExecutedButToolsEmpty
+// 场景 B 守护：已执行过工具但本次不声明任何 tools（如 Summarize/Planner 路径）→
+// 无 ReadOnly 依据，保守禁止。
+func TestCanFallbackAfterToolUse_ExecutedButToolsEmpty(t *testing.T) {
+	messages := []Message{
+		{Role: model.RoleTool, Name: "search", ToolCallID: "call-1", ContentText: "result"},
+	}
+	if CanFallbackAfterToolUse(messages, nil) {
+		t.Fatal("expected false: no ReadOnly declaration available")
+	}
+}
+
+// TestCanFallbackAfterToolUse_ExecutedWithoutName
+// RoleTool 缺 Name（异常构造/历史 fixture）→ 无法判定，保守禁止。
+func TestCanFallbackAfterToolUse_ExecutedWithoutName(t *testing.T) {
+	tools := []ToolSpec{
+		{ReadOnly: true, Function: ToolSpecFunction{Name: "search"}},
+	}
+	messages := []Message{
+		{Role: model.RoleTool, ToolCallID: "call-1", ContentText: "result"}, // 无 Name
+	}
+	if CanFallbackAfterToolUse(messages, tools) {
+		t.Fatal("expected false: RoleTool without Name cannot be verified")
 	}
 }
 

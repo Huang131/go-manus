@@ -700,3 +700,226 @@ func TestOpenAIClient_ProtocolError_NotFallbackable(t *testing.T) {
 		t.Error("protocol error should NOT be fallbackable")
 	}
 }
+
+// === 9. max_tokens wire 契约：未配置（0）必须省略 ===
+//
+// 守护协议契约：OpenAI Chat API 要求 max_tokens >= 1。
+// 配置链路（DB → runtimeConfigToOpenAIClientConfig）中 max_tokens 可为 0（未配置），
+// 此时必须从 wire 省略该字段——下发 "max_tokens": 0 会被上游 400 拒绝
+// （"max_tokens must be at least 1"）。修复前该测试失败，可复现该 400 问题。
+
+func newWireCaptureClient(t *testing.T, maxTokens int, respond func() (*http.Response, error)) (*OpenAIClient, *map[string]interface{}) {
+	t.Helper()
+	var got map[string]interface{}
+	c := NewOpenAIClient(&OpenAIClientConfig{
+		BaseURL:   "https://example.invalid",
+		APIKey:    "test-key",
+		ModelName: "test-model",
+		MaxTokens: maxTokens,
+	})
+	c.httpClient = &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			body, _ := io.ReadAll(r.Body)
+			_ = sonic.Unmarshal(body, &got)
+			return respond()
+		}),
+	}
+	return c, &got
+}
+
+func okChatResponse() (*http.Response, error) {
+	return responseJSON(http.StatusOK, map[string]interface{}{
+		"id":    "chatcmpl-wire",
+		"model": "test-model",
+		"choices": []map[string]interface{}{
+			{
+				"index":         0,
+				"finish_reason": "stop",
+				"message":       map[string]interface{}{"role": "assistant", "content": "ok"},
+			},
+		},
+		"usage": map[string]interface{}{},
+	})
+}
+
+func TestOpenAIClient_MaxTokensWireContract(t *testing.T) {
+	userMsg := []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}}
+
+	t.Run("Invoke 未配置时省略 max_tokens", func(t *testing.T) {
+		c, gotPtr := newWireCaptureClient(t, 0, okChatResponse)
+		if _, err := c.Invoke(context.Background(), &LLMRequest{Messages: userMsg}); err != nil {
+			t.Fatalf("Invoke: %v", err)
+		}
+		got := *gotPtr
+		if _, ok := got["max_tokens"]; ok {
+			t.Fatalf("未配置时 wire 不应包含 max_tokens（下发 0 会被上游 400 拒绝），got max_tokens=%v", got["max_tokens"])
+		}
+	})
+
+	t.Run("Stream 未配置时省略 max_tokens 并显式请求 usage", func(t *testing.T) {
+		streamBody := strings.Join([]string{
+			`data: {"choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}`,
+			``,
+			`data: {"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5,"completion_tokens_details":{"reasoning_tokens":2}}}`,
+			``,
+			`data: [DONE]`,
+			``,
+		}, "\n")
+		c, gotPtr := newWireCaptureClient(t, 0, func() (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body:       io.NopCloser(strings.NewReader(streamBody)),
+			}, nil
+		})
+		var lastUsage *llmcore.Usage
+		deltas, err := c.Stream(context.Background(), &LLMRequest{Messages: userMsg})
+		if err != nil {
+			t.Fatalf("Stream() error = %v", err)
+		}
+		for delta := range deltas {
+			if delta.Error != "" {
+				t.Fatalf("stream error: %s", delta.Error)
+			}
+			if delta.Usage != nil {
+				lastUsage = delta.Usage
+			}
+		}
+		got := *gotPtr
+		if _, ok := got["max_tokens"]; ok {
+			t.Fatalf("未配置时 stream wire 不应包含 max_tokens，got %v", got["max_tokens"])
+		}
+		// 严格 OpenAI 协议流式默认不返回 usage，必须显式开启
+		opts, ok := got["stream_options"].(map[string]interface{})
+		if !ok || opts["include_usage"] != true {
+			t.Fatalf("stream_options = %v, want include_usage=true", got["stream_options"])
+		}
+		if lastUsage == nil {
+			t.Fatal("流式 usage 帧未被解析")
+		}
+		if lastUsage.ReasoningTokens != 2 {
+			t.Fatalf("ReasoningTokens = %d, want 2（completion_tokens_details 归一化）", lastUsage.ReasoningTokens)
+		}
+	})
+
+	t.Run("policy 默认值填充 max_tokens", func(t *testing.T) {
+		c, gotPtr := newWireCaptureClient(t, 0, okChatResponse)
+		defaultMax := 2048
+		c.requestPolicy = llmcore.RequestPolicy{DefaultMaxTokens: &defaultMax}
+		if _, err := c.Invoke(context.Background(), &LLMRequest{Messages: userMsg}); err != nil {
+			t.Fatalf("Invoke: %v", err)
+		}
+		if got := *gotPtr; got["max_tokens"] != float64(2048) {
+			t.Fatalf("max_tokens = %v, want 2048（policy 默认值）", got["max_tokens"])
+		}
+	})
+
+	t.Run("显式配置时正常下发", func(t *testing.T) {
+		c, gotPtr := newWireCaptureClient(t, 512, okChatResponse)
+		if _, err := c.Invoke(context.Background(), &LLMRequest{Messages: userMsg}); err != nil {
+			t.Fatalf("Invoke: %v", err)
+		}
+		if got := *gotPtr; got["max_tokens"] != float64(512) {
+			t.Fatalf("max_tokens = %v, want 512", got["max_tokens"])
+		}
+	})
+}
+
+// === 10. 200 + error body：上游真实错误不被 "no choices" 覆盖 ===
+//
+// 守护协议契约：部分兼容网关（one-api/new-api 等）用 200 + error body 转发上游错误。
+// Adapter 必须消费 error.message 并以 KindServer 上报，而不是丢失后报 "no choices"。
+
+func TestOpenAIClient_200WithErrorBodySurfacesUpstreamMessage(t *testing.T) {
+	c := newTransportClient(t, func(r *http.Request) (*http.Response, error) {
+		return responseJSON(http.StatusOK, map[string]interface{}{
+			"error": map[string]interface{}{
+				"message": "Upstream model overloaded",
+				"type":    "server_error",
+				"code":    "overloaded",
+			},
+		})
+	})
+	_, err := c.Invoke(context.Background(), &LLMRequest{
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !llmcore.IsKind(err, llmcore.KindServer) {
+		t.Fatalf("error kind = %v, want KindServer (err=%v)", err, err)
+	}
+	if !strings.Contains(err.Error(), "Upstream model overloaded") {
+		t.Fatalf("错误信息应携带上游 message，got: %v", err)
+	}
+}
+
+// === 11. 超时归因：父 ctx 到期 ≠ tool calling 子超时 ===
+//
+// 守护排障语义：只有 tool-call 子超时（Invoke 对带 tools 的请求设置）才允许归因为
+// "模型可能不支持 tool calling"；父 ctx 先到期时必须是普通 request timeout，
+// 否则全局超时会被误报为模型能力问题。
+
+func blockingTransport(t *testing.T) roundTripperFunc {
+	t.Helper()
+	return roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Context().Err() != nil {
+			return nil, r.Context().Err()
+		}
+		<-r.Context().Done()
+		return nil, r.Context().Err()
+	})
+}
+
+func TestOpenAIClient_ParentDeadlineNotMisattributedToToolCalling(t *testing.T) {
+	c := newTransportClient(t, func(r *http.Request) (*http.Response, error) {
+		return blockingTransport(t)(r)
+	})
+	c.toolCallTimeout = 5 * time.Second // 子超时远大于父超时
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	<-ctx.Done() // 等父 ctx 真正到期，消除与子超时的同时刻竞争
+
+	_, err := c.Invoke(ctx, &LLMRequest{
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
+		Tools: []llmcore.ToolSpec{{
+			Type:     llmcore.ToolTypeFunction,
+			Function: llmcore.ToolSpecFunction{Name: "search"},
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !llmcore.IsKind(err, llmcore.KindTimeout) {
+		t.Fatalf("error kind = %v, want KindTimeout (err=%v)", err, err)
+	}
+	if strings.Contains(err.Error(), "tool calling") {
+		t.Fatalf("父 ctx 到期不应归因为 tool calling 不支持，got: %v", err)
+	}
+}
+
+func TestOpenAIClient_ToolCallTimeoutStillAttributed(t *testing.T) {
+	c := newTransportClient(t, func(r *http.Request) (*http.Response, error) {
+		return blockingTransport(t)(r)
+	})
+	c.toolCallTimeout = 50 * time.Millisecond // 子超时先到期，父 ctx（Background）永不到期
+
+	_, err := c.Invoke(context.Background(), &LLMRequest{
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
+		Tools: []llmcore.ToolSpec{{
+			Type:     llmcore.ToolTypeFunction,
+			Function: llmcore.ToolSpecFunction{Name: "search"},
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !llmcore.IsKind(err, llmcore.KindTimeout) {
+		t.Fatalf("error kind = %v, want KindTimeout (err=%v)", err, err)
+	}
+	if !strings.Contains(err.Error(), "tool calling") {
+		t.Fatalf("tool-call 子超时应保留归因信息，got: %v", err)
+	}
+}

@@ -35,15 +35,45 @@ func CanFallbackTo(candidate, current ModelProfile) bool {
 }
 
 // CanFallbackAfterToolUse 工具已经被执行后，是否还允许 fallback
-// 规则：
-//   - 所有工具都是 ReadOnly  → 允许 fallback（没有副作用）
-//   - 任一工具已执行且有副作用 → 禁止 fallback（跨 model 上下文不一致）
 //
-// 注意：此函数只看工具的 ReadOnly 声明，不判断工具是否真的"已执行"
-// 调用方需要在工具执行成功后维护"已执行的 tool 列表"状态
-func CanFallbackAfterToolUse(executedTools []ToolSpec) bool {
-	for _, t := range executedTools {
-		if !t.ReadOnly {
+// 判定输入：完整消息历史（含 RoleTool 执行痕迹）+ 本次请求声明的工具列表。
+// RoleTool 消息的 Name 字段标识执行过哪个工具（Agent 构造时写入）。
+//
+// 规则（声明即禁止）：
+//   - 没有任何工具执行过（无 RoleTool 消息）→ 允许 fallback
+//   - 已执行过工具（存在 RoleTool 消息）时，以下任一情况禁止 fallback：
+//     1. 本次声明的 tools 中存在任一非 ReadOnly 工具——即使尚未执行
+//     （跨模型续接会改变写工具的调用决策，行为漂移不可控，宁可保守）
+//     2. RoleTool 消息缺 Name，或执行过的工具不在本次声明集中
+//     （无法查证副作用，保守禁止；覆盖工具集被收窄的场景）
+func CanFallbackAfterToolUse(messages []Message, tools []ToolSpec) bool {
+	hasExecutedTool := false
+	for _, msg := range messages {
+		if msg.Role == model.RoleTool {
+			hasExecutedTool = true
+			break
+		}
+	}
+	if !hasExecutedTool {
+		return true
+	}
+	// 声明即禁止：任一声明的工具非 ReadOnly → 禁止
+	for _, tool := range tools {
+		if !tool.ReadOnly {
+			return false
+		}
+	}
+	// 已执行的工具必须可查证：带 Name 且仍在本次声明集中
+	// （声明集已全 ReadOnly，可查证即无副作用；查不到则保守禁止）
+	declared := make(map[string]bool, len(tools))
+	for _, tool := range tools {
+		declared[tool.Function.Name] = true
+	}
+	for _, msg := range messages {
+		if msg.Role != model.RoleTool {
+			continue
+		}
+		if msg.Name == "" || !declared[msg.Name] {
 			return false
 		}
 	}

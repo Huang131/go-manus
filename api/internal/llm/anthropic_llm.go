@@ -122,6 +122,8 @@ func NewAnthropicClient(cfg *AnthropicClientConfig) *AnthropicClient {
 	if baseURL == "" {
 		baseURL = defaultAnthropicBaseURL
 	}
+	// 尾斜杠归一：避免拼出 //v1/messages
+	baseURL = strings.TrimSuffix(baseURL, "/")
 
 	toolCallTimeout := cfg.ToolCallTimeout
 	if toolCallTimeout == 0 {
@@ -199,7 +201,7 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, c.classifySendError(err, len(req.Tools) > 0)
+		return nil, c.classifySendError(ctx, err, len(req.Tools) > 0)
 	}
 	defer resp.Body.Close()
 
@@ -211,7 +213,8 @@ func (c *AnthropicClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore
 		return nil, pe
 	}
 
-	if resp.StatusCode != http.StatusOK {
+	// 接受全部 2xx（部分网关用 201/204 转发成功响应）。
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		logger.ErrorContext(ctx, "Anthropic API error",
 			logger.Int("status", resp.StatusCode),
 			logger.String("body", string(respBody)),
@@ -348,6 +351,7 @@ func (c *AnthropicClient) Stream(ctx context.Context, req *LLMRequest) (<-chan l
 	streamCtx, cancelStream := streamContext(ctx)
 	httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, c.baseURL+anthropicMessagesPath, bytes.NewReader(requestBody))
 	if err != nil {
+		cancelStream()
 		return nil, fmt.Errorf("create stream request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", httpconst.ContentTypeJSON)
@@ -356,11 +360,14 @@ func (c *AnthropicClient) Stream(ctx context.Context, req *LLMRequest) (<-chan l
 	httpReq.Header.Set("anthropic-version", c.version)
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, c.classifySendError(err, len(req.Tools) > 0)
+		cancelStream()
+		// Stream 不设置 tool-call 子超时（只有整体截止），传 false 避免整体超时被误归因
+		return nil, c.classifySendError(ctx, err, false)
 	}
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
 		body, readErr := io.ReadAll(resp.Body)
+		cancelStream()
 		if readErr != nil {
 			pe := llmcore.NewProviderError(llmcore.KindNetwork, anthropicProvider, c.modelName, "read stream error response")
 			pe.StatusCode = resp.StatusCode
@@ -543,27 +550,21 @@ func textOf(msg llmcore.Message) string {
 	return sb.String()
 }
 
-// userContent 构造 user 消息内容：纯文本用 string；含图片等多模态 part 时用块数组
+// userContent 构造 user 消息内容：纯文本用 string；含图片等多模态 part 时用块数组。
+// ContentText 与 ContentParts 为互斥关系（与 OpenAI adapter 对齐）：
+// - ContentParts 非空时作为唯一来源（不再额外 append ContentText）
+// - ContentParts 为空时使用 ContentText
 func userContent(msg llmcore.Message) interface{} {
-	hasMultimodal := false
-	for _, p := range msg.ContentParts {
-		if p.Type != llmcore.ContentTypeText {
-			hasMultimodal = true
-			break
-		}
-	}
-	if !hasMultimodal {
-		return textOf(msg)
+	if len(msg.ContentParts) == 0 {
+		return msg.ContentText
 	}
 
+	// ContentParts 非空：迭代处理，ContentText 不再单独追加（避免重复）
 	blocks := make([]AnthropicContent, 0, len(msg.ContentParts))
-	if text := msg.ContentText; text != "" {
-		blocks = append(blocks, AnthropicContent{Type: anthropicContentTypeText, Text: text})
-	}
 	for _, p := range msg.ContentParts {
 		switch p.Type {
 		case llmcore.ContentTypeText:
-			blocks = append(blocks, AnthropicContent{Type: llmcore.ContentTypeText, Text: p.Text})
+			blocks = append(blocks, AnthropicContent{Type: anthropicContentTypeText, Text: p.Text})
 		case llmcore.ContentTypeImageURL:
 			if p.ImageURL != nil && p.ImageURL.URL != "" {
 				// Anthropic 支持 URL source 的图片输入
@@ -604,10 +605,13 @@ func mustMarshalString(input map[string]interface{}) string {
 }
 
 // classifySendError 把 httpClient.Do 返回的网络/超时错误归一化为 ProviderError。
-func (c *AnthropicClient) classifySendError(err error, hasTools bool) error {
+// parent 是调用方原始 ctx：只有它仍然存活时，DeadlineExceeded 才是 tool calling
+// 子超时（仅 Invoke 会设置）；父 ctx 先到期或 Stream 的整体截止到期时，
+// 不能归因为"模型不支持 tool calling"，否则误导排障。
+func (c *AnthropicClient) classifySendError(parent context.Context, err error, hasTools bool) error {
 	if errors.Is(err, context.DeadlineExceeded) {
 		msg := "request timeout"
-		if hasTools {
+		if hasTools && parent.Err() == nil {
 			msg = fmt.Sprintf("tool calling 请求超时（%v），模型 %q 可能不支持 tool calling", c.toolCallTimeout, c.modelName)
 		}
 		pe := llmcore.NewProviderError(llmcore.KindTimeout, anthropicProvider, c.modelName, msg)

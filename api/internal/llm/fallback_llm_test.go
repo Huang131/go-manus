@@ -10,20 +10,6 @@ import (
 	"github.com/Huang131/go-manus/api/internal/model"
 )
 
-type streamingStubLLM struct {
-	*stubLLM
-	deltas []llmcore.LLMDelta
-}
-
-func (s *streamingStubLLM) Stream(context.Context, *LLMRequest) (<-chan llmcore.LLMDelta, error) {
-	ch := make(chan llmcore.LLMDelta, len(s.deltas))
-	for _, delta := range s.deltas {
-		ch <- delta
-	}
-	close(ch)
-	return ch, nil
-}
-
 func TestRoutedLLM_FallbackOnRateLimit(t *testing.T) {
 	var attempts []string
 	router := NewRoutedLLM(
@@ -116,6 +102,44 @@ func TestRoutedLLM_StreamUsesStreamingCandidate(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].ContentText != "token" {
 		t.Fatalf("deltas = %+v, want one token delta", got)
+	}
+}
+
+// TestRoutedLLM_StreamErrorDeltaRecordsFailure 流中出现 Error delta（协议约定表示本次流失败）
+// 后，channel 关闭时应记录失败而非成功，避免把失败模型标为健康、影响后续路由排序。
+func TestRoutedLLM_StreamErrorDeltaRecordsFailure(t *testing.T) {
+	router := NewRoutedLLM(
+		func(context.Context) ([]*LLMRuntimeConfig, error) {
+			return []*LLMRuntimeConfig{
+				{Profile: withProfileID(openAITextProfile(), "streaming"), ModelName: "streaming"},
+			}, nil
+		},
+		nil,
+		func(cfg *LLMRuntimeConfig) LLM {
+			return &streamingStubLLM{
+				stubLLM: &stubLLM{name: cfg.ModelName},
+				deltas:  []llmcore.LLMDelta{{Error: "upstream stream failure"}},
+			}
+		},
+	)
+
+	deltas, err := router.Stream(context.Background(), &LLMRequest{})
+	if err != nil {
+		t.Fatalf("Stream() error = %v", err)
+	}
+	sawError := false
+	for d := range deltas {
+		if d.Error != "" {
+			sawError = true
+		}
+	}
+	if !sawError {
+		t.Fatal("expected an Error delta to be forwarded")
+	}
+
+	h := router.GetHealth("streaming")
+	if h.Status != model.HealthStateDegraded || h.RecentFailures != 1 {
+		t.Fatalf("health = %+v, want degraded/1 after stream error", h)
 	}
 }
 
@@ -349,7 +373,9 @@ func TestRoutedLLM_AllowFallbackBeforeToolExecution(t *testing.T) {
 	}
 }
 
-func TestRoutedLLM_RecordSuccessUpdatesRuntimeHealth(t *testing.T) {
+// TestRoutedLLM_LatencyAffectsPlanOrder 测试成功记录后的延迟如何影响 plan 排序。
+// 低延迟模型应优先于高延迟模型（相同健康状态）。
+func TestRoutedLLM_LatencyAffectsPlanOrder(t *testing.T) {
 	router := NewRoutedLLM(
 		func(ctx context.Context) ([]*LLMRuntimeConfig, error) {
 			return []*LLMRuntimeConfig{
@@ -371,7 +397,7 @@ func TestRoutedLLM_RecordSuccessUpdatesRuntimeHealth(t *testing.T) {
 		},
 	)
 
-	router.RecordSuccess("fast", 10*time.Millisecond)
+	router.RecordSuccess(recordAs("fast"), 10*time.Millisecond)
 	resp, err := router.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hello"}},
 	})
@@ -383,7 +409,9 @@ func TestRoutedLLM_RecordSuccessUpdatesRuntimeHealth(t *testing.T) {
 	}
 }
 
-func TestRoutedLLM_RecordFailureUpdatesRuntimeHealth(t *testing.T) {
+// TestRoutedLLM_DegradedModelIsSortedLower 测试健康状态降级后，模型在 plan 中排序优先级降低。
+// 与 TestRoutedLLM_FallbackOnRateLimit（调用失败后 fallback）不同，这里测试的是排序变化。
+func TestRoutedLLM_DegradedModelIsSortedLower(t *testing.T) {
 	router := NewRoutedLLM(
 		func(ctx context.Context) ([]*LLMRuntimeConfig, error) {
 			return []*LLMRuntimeConfig{
@@ -405,7 +433,7 @@ func TestRoutedLLM_RecordFailureUpdatesRuntimeHealth(t *testing.T) {
 		},
 	)
 
-	router.RecordFailure("primary", llmcore.NewProviderError(llmcore.KindServer, "openai_compat", "primary", "server error"), 20*time.Millisecond)
+	router.RecordFailure(recordAs("primary"), llmcore.NewProviderError(llmcore.KindServer, "openai_compat", "primary", "server error"), 20*time.Millisecond)
 	resp, err := router.Invoke(context.Background(), &LLMRequest{
 		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hello"}},
 	})
@@ -417,43 +445,37 @@ func TestRoutedLLM_RecordFailureUpdatesRuntimeHealth(t *testing.T) {
 	}
 }
 
-func openAITextProfile() llmcore.ModelProfile {
-	return llmcore.ModelProfile{
-		Protocol: llmcore.ProtocolOpenAICompat,
-		Capabilities: model.ModelCapabilities{
-			SupportsText:      true,
-			SupportsToolCalls: true,
-			SupportsStreaming: true,
-			MaxContextTokens:  4096,
-			MaxOutputTokens:   1024,
-		},
-	}
-}
-
 // ============================================================================
 // 健康状态记录与衰减逻辑单元测试
 // ============================================================================
+
+// recordAs 构造以 name 为 Profile.ID 的目录模型配置用于健康记录。
+// 健康按 Profile.ID 记录；测试目录条目无 ID 时 configKey 退化为 ModelName，
+// 两者同名即可命中同一把 key。
+func recordAs(name string) *LLMRuntimeConfig {
+	return &LLMRuntimeConfig{Profile: llmcore.ModelProfile{ID: name}, ModelName: name}
+}
 
 func TestRoutedLLM_RecordFailureEscalatesToUnhealthy(t *testing.T) {
 	router := NewRoutedLLM(nil, nil, nil)
 	const key = "model-x"
 
 	// 第 1 次失败：degraded, failures=1
-	router.RecordFailure(key, nil, 10*time.Millisecond)
+	router.RecordFailure(recordAs(key), nil, 10*time.Millisecond)
 	h := router.GetHealth(key)
 	if h.Status != model.HealthStateDegraded || h.RecentFailures != 1 {
 		t.Fatalf("after 1st failure: status=%s failures=%d, want degraded/1", h.Status, h.RecentFailures)
 	}
 
 	// 第 2 次失败：仍 degraded, failures=2
-	router.RecordFailure(key, nil, 10*time.Millisecond)
+	router.RecordFailure(recordAs(key), nil, 10*time.Millisecond)
 	h = router.GetHealth(key)
 	if h.Status != model.HealthStateDegraded || h.RecentFailures != 2 {
 		t.Fatalf("after 2nd failure: status=%s failures=%d, want degraded/2", h.Status, h.RecentFailures)
 	}
 
 	// 第 3 次失败：升级为 unhealthy, failures=3
-	router.RecordFailure(key, nil, 10*time.Millisecond)
+	router.RecordFailure(recordAs(key), nil, 10*time.Millisecond)
 	h = router.GetHealth(key)
 	if h.Status != model.HealthStateUnhealthy || h.RecentFailures != 3 {
 		t.Fatalf("after 3rd failure: status=%s failures=%d, want unhealthy/3", h.Status, h.RecentFailures)
@@ -465,18 +487,18 @@ func TestRoutedLLM_RecordSuccessDecaysFailuresAndRecovers(t *testing.T) {
 	const key = "model-y"
 
 	// 先失败 2 次：degraded, failures=2
-	router.RecordFailure(key, nil, 10*time.Millisecond)
-	router.RecordFailure(key, nil, 10*time.Millisecond)
+	router.RecordFailure(recordAs(key), nil, 10*time.Millisecond)
+	router.RecordFailure(recordAs(key), nil, 10*time.Millisecond)
 
 	// 第 1 次成功：failures 衰减到 1，仍 degraded
-	router.RecordSuccess(key, 50*time.Millisecond)
+	router.RecordSuccess(recordAs(key), 50*time.Millisecond)
 	h := router.GetHealth(key)
 	if h.RecentFailures != 1 || h.Status != model.HealthStateDegraded {
 		t.Fatalf("after 1st success: status=%s failures=%d, want degraded/1", h.Status, h.RecentFailures)
 	}
 
 	// 第 2 次成功：failures 归零，恢复 healthy
-	router.RecordSuccess(key, 50*time.Millisecond)
+	router.RecordSuccess(recordAs(key), 50*time.Millisecond)
 	h = router.GetHealth(key)
 	if h.RecentFailures != 0 || h.Status != model.HealthStateHealthy {
 		t.Fatalf("after 2nd success: status=%s failures=%d, want healthy/0", h.Status, h.RecentFailures)
@@ -488,14 +510,14 @@ func TestRoutedLLM_RecordSuccessTracksLatency(t *testing.T) {
 	const key = "model-z"
 
 	// 首次成功：延迟直接记录（10ms）
-	router.RecordSuccess(key, 10*time.Millisecond)
+	router.RecordSuccess(recordAs(key), 10*time.Millisecond)
 	h := router.GetHealth(key)
 	if h.AverageLatencyMS != 10 {
 		t.Fatalf("first latency = %d, want 10", h.AverageLatencyMS)
 	}
 
 	// 第二次成功：滑动平均 (10+30)/2 = 20
-	router.RecordSuccess(key, 30*time.Millisecond)
+	router.RecordSuccess(recordAs(key), 30*time.Millisecond)
 	h = router.GetHealth(key)
 	if h.AverageLatencyMS != 20 {
 		t.Fatalf("second latency = %d, want 20", h.AverageLatencyMS)
@@ -505,8 +527,8 @@ func TestRoutedLLM_RecordSuccessTracksLatency(t *testing.T) {
 func TestRoutedLLM_RecordIgnoresEmptyModelKey(t *testing.T) {
 	router := NewRoutedLLM(nil, nil, nil)
 
-	router.RecordSuccess("", 10*time.Millisecond)
-	router.RecordFailure("", nil, 10*time.Millisecond)
+	router.RecordSuccess(&LLMRuntimeConfig{}, 10*time.Millisecond)
+	router.RecordFailure(&LLMRuntimeConfig{}, nil, 10*time.Millisecond)
 
 	router.mu.RLock()
 	count := len(router.health)
@@ -534,14 +556,14 @@ func TestRoutedLLM_PlanSortsByHealthThenLatency(t *testing.T) {
 
 	// 通过 RecordFailure 构造 unhealthy（3 次失败）
 	for i := 0; i < 3; i++ {
-		router.RecordFailure("unhealthy", nil, 100*time.Millisecond)
+		router.RecordFailure(recordAs("unhealthy"), nil, 100*time.Millisecond)
 	}
 	// 构造 degraded：1 次失败 + 不同延迟
-	router.RecordFailure("degraded-slow", nil, 2000*time.Millisecond)
-	router.RecordFailure("degraded-fast", nil, 100*time.Millisecond)
+	router.RecordFailure(recordAs("degraded-slow"), nil, 2000*time.Millisecond)
+	router.RecordFailure(recordAs("degraded-fast"), nil, 100*time.Millisecond)
 	// 构造 healthy：记录不同延迟
-	router.RecordSuccess("healthy-slow", 1500*time.Millisecond)
-	router.RecordSuccess("healthy-fast", 100*time.Millisecond)
+	router.RecordSuccess(recordAs("healthy-slow"), 1500*time.Millisecond)
+	router.RecordSuccess(recordAs("healthy-fast"), 100*time.Millisecond)
 
 	plan, _ := router.plan(context.Background(), &LLMRequest{})
 	if len(plan) != 5 {
@@ -581,9 +603,9 @@ func TestRoutedLLM_PlanPrefersFewerFailuresOnSameStatus(t *testing.T) {
 
 	// 两个模型都 degraded、延迟相同，但失败次数不同
 	for i := 0; i < 2; i++ {
-		router.RecordFailure("more-failures", nil, 100*time.Millisecond)
+		router.RecordFailure(recordAs("more-failures"), nil, 100*time.Millisecond)
 	}
-	router.RecordFailure("fewer-failures", nil, 100*time.Millisecond)
+	router.RecordFailure(recordAs("fewer-failures"), nil, 100*time.Millisecond)
 
 	plan, _ := router.plan(context.Background(), &LLMRequest{})
 	if len(plan) < 2 {
@@ -629,6 +651,27 @@ func TestRoutedLLM_AutoAppendsConfiguredEnvFallback(t *testing.T) {
 	}
 	if len(plan) != 2 || plan[0].ModelName != "db-model" || plan[1].ModelName != "env-fallback" {
 		t.Fatalf("plan = %v, want [db-model env-fallback]", modelNames(plan))
+	}
+}
+
+// TestRoutedLLM_AutoSkipsCrossProtocolEnvFallback Auto（无 model_id）时，
+// 目录主模型为 Anthropic，而 env fallback 是 OpenAI 兼容协议：跨协议兜底语义错乱，
+// 不应被追加到 plan。
+func TestRoutedLLM_AutoSkipsCrossProtocolEnvFallback(t *testing.T) {
+	anthropicProfile := openAITextProfile()
+	anthropicProfile.Protocol = llmcore.ProtocolAnthropic
+	catalog := []*LLMRuntimeConfig{{Profile: anthropicProfile, ModelName: "claude"}}
+	fallback := &LLMRuntimeConfig{Profile: openAITextProfile(), ModelName: "env-openai"}
+	router := NewRoutedLLM(func(ctx context.Context) ([]*LLMRuntimeConfig, error) {
+		return catalog, nil
+	}, fallback, nil)
+
+	plan, err := router.plan(context.Background(), &LLMRequest{})
+	if err != nil {
+		t.Fatalf("plan() error = %v", err)
+	}
+	if len(plan) != 1 || plan[0].ModelName != "claude" {
+		t.Fatalf("plan = %v, want [claude] (cross-protocol fallback must be skipped)", modelNames(plan))
 	}
 }
 

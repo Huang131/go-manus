@@ -88,6 +88,7 @@ const (
 
 // === 路由权重配置 ===
 const (
-	// HealthRankUnknown 健康状态未知时的排名分值
+	// HealthRankUnknown 健康状态未知时的排名分值（差于 unhealthy：
+	// 未知模型不抢占存量流量，仅作为 fallback 候选被尝试）
 	HealthRankUnknown = 3
 )

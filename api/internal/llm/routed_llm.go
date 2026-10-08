@@ -85,22 +85,32 @@ func (r *RoutedLLM) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMRe
 	if err != nil {
 		return nil, err
 	}
+	attempts := 0
 	var lastErr error
-	for idx, cfg := range plan {
+	for _, cfg := range plan {
 		if cfg == nil {
 			continue
 		}
 		start := time.Now()
 		resp, err := r.factory(cfg).Invoke(ctx, req)
 		latency := time.Since(start)
+		attempts++
 		if err == nil {
-			r.RecordSuccess(configKey(cfg), latency)
+			r.RecordSuccess(cfg, latency)
 			return resp, nil
 		}
-		r.RecordFailure(configKey(cfg), err, latency)
+		// 请求上下文已取消或超时：继续 fallback 无意义（后续候选会在同一 ctx 上立即失败），
+		// 且不属供应商故障，不污染健康统计、不再尝试备用模型。
+		if ctx.Err() != nil {
+			return nil, err
+		}
+		r.RecordFailure(cfg, err, latency)
 		lastErr = err
-		if idx == 0 {
-			if pe, ok := err.(*llmcore.ProviderError); ok && pe.Fallbackable && canFallbackAfterToolUse(req) {
+		// 与 Stream 对齐：仅首次尝试失败、错误可 fallback、工具使用安全时才切换下一候选。
+		// 用尝试计数而非 plan 下标判断——plan[0] 为 nil 时真正的首次尝试在更后面的下标。
+		if attempts == 1 {
+			var pe *llmcore.ProviderError
+			if errors.As(err, &pe) && pe.Fallbackable && llmcore.CanFallbackAfterToolUse(req.Messages, req.Tools) {
 				continue
 			}
 		}
@@ -113,12 +123,17 @@ func (r *RoutedLLM) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMRe
 }
 
 // Stream 选择支持流式能力的模型并透传增量。
-// 流式请求暂不做中途 fallback，因为响应可能已经部分发送给调用方。
+// 建连失败（Stream 同步返回 error，此时尚未向调用方发送任何增量）按与 Invoke
+// 相同的严格规则 fallback：仅首次尝试、错误可 fallback、且工具使用安全
+// （CanFallbackAfterToolUse：无已执行副作用工具，且未声明写工具）。
+// 一旦建流成功则不做中途 fallback——增量可能已部分发送，中途换模型会产生内容拼接。
 func (r *RoutedLLM) Stream(ctx context.Context, req *LLMRequest) (<-chan llmcore.LLMDelta, error) {
 	plan, err := r.plan(ctx, req)
 	if err != nil {
 		return nil, err
 	}
+	attempts := 0
+	var lastErr error
 	for _, cfg := range plan {
 		if cfg == nil {
 			continue
@@ -136,16 +151,36 @@ func (r *RoutedLLM) Stream(ctx context.Context, req *LLMRequest) (<-chan llmcore
 			continue
 		}
 		ch, streamErr := streaming.Stream(ctx, req)
+		attempts++
 		if streamErr != nil {
-			r.RecordFailure(configKey(cfg), streamErr, 0)
+			// 调用方取消/超时：后续候选会在同一 ctx 上立即失败，
+			// 且不属供应商故障，不污染健康统计、不再 fallback。
+			if ctx.Err() != nil {
+				return nil, streamErr
+			}
+			r.RecordFailure(cfg, streamErr, 0)
+			// 与 Invoke 对齐：仅首次尝试失败、错误可 fallback、无副作用工具时才切换下一候选
+			if attempts == 1 {
+				var pe *llmcore.ProviderError
+				if errors.As(streamErr, &pe) && pe.Fallbackable && llmcore.CanFallbackAfterToolUse(req.Messages, req.Tools) {
+					lastErr = streamErr
+					continue
+				}
+			}
 			return nil, streamErr
 		}
 		if ch == nil {
 			err := errors.New("streaming llm returned nil channel")
-			r.RecordFailure(configKey(cfg), err, 0)
+			r.RecordFailure(cfg, err, 0)
 			return nil, err
 		}
 		return r.trackStream(ctx, cfg, ch), nil
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	if modelID := ModelIDFromContext(ctx); modelID != "" {
+		return nil, fmt.Errorf("no streaming llm model available: 指定模型 %s 不支持流式", modelID)
 	}
 	return nil, errors.New("no streaming llm model available")
 }
@@ -155,6 +190,11 @@ func (r *RoutedLLM) trackStream(ctx context.Context, cfg *LLMRuntimeConfig, inpu
 	go func() {
 		start := time.Now()
 		defer close(output)
+		// 口径说明：这里的 latency 是整个流的消费时长（含下游排空速度），
+		// 与 Invoke 的完整生成时长进同一个 AverageLatencyMS EMA。
+		// 流式分钟级 vs 非流式秒级，混口径会稀释排序信号——
+		// 轻量实现接受此权衡，仅作 tiebreaker 使用，不做精确延迟统计。
+		streamErr := ""
 		for {
 			select {
 			case <-ctx.Done():
@@ -162,8 +202,17 @@ func (r *RoutedLLM) trackStream(ctx context.Context, cfg *LLMRuntimeConfig, inpu
 				return
 			case delta, ok := <-input:
 				if !ok {
-					r.RecordSuccess(configKey(cfg), time.Since(start))
+					latency := time.Since(start)
+					if streamErr != "" {
+						r.RecordFailure(cfg, errors.New(streamErr), latency)
+					} else {
+						r.RecordSuccess(cfg, latency)
+					}
 					return
+				}
+				// 协议约定：Error delta 表示本次流失败，发送后 channel 会关闭。
+				if delta.Error != "" {
+					streamErr = delta.Error
 				}
 				select {
 				case output <- delta:
@@ -211,7 +260,8 @@ func (r *RoutedLLM) plan(ctx context.Context, req *LLMRequest) ([]*LLMRuntimeCon
 	// Auto 语义（业界惯例，对齐 Cursor）：
 	//   - ctx 指定 model_id → 用户选定，粘性路由：plan 只含该模型，失败直接报错
 	//   - 未指定 model_id（Auto）→ 系统路由，env fallback 作为最后兜底追加在 plan 尾部
-	if modelID := ModelIDFromContext(ctx); modelID != "" {
+	modelID := ModelIDFromContext(ctx)
+	if modelID != "" {
 		for _, cfg := range catalog {
 			if cfg != nil && cfg.Profile.ID == modelID {
 				return []*LLMRuntimeConfig{cfg}, nil
@@ -233,13 +283,29 @@ func (r *RoutedLLM) plan(ctx context.Context, req *LLMRequest) ([]*LLMRuntimeCon
 			plan = append(plan, candidate)
 		}
 	}
-	// Auto 路径：env fallback（部署方在配置文件里显式指定的保底模型）
-	// 作为最后一位追加。仅在它真实配置过时生效，避免把零值配置当候选。
-	if modelID := ModelIDFromContext(ctx); modelID == "" &&
-		r.fallback != nil && primary != r.fallback && r.fallback.ModelName != "" {
-		plan = append(plan, r.fallback)
+	// Auto 路径：env fallback（部署方在配置文件里显式指定的保底模型）作为最后兜底。
+	// 追加条件：真实配置过、不重复（按稳定模型名去重）、且主模型非空时须协议/能力兼容。
+	if r.fallback != nil && r.fallback.ModelName != "" &&
+		!containsModel(plan, r.fallback) {
+		if primary == nil || llmcore.CanFallbackTo(r.fallback.Profile, primary.Profile) {
+			plan = append(plan, r.fallback)
+		}
 	}
 	return plan, nil
+}
+
+// containsModel 判断 plan 中是否已存在与 target 相同的模型（按稳定模型名去重，
+// 避免 env fallback 与目录中同名模型被重复调用）。
+func containsModel(plan []*LLMRuntimeConfig, target *LLMRuntimeConfig) bool {
+	if target == nil || target.ModelName == "" {
+		return false
+	}
+	for _, cfg := range plan {
+		if cfg != nil && cfg.ModelName == target.ModelName {
+			return true
+		}
+	}
+	return false
 }
 
 func betterHealth(a, b *LLMRuntimeConfig) bool {
@@ -263,7 +329,7 @@ func betterHealth(a, b *LLMRuntimeConfig) bool {
 
 func healthRank(cfg *LLMRuntimeConfig) int {
 	if cfg == nil {
-		return 3
+		return HealthRankUnknown
 	}
 	switch cfg.Health.Status {
 	case model.HealthStateHealthy:
@@ -273,7 +339,9 @@ func healthRank(cfg *LLMRuntimeConfig) int {
 	case model.HealthStateUnhealthy:
 		return 2
 	default:
-		return 1
+		// 未知状态（新模型、重启后无数据）排最后：新模型不抢占存量流量，
+		// 只作为 fallback 候选被尝试；同分时由延迟与稳定排序打破平局。
+		return HealthRankUnknown
 	}
 }
 
@@ -283,10 +351,14 @@ func healthRank(cfg *LLMRuntimeConfig) int {
 //   - 最近一次延迟
 //   - 失败计数衰减
 //   - 健康状态回升
-func (r *RoutedLLM) RecordSuccess(modelKey string, latency time.Duration) {
-	if modelKey == "" {
+//
+// 只记录目录模型（有 Profile.ID）：健康快照只注入目录条目（见 applyStoredHealth），
+// env fallback 单例的健康数据永不参与排序——写入只会积累无人读取的死数据。
+func (r *RoutedLLM) RecordSuccess(cfg *LLMRuntimeConfig, latency time.Duration) {
+	if cfg == nil || cfg.Profile.ID == "" {
 		return
 	}
+	modelKey := cfg.Profile.ID
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -304,10 +376,20 @@ func (r *RoutedLLM) RecordSuccess(modelKey string, latency time.Duration) {
 }
 
 // RecordFailure 写回一次失败调用的运行时健康状态。
-func (r *RoutedLLM) RecordFailure(modelKey string, err error, latency time.Duration) {
-	if modelKey == "" {
+// 同 RecordSuccess：只记录有 Profile.ID 的目录模型。
+//
+// 配置类错误（auth/not_found/bad_request/context_limit，见 isConfigError）
+// 不计入失败计数：API key 配错、模型名写错是确定性问题，重试也不会成功，
+// 把这类模型打成 unhealthy 会让路由永久避开一个"配置修好即正常"的模型，
+// 且掩盖真实病因（排障时看到的是降权，而不是配置错误本身）。
+func (r *RoutedLLM) RecordFailure(cfg *LLMRuntimeConfig, err error, latency time.Duration) {
+	if cfg == nil || cfg.Profile.ID == "" {
 		return
 	}
+	if isConfigError(err) {
+		return
+	}
+	modelKey := cfg.Profile.ID
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -325,7 +407,17 @@ func (r *RoutedLLM) RecordFailure(modelKey string, err error, latency time.Durat
 		health.Status = model.HealthStateDegraded
 	}
 	r.health[modelKey] = health
-	_ = err
+}
+
+// isConfigError 判断错误是否为配置/语义类问题（确定性失败，非供应商抖动）。
+// 委托 llmcore.IsDeterministicKind 单一事实源——与 ProviderError.Fallbackable
+// 共用同一份清单，新增 Kind 时两个决策自动保持一致。
+func isConfigError(err error) bool {
+	var pe *llmcore.ProviderError
+	if !errors.As(err, &pe) {
+		return false
+	}
+	return llmcore.IsDeterministicKind(pe.Kind)
 }
 
 func (r *RoutedLLM) applyStoredHealth(catalog []*LLMRuntimeConfig) {
@@ -367,31 +459,6 @@ func updateLatencyMS(prev int, latency time.Duration) int {
 		return ms
 	}
 	return (prev + ms) / 2
-}
-
-func canFallbackAfterToolUse(req *LLMRequest) bool {
-	if req == nil {
-		return true
-	}
-	hasExecutedTool := false
-	for _, msg := range req.Messages {
-		if msg.Role == model.RoleTool {
-			hasExecutedTool = true
-			break
-		}
-	}
-	if !hasExecutedTool {
-		return true
-	}
-	if len(req.Tools) == 0 {
-		return false
-	}
-	for _, tool := range req.Tools {
-		if !tool.ReadOnly {
-			return false
-		}
-	}
-	return true
 }
 
 func (r *RoutedLLM) ModelName() string {

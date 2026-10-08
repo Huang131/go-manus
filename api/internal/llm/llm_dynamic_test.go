@@ -5,24 +5,7 @@ import (
 	"testing"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
-	"github.com/Huang131/go-manus/api/internal/model"
 )
-
-type stubLLM struct {
-	name   string
-	invoke func(ctx context.Context, req *LLMRequest) (*llmcore.LLMResponse, error)
-}
-
-func (s *stubLLM) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMResponse, error) {
-	if s.invoke != nil {
-		return s.invoke(ctx, req)
-	}
-	return &llmcore.LLMResponse{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: s.name}}, nil
-}
-
-func (s *stubLLM) ModelName() string    { return s.name }
-func (s *stubLLM) Temperature() float64 { return 0.7 }
-func (s *stubLLM) MaxTokens() int       { return 1024 }
 
 func TestDynamicLLM_UsesFactory(t *testing.T) {
 	var gotProtocol string

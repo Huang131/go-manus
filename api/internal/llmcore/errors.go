@@ -101,10 +101,22 @@ func isRetryable(kind ErrorKind) bool {
 // 即使同 provider 重试能恢复，仍允许 fallback
 // 注意：内容安全/限流/网络错误都允许 fallback
 func isFallbackable(kind ErrorKind) bool {
+	return !IsDeterministicKind(kind)
+}
+
+// IsDeterministicKind 判断是否为请求/配置类确定性错误（非供应商健康问题）。
+// 单一事实源，两个决策共用同一份清单：
+//   - ProviderError.Fallbackable（isFallbackable）：确定性错误换模型也救不了，不 fallback
+//   - llm 层健康统计（isConfigError）：模型本身没病，不计入失败计数/降权
+//
+// 漂移后果：新增 Kind 时只改一侧会让"该不该 fallback"与"该不该污染健康"
+// 两个答案分叉（如配额类错误 fallback 被拒却把模型打成 unhealthy）。
+// 修改此清单必须同时评估两个决策的语义。
+func IsDeterministicKind(kind ErrorKind) bool {
 	switch kind {
 	case KindAuth, KindNotFound, KindBadRequest, KindContentFilter, KindContextLimit:
-		return false // 配置/语义类问题，fallback 也救不了
+		return true // 配置/语义类问题：确定性失败，非供应商抖动
 	default:
-		return true
+		return false
 	}
 }

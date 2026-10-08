@@ -1,7 +1,6 @@
 package llm
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -10,9 +9,11 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/bytedance/sonic"
 
+	"github.com/Huang131/go-manus/api/internal/llm/sse"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/pkg/httpconst"
@@ -47,7 +48,7 @@ type OpenAIClientConfig struct {
 
 func (c *OpenAIClientConfig) setDefaults() {
 	if c.ToolCallTimeout == 0 {
-		c.ToolCallTimeout = 15
+		c.ToolCallTimeout = DefaultToolCallTimeout
 	}
 }
 
@@ -55,7 +56,8 @@ func (c *OpenAIClientConfig) setDefaults() {
 func NewOpenAIClient(cfg *OpenAIClientConfig) *OpenAIClient {
 	cfg.setDefaults()
 	return &OpenAIClient{
-		baseURL:         cfg.BaseURL,
+		// 尾斜杠归一：配置 http://api.example.com/v1/ 时避免拼出 //chat/completions
+		baseURL:         strings.TrimSuffix(cfg.BaseURL, "/"),
 		apiKey:          cfg.APIKey,
 		modelName:       cfg.ModelName,
 		temperature:     cfg.Temperature,
@@ -76,8 +78,16 @@ type openAIChatRequest struct {
 	Temperature     *float64                `json:"temperature,omitempty"`
 	MaxTokens       *int                    `json:"max_tokens,omitempty"`
 	Stream          bool                    `json:"stream,omitempty"`
+	StreamOptions   *openAIStreamOptions    `json:"stream_options,omitempty"`
 	ResponseFormat  *llmcore.ResponseFormat `json:"response_format,omitempty"`
 	ReasoningEffort *string                 `json:"reasoning_effort,omitempty"`
+}
+
+// openAIStreamOptions OpenAI 流式请求选项。
+// 严格 OpenAI 协议在流式模式下默认不返回 usage，必须显式开启 include_usage，
+// 否则流式调用的 token 统计与成本恒为 0（DeepSeek/vLLM 等网关默认带，但不可依赖）。
+type openAIStreamOptions struct {
+	IncludeUsage bool `json:"include_usage,omitempty"`
 }
 
 type openAIMessage struct {
@@ -147,42 +157,47 @@ type openAIChatResponse struct {
 		} `json:"completion_tokens_details"`
 	} `json:"usage"`
 	Error *struct {
-		Message    string `json:"message"`
-		Type       string `json:"type"`
-		Code       string `json:"code"`
-		RetryAfter int    `json:"retry_after"`
+		Message string `json:"message"`
+		Type    string `json:"type"`
+		Code    string `json:"code"`
 	} `json:"error,omitempty"`
 }
 
-// Invoke 调用 OpenAI Chat API
-//
-// 阶段 1d 改造点：
-//  1. 入参 Messages / Tools / ResponseFormat 用 llmcore 强类型，直接 marshal
-//  2. 内部按 llmcore 协议解析上游响应（Content / ReasoningContent / ToolCalls 严格分离）
-//  3. 去掉"content 为空时把 reasoning 当 content 兜底"的违规逻辑
-//     —— Reasoning 不再覆盖 Content；调用方读 ReasoningContent 字段
-//  4. 上游错误按 401/403/429/5xx/timeout 分类为 llmcore.ProviderError，
-//     为阶段 3 fallback 矩阵提供 ErrorKind 钩子
-//  5. 对外返回 llmcore.LLMResponse（与 anthropic adapter 一致的统一响应形状）
-func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMResponse, error) {
-	// 构建 wire format 请求
-	temp := c.effectiveTemperature()
-	maxTok := c.effectiveMaxTokens()
+// buildChatRequest 把 llmcore 请求转换为 OpenAI 兼容 wire format，Invoke/Stream 共用。
+// stream=true 时额外设置 Stream 和 stream_options.include_usage
+// （严格 OpenAI 协议流式默认不返回 usage，必须显式开启）。
+func (c *OpenAIClient) buildChatRequest(req *LLMRequest, stream bool) openAIChatRequest {
 	chatReq := openAIChatRequest{
 		Model:          c.modelName,
 		Messages:       toOpenAIMessages(req.Messages),
 		Tools:          toOpenAITools(req.Tools),
-		Temperature:    &temp,
-		MaxTokens:      &maxTok,
+		Temperature:    func() *float64 { t := c.effectiveTemperature(); return &t }(),
 		ResponseFormat: req.ResponseFormat,
+	}
+	// max_tokens=0 表示未配置：必须省略字段而不是下发 0。
+	// OpenAI 兼容协议要求 max_tokens >= 1，下发 0 会被上游 400 拒绝
+	// （"max_tokens must be at least 1"）。
+	if maxTok := c.effectiveMaxTokens(); maxTok > 0 {
+		chatReq.MaxTokens = &maxTok
 	}
 	chatReq.ReasoningEffort = c.effectiveReasoningEffort()
 	if req.ToolChoice != "" {
 		chatReq.ToolChoice = req.ToolChoice
 	}
+	if stream {
+		chatReq.Stream = true
+		chatReq.StreamOptions = &openAIStreamOptions{IncludeUsage: true}
+	}
+	return chatReq
+}
 
-	// 序列化请求
-	reqBody, err := sonic.Marshal(chatReq)
+// Invoke 调用 OpenAI Chat API，返回统一的 llmcore.LLMResponse。
+func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LLMResponse, error) {
+	if req == nil {
+		return nil, fmt.Errorf("llm request is nil")
+	}
+
+	reqBody, err := sonic.Marshal(c.buildChatRequest(req, false))
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
@@ -210,8 +225,9 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LL
 	// 发送请求
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		// tool calling 超时特殊处理
-		if len(req.Tools) > 0 && errors.Is(err, context.DeadlineExceeded) {
+		// 超时归因：只有父 ctx 仍然存活时，DeadlineExceeded 才是 tool calling 子超时；
+		// 父 ctx（如全局超时）先到期时不能归因为"模型不支持 tool calling"，否则误导排障。
+		if len(req.Tools) > 0 && ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
 			pe := llmcore.NewProviderError(llmcore.KindTimeout, "openai_compat", c.modelName,
 				fmt.Sprintf("tool calling 请求超时（%v），模型 %q 可能不支持 tool calling", c.toolCallTimeout, c.modelName))
 			pe.StatusCode = http.StatusGatewayTimeout
@@ -238,8 +254,9 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LL
 		return nil, pe
 	}
 
-	// 非 2xx：分类为 ProviderError，让阶段 3 fallback 决策有 ErrorKind
-	if resp.StatusCode != http.StatusOK {
+	// 非 2xx：分类为 ProviderError，让阶段 3 fallback 决策有 ErrorKind。
+	// 接受全部 2xx（部分网关用 201/204 转发成功响应）。
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, classifyHTTPError(resp.StatusCode, respBody, "openai_compat", c.modelName)
 	}
 
@@ -253,6 +270,14 @@ func (c *OpenAIClient) Invoke(ctx context.Context, req *LLMRequest) (*llmcore.LL
 		pe.Cause = err
 		pe.Retryable = false
 		pe.Fallbackable = false
+		return nil, pe
+	}
+
+	// 部分兼容网关（one-api/new-api 等）用 200 + error body 转发上游错误。
+	// 优先消费 error 字段，避免真实错误被 "no choices in response" 覆盖。
+	if e := chatResp.Error; e != nil && e.Message != "" {
+		pe := llmcore.NewProviderError(llmcore.KindServer, "openai_compat", c.modelName,
+			fmt.Sprintf("上游在 200 响应中返回错误: %s (type=%s, code=%s)", e.Message, e.Type, e.Code))
 		return nil, pe
 	}
 
@@ -345,6 +370,12 @@ type openAIStreamChunk struct {
 		PromptTokens     int `json:"prompt_tokens"`
 		CompletionTokens int `json:"completion_tokens"`
 		TotalTokens      int `json:"total_tokens"`
+		// 与非流式 openAIChatResponse.Usage 相同的双形状兼容：
+		// reasoning_tokens（DeepSeek / GMI 顶层）与 completion_tokens_details.reasoning_tokens（OpenAI 标准）
+		ReasoningTokens   int `json:"reasoning_tokens,omitempty"`
+		CompletionDetails struct {
+			ReasoningTokens int `json:"reasoning_tokens"`
+		} `json:"completion_tokens_details"`
 	} `json:"usage,omitempty"`
 }
 
@@ -355,23 +386,7 @@ func (c *OpenAIClient) Stream(ctx context.Context, req *LLMRequest) (<-chan llmc
 		return nil, fmt.Errorf("llm request is nil")
 	}
 
-	temp := c.effectiveTemperature()
-	maxTok := c.effectiveMaxTokens()
-	chatReq := openAIChatRequest{
-		Model:          c.modelName,
-		Messages:       toOpenAIMessages(req.Messages),
-		Tools:          toOpenAITools(req.Tools),
-		Temperature:    &temp,
-		MaxTokens:      &maxTok,
-		Stream:         true,
-		ResponseFormat: req.ResponseFormat,
-	}
-	chatReq.ReasoningEffort = c.effectiveReasoningEffort()
-	if req.ToolChoice != "" {
-		chatReq.ToolChoice = req.ToolChoice
-	}
-
-	reqBody, err := sonic.Marshal(chatReq)
+	reqBody, err := sonic.Marshal(c.buildChatRequest(req, true))
 	if err != nil {
 		return nil, fmt.Errorf("marshal stream request: %w", err)
 	}
@@ -380,6 +395,7 @@ func (c *OpenAIClient) Stream(ctx context.Context, req *LLMRequest) (<-chan llmc
 	streamCtx, cancelStream := streamContext(ctx)
 	httpReq, err := http.NewRequestWithContext(streamCtx, http.MethodPost, c.baseURL+openAIChatCompletionsPath, bytes.NewReader(reqBody))
 	if err != nil {
+		cancelStream()
 		return nil, fmt.Errorf("create stream request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", httpconst.ContentTypeJSON)
@@ -390,6 +406,7 @@ func (c *OpenAIClient) Stream(ctx context.Context, req *LLMRequest) (<-chan llmc
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		cancelStream()
 		if errors.Is(err, context.DeadlineExceeded) {
 			pe := llmcore.NewProviderError(llmcore.KindTimeout, "openai_compat", c.modelName, "stream request timeout")
 			pe.StatusCode = http.StatusGatewayTimeout
@@ -400,9 +417,10 @@ func (c *OpenAIClient) Stream(ctx context.Context, req *LLMRequest) (<-chan llmc
 		pe.Cause = err
 		return nil, pe
 	}
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
 		body, readErr := io.ReadAll(resp.Body)
+		cancelStream()
 		if readErr != nil {
 			return nil, fmt.Errorf("read stream error response: %w", readErr)
 		}
@@ -420,36 +438,38 @@ func (c *OpenAIClient) readOpenAIStream(ctx context.Context, body io.ReadCloser,
 	defer close(deltas)
 	defer body.Close()
 
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 4096), 1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || !strings.HasPrefix(line, "data:") {
-			continue
+	err := sse.ParseWithContext(ctx, body, sse.DefaultConfig, func(ctx context.Context, frame sse.Frame) bool {
+		// 空 data 帧跳过
+		if len(frame.Data) == 0 {
+			return true
 		}
-		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if payload == openAISSEEndToken {
-			return
+
+		// OpenAI SSE 结束标记
+		if string(frame.Data) == openAISSEEndToken {
+			return false
 		}
 
 		var chunk openAIStreamChunk
-		if err := sonic.UnmarshalString(payload, &chunk); err != nil {
+		if err := sonic.Unmarshal(frame.Data, &chunk); err != nil {
 			sendStreamDelta(ctx, deltas, llmcore.LLMDelta{Error: fmt.Sprintf("decode stream chunk: %v", err)})
-			return
+			return false
 		}
+
 		var usage *llmcore.Usage
 		if chunk.Usage != nil {
 			usage = &llmcore.Usage{
 				PromptTokens:     chunk.Usage.PromptTokens,
 				CompletionTokens: chunk.Usage.CompletionTokens,
 				TotalTokens:      chunk.Usage.TotalTokens,
+				ReasoningTokens:  reasoningTokens(chunk.Usage.ReasoningTokens, chunk.Usage.CompletionDetails.ReasoningTokens),
 			}
 		}
+
+		// 只有 usage 没有 choices 的帧（通常在开头或结尾）
 		if len(chunk.Choices) == 0 && usage != nil {
-			if !sendStreamDelta(ctx, deltas, llmcore.LLMDelta{Usage: usage}) {
-				return
-			}
+			return sendStreamDelta(ctx, deltas, llmcore.LLMDelta{Usage: usage})
 		}
+
 		for _, choice := range chunk.Choices {
 			reasoning := choice.Delta.ReasoningContent
 			if reasoning == "" {
@@ -474,11 +494,14 @@ func (c *OpenAIClient) readOpenAIStream(ctx context.Context, body io.ReadCloser,
 				continue
 			}
 			if !sendStreamDelta(ctx, deltas, delta) {
-				return
+				return false
 			}
 		}
-	}
-	if err := scanner.Err(); err != nil {
+		return true
+	})
+
+	// context 已取消时下游早已收不到错误，静默退出即可，其余错误才上报。
+	if err != nil && !errors.Is(err, context.Canceled) {
 		sendStreamDelta(ctx, deltas, llmcore.LLMDelta{Error: fmt.Sprintf("read stream: %v", err)})
 	}
 }
@@ -517,6 +540,9 @@ func (c *OpenAIClient) effectiveReasoningEffort() *string {
 	case model.ReasoningHigh:
 		v := openAIReasoningEffortHigh
 		return &v
+		// ReasoningAuto 有意落空：OpenAI 协议没有 auto 档（reasoning_effort 仅
+		// none/low/medium/high），不发参数让模型用默认行为。
+		// 注意与 Anthropic 适配器语义不同：那边 Auto 映射 ThinkingBudgetLow。
 	}
 
 	if extra, ok := c.requestPolicy.Extra["reasoning_effort"]; ok {
@@ -594,7 +620,7 @@ func toOpenAITools(tools []llmcore.ToolSpec) []openAIToolSpec {
 // classifyHTTPError 把 HTTP 状态码分类为 llmcore.ErrorKind，并包装为 ProviderError。
 // 参考 MULTI_LLM_ADAPTER_DESIGN.md "错误分类"：
 //   - 401/403 → auth         不重试不 fallback
-//   - 429     → rate_limit   读 Retry-After 退避，必要时 fallback
+//   - 429     → rate_limit   必要时 fallback（本层只分类，退避策略由上层路由重试决定）
 //   - 5xx     → server       有限重试，失败后 fallback
 //   - 4xx     → bad_request  不重试
 //   - 其他    → unknown
@@ -636,10 +662,16 @@ func classifyHTTPError(status int, body []byte, provider, modelName string) erro
 	return pe
 }
 
+// truncateBody 截断响应体用于错误消息。按 rune 边界回退，
+// 避免字节截断切断多字节 UTF-8 字符导致日志乱码。
 func truncateBody(b []byte) string {
 	const max = 512
 	if len(b) > max {
-		return string(b[:max]) + "..."
+		cut := max
+		for cut > 0 && !utf8.RuneStart(b[cut]) {
+			cut--
+		}
+		return string(b[:cut]) + "..."
 	}
 	return string(b)
 }

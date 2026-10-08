@@ -430,6 +430,7 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 					// 添加错误结果到历史，继续循环
 					messages = append(messages, llmcore.Message{
 						Role:        model.RoleTool,
+						Name:        tc.Function.Name,
 						ToolCallID:  tc.ID,
 						ContentText: fmt.Sprintf(`{"success": false, "message": "%s"}`, err.Error()),
 					})
@@ -441,6 +442,7 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 					// 将工具结果添加到历史
 					messages = append(messages, llmcore.Message{
 						Role:        model.RoleTool,
+						Name:        tc.Function.Name,
 						ToolCallID:  result.ToolCallID,
 						ContentText: result.Result.LLMJSON(),
 					})
@@ -466,6 +468,7 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 				// 将工具结果添加到历史
 				messages = append(messages, llmcore.Message{
 					Role:        model.RoleTool,
+					Name:        tc.Function.Name,
 					ToolCallID:  result.ToolCallID,
 					ContentText: result.Result.LLMJSON(),
 				})
