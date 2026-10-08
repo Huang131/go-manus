@@ -15,7 +15,6 @@ import (
 // MCPTool MCP 工具 (Model Context Protocol)
 type MCPTool struct {
 	mu      sync.RWMutex
-	config  *model.MCPConfig
 	manager *mcp.MCPClientManager
 	tools   map[string]map[string]mcp.MCPToolInfo // serverName -> toolName -> toolInfo
 }
@@ -152,8 +151,6 @@ func (t *MCPTool) Initialize(ctx context.Context, cfg *model.MCPConfig) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	t.config = cfg
-
 	// agent.MCPConfig 已经是 model.MCPConfig，直接传递
 	t.manager = mcp.NewMCPClientManager(cfg)
 
@@ -272,7 +269,6 @@ func (t *MCPTool) Cleanup() error {
 	}
 
 	t.tools = make(map[string]map[string]mcp.MCPToolInfo)
-	t.config = nil
 
 	return nil
 }

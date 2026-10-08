@@ -20,7 +20,6 @@ type A2AAgentCard struct {
 	Capabilities        *A2AAgentCapabilities  `json:"capabilities,omitempty"`        // Agent 能力
 	Skills              []A2AAgentSkill        `json:"skills,omitempty"`              // Agent 技能列表
 	Metadata            map[string]interface{} `json:"metadata,omitempty"`            // 元数据
-	Enabled             bool                   `json:"enabled,omitempty"`             // 是否启用（go-manus 本地字段，非协议字段）
 }
 
 // A2AInterface A2A 支持的协议接口（v1.0）。
@@ -33,7 +32,7 @@ type A2AInterface struct {
 // A2AAgentCapabilities Agent 能力。
 //
 // 兼容两版命名：v1.0 使用 `streaming`，v0.3 使用 `supportsStreaming`。
-// 调用方优先读 SupportsStreaming() 聚合方法，不要直接读字段。
+// 调用方优先读 CanStream() 聚合方法，不要直接读字段。
 type A2AAgentCapabilities struct {
 	Streaming                 bool `json:"streaming,omitempty"`                 // v1.0 流式
 	PushNotifications         bool `json:"pushNotifications,omitempty"`         // v1.0 推送通知

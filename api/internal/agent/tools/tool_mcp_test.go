@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/Huang131/go-manus/api/internal/mcp"
 )
 
 func TestMCPToolInvokeValidatesParameters(t *testing.T) {
@@ -47,5 +49,30 @@ func TestMCPToolInvokeAllowsMissingParams(t *testing.T) {
 	}
 	if result == nil || result.Success || result.Message != "MCP manager not initialized" {
 		t.Fatalf("Invoke() result = %+v, want manager initialization error", result)
+	}
+}
+
+// TestMCPToolCleanupDropsLoadedTools 覆盖 Cleanup 的重置语义：清理后不得再暴露
+// 已加载的工具。该路径此前零覆盖，且顺带清理了一个只写不读的死字段 config。
+func TestMCPToolCleanupDropsLoadedTools(t *testing.T) {
+	tool := NewMCPTool()
+	// 直接注入已加载状态，模拟 Initialize 成功后的 tools 缓存（避免依赖真实 MCP server）。
+	tool.tools = map[string]map[string]mcp.MCPToolInfo{
+		"demo": {"search": {Name: "search"}},
+	}
+
+	if !tool.HasTool("search") {
+		t.Fatal("precondition failed: injected tool should be visible")
+	}
+
+	if err := tool.Cleanup(); err != nil {
+		t.Fatalf("Cleanup() error = %v, want nil", err)
+	}
+
+	if tool.HasTool("search") {
+		t.Error("Cleanup() should drop loaded tools")
+	}
+	if got := len(tool.GetToolsForLLM()); got != 0 {
+		t.Errorf("GetToolsForLLM() after Cleanup = %d tools, want 0", got)
 	}
 }

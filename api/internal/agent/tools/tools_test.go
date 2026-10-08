@@ -2,6 +2,11 @@ package tools
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
@@ -152,9 +157,19 @@ func TestA2ATool_Parameters(t *testing.T) {
 		t.Fatal("Parameters() should have properties")
 	}
 
-	// 检查必需字段
-	if _, ok := properties["action"]; !ok {
-		t.Error("Parameters() should have action field")
+	// 声明即实现：schema 的每个属性都必须被 Invoke 实际读取（如 agent_id/task 由
+	// call_agent 消费），反向也不得出现只声明不消费的参数——历史上 context 就是
+	// 一个被静默丢弃的字段，会误导 LLM 传入无效参数。
+	wantProps := map[string]bool{"action": true, "agent_id": true, "task": true}
+	for name := range properties {
+		if !wantProps[name] {
+			t.Errorf("Parameters() declares unexpected property %q (must be consumed by Invoke)", name)
+		}
+	}
+	for name := range wantProps {
+		if _, ok := properties[name]; !ok {
+			t.Errorf("Parameters() should declare %q field", name)
+		}
 	}
 
 	required, ok := params["required"].([]string)
@@ -261,13 +276,26 @@ func TestA2ATool_Invoke_CallAgentRejectsInvalidRequiredTypes(t *testing.T) {
 	})
 }
 
-func TestA2ATool_MarshalResponseTextHandlesUnsupportedData(t *testing.T) {
-	got := marshalResponseText(func() {})
-	if got == "" {
-		t.Fatal("marshalResponseText() returned empty string for unsupported data")
-	}
-	if got == "null" {
-		t.Fatalf("marshalResponseText() silently returned null: %q", got)
+// TestA2ATool_Invoke_UnknownActionFailsLoud 守护未知 action 必须报错而非静默兜底。
+// 历史实现会把拼错的 action（如 "listagent"）默默当成 call_agent，触发真实的远程执行。
+func TestA2ATool_Invoke_UnknownActionFailsLoud(t *testing.T) {
+	tool := NewA2ATool()
+
+	for _, action := range []string{"listagent", "call", "LIST_AGENTS"} {
+		t.Run(action, func(t *testing.T) {
+			result, err := tool.Invoke(context.Background(), map[string]interface{}{
+				"action": action,
+			})
+			if err != nil {
+				t.Fatalf("Invoke() error = %v, want nil（业务错误应走 ToolResult 双通道）", err)
+			}
+			if result.Success {
+				t.Fatal("Invoke() should fail for unknown action, got success")
+			}
+			if !strings.Contains(result.Message, action) {
+				t.Errorf("Invoke() message = %q, want it to mention the invalid action %q", result.Message, action)
+			}
+		})
 	}
 }
 
@@ -325,6 +353,90 @@ func TestA2ATool_Initialize(t *testing.T) {
 	err = tool.Initialize(context.Background(), &A2AConfig{Agents: []A2AAgent{}})
 	if err != nil {
 		t.Errorf("Initialize(empty config) error = %v, want nil", err)
+	}
+}
+
+func TestA2ATool_InitializeSkipsDuplicateAgentNames(t *testing.T) {
+	newCardServer := func(hits *int32) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(hits, 1)
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprint(w, `{"name":"dup-agent","url":"http://placeholder"}`)
+		}))
+	}
+
+	var hitsA, hitsB int32
+	srvA := newCardServer(&hitsA)
+	defer srvA.Close()
+	srvB := newCardServer(&hitsB)
+	defer srvB.Close()
+
+	tool := NewA2ATool()
+	err := tool.Initialize(context.Background(), &A2AConfig{
+		Agents: []A2AAgent{
+			{Name: "dup-agent", URL: srvA.URL},
+			{Name: "dup-agent", URL: srvB.URL},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Initialize() error = %v, want nil", err)
+	}
+
+	// 同名 Agent 只保留先配置者：第一个服务被请求一次，重复配置的服务不应被访问。
+	if got := atomic.LoadInt32(&hitsA); got != 1 {
+		t.Errorf("first server hits = %d, want 1", got)
+	}
+	if got := atomic.LoadInt32(&hitsB); got != 0 {
+		t.Errorf("duplicate server hits = %d, want 0 (duplicate config should be skipped)", got)
+	}
+
+	if n := len(tool.GetManager().GetAgentCards()); n != 1 {
+		t.Errorf("GetAgentCards() count = %d, want 1", n)
+	}
+}
+
+// TestA2ATool_ListAgentsOmitsEnabledField 守护 list_agents 输出不再携带死字段 enabled。
+// 被停用的 Agent 已在 RuntimeA2AConfig 边界被过滤，运行时 Enabled 恒为 true，无信息量。
+func TestA2ATool_ListAgentsOmitsEnabledField(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"name":"agent-x","description":"a demo agent","url":"http://placeholder"}`)
+	}))
+	defer srv.Close()
+
+	tool := NewA2ATool()
+	if err := tool.Initialize(context.Background(), &A2AConfig{
+		Agents: []A2AAgent{{Name: "agent-x", URL: srv.URL}},
+	}); err != nil {
+		t.Fatalf("Initialize() error = %v, want nil", err)
+	}
+
+	result, err := tool.Invoke(context.Background(), map[string]interface{}{
+		"action": A2AActionListAgents,
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v, want nil", err)
+	}
+	if !result.Success {
+		t.Fatalf("Invoke() = %+v, want success", result)
+	}
+
+	data, ok := result.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("result.Data type = %T, want map[string]interface{}", result.Data)
+	}
+	agents, ok := data["agents"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("agents type = %T, want []map[string]interface{}", data["agents"])
+	}
+	if len(agents) != 1 {
+		t.Fatalf("agents len = %d, want 1", len(agents))
+	}
+	if _, exists := agents[0]["enabled"]; exists {
+		t.Error("list_agents output should not expose dead 'enabled' field")
+	}
+	if agents[0]["id"] != "agent-x" {
+		t.Errorf("agents[0][id] = %v, want agent-x", agents[0]["id"])
 	}
 }
 

@@ -18,7 +18,6 @@ import (
 type A2AServerConfig struct {
 	ID      string // 唯一标识
 	BaseURL string // 服务器基础 URL
-	Enabled bool   // 是否启用
 }
 
 // A2AClientManagerConfig A2A 客户端管理器配置。
@@ -98,7 +97,6 @@ func (m *A2AClientManager) fetchAndResolve(ctx context.Context, server A2AServer
 		return nil, err
 	}
 
-	card.Enabled = server.Enabled
 	return &A2ARemoteAgent{Card: card, Endpoint: endpoint}, nil
 }
 

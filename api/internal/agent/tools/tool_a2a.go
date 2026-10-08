@@ -3,7 +3,6 @@ package tools
 import (
 	"context"
 	"fmt"
-	"github.com/bytedance/sonic"
 	"sync"
 
 	"github.com/Huang131/go-manus/api/internal/a2a"
@@ -12,11 +11,9 @@ import (
 )
 
 // A2ATool A2A (Agent-to-Agent) 工具
-// 参考 Python 版本的 A2ATool
 type A2ATool struct {
 	mu      sync.RWMutex
 	manager *a2a.A2AClientManager
-	config  *A2AConfig
 }
 
 // NewA2ATool 创建 A2A 工具
@@ -54,10 +51,6 @@ func (t *A2ATool) Parameters() map[string]interface{} {
 				"type":        "string",
 				"description": "任务描述",
 			},
-			"context": map[string]interface{}{
-				"type":        "object",
-				"description": "任务上下文（可选）",
-			},
 		},
 		"required": []string{"action"},
 	}
@@ -69,7 +62,6 @@ func (t *A2ATool) ReadOnly() bool {
 }
 
 // Invoke 调用工具
-// 参考 Python 版本的 call_remote_agent 工具
 func (t *A2ATool) Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
 	action, toolErr := requiredToolString(params, "action")
 	if toolErr != nil {
@@ -82,12 +74,15 @@ func (t *A2ATool) Invoke(ctx context.Context, params map[string]interface{}) (*m
 	case A2AActionCallAgent:
 		return t.callAgent(ctx, params)
 	default:
-		return t.callAgent(ctx, params) // 默认为 call_agent，保持向后兼容
+		// 未知 action 必须 fail loud：静默兜底到 call_agent 会让拼错的 action
+		// （如 listagent）触发真实的远程执行（有副作用）。返回错误交给模型自纠。
+		return model.NewToolError(fmt.Sprintf(
+			"未知的 action: %q，可选值: %s、%s",
+			action, A2AActionListAgents, A2AActionCallAgent)), nil
 	}
 }
 
 // listAgents 获取可用的远程 Agent 列表
-// 对应 Python 版本的 get_remote_agent_cards 工具
 func (t *A2ATool) listAgents(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
 	t.mu.RLock()
 	manager := t.manager
@@ -110,7 +105,6 @@ func (t *A2ATool) listAgents(ctx context.Context, params map[string]interface{})
 			"description": card.Description,
 			"url":         endpoint,
 			"version":     card.Version,
-			"enabled":     card.Enabled,
 		}
 
 		// 添加技能列表
@@ -143,7 +137,6 @@ func (t *A2ATool) listAgents(ctx context.Context, params map[string]interface{})
 }
 
 // callAgent 调用远程 Agent
-// 对应 Python 版本的 call_remote_agent 工具
 func (t *A2ATool) callAgent(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
 	agentID, toolErr := requiredToolString(params, "agent_id")
 	if toolErr != nil {
@@ -187,16 +180,7 @@ func (t *A2ATool) callAgent(ctx context.Context, params map[string]interface{}) 
 	), nil
 }
 
-func marshalResponseText(data interface{}) string {
-	jsonBytes, err := sonic.Marshal(data)
-	if err != nil {
-		return fmt.Sprintf("远程 Agent 返回了不可序列化的数据: %v", err)
-	}
-	return string(jsonBytes)
-}
-
 // Initialize 初始化 A2A 工具
-// 参考 Python 版本的 A2ATool.initialize()
 func (t *A2ATool) Initialize(ctx context.Context, cfg *A2AConfig) error {
 	if cfg == nil {
 		return nil
@@ -205,11 +189,19 @@ func (t *A2ATool) Initialize(ctx context.Context, cfg *A2AConfig) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	t.config = cfg
-
-	// 构建服务器配置
+	// 构建服务器配置。Agent 以 Name 作为唯一 ID（manager 内部按 ID 建 map，
+	// 同名后者会静默覆盖前者），这里显式去重：保留先配置者并告警。
 	servers := make([]a2a.A2AServerConfig, 0, len(cfg.Agents))
+	seen := make(map[string]struct{}, len(cfg.Agents))
 	for _, agent := range cfg.Agents {
+		if _, dup := seen[agent.Name]; dup {
+			logger.WarnContext(ctx, "A2A Agent 名称重复，已跳过后续配置（先配置者生效）",
+				logger.String("name", agent.Name),
+				logger.String("url", agent.URL))
+			continue
+		}
+		seen[agent.Name] = struct{}{}
+
 		// 从 URL 中提取 base URL（去掉路径）
 		baseURL := agent.URL
 		if len(baseURL) > 0 && baseURL[len(baseURL)-1] == '/' {
@@ -219,7 +211,6 @@ func (t *A2ATool) Initialize(ctx context.Context, cfg *A2AConfig) error {
 		servers = append(servers, a2a.A2AServerConfig{
 			ID:      agent.Name, // 使用名称作为唯一 ID
 			BaseURL: baseURL,
-			Enabled: true,
 		})
 	}
 
@@ -248,7 +239,6 @@ func (t *A2ATool) Cleanup() error {
 		}
 	}
 
-	t.config = nil
 	return nil
 }
 
