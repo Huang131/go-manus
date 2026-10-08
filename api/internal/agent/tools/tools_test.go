@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/Huang131/go-manus/api/internal/a2a"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 )
@@ -437,6 +438,16 @@ func TestA2ATool_ListAgentsOmitsEnabledField(t *testing.T) {
 	}
 	if agents[0]["id"] != "agent-x" {
 		t.Errorf("agents[0][id] = %v, want agent-x", agents[0]["id"])
+	}
+}
+
+func TestA2ATool_ListAgentsSortsByID(t *testing.T) {
+	ids := sortedAgentIDs(map[string]*a2a.A2AAgentCard{
+		"z-agent": {},
+		"a-agent": {},
+	})
+	if got, want := strings.Join(ids, ","), "a-agent,z-agent"; got != want {
+		t.Fatalf("sortedAgentIDs() = %q, want %q", got, want)
 	}
 }
 

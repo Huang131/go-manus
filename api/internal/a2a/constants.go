@@ -23,14 +23,14 @@ const (
 	a2aKindTask    = "task"
 
 	// A2A 任务状态。
-	a2aTaskStateSubmitted     = "submitted"
-	a2aTaskStateWorking       = "working"
-	a2aTaskStateInputRequired = "input-required"
-	a2aTaskStateCompleted     = "completed"
+	a2aTaskStateSubmitted     = "submitted"      // 任务已被远程 Agent 接收、排队，尚未开始处理
+	a2aTaskStateWorking       = "working"        // 远程 Agent 正在执行
+	a2aTaskStateInputRequired = "input-required" // 需要客户端 补充信息 才能继续（HITL）。问题挂在 status.message 上，如"选 A 还是 B？"
+	a2aTaskStateCompleted     = "completed"      // 正常完成
 	a2aTaskStateFailed        = "failed"
 	a2aTaskStateCanceled      = "canceled"
-	a2aTaskStateRejected      = "rejected"
-	a2aTaskStateAuthRequired  = "auth-required"
+	a2aTaskStateRejected      = "rejected"      // 远程 Agent 拒绝 执行
+	a2aTaskStateAuthRequired  = "auth-required" // 需要客户端完成 认证/授权 （如提供 OAuth 凭证）才能继续
 )
 
 // A2A 客户端运行参数。

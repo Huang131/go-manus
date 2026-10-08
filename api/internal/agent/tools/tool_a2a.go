@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/Huang131/go-manus/api/internal/a2a"
@@ -96,7 +97,8 @@ func (t *A2ATool) listAgents(ctx context.Context, params map[string]interface{})
 
 	// 重组结构，将 id 填充到 agent_card 中
 	agentCards := make([]map[string]interface{}, 0, len(cards))
-	for id, card := range cards {
+	for _, id := range sortedAgentIDs(cards) {
+		card := cards[id]
 		// 端点取 ResolveEndpoint，兼容 v1.0（supportedInterfaces）与 v0.3（根层 URL）。
 		endpoint, _, _ := card.ResolveEndpoint()
 		agentCard := map[string]interface{}{
@@ -134,6 +136,15 @@ func (t *A2ATool) listAgents(ctx context.Context, params map[string]interface{})
 			"agents": agentCards,
 		},
 	), nil
+}
+
+func sortedAgentIDs(cards map[string]*a2a.A2AAgentCard) []string {
+	ids := make([]string, 0, len(cards))
+	for id := range cards {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // callAgent 调用远程 Agent
@@ -203,14 +214,9 @@ func (t *A2ATool) Initialize(ctx context.Context, cfg *A2AConfig) error {
 		seen[agent.Name] = struct{}{}
 
 		// 从 URL 中提取 base URL（去掉路径）
-		baseURL := agent.URL
-		if len(baseURL) > 0 && baseURL[len(baseURL)-1] == '/' {
-			baseURL = baseURL[:len(baseURL)-1]
-		}
-
 		servers = append(servers, a2a.A2AServerConfig{
 			ID:      agent.Name, // 使用名称作为唯一 ID
-			BaseURL: baseURL,
+			BaseURL: agent.URL,
 		})
 	}
 

@@ -354,6 +354,30 @@ func TestA2AClientManagerAuthRequiredDoesNotPoll(t *testing.T) {
 	}
 }
 
+func TestA2AClientManagerUnknownTaskStateFailsFast(t *testing.T) {
+	manager := NewA2AClientManager()
+	task := &A2ATask{Status: A2ATaskStatus{State: "future-state"}}
+
+	started := time.Now()
+	_, err := manager.pollUntilSettled(context.Background(), manager.client, "https://remote.example/rpc", task)
+	if err == nil {
+		t.Fatal("pollUntilSettled() error = nil, want unknown state error")
+	}
+	if !strings.Contains(err.Error(), "未知任务状态") {
+		t.Fatalf("pollUntilSettled() error = %q, want unknown state context", err)
+	}
+	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
+		t.Fatalf("unknown state took %s, want fail fast", elapsed)
+	}
+}
+
+func TestA2AClientManagerPollRejectsNilTask(t *testing.T) {
+	manager := NewA2AClientManager()
+	if _, err := manager.pollUntilSettled(context.Background(), manager.client, "https://remote.example/rpc", nil); err == nil {
+		t.Fatal("pollUntilSettled() error = nil, want nil task error")
+	}
+}
+
 // TestA2AJSONRPCError_CodeIsInt 守护 JSON-RPC 2.0 错误 code 必须是整数解析。
 // 旧实现用 string 承载，遇到规范返回的整数 code 会反序列化失败。
 func TestA2AJSONRPCError_CodeIsInt(t *testing.T) {

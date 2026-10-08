@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,7 +45,7 @@ type A2AClientManager struct {
 	client      *A2AClient
 	agents      map[string]*A2ARemoteAgent
 	initialized bool
-	generation  uint64
+	generation  uint64 // 代际版本号
 }
 
 // NewA2AClientManager 创建管理器。
@@ -56,8 +57,7 @@ func NewA2AClientManager() *A2AClientManager {
 }
 
 // Initialize 初始化：拉取所有远程 Agent 卡片并解析调用端点。
-//
-// 与旧实现不同：单个 Agent 加载失败会返回错误，让调用方感知（而非静默继续）。
+// 单个 Agent 加载失败会返回错误，让调用方感知（而非静默继续）。
 func (m *A2AClientManager) Initialize(ctx context.Context, config *A2AClientManagerConfig) error {
 	if config == nil {
 		return fmt.Errorf("A2A 配置为空")
@@ -86,7 +86,7 @@ func (m *A2AClientManager) Initialize(ctx context.Context, config *A2AClientMana
 		client = NewA2AClient(config.Timeout)
 	}
 
-	logger.Info(fmt.Sprintf("加载 %d 个 A2A 服务", len(config.Servers)))
+	logger.Info("加载 A2A 服务", logger.Int("count", len(config.Servers)))
 
 	agents := make(map[string]*A2ARemoteAgent, len(config.Servers))
 	for _, server := range config.Servers {
@@ -112,7 +112,7 @@ func (m *A2AClientManager) Initialize(ctx context.Context, config *A2AClientMana
 
 // fetchAndResolve 拉取单个 Agent 卡片并解析端点。
 func (m *A2AClientManager) fetchAndResolve(ctx context.Context, client *A2AClient, server A2AServerConfig) (*A2ARemoteAgent, error) {
-	baseURL := trimTrailingSlash(server.BaseURL)
+	baseURL := strings.TrimRight(server.BaseURL, "/")
 	card, err := m.fetchAgentCard(ctx, client, baseURL)
 	if err != nil {
 		return nil, err
@@ -158,8 +158,7 @@ func (m *A2AClientManager) fetchAgentCard(ctx context.Context, client *A2AClient
 	return &card, nil
 }
 
-// GetAgentCards 返回所有 Agent 卡片快照（不含端点，仅用于展示）。
-// 返回的是引用快照，卡片内部字段为只读使用，调用方不应修改。
+// GetAgentCards 返回所有 Agent Card 的深拷贝快照。
 func (m *A2AClientManager) GetAgentCards() map[string]*A2AAgentCard {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -172,7 +171,6 @@ func (m *A2AClientManager) GetAgentCards() map[string]*A2AAgentCard {
 }
 
 // Invoke 同步调用远程 Agent：先 message/send，若返回长任务则轮询 tasks/get 直到终态。
-//
 // 返回 *A2AResult；传输/协议错误以 error 返回，Agent 业务结果在 result 中。
 func (m *A2AClientManager) Invoke(ctx context.Context, agentID string, query string) (*A2AResult, error) {
 	if query == "" {
@@ -229,13 +227,21 @@ func (m *A2AClientManager) Invoke(ctx context.Context, agentID string, query str
 
 // pollUntilSettled 轮询 tasks/get 直到任务进入终态或需要人工输入。
 func (m *A2AClientManager) pollUntilSettled(ctx context.Context, client *A2AClient, endpoint string, task *A2ATask) (*A2ATask, error) {
+	if task == nil {
+		return nil, fmt.Errorf("远程 Agent 返回空任务，无法轮询")
+	}
 	pollCtx, cancel := context.WithTimeout(ctx, a2aPollTimeout)
 	defer cancel()
 
 	current := task
-	for !isTerminalA2AState(current.Status.State) {
-		if current.Status.State == a2aTaskStateInputRequired || current.Status.State == a2aTaskStateAuthRequired {
-			break // 需要额外输入，工具无法自动补全，返回当前状态。
+	for {
+		switch {
+		case isTerminalA2AState(current.Status.State):
+			return current, nil
+		case isInputRequiredA2AState(current.Status.State):
+			return current, nil // 需要额外输入，工具无法自动补全。
+		case !isKnownA2AState(current.Status.State):
+			return nil, fmt.Errorf("远程 Agent 返回未知任务状态: %q", current.Status.State)
 		}
 		if current.ID == "" {
 			return nil, fmt.Errorf("远程 Agent 返回的任务缺少 ID，无法轮询")
@@ -251,9 +257,11 @@ func (m *A2AClientManager) pollUntilSettled(ctx context.Context, client *A2AClie
 		if err != nil {
 			return nil, err
 		}
+		if next == nil {
+			return nil, fmt.Errorf("远程 Agent 返回空任务，无法继续轮询")
+		}
 		current = next
 	}
-	return current, nil
 }
 
 // CancelTask 取消远程 Agent 任务。
@@ -337,14 +345,22 @@ func isTerminalA2AState(state string) bool {
 	}
 }
 
-// trimTrailingSlash 去除末尾斜杠。
-func trimTrailingSlash(s string) string {
-	if s == "" {
-		return s
+func isInputRequiredA2AState(state string) bool {
+	return state == a2aTaskStateInputRequired || state == a2aTaskStateAuthRequired
+}
+
+func isKnownA2AState(state string) bool {
+	switch state {
+	case a2aTaskStateSubmitted,
+		a2aTaskStateWorking,
+		a2aTaskStateInputRequired,
+		a2aTaskStateAuthRequired,
+		a2aTaskStateCompleted,
+		a2aTaskStateFailed,
+		a2aTaskStateCanceled,
+		a2aTaskStateRejected:
+		return true
+	default:
+		return false
 	}
-	// 去除连续的末尾斜杠。
-	for len(s) > 0 && s[len(s)-1] == '/' {
-		s = s[:len(s)-1]
-	}
-	return s
 }

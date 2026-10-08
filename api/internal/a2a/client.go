@@ -166,7 +166,7 @@ type A2AJSONRPCResponse struct {
 // A2ARequestParams message/send 请求参数。
 type A2ARequestParams struct {
 	Message       A2AMessage             `json:"message"`
-	Configuration map[string]interface{} `json:"configuration,omitempty"`
+	Configuration map[string]interface{} `json:"configuration,omitempty"` // 发送控制参数
 	Metadata      map[string]interface{} `json:"metadata,omitempty"`
 }
 
