@@ -8,10 +8,9 @@ const (
 	a2aJSONRPCVersion         = "2.0"
 	a2aProtocolBindingJSONRPC = "JSONRPC"
 
-	a2aMethodMessageSend   = "message/send"
-	a2aMethodMessageStream = "message/stream"
-	a2aMethodTasksGet      = "tasks/get"
-	a2aMethodTasksCancel   = "tasks/cancel"
+	a2aMethodMessageSend = "message/send"
+	a2aMethodTasksGet    = "tasks/get"
+	a2aMethodTasksCancel = "tasks/cancel"
 
 	a2aRoleUser = "user"
 
@@ -22,12 +21,6 @@ const (
 	// a2aKindMessage / a2aKindTask 是 message/send 响应 result 的 kind。
 	a2aKindMessage = "message"
 	a2aKindTask    = "task"
-
-	// message/stream 的 SSE 事件 kind。
-	a2aStreamKindStatusUpdate   = "status-update"
-	a2aStreamKindArtifactUpdate = "artifact-update"
-	a2aStreamKindTask           = "task"
-	a2aSSEDoneMarker            = "[DONE]"
 
 	// A2A 任务状态。
 	a2aTaskStateSubmitted     = "submitted"

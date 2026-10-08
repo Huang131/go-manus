@@ -1,11 +1,32 @@
 package a2a
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/bytedance/sonic"
 )
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func jsonResponse(body string) *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+}
 
 // TestA2AAgentCard_ResolveEndpoint 守护卡片端点解析契约：
 // 必须兼容 v1.0（supportedInterfaces）与 v0.3（根层 url）两版结构。
@@ -101,6 +122,73 @@ func TestA2AAgentCapabilities_CanStream(t *testing.T) {
 	}
 }
 
+func TestNewA2AClientUsesDefaultTimeout(t *testing.T) {
+	if got := NewA2AClient(0).httpClient.Timeout; got != defaultA2AHTTPTimeout {
+		t.Fatalf("HTTP timeout = %s, want default %s", got, defaultA2AHTTPTimeout)
+	}
+}
+
+func TestA2AClientSendMessageValidatesRPCEnvelope(t *testing.T) {
+	client := NewA2AClient(time.Second)
+	client.httpClient.Transport = roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodPost {
+			t.Errorf("request method = %s, want POST", req.Method)
+		}
+		if got := req.Header.Get("Content-Type"); got != "application/json" {
+			t.Errorf("Content-Type = %q, want application/json", got)
+		}
+
+		var rpcReq A2AJSONRPCRequest
+		if err := sonic.ConfigDefault.NewDecoder(req.Body).Decode(&rpcReq); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if rpcReq.JSONRPC != a2aJSONRPCVersion || rpcReq.Method != a2aMethodMessageSend {
+			t.Errorf("request = %+v, want JSON-RPC message/send", rpcReq)
+		}
+		responseBody, err := sonic.Marshal(map[string]interface{}{
+			"jsonrpc": a2aJSONRPCVersion,
+			"id":      rpcReq.ID,
+			"result":  map[string]interface{}{"kind": "message", "role": "agent", "parts": []interface{}{map[string]interface{}{"kind": "text", "text": "ok"}}},
+		})
+		if err != nil {
+			t.Fatalf("marshal response: %v", err)
+		}
+		return jsonResponse(string(responseBody)), nil
+	})
+
+	result, err := client.SendMessage(context.Background(), "https://remote.example/rpc", A2AMessage{
+		Role:  a2aRoleUser,
+		Parts: []A2APart{{Kind: a2aPartKindText, Text: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("SendMessage() error = %v", err)
+	}
+	if result.Message == nil || result.ExtractText() != "ok" {
+		t.Fatalf("SendMessage() result = %+v, want message text ok", result)
+	}
+}
+
+func TestA2AClientRejectsInvalidRPCEnvelope(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "wrong JSON-RPC version", body: `{"jsonrpc":"1.0","id":"request-id","result":{}}`},
+		{name: "mismatched request id", body: `{"jsonrpc":"2.0","id":"other-id","result":{}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := NewA2AClient(time.Second)
+			client.httpClient.Transport = roundTripperFunc(func(*http.Request) (*http.Response, error) {
+				return jsonResponse(tt.body), nil
+			})
+			if _, err := client.doRPC(context.Background(), "https://remote.example/rpc", a2aMethodTasksGet, A2ATaskParams{ID: "t1"}); err == nil {
+				t.Fatal("doRPC() error = nil, want invalid response envelope error")
+			}
+		})
+	}
+}
+
 // TestParseA2AResult 守护 message/send 响应 kind 分派：task 与 message 二选一。
 func TestParseA2AResult(t *testing.T) {
 	tests := []struct {
@@ -122,11 +210,6 @@ func TestParseA2AResult(t *testing.T) {
 			wantMsg:  true,
 			wantText: "你好",
 		},
-		{
-			name:     "缺 kind 默认按 task 解析",
-			raw:      `{"id":"t2","status":{"state":"working"}}`,
-			wantTask: true,
-		},
 	}
 
 	for _, tt := range tests {
@@ -147,6 +230,105 @@ func TestParseA2AResult(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestParseA2AResultRejectsUnknownKind(t *testing.T) {
+	for _, raw := range []string{
+		`{"kind":"unknown","id":"t1"}`,
+		`{"id":"legacy-task","status":{"state":"working"}}`,
+	} {
+		t.Run(raw, func(t *testing.T) {
+			if _, err := parseA2AResult(json.RawMessage(raw)); err == nil {
+				t.Fatal("parseA2AResult() error = nil, want unsupported kind error")
+			}
+		})
+	}
+}
+
+func TestA2AClientManagerUsesConfiguredTimeout(t *testing.T) {
+	manager := NewA2AClientManager()
+	want := 250 * time.Millisecond
+
+	if err := manager.Initialize(context.Background(), &A2AClientManagerConfig{Timeout: want}); err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+	if got := manager.client.httpClient.Timeout; got != want {
+		t.Fatalf("HTTP timeout = %s, want %s", got, want)
+	}
+}
+
+func TestA2AClientManagerCleanupInvalidatesInFlightInitialize(t *testing.T) {
+	manager := NewA2AClientManager()
+	requestStarted := make(chan struct{})
+	releaseResponse := make(chan struct{})
+	var once sync.Once
+	manager.client.httpClient.Transport = roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		once.Do(func() { close(requestStarted) })
+		<-releaseResponse
+		return jsonResponse(`{"name":"remote","url":"https://remote.example/rpc"}`), nil
+	})
+
+	initErr := make(chan error, 1)
+	go func() {
+		initErr <- manager.Initialize(context.Background(), &A2AClientManagerConfig{
+			Servers: []A2AServerConfig{{ID: "remote", BaseURL: "https://remote.example"}},
+		})
+	}()
+
+	select {
+	case <-requestStarted:
+	case <-time.After(time.Second):
+		t.Fatal("Initialize() did not start the Agent Card request")
+	}
+	if err := manager.Cleanup(); err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	close(releaseResponse)
+
+	select {
+	case err := <-initErr:
+		if !errors.Is(err, ErrA2AInitializationSuperseded) {
+			t.Fatalf("Initialize() error = %v, want %v", err, ErrA2AInitializationSuperseded)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Initialize() did not return after its response was released")
+	}
+	if got := len(manager.GetAgentCards()); got != 0 {
+		t.Fatalf("GetAgentCards() count = %d, want 0 after Cleanup", got)
+	}
+}
+
+func TestA2AClientManagerAgentCardsAreIsolatedSnapshots(t *testing.T) {
+	manager := NewA2AClientManager()
+	manager.agents["remote"] = &A2ARemoteAgent{Card: &A2AAgentCard{
+		Name:     "remote",
+		Metadata: map[string]interface{}{"owner": "original"},
+	}}
+
+	first := manager.GetAgentCards()
+	first["remote"].Name = "mutated"
+	first["remote"].Metadata["owner"] = "mutated"
+
+	second := manager.GetAgentCards()
+	if second["remote"].Name != "remote" {
+		t.Fatalf("card name = %q, want isolated original", second["remote"].Name)
+	}
+	if second["remote"].Metadata["owner"] != "original" {
+		t.Fatalf("card metadata = %v, want isolated original", second["remote"].Metadata)
+	}
+}
+
+func TestA2AClientManagerAuthRequiredDoesNotPoll(t *testing.T) {
+	manager := NewA2AClientManager()
+	task := &A2ATask{Status: A2ATaskStatus{State: a2aTaskStateAuthRequired}}
+
+	got, err := manager.pollUntilSettled(context.Background(), manager.client, "https://remote.example/rpc", task)
+	if err != nil {
+		t.Fatalf("pollUntilSettled() error = %v, want nil", err)
+	}
+	if got != task {
+		t.Fatalf("pollUntilSettled() returned a different task: got %+v, want %+v", got, task)
 	}
 }
 

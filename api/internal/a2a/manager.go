@@ -2,6 +2,7 @@ package a2a
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,9 @@ import (
 
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
+
+// ErrA2AInitializationSuperseded 表示初始化结果已被后续清理操作废弃。
+var ErrA2AInitializationSuperseded = errors.New("A2A 初始化已被清理操作废弃")
 
 // A2AServerConfig A2A 服务器配置。
 type A2AServerConfig struct {
@@ -36,9 +40,11 @@ type A2ARemoteAgent struct {
 // 协议编码与 HTTP 交互下沉到 A2AClient。
 type A2AClientManager struct {
 	mu          sync.RWMutex
+	initMu      sync.Mutex
 	client      *A2AClient
 	agents      map[string]*A2ARemoteAgent
 	initialized bool
+	generation  uint64
 }
 
 // NewA2AClientManager 创建管理器。
@@ -57,18 +63,34 @@ func (m *A2AClientManager) Initialize(ctx context.Context, config *A2AClientMana
 		return fmt.Errorf("A2A 配置为空")
 	}
 
-	m.mu.Lock()
+	m.mu.RLock()
+	startGeneration := m.generation
+	m.mu.RUnlock()
+
+	m.initMu.Lock()
+	defer m.initMu.Unlock()
+
+	m.mu.RLock()
 	if m.initialized {
-		m.mu.Unlock()
+		m.mu.RUnlock()
 		return nil
 	}
-	m.mu.Unlock()
+	if m.generation != startGeneration {
+		m.mu.RUnlock()
+		return ErrA2AInitializationSuperseded
+	}
+	client := m.client
+	m.mu.RUnlock()
+
+	if config.Timeout > 0 {
+		client = NewA2AClient(config.Timeout)
+	}
 
 	logger.Info(fmt.Sprintf("加载 %d 个 A2A 服务", len(config.Servers)))
 
 	agents := make(map[string]*A2ARemoteAgent, len(config.Servers))
 	for _, server := range config.Servers {
-		remote, err := m.fetchAndResolve(ctx, server)
+		remote, err := m.fetchAndResolve(ctx, client, server)
 		if err != nil {
 			return fmt.Errorf("加载 A2A 服务 [%s] 失败: %w", server.ID, err)
 		}
@@ -76,18 +98,22 @@ func (m *A2AClientManager) Initialize(ctx context.Context, config *A2AClientMana
 	}
 
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.generation != startGeneration {
+		return ErrA2AInitializationSuperseded
+	}
+	m.client = client
 	m.agents = agents
 	m.initialized = true
-	m.mu.Unlock()
 
 	logger.Info("A2A 客户端加载成功")
 	return nil
 }
 
 // fetchAndResolve 拉取单个 Agent 卡片并解析端点。
-func (m *A2AClientManager) fetchAndResolve(ctx context.Context, server A2AServerConfig) (*A2ARemoteAgent, error) {
+func (m *A2AClientManager) fetchAndResolve(ctx context.Context, client *A2AClient, server A2AServerConfig) (*A2ARemoteAgent, error) {
 	baseURL := trimTrailingSlash(server.BaseURL)
-	card, err := m.fetchAgentCard(ctx, baseURL)
+	card, err := m.fetchAgentCard(ctx, client, baseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +127,7 @@ func (m *A2AClientManager) fetchAndResolve(ctx context.Context, server A2AServer
 }
 
 // fetchAgentCard 从远程服务器获取 Agent Card。
-func (m *A2AClientManager) fetchAgentCard(ctx context.Context, baseURL string) (*A2AAgentCard, error) {
+func (m *A2AClientManager) fetchAgentCard(ctx context.Context, client *A2AClient, baseURL string) (*A2AAgentCard, error) {
 	url := baseURL + a2aAgentCardPath
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -109,7 +135,7 @@ func (m *A2AClientManager) fetchAgentCard(ctx context.Context, baseURL string) (
 		return nil, fmt.Errorf("创建请求失败: %w", err)
 	}
 
-	resp, err := m.client.httpClient.Do(req)
+	resp, err := client.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("请求失败: %w", err)
 	}
@@ -140,19 +166,7 @@ func (m *A2AClientManager) GetAgentCards() map[string]*A2AAgentCard {
 
 	result := make(map[string]*A2AAgentCard, len(m.agents))
 	for id, remote := range m.agents {
-		result[id] = remote.Card
-	}
-	return result
-}
-
-// GetAgents 返回所有远程 Agent（含解析后的调用端点）。
-func (m *A2AClientManager) GetAgents() map[string]*A2ARemoteAgent {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	result := make(map[string]*A2ARemoteAgent, len(m.agents))
-	for id, remote := range m.agents {
-		result[id] = remote
+		result[id] = cloneAgentCard(remote.Card)
 	}
 	return result
 }
@@ -172,6 +186,7 @@ func (m *A2AClientManager) Invoke(ctx context.Context, agentID string, query str
 	m.mu.RLock()
 	remote, ok := m.agents[agentID]
 	endpoint := ""
+	client := m.client
 	if ok {
 		endpoint = remote.Endpoint
 	}
@@ -194,7 +209,7 @@ func (m *A2AClientManager) Invoke(ctx context.Context, agentID string, query str
 		Parts:     []A2APart{{Kind: a2aPartKindText, Text: query}},
 	}
 
-	result, err := m.client.SendMessage(ctx, endpoint, message)
+	result, err := client.SendMessage(ctx, endpoint, message)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +220,7 @@ func (m *A2AClientManager) Invoke(ctx context.Context, agentID string, query str
 	}
 
 	// 有任务则轮询直到终态。
-	task, err := m.pollUntilSettled(ctx, endpoint, result.Task)
+	task, err := m.pollUntilSettled(ctx, client, endpoint, result.Task)
 	if err != nil {
 		return nil, err
 	}
@@ -213,13 +228,13 @@ func (m *A2AClientManager) Invoke(ctx context.Context, agentID string, query str
 }
 
 // pollUntilSettled 轮询 tasks/get 直到任务进入终态或需要人工输入。
-func (m *A2AClientManager) pollUntilSettled(ctx context.Context, endpoint string, task *A2ATask) (*A2ATask, error) {
+func (m *A2AClientManager) pollUntilSettled(ctx context.Context, client *A2AClient, endpoint string, task *A2ATask) (*A2ATask, error) {
 	pollCtx, cancel := context.WithTimeout(ctx, a2aPollTimeout)
 	defer cancel()
 
 	current := task
 	for !isTerminalA2AState(current.Status.State) {
-		if current.Status.State == a2aTaskStateInputRequired {
+		if current.Status.State == a2aTaskStateInputRequired || current.Status.State == a2aTaskStateAuthRequired {
 			break // 需要额外输入，工具无法自动补全，返回当前状态。
 		}
 		if current.ID == "" {
@@ -232,7 +247,7 @@ func (m *A2AClientManager) pollUntilSettled(ctx context.Context, endpoint string
 		case <-time.After(a2aPollInterval):
 		}
 
-		next, err := m.client.GetTask(pollCtx, endpoint, current.ID)
+		next, err := client.GetTask(pollCtx, endpoint, current.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -246,6 +261,7 @@ func (m *A2AClientManager) CancelTask(ctx context.Context, agentID, taskID strin
 	m.mu.RLock()
 	remote, ok := m.agents[agentID]
 	endpoint := ""
+	client := m.client
 	if ok {
 		endpoint = remote.Endpoint
 	}
@@ -254,7 +270,7 @@ func (m *A2AClientManager) CancelTask(ctx context.Context, agentID, taskID strin
 	if !ok {
 		return nil, fmt.Errorf("该远程 Agent 不存在")
 	}
-	return m.client.CancelTask(ctx, endpoint, taskID)
+	return client.CancelTask(ctx, endpoint, taskID)
 }
 
 // Cleanup 清理资源。
@@ -264,9 +280,51 @@ func (m *A2AClientManager) Cleanup() error {
 
 	m.agents = make(map[string]*A2ARemoteAgent)
 	m.initialized = false
+	m.generation++
 
 	logger.Info("清除 A2A 客户端管理器成功")
 	return nil
+}
+
+func cloneAgentCard(card *A2AAgentCard) *A2AAgentCard {
+	if card == nil {
+		return nil
+	}
+	cloned := *card
+	cloned.SupportedInterfaces = append([]A2AInterface(nil), card.SupportedInterfaces...)
+	cloned.Skills = append([]A2AAgentSkill(nil), card.Skills...)
+	if card.Capabilities != nil {
+		capabilities := *card.Capabilities
+		cloned.Capabilities = &capabilities
+	}
+	cloned.Metadata = cloneJSONMap(card.Metadata)
+	return &cloned
+}
+
+func cloneJSONMap(values map[string]interface{}) map[string]interface{} {
+	if values == nil {
+		return nil
+	}
+	cloned := make(map[string]interface{}, len(values))
+	for key, value := range values {
+		cloned[key] = cloneJSONValue(value)
+	}
+	return cloned
+}
+
+func cloneJSONValue(value interface{}) interface{} {
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		return cloneJSONMap(typed)
+	case []interface{}:
+		cloned := make([]interface{}, len(typed))
+		for i, item := range typed {
+			cloned[i] = cloneJSONValue(item)
+		}
+		return cloned
+	default:
+		return value
+	}
 }
 
 // isTerminalA2AState 判断任务是否处于终态。

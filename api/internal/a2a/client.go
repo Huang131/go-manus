@@ -13,7 +13,6 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/google/uuid"
 
-	"github.com/Huang131/go-manus/api/internal/llm/sse"
 	"github.com/Huang131/go-manus/api/pkg/httpconst"
 )
 
@@ -63,20 +62,20 @@ type A2ATaskStatus struct {
 
 // A2AArtifact 任务工件。
 type A2AArtifact struct {
-	ArtifactID string                 `json:"artifactId,omitempty"`
-	Name       string                 `json:"name,omitempty"`
-	Parts      []A2APart              `json:"parts,omitempty"`
+	ArtifactID string                 `json:"artifactId,omitempty"` // 产物唯一标识（一个任务可产出多个）
+	Name       string                 `json:"name,omitempty"`       // 产物名，如 "analysis-report.md"
+	Parts      []A2APart              `json:"parts,omitempty"`      // 内容（复用 text/file/data 三态）
 	Metadata   map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // A2ATask A2A 任务对象。
 type A2ATask struct {
-	ID        string                 `json:"id"`
-	ContextID string                 `json:"contextId,omitempty"`
+	ID        string                 `json:"id"`                  // 任务主键，轮询/取消的凭据
+	ContextID string                 `json:"contextId,omitempty"` // 会话上下文分组
 	Status    A2ATaskStatus          `json:"status"`
-	Artifacts []A2AArtifact          `json:"artifacts,omitempty"`
-	History   []A2AMessage           `json:"history,omitempty"`
-	Kind      string                 `json:"kind,omitempty"` // "task"
+	Artifacts []A2AArtifact          `json:"artifacts,omitempty"` // 任务的"产出物"
+	History   []A2AMessage           `json:"history,omitempty"`   // 消息历史
+	Kind      string                 `json:"kind,omitempty"`      // "task"
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 }
 
@@ -151,7 +150,7 @@ type A2AJSONRPCResponse struct {
 	Error   *A2AJSONRPCError `json:"error,omitempty"`
 }
 
-// A2ARequestParams message/send、message/stream 共用的请求参数。
+// A2ARequestParams message/send 请求参数。
 type A2ARequestParams struct {
 	Message       A2AMessage             `json:"message"`
 	Configuration map[string]interface{} `json:"configuration,omitempty"`
@@ -162,13 +161,6 @@ type A2ARequestParams struct {
 type A2ATaskParams struct {
 	ID       string                 `json:"id"`
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
-}
-
-// A2AStreamEvent message/stream 的单个 SSE 事件。
-type A2AStreamEvent struct {
-	Kind     string       // "status-update" | "artifact-update" | "task"
-	Task     *A2ATask     // status-update / task
-	Artifact *A2AArtifact // artifact-update
 }
 
 // ============================================================================
@@ -183,6 +175,9 @@ type A2AClient struct {
 
 // NewA2AClient 创建 A2A 客户端。timeout 仅作兜底上限，实际以请求 ctx 的 deadline 为准。
 func NewA2AClient(timeout time.Duration) *A2AClient {
+	if timeout <= 0 {
+		timeout = defaultA2AHTTPTimeout
+	}
 	return &A2AClient{
 		httpClient: &http.Client{Timeout: timeout},
 	}
@@ -196,42 +191,6 @@ func (c *A2AClient) SendMessage(ctx context.Context, endpoint string, message A2
 		return nil, err
 	}
 	return parseA2AResult(resp.Result)
-}
-
-// StreamMessage 流式发送消息（message/stream），逐 SSE 事件回调 handler。
-// handler 返回错误会提前终止流（用于调用方提前取消）。
-func (c *A2AClient) StreamMessage(ctx context.Context, endpoint string, message A2AMessage, handler func(A2AStreamEvent) error) error {
-	req := A2AJSONRPCRequest{
-		JSONRPC: a2aJSONRPCVersion,
-		ID:      newA2ARequestID(),
-		Method:  a2aMethodMessageStream,
-		Params:  A2ARequestParams{Message: message},
-	}
-
-	body, err := sonic.Marshal(req)
-	if err != nil {
-		return fmt.Errorf("序列化请求失败: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("创建 HTTP 请求失败: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", httpconst.ContentTypeJSON)
-	httpReq.Header.Set("Accept", httpconst.ContentTypeSSE)
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return fmt.Errorf("调用远程 Agent 失败: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, maxA2AResponseBytes))
-		return fmt.Errorf("调用远程 Agent 出错: HTTP %d: %s", resp.StatusCode, string(b))
-	}
-
-	return c.consumeSSE(ctx, resp.Body, handler)
 }
 
 // GetTask 查询任务状态（tasks/get）。
@@ -299,6 +258,13 @@ func (c *A2AClient) doRPC(ctx context.Context, endpoint, method string, params i
 	if err := sonic.Unmarshal(respBody, &rpcResp); err != nil {
 		return nil, fmt.Errorf("解析响应失败: %w", err)
 	}
+	if rpcResp.JSONRPC != a2aJSONRPCVersion {
+		return nil, fmt.Errorf("响应 JSON-RPC 版本无效: %q", rpcResp.JSONRPC)
+	}
+	var responseID string
+	if len(rpcResp.ID) == 0 || sonic.Unmarshal(rpcResp.ID, &responseID) != nil || responseID != req.ID {
+		return nil, fmt.Errorf("响应 JSON-RPC 请求 ID 不匹配")
+	}
 
 	// JSON-RPC 层的错误应作为 error 返回（而非塞进结果），这是本次重构的关键修正。
 	if rpcResp.Error != nil {
@@ -308,63 +274,6 @@ func (c *A2AClient) doRPC(ctx context.Context, endpoint, method string, params i
 		return nil, fmt.Errorf("远程 Agent 返回空结果")
 	}
 	return &rpcResp, nil
-}
-
-// consumeSSE 使用统一的 SSE 解析层解析 text/event-stream，回调 handler。
-// handler 返回错误会提前终止流。
-func (c *A2AClient) consumeSSE(ctx context.Context, r io.Reader, handler func(A2AStreamEvent) error) error {
-	return sse.ParseWithContext(ctx, r, sse.DefaultConfig, func(ctx context.Context, frame sse.Frame) bool {
-		// 跳过空 data 帧；[DONE] 标记由 handleSSEData 内部统一处理
-		if len(frame.Data) == 0 {
-			return true
-		}
-		// 内部 handler 错误转换为 bool 返回值
-		err := c.handleSSEData(string(frame.Data), handler)
-		return err == nil
-	})
-}
-
-func (c *A2AClient) handleSSEData(data string, handler func(A2AStreamEvent) error) error {
-	data = strings.TrimSpace(data)
-	if data == "" || data == a2aSSEDoneMarker {
-		return nil
-	}
-
-	var rpcResp A2AJSONRPCResponse
-	if err := sonic.Unmarshal([]byte(data), &rpcResp); err != nil {
-		return fmt.Errorf("解析 SSE 事件失败: %w", err)
-	}
-	if rpcResp.Error != nil {
-		return rpcResp.Error
-	}
-	if len(rpcResp.Result) == 0 {
-		return nil
-	}
-
-	// 根据 kind 分派事件类型。
-	var kind struct {
-		Kind string `json:"kind"`
-	}
-	_ = sonic.Unmarshal(rpcResp.Result, &kind)
-
-	event := A2AStreamEvent{Kind: kind.Kind}
-	switch kind.Kind {
-	case a2aStreamKindArtifactUpdate:
-		var payload struct {
-			Artifact A2AArtifact `json:"artifact"`
-		}
-		_ = sonic.Unmarshal(rpcResp.Result, &payload)
-		event.Artifact = &payload.Artifact
-	default: // status-update / 无 kind（task）
-		var task A2ATask
-		_ = sonic.Unmarshal(rpcResp.Result, &task)
-		event.Task = &task
-		if kind.Kind == "" {
-			event.Kind = a2aStreamKindTask
-		}
-	}
-
-	return handler(event)
 }
 
 // parseA2AResult 依据 kind 字段将 result 解析为 Task 或 Message。
@@ -383,11 +292,13 @@ func parseA2AResult(raw json.RawMessage) (*A2AResult, error) {
 			return nil, fmt.Errorf("解析消息失败: %w", err)
 		}
 		return &A2AResult{Message: &msg}, nil
-	default: // "task" 或未声明（旧实现默认 task）
+	case a2aKindTask:
 		var task A2ATask
 		if err := sonic.Unmarshal(raw, &task); err != nil {
 			return nil, fmt.Errorf("解析任务失败: %w", err)
 		}
 		return &A2AResult{Task: &task}, nil
+	default:
+		return nil, fmt.Errorf("不支持的 A2A 响应类型: %q", kind.Kind)
 	}
 }
