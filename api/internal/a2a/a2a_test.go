@@ -210,6 +210,28 @@ func TestParseA2AResult(t *testing.T) {
 			wantMsg:  true,
 			wantText: "你好",
 		},
+		{
+			// artifact 只含 file（无文本）时必须继续回退到 status.message，
+			// 否则 failed/input-required 挂在状态上的文本会被漏掉。
+			name:     "task 仅含 file artifact 时回退 status.message",
+			raw:      `{"kind":"task","id":"t2","status":{"state":"failed","message":{"role":"agent","parts":[{"kind":"text","text":"执行失败：超时"}]}},"artifacts":[{"artifactId":"a1","parts":[{"kind":"file","file":{"uri":"https://x/report.pdf"}}]}]}`,
+			wantTask: true,
+			wantText: "执行失败：超时",
+		},
+		{
+			// artifact 含非空文本时优先于 status.message。
+			name:     "task artifacts 文本优先于 status.message",
+			raw:      `{"kind":"task","id":"t3","status":{"state":"completed","message":{"role":"agent","parts":[{"kind":"text","text":"状态文本"}]}},"artifacts":[{"artifactId":"a2","parts":[{"kind":"text","text":"产物文本"}]}]}`,
+			wantTask: true,
+			wantText: "产物文本",
+		},
+		{
+			// artifact 只有空字符串文本（提不出内容）时也要回退。
+			name:     "task artifact 文本为空时回退 status.message",
+			raw:      `{"kind":"task","id":"t4","status":{"state":"input-required","message":{"role":"agent","parts":[{"kind":"text","text":"请补充参数"}]}},"artifacts":[{"artifactId":"a3","parts":[{"kind":"text","text":""}]}]}`,
+			wantTask: true,
+			wantText: "请补充参数",
+		},
 	}
 
 	for _, tt := range tests {

@@ -91,19 +91,32 @@ func (r *A2AResult) ExtractText() string {
 		return ""
 	}
 
-	var parts []A2APart
 	if r.Message != nil {
-		parts = r.Message.Parts
-	} else if r.Task != nil {
-		// 任务结果优先取 artifacts，其次取 status.message。
-		for _, a := range r.Task.Artifacts {
-			parts = append(parts, a.Parts...)
-		}
-		if len(parts) == 0 && r.Task.Status.Message != nil {
-			parts = r.Task.Status.Message.Parts
-		}
+		return extractTextParts(r.Message.Parts)
+	}
+	if r.Task == nil {
+		return ""
 	}
 
+	// 任务结果优先取 artifacts 的文本，其次退到 status.message。
+	// 判据是「是否真的提取到非空文本」，而非「artifact 是否存在」：
+	// artifact 只含 file/data 时提取不到文本，此时必须继续回退，
+	// 否则 failed/input-required 等挂在 status.message 上的文本会被漏掉。
+	artifactParts := make([]A2APart, 0, len(r.Task.Artifacts))
+	for _, a := range r.Task.Artifacts {
+		artifactParts = append(artifactParts, a.Parts...)
+	}
+	if text := extractTextParts(artifactParts); text != "" {
+		return text
+	}
+	if r.Task.Status.Message != nil {
+		return extractTextParts(r.Task.Status.Message.Parts)
+	}
+	return ""
+}
+
+// extractTextParts 拼接 parts 中所有非空 text 部分，忽略 file/data 等非文本类型。
+func extractTextParts(parts []A2APart) string {
 	var b strings.Builder
 	for _, p := range parts {
 		if p.Kind == a2aPartKindText && p.Text != "" {
