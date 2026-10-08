@@ -19,7 +19,7 @@ type FileStorage interface {
 // Loader 将用户附件转为 LLM 可见的 FileContext
 type Loader struct {
 	storage FileStorage
-	ranker  *Ranker
+	ranker  *Ranker //  RAG 相关性排序
 }
 
 // NewLoader 构造 Loader
@@ -103,56 +103,44 @@ func (l *Loader) loadOne(ctx context.Context, f model.File, userMessage string, 
 
 	content := normalizeText(data)
 	size := int64(len(content))
+	base := FileContext{
+		Filename: f.Filename,
+		Filepath: f.Filepath,
+		MimeType: f.MimeType,
+	}
 
 	switch {
+	case size == 0:
+		base.Mode = ModeSkipped
+		base.Notice = "文件内容为空"
 	case ShouldInline(size):
-		if *budget-len(content) < 0 {
-			return FileContext{
-				Filename: f.Filename,
-				Filepath: f.Filepath,
-				MimeType: f.MimeType,
-				Mode:     ModeSkipped,
-				Notice:   "已超出本轮内联预算，跳过",
-			}
-		}
-		*budget -= len(content)
-		return FileContext{
-			Filename: f.Filename,
-			Filepath: f.Filepath,
-			MimeType: f.MimeType,
-			Mode:     ModeInline,
-			Content:  content,
+		if len(content) <= *budget {
+			*budget -= len(content)
+			base.Mode = ModeInline
+			base.Content = content
+		} else {
+			base.Mode = ModeSkipped
+			base.Notice = "已超出本轮内联预算，跳过"
 		}
 	case ShouldTruncate(size):
-		head := headBytes(content, HeadTailBytes)
-		tail := tailBytes(content, HeadTailBytes)
-		return FileContext{
-			Filename: f.Filename,
-			Filepath: f.Filepath,
-			MimeType: f.MimeType,
-			Mode:     ModeTruncated,
-			Content:  head + "\n\n[... 内容已截断 ...]\n\n" + tail,
-			Notice:   "中文件，仅保留头尾",
-		}
-	default:
+		head := headRunes(content, HeadTailRunes)
+		tail := tailRunes(content, HeadTailRunes)
+		base.Mode = ModeTruncated
+		base.Content = head + "\n\n[... 内容已截断 ...]\n\n" + tail
+		base.Notice = "中文件，仅保留头尾"
+	case ShouldRAG(size):
 		chunks := Chunk(content, RAGChunkSize)
 		hit := l.ranker.Rank(userMessage, chunks, RAGTopK)
-		if len(hit) == 0 {
+		if len(hit) == 0 && len(chunks) > 0 {
 			// 兜底取首段
-			if len(chunks) > 0 {
-				hit = chunks[:min(1, len(chunks))]
-			}
+			hit = chunks[:1]
 		}
-		body := strings.Join(hit, "\n\n---\n\n")
-		return FileContext{
-			Filename: f.Filename,
-			Filepath: f.Filepath,
-			MimeType: f.MimeType,
-			Mode:     ModeRAG,
-			Content:  body,
-			Notice:   "大文件，已按相关性检索 top 段落",
-		}
+		base.Mode = ModeRAG
+		base.Content = strings.Join(hit, "\n\n---\n\n")
+		base.Notice = "大文件，已按相关性检索 top 段落"
 	}
+
+	return base
 }
 
 // normalizeText 处理编码：UTF-8 完整则用原值，否则退回 latin1
@@ -168,7 +156,7 @@ func normalizeText(data []byte) string {
 	return string(runes)
 }
 
-func headBytes(s string, n int) string {
+func headRunes(s string, n int) string {
 	if n <= 0 {
 		return ""
 	}
@@ -179,7 +167,7 @@ func headBytes(s string, n int) string {
 	return string(r[:n])
 }
 
-func tailBytes(s string, n int) string {
+func tailRunes(s string, n int) string {
 	if n <= 0 {
 		return ""
 	}
@@ -188,11 +176,4 @@ func tailBytes(s string, n int) string {
 		return s
 	}
 	return string(r[len(r)-n:])
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

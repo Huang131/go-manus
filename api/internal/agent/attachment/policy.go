@@ -3,6 +3,8 @@
 // 而不仅是文件路径。
 package attachment
 
+import "strings"
+
 // 尺寸阈值（字节）
 const (
 	// InlineMaxBytes 小于等于该阈值的文件会被完整内联到 prompt
@@ -11,8 +13,8 @@ const (
 	// TruncateMaxBytes 小于等于该阈值的文件保留头尾片段
 	TruncateMaxBytes = 64 * 1024
 
-	// HeadTailBytes 截断模式下文件头与尾各保留的字节数
-	HeadTailBytes = 2 * 1024
+	// HeadTailRunes 截断模式下文件头与尾各保留的字符数（rune，非字节）
+	HeadTailRunes = 2 * 1024
 
 	// RAGChunkSize RAG 段落切分粒度
 	RAGChunkSize = 1024
@@ -65,7 +67,7 @@ func IsLikelyBinary(mimeType string) bool {
 		return false
 	}
 	switch {
-	case len(mimeType) >= 5 && mimeType[:5] == "text/":
+	case strings.HasPrefix(mimeType, "text/"):
 		return false
 	case mimeType == "application/json",
 		mimeType == "application/xml",

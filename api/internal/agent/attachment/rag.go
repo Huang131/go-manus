@@ -10,7 +10,7 @@ func Chunk(text string, size int) []string {
 	if size <= 0 || text == "" {
 		return nil
 	}
-	runes := []rune(text)
+	runes := []rune(text) // 按字符切分而非字节，防止中文被截断
 	var chunks []string
 	for i := 0; i < len(runes); i += size {
 		end := i + size
@@ -70,8 +70,8 @@ func (r *Ranker) Rank(query string, chunks []string, topK int) []string {
 	}
 	out := make([]string, 0, topK)
 	for i := 0; i < topK; i++ {
-		if results[i].score == 0 {
-			break
+		if results[i].score == 0 { // 得分为0说明毫无相关性
+			break // 提前截断，不返回无关段落
 		}
 		out = append(out, chunks[results[i].idx])
 	}
@@ -82,8 +82,8 @@ func score(text string, qTokens map[string]int, stop map[string]struct{}) int {
 	tokens := tokenize(text, stop)
 	s := 0
 	for tok, cnt := range tokens {
-		if q, ok := qTokens[tok]; ok {
-			s += q * cnt
+		if q, ok := qTokens[tok]; ok { // 若该词在 Query 中也存在
+			s += q * cnt // 累加得分：Query词频 * 段落词频
 		}
 	}
 	return s
@@ -91,10 +91,10 @@ func score(text string, qTokens map[string]int, stop map[string]struct{}) int {
 
 // tokenize 拆词：连续中文字符按 2 字符切，其他按非字母数字切
 func tokenize(text string, stop map[string]struct{}) map[string]int {
-	out := map[string]int{}
+	out := map[string]int{} // 返回词频 Map
 	runes := []rune(strings.ToLower(text))
-	buf := make([]rune, 0, 8)
-	flush := func() {
+	buf := make([]rune, 0, 8) // 字符缓冲区
+	flush := func() {         // 将缓冲区内容刷入词频表
 		if len(buf) == 0 {
 			return
 		}
@@ -106,7 +106,7 @@ func tokenize(text string, stop map[string]struct{}) map[string]int {
 	}
 	for _, r := range runes {
 		switch {
-		case unicode.Is(unicode.Han, r):
+		case unicode.Is(unicode.Han, r): // 遇到中文字符
 			// 中文：按 2 字符切（防止过细爆词表）
 			buf = append(buf, r)
 			if len(buf) >= 2 {
