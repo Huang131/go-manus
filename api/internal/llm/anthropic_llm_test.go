@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -531,8 +530,6 @@ func TestAnthropicClient_ProtocolError_NotFallbackable(t *testing.T) {
 
 // StreamCancel 验证 context cancel 时 Stream 能正确退出且无 goroutine 泄漏
 func TestAnthropicClient_StreamCancel(t *testing.T) {
-	goroutineBefore := runtime.NumGoroutine()
-
 	c := NewAnthropicClient(&AnthropicClientConfig{
 		BaseURL:   "https://example.invalid",
 		APIKey:    "test-key",
@@ -540,30 +537,24 @@ func TestAnthropicClient_StreamCancel(t *testing.T) {
 		MaxTokens: 1024,
 	})
 
-	// 模拟慢速响应：发送部分数据后等待 context cancel
-	slowStreamBody := strings.Join([]string{
-		"event: message_start",
-		`data: {"type":"message","message":{"id":"msg-1","usage":{"input_tokens":10,"output_tokens":0}}}`,
-		"",
-		"event: content_block_start",
-		`data: {"index":0,"content_block":{"type":"text"}}`,
-		"",
-		"event: content_block_delta",
-		`data: {"index":0,"delta":{"type":"text_delta","text":"慢"}}`,
-		"", // 发送部分内容后，下一条消息会被 context cancel 阻塞
-	}, "\n")
-
+	var body *contextBlockingBody
 	c.httpClient.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		body = newContextBlockingBody(r.Context(), strings.Join([]string{
+			"event: message_start",
+			`data: {"type":"message","message":{"id":"msg-1","usage":{"input_tokens":10,"output_tokens":0}}}`,
+			"",
+			"event: content_block_delta",
+			`data: {"index":0,"delta":{"type":"text_delta","text":"慢"}}`,
+			"",
+		}, "\n")+"\n")
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
-			Body:       io.NopCloser(strings.NewReader(slowStreamBody)),
+			Body:       body,
 		}, nil
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
-	// defer 兜底：流若在收到 2 个 delta 前提前结束，循环内的 cancel 不会执行，
-	// context 将泄漏（vet lostcancel）。cancel 幂等，双调无害。
 	defer cancel()
 	deltas, err := c.Stream(ctx, &LLMRequest{
 		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
@@ -572,34 +563,28 @@ func TestAnthropicClient_StreamCancel(t *testing.T) {
 		t.Fatalf("Stream() error = %v", err)
 	}
 
-	// 消费部分 deltas
-	var got int
-	for delta := range deltas {
-		got++
-		if got >= 2 {
-			// 收到部分内容后取消 context
-			cancel()
-			break
-		}
-		// 忽略可能的 error delta
-		if delta.Error != "" {
-			t.Logf("stream error during partial consumption: %v", delta.Error)
+	gotPartial := false
+	for !gotPartial {
+		select {
+		case delta, ok := <-deltas:
+			if !ok {
+				t.Fatal("stream closed before delivering the partial response")
+			}
+			if delta.ContentText == "慢" {
+				gotPartial = true
+			}
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for the partial response")
 		}
 	}
-
-	// 等待 goroutine 退出（Stream 的 reader goroutine 应在 cancel 后退出）
-	time.Sleep(100 * time.Millisecond)
-	goroutineAfter := runtime.NumGoroutine()
-
-	// 验证：goroutine 数量应恢复到 cancel 前（允许 ±1 误差）
-	// 主要验证：没有泄漏（cancel 后不应有新增 goroutine）
-	if goroutineAfter > goroutineBefore+1 {
-		t.Errorf("goroutine 泄漏: cancel 前=%d, cancel 后=%d", goroutineBefore, goroutineAfter)
+	cancel()
+	for range deltas {
 	}
 
-	// 验证：收到了一些 deltas（不是全部）
-	if got == 0 {
-		t.Error("应至少收到部分 deltas")
+	select {
+	case <-body.closed:
+	case <-time.After(time.Second):
+		t.Fatal("stream body was not closed after cancellation")
 	}
 }
 

@@ -532,3 +532,31 @@ func TestRoutedLLM_FallbackWithWrappedProviderError(t *testing.T) {
 		t.Fatalf("invoke attempts = %v, want [primary backup]（包装后的 ProviderError 仍应触发 fallback）", calls)
 	}
 }
+
+func TestRoutedLLM_SingleCatalogModel(t *testing.T) {
+	var gotModel string
+	router := NewRoutedLLM(
+		func(context.Context) ([]*LLMRuntimeConfig, error) {
+			return []*LLMRuntimeConfig{{
+				Profile:   llmcore.ModelProfile{Protocol: llmcore.ProtocolOpenAICompat},
+				ModelName: "single-model",
+			}}, nil
+		},
+		nil,
+		func(cfg *LLMRuntimeConfig) LLM {
+			gotModel = cfg.ModelName
+			return &stubLLM{name: cfg.ModelName}
+		},
+	)
+
+	resp, err := router.Invoke(context.Background(), &LLMRequest{})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if gotModel != "single-model" {
+		t.Fatalf("got model %s, want single-model", gotModel)
+	}
+	if resp.Message.ContentText != "single-model" {
+		t.Fatalf("content = %q, want single-model", resp.Message.ContentText)
+	}
+}

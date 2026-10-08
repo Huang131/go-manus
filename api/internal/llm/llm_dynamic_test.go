@@ -35,31 +35,3 @@ func TestDynamicLLM_UsesFactory(t *testing.T) {
 		t.Fatalf("content = %q, want model name", resp.Message.ContentText)
 	}
 }
-
-func TestRoutedLLMFromSingleProvider(t *testing.T) {
-	var gotModel string
-	router := NewRoutedLLM(
-		func(ctx context.Context) ([]*LLMRuntimeConfig, error) {
-			return []*LLMRuntimeConfig{{
-				Profile:   llmcore.ModelProfile{Protocol: llmcore.ProtocolOpenAICompat},
-				ModelName: "single-model",
-			}}, nil
-		},
-		nil,
-		func(cfg *LLMRuntimeConfig) LLM {
-			gotModel = cfg.ModelName
-			return &stubLLM{name: cfg.ModelName}
-		},
-	)
-
-	resp, err := router.Invoke(context.Background(), &LLMRequest{})
-	if err != nil {
-		t.Fatalf("Invoke: %v", err)
-	}
-	if gotModel != "single-model" {
-		t.Fatalf("got model %s, want single-model", gotModel)
-	}
-	if resp.Message.ContentText != "single-model" {
-		t.Fatalf("content = %q, want single-model", resp.Message.ContentText)
-	}
-}

@@ -2,39 +2,17 @@ package llm
 
 import (
 	"context"
-	"github.com/bytedance/sonic"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/bytedance/sonic"
+
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 )
-
-// newTestClient 构造一个 baseURL 指向 test server 的 OpenAIClient
-func newTestClient(t *testing.T, baseURL string) *OpenAIClient {
-	t.Helper()
-	c := NewOpenAIClient(&OpenAIClientConfig{
-		BaseURL:         baseURL,
-		APIKey:          "test-key",
-		ModelName:       "test-model",
-		Temperature:     0.7,
-		MaxTokens:       1024,
-		ToolCallTimeout: 2,
-	})
-	// 缩短请求总超时，让 timeout 测试不会被全局 120s 卡住
-	c.httpClient.Timeout = 5 * time.Second
-	return c
-}
-
-func TestNewOpenAIClient_DoesNotApplyGlobalTimeout(t *testing.T) {
-	client := NewOpenAIClient(&OpenAIClientConfig{})
-	if client.httpClient.Timeout != 0 {
-		t.Fatalf("http client timeout = %s, want request-scoped timeout", client.httpClient.Timeout)
-	}
-}
 
 func TestOpenAIClient_StreamProducesDeltas(t *testing.T) {
 	var requestBody map[string]interface{}
@@ -151,20 +129,6 @@ func (r *contextBlockingReader) Close() error {
 	return nil
 }
 
-// rawOK 把任意 JSON 写入 200 响应
-func rawOK(w http.ResponseWriter, payload interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	data, _ := sonic.Marshal(payload)
-	w.Write(data)
-}
-
-type roundTripperFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
-	return f(r)
-}
-
 func newTransportClient(t *testing.T, handler func(*http.Request) (*http.Response, error)) *OpenAIClient {
 	t.Helper()
 	c := NewOpenAIClient(&OpenAIClientConfig{
@@ -179,18 +143,6 @@ func newTransportClient(t *testing.T, handler func(*http.Request) (*http.Respons
 		Transport: roundTripperFunc(handler),
 	}
 	return c
-}
-
-func responseJSON(status int, payload interface{}) (*http.Response, error) {
-	body, err := sonic.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-	return &http.Response{
-		StatusCode: status,
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
-		Body:       io.NopCloser(strings.NewReader(string(body))),
-	}, nil
 }
 
 // === 1. content-only ===

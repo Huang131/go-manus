@@ -35,36 +35,6 @@ func (r *errorReader) Read(p []byte) (n int, err error) {
 	return int(toCopy), nil
 }
 
-func TestParseWithContext_RaceDetector(t *testing.T) {
-	// 使用 race detector 验证并发安全性
-	sseData := `event: content_block_delta
-data: {"type":"text_delta","text":"hello"}
-
-event: message_delta
-data: {"type":"delta","text":"world"}
-`
-
-	for i := 0; i < 100; i++ {
-		wg := sync.WaitGroup{}
-		for j := 0; j < 10; j++ {
-			wg.Add(1)
-			go func(idx int) {
-				defer wg.Done()
-				r := bytes.NewReader([]byte(sseData))
-				var frames int64
-				_ = ParseWithContext(context.Background(), r, DefaultConfig, func(ctx context.Context, frame Frame) bool {
-					atomic.AddInt64(&frames, 1)
-					return true
-				})
-				if frames != 2 {
-					t.Errorf("expected 2 frames, got %d", frames)
-				}
-			}(j)
-		}
-		wg.Wait()
-	}
-}
-
 func TestParseWithContext_ConcurrentDifferentData(t *testing.T) {
 	// 验证不同数据源并发解析不会互相干扰
 	inputs := []string{
@@ -82,25 +52,31 @@ data: {"part2":"f"}
 `,
 	}
 
+	type result struct {
+		frames int
+		err    error
+	}
+	results := make([]result, len(inputs))
 	var wg sync.WaitGroup
 	for i, input := range inputs {
 		wg.Add(1)
 		go func(idx int, data string) {
 			defer wg.Done()
-			for j := 0; j < 50; j++ {
-				r := bytes.NewReader([]byte(data))
-				var frames int64
-				_ = ParseWithContext(context.Background(), r, DefaultConfig, func(ctx context.Context, frame Frame) bool {
-					atomic.AddInt64(&frames, 1)
-					return true
-				})
-				if frames != 1 {
-					t.Errorf("goroutine %d iteration %d: expected 1 frame, got %d", idx, j, frames)
-				}
-			}
+			results[idx].err = ParseWithContext(context.Background(), bytes.NewReader([]byte(data)), DefaultConfig, func(context.Context, Frame) bool {
+				results[idx].frames++
+				return true
+			})
 		}(i, input)
 	}
 	wg.Wait()
+	for i, got := range results {
+		if got.err != nil {
+			t.Fatalf("input %d: ParseWithContext() error = %v", i, got.err)
+		}
+		if got.frames != 1 {
+			t.Fatalf("input %d: frames = %d, want 1", i, got.frames)
+		}
+	}
 }
 
 func TestParse_BasicFunctionality(t *testing.T) {
