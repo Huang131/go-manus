@@ -49,7 +49,9 @@ func TestToolProviderReloadSearchLimitAffectsNewTools(t *testing.T) {
 	provider := NewToolProvider(context.Background(), nil, nil, search, nil, nil)
 
 	var searchTool *SearchTool
-	for _, tool := range provider.Tools(9) {
+	toolSet := provider.Acquire(9)
+	defer toolSet.Release()
+	for _, tool := range toolSet.Tools() {
 		if candidate, ok := tool.(*SearchTool); ok {
 			searchTool = candidate
 			break

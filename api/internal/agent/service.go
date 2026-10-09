@@ -60,7 +60,6 @@ func NewAgentService(
 }
 
 // Chat 处理聊天消息
-// 对齐 Python 版本的 RedisStreamTask 架构
 func (s *AgentService) Chat(ctx context.Context, sessionID string, message *llmcore.Message) (string, error) {
 	// 获取会话
 	session, err := s.repos.Session.GetByID(ctx, sessionID)
@@ -119,7 +118,7 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *llmc
 	s.mu.RLock()
 	searchLimit := s.agentConfig.MaxSearchResults
 	s.mu.RUnlock()
-	task, err := s.getOrCreateTask(ctx, session, s.toolsProvider.Tools(searchLimit))
+	task, err := s.getOrCreateTask(ctx, session, searchLimit)
 	if err != nil {
 		return "", fmt.Errorf("创建任务失败: %w", err)
 	}
@@ -264,7 +263,7 @@ func (s *AgentService) ReloadA2AConfig(ctx context.Context, cfg *A2AConfig) erro
 
 // getOrCreateTask 获取或创建 RedisStreamTask
 // 对齐 Python: task = await RedisStreamTask.create(task_runner)
-func (s *AgentService) getOrCreateTask(ctx context.Context, session *model.Session, tools []toolspkg.Tool) (*RedisStreamTask, error) {
+func (s *AgentService) getOrCreateTask(ctx context.Context, session *model.Session, searchLimit int) (*RedisStreamTask, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -279,18 +278,20 @@ func (s *AgentService) getOrCreateTask(ctx context.Context, session *model.Sessi
 	}
 
 	// 创建新的 task
+	toolSet := s.toolsProvider.Acquire(searchLimit)
 	runtime := NewSessionRuntime(session.ID, s.repos.Session, s.repos.File, s.caps.Sandbox, s.caps.FileStorage)
 	runner := NewAgentTaskRunner(&AgentTaskRunnerConfig{
 		SessionID:       session.ID,
 		AgentConfig:     s.agentConfig,
 		InitialMessages: conversationMessages(session.Events),
 		LLM:             s.caps.LLM,
-		Tools:           tools,
+		Tools:           toolSet.Tools(),
 		Runtime:         runtime,
 	})
 
 	task := NewRedisStreamTask(s.caps.MessageQueue, runner)
 	task.SetOnFinished(func() {
+		toolSet.Release()
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if current, ok := s.taskBySession[session.ID]; ok && current == task {

@@ -28,7 +28,9 @@ func TestRuntimeMCPConfigFiltersDisabledServersAndCopiesValues(t *testing.T) {
 
 func TestToolProviderOmitsEmptyDynamicTools(t *testing.T) {
 	provider := toolspkg.NewToolProvider(context.Background(), nil, nil, nil, &model.MCPConfig{}, &toolspkg.A2AConfig{})
-	got := provider.Tools(DefaultAgentConfig().MaxSearchResults)
+	toolSet := provider.Acquire(DefaultAgentConfig().MaxSearchResults)
+	defer toolSet.Release()
+	got := toolSet.Tools()
 	if len(got) != 1 || got[0].Name() != toolspkg.ToolNameMessage {
 		t.Fatalf("Tools() = %v, want message tool only", got)
 	}
