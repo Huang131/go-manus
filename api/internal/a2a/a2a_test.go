@@ -280,6 +280,31 @@ func TestA2AClientManagerUsesConfiguredTimeout(t *testing.T) {
 	}
 }
 
+func TestA2AClientManagerRejectsInvalidServerConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		servers []A2AServerConfig
+		want    string
+	}{
+		{name: "empty id", servers: []A2AServerConfig{{BaseURL: "https://remote.example"}}, want: "ID 不能为空"},
+		{name: "empty url", servers: []A2AServerConfig{{ID: "remote"}}, want: "地址不能为空"},
+		{name: "duplicate id", servers: []A2AServerConfig{
+			{ID: "remote", BaseURL: "https://one.example"},
+			{ID: "remote", BaseURL: "https://two.example"},
+		}, want: "ID 重复"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manager := NewA2AClientManager()
+			err := manager.Initialize(context.Background(), &A2AClientManagerConfig{Servers: tt.servers})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Initialize() error = %v, want message containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestA2AClientManagerCleanupInvalidatesInFlightInitialize(t *testing.T) {
 	manager := NewA2AClientManager()
 	requestStarted := make(chan struct{})
@@ -357,8 +382,12 @@ func TestA2AClientManagerAuthRequiredDoesNotPoll(t *testing.T) {
 func TestA2AClientManagerUnknownTaskStateFailsFast(t *testing.T) {
 	manager := NewA2AClientManager()
 	task := &A2ATask{Status: A2ATaskStatus{State: "future-state"}}
+	var requests int
+	manager.client.httpClient.Transport = roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		requests++
+		return nil, errors.New("unexpected tasks/get request")
+	})
 
-	started := time.Now()
 	_, err := manager.pollUntilSettled(context.Background(), manager.client, "https://remote.example/rpc", task)
 	if err == nil {
 		t.Fatal("pollUntilSettled() error = nil, want unknown state error")
@@ -366,8 +395,8 @@ func TestA2AClientManagerUnknownTaskStateFailsFast(t *testing.T) {
 	if !strings.Contains(err.Error(), "未知任务状态") {
 		t.Fatalf("pollUntilSettled() error = %q, want unknown state context", err)
 	}
-	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
-		t.Fatalf("unknown state took %s, want fail fast", elapsed)
+	if requests != 0 {
+		t.Fatalf("tasks/get requests = %d, want 0 for unknown state", requests)
 	}
 }
 
@@ -375,6 +404,14 @@ func TestA2AClientManagerPollRejectsNilTask(t *testing.T) {
 	manager := NewA2AClientManager()
 	if _, err := manager.pollUntilSettled(context.Background(), manager.client, "https://remote.example/rpc", nil); err == nil {
 		t.Fatal("pollUntilSettled() error = nil, want nil task error")
+	}
+}
+
+func TestA2AClientManagerCancelRejectsMissingEndpoint(t *testing.T) {
+	manager := NewA2AClientManager()
+	manager.agents["remote"] = &A2ARemoteAgent{Card: &A2AAgentCard{Name: "remote"}}
+	if _, err := manager.CancelTask(context.Background(), "remote", "task-1"); err == nil {
+		t.Fatal("CancelTask() error = nil, want missing endpoint error")
 	}
 }
 

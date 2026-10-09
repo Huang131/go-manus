@@ -62,6 +62,9 @@ func (m *A2AClientManager) Initialize(ctx context.Context, config *A2AClientMana
 	if config == nil {
 		return fmt.Errorf("A2A 配置为空")
 	}
+	if err := validateA2AConfig(config); err != nil {
+		return err
+	}
 
 	m.mu.RLock()
 	startGeneration := m.generation
@@ -107,6 +110,24 @@ func (m *A2AClientManager) Initialize(ctx context.Context, config *A2AClientMana
 	m.initialized = true
 
 	logger.Info("A2A 客户端加载成功")
+	return nil
+}
+
+// validateA2AConfig 在发起网络请求前拒绝无法路由的配置，避免重复 ID 静默覆盖。
+func validateA2AConfig(config *A2AClientManagerConfig) error {
+	seen := make(map[string]struct{}, len(config.Servers))
+	for _, server := range config.Servers {
+		if strings.TrimSpace(server.ID) == "" {
+			return fmt.Errorf("A2A 服务 ID 不能为空")
+		}
+		if strings.TrimSpace(server.BaseURL) == "" {
+			return fmt.Errorf("A2A 服务 [%s] 地址不能为空", server.ID)
+		}
+		if _, exists := seen[server.ID]; exists {
+			return fmt.Errorf("A2A 服务 ID 重复: %q", server.ID)
+		}
+		seen[server.ID] = struct{}{}
+	}
 	return nil
 }
 
@@ -277,6 +298,9 @@ func (m *A2AClientManager) CancelTask(ctx context.Context, agentID, taskID strin
 
 	if !ok {
 		return nil, fmt.Errorf("该远程 Agent 不存在")
+	}
+	if endpoint == "" {
+		return nil, fmt.Errorf("该远程 Agent 调用端点不存在")
 	}
 	return client.CancelTask(ctx, endpoint, taskID)
 }
