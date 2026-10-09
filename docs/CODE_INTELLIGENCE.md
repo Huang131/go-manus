@@ -2,37 +2,38 @@
 
 > 本文只说明当前 Graphify/GitNexus 工作方式，不替代架构和运行维护文档。
 
-本项目使用两类代码智能工具辅助架构分析、代码导航和变更影响评估：
+本项目使用两类代码智能工具辅助架构分析、代码导航和变更影响评估。两者的产物都只留在本机，都不提交到仓库：
 
-- **Graphify**：生成可审查的项目知识快照，提交到仓库，供团队成员直接浏览和查询。
-- **GitNexus**：生成本机代码关系索引，不提交到仓库；每位开发者在本机建立自己的索引。
+- **Graphify**：把项目解析成知识图谱，状态保存在 `.graphify/`，供本机查询和浏览。
+- **GitNexus**：生成本机代码关系索引（`.gitnexus/`）；每位开发者在本机建立自己的索引。
 
 ## 提交策略
 
 ### Graphify
 
-仓库只提交根目录 `graphify-out/` 的当前快照：
+Graphify 的状态目录是 `.graphify/`，属于本机运行态，不提交：
 
 ```text
-graphify-out/
-├── .graphify_root
-├── .graphify_labels.json
-├── .graphify_labels.json.sig
-├── GRAPH_REPORT.md
-├── graph.json
-├── graph.html
-└── manifest.json
+.graphify/
+├── graph.json          # 知识图谱本体
+├── GRAPH_REPORT.md     # 可读的架构报告
+├── manifest.json       # 文件指纹索引，用于增量更新
+├── scope.json          # 本次解析的输入范围
+├── branch.json         # 分支与陈旧标记
+├── worktree.json       # 当前 worktree 元数据
+└── cache/              # AST 与统计缓存
 ```
 
-以下内容不提交：
+`.gitignore` 用两条规则覆盖所有层级：
 
-```text
-graphify-out/cache/
-graphify-out/YYYY-MM-DD/
-api/graphify-out/
+```gitignore
+.graphify/
+**/graphify-out/
 ```
 
-根目录快照是整个 `go-manus` 项目的统一图谱。`api/graphify-out/` 是 API 子目录图谱，不单独维护，避免出现两份容易过期的数据。
+`graphify-out/` 是 0.10 之前版本的旧状态目录（`graphify migrate-state` 的作用就是把 legacy 的 `graphify-out/` 迁到 `.graphify/`），当前版本已不再生成它，也不再提交。
+
+图谱只在**仓库根目录**生成。不要在 `api/`、`ui/`、`sandbox/` 等子目录里单独运行 `graphify`，否则会在子目录内额外产生一份状态目录（历史上 `api/graphify-out/`、`api/.graphify/`、`ui/graphify-out/` 就是这么出现的）。
 
 ### GitNexus
 
@@ -78,29 +79,29 @@ npx gitnexus analyze
 graphify --help
 ```
 
-如果未安装，按照 Graphify 官方安装方式安装。项目不把 Python 虚拟环境或 Graphify 缓存提交到仓库。
+如果未安装，按照 Graphify 官方安装方式安装。项目不把 Graphify 状态目录（`.graphify/`）或任何图谱产物提交到仓库。
 
 ## Clone 后的首次使用
 
-在项目根目录执行：
+仓库不提交图谱快照，需要在本机生成一次。在**项目根目录**执行：
 
 ```bash
-# 检查已提交的 Graphify 快照
-graphify query "项目整体架构和主要调用关系"
+# 生成 Graphify 知识图谱（写入本机 .graphify/）
+graphify update .
 
 # 创建本机 GitNexus 索引
 npx gitnexus analyze
 npx gitnexus status
 ```
 
-Graphify 的 `graph.json` 和 `GRAPH_REPORT.md` 可以直接用于浏览项目结构；GitNexus 建立索引后，可以进一步使用调用关系、影响分析和流程追踪能力。
+生成后即可用 `graphify query` / `path` / `explain` 查询；需要 HTML 视图时执行 `graphify export html --out .graphify/graph.html`。没有配置 LLM API key 时，`graphify update .` 会跳过节点描述生成，可加 `--no-description` 显式静默该提示。
 
 ## 日常更新
 
-代码、文档或目录结构发生变化后，建议在提交前更新两类数据：
+代码、文档或目录结构发生变化后，重新生成本机数据：
 
 ```bash
-# 更新根目录 Graphify 快照
+# 增量更新 Graphify 知识图谱
 graphify update .
 
 # 更新本机 GitNexus 索引
@@ -108,19 +109,7 @@ npx gitnexus analyze
 npx gitnexus status
 ```
 
-Graphify 更新后，只提交根目录当前快照文件：
-
-```bash
-git add graphify-out/.graphify_root \
-  graphify-out/.graphify_labels.json \
-  graphify-out/.graphify_labels.json.sig \
-  graphify-out/GRAPH_REPORT.md \
-  graphify-out/graph.json \
-  graphify-out/graph.html \
-  graphify-out/manifest.json
-```
-
-GitNexus 的 `.gitnexus/` 不应加入提交。
+两者都只写本机目录（`.graphify/`、`.gitnexus/`），**不产生需要提交的文件**。如果 `graphify check-update` 提示图谱落后于 `HEAD`，重跑一次 `graphify update .` 即可。
 
 ## 查询示例
 
@@ -152,11 +141,11 @@ npx gitnexus analyze
 ## 提交前检查
 
 ```bash
+# 确认 Graphify 状态目录没有被误提交（正常时无输出并返回 0）
+make check-graphify
+
 # 确认 GitNexus 不会被提交
 git status --short --ignored .gitnexus
-
-# 确认 Graphify 只暴露当前快照
-git status --short --ignored graphify-out api/graphify-out
 
 # 检查文件格式和空白错误
 git diff --check
@@ -164,29 +153,23 @@ git diff --check
 
 预期结果：
 
+- `make check-graphify` 无输出并返回 0。
 - `.gitnexus/` 显示为 ignored。
-- `graphify-out/cache/` 和 `graphify-out/YYYY-MM-DD/` 显示为 ignored。
-- `graphify-out/` 根目录当前快照文件可被 `git add` 选择。
-- `api/graphify-out/` 显示为 ignored。
+- `.graphify/` 以及任意层级的 `graphify-out/` 显示为 ignored。
 - `.claude/settings.local.json` 显示为 ignored；`.claude/settings.json` 是否提交由团队配置用途决定。
+
+`make install-hooks` 会把 `make check-graphify` 装成 `.git/hooks/pre-commit`，从源头拦住误提交；该命令只需在每个 clone 上执行一次。
 
 ## 常见问题
 
-### Graphify 文件仍被全局 Git ignore 忽略
+### Graphify 图谱提示落后于 HEAD
 
-某些开发环境会在用户级 `.gitignore` 中写入 `graphify-out/`。仓库 `.gitignore` 已为根目录当前快照添加反向规则；如果本机 Git 版本或规则配置仍然拦截，可以显式添加当前快照：
+重新生成一次即可：
 
 ```bash
-git add -f graphify-out/.graphify_root \
-  graphify-out/.graphify_labels.json \
-  graphify-out/.graphify_labels.json.sig \
-  graphify-out/GRAPH_REPORT.md \
-  graphify-out/graph.json \
-  graphify-out/graph.html \
-  graphify-out/manifest.json
+graphify update .
+graphify check-update
 ```
-
-不要使用 `git add -f graphify-out/`，否则可能把缓存和历史备份一并加入提交。
 
 ### GitNexus 显示仓库未索引
 

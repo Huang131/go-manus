@@ -50,6 +50,10 @@ help:
 	@echo "  cd api && make test     - 运行测试"
 	@echo "  cd api && make lint     - 代码检查"
 	@echo ""
+	@echo "=== 代码智能数据 ==="
+	@echo "  make check-graphify - 校验 Graphify 状态目录未被提交"
+	@echo "  make install-hooks  - 安装 pre-commit 钩子 (每个 clone 执行一次)"
+	@echo ""
 	@echo "=== 清理 ==="
 	@echo "  make clean         - 清理未使用的 Docker 资源"
 	@echo "  make clean-all     - 完整清理 (删除所有 go-manus 镜像)"
@@ -248,3 +252,17 @@ rebuild-sandbox:
 # 运行 sandbox 容器内的回归测试（56 个：服务级 + ASGI 端点级）
 test-sandbox:
 	docker compose exec -T sandbox /venv/bin/python -m pytest tests/ -q
+
+# ============================================================
+# 代码智能数据
+# ============================================================
+
+# 校验 Graphify 状态目录（.graphify/、任意层级的 graphify-out/）未被 Git 跟踪
+check-graphify:
+	@scripts/check-graphify-tracked.sh
+
+# 安装 pre-commit 钩子，提交前自动跑 check-graphify（每个 clone 执行一次）
+install-hooks:
+	@printf '#!/usr/bin/env sh\nexec scripts/check-graphify-tracked.sh\n' > .git/hooks/pre-commit
+	@chmod +x .git/hooks/pre-commit
+	@echo "已安装 .git/hooks/pre-commit -> scripts/check-graphify-tracked.sh"
