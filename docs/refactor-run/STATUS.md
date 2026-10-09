@@ -9,7 +9,7 @@
 | 0. 事实基线与方案校准 | complete | `0382404` | 已核对当前 Session/Task 链、配置、Engine、ToolSet，并形成可恢复的阶段方案 |
 | 1. Settings 与 Prompt | complete | `4df77fe`、`e9dcba2`、`9548b84`、`dd5c2cf`、`b0f5328` | Settings、严格校验、migration、UI 与 PromptCatalog/hash 已完成 |
 | 2. Engine 与 Context | complete | `4650cc4`、`aba7f43`、`8fd0fa6` | Outcome、ContextPolicy 与 MCP 动态调用契约已完成 |
-| 3. Run 领域与存储 | in_progress | `a8de838`、`待提交：feat(api): add run persistence` | 3A 领域、状态机和等待恢复转换器已完成；3B Repository、migration 与组件测试已完成；3C RunService 待实现 |
+| 3. Run 领域与存储 | in_progress | `a8de838`、`f0ada6a`、`6055590` | 3A 领域、状态机和等待恢复转换器已完成；3B Repository、migration 与组件测试已完成；3C RunService 待实现 |
 | 4. 执行生产切换 | pending | - | 唯一后端生产语义切换点；Session 路由只剩薄适配 |
 | 5. API/UI/SSE | pending | - | 唯一公开契约切换点；完成后删除旧路由 |
 | 6. 遗留删除 | pending | - | 依赖阶段 4/5 的引用扫描和回归 |
@@ -47,7 +47,7 @@ go vet ./...
 | 2B ContextPolicy | complete | `aba7f43` |
 | 2C MCP 动态路由、初始化与错误契约 | complete | `8fd0fa6` |
 | 3A Run、执行快照与等待恢复契约 | complete | `a8de838` |
-| 3B Run/Message Repository | complete | `待提交：feat(api): add run persistence` |
+| 3B Run/Message Repository | complete | `f0ada6a` |
 | 3C 纯 RunService | pending | `04-run-domain-and-storage.md` |
 | 4A RunExecutor 生命周期与观测，未接生产 | pending | `05-run-execution-cutover.md` |
 | 4B 唯一后端生产切换 | pending | `05-run-execution-cutover.md` |
@@ -107,7 +107,7 @@ git diff --check                                                         PASS
 
 ## 最近完成：检查点 3B Run/Message Repository 与 migration
 
-提交：待创建，建议 `feat(api): add run persistence`。
+提交：`f0ada6a feat(api): add run persistence`。
 
 验证结果：
 
