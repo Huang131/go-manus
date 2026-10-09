@@ -179,6 +179,19 @@ class SupervisorService:
             logger.error(f"RPC方法调用失败: {str(e)}")
             raise BadRequestException(f"RPC方法调用失败: {str(e)}")
 
+    @staticmethod
+    def _namespec(process: dict) -> str:
+        """把 getAllProcessInfo 返回的进程信息还原成 supervisor 的 namespec。
+
+        getAllProcessInfo 返回的是拆开的 name + group，而 stopProcess/startProcess
+        接受的是 group:name 形式的 namespec。进程被收进 supervisord.conf 的
+        [group:services] 后，只传短名会被当成同名的组去查找（名为 app 的组并不
+        存在，真实的组是 services），直接抛 BAD_NAME；因此调用前必须拼回 namespec。
+        """
+        name = process.get("name")
+        group = process.get("group")
+        return name if group in (None, "", name) else f"{group}:{name}"
+
     async def get_all_processes(self) -> List[ProcessInfo]:
         """获取当前supervisor管理的所有进程信息"""
         try:
@@ -202,7 +215,9 @@ class SupervisorService:
                 if name == "app":
                     continue
                 if process.get("statename", "RUNNING") == "RUNNING":
-                    await self._call_rpc(self.server.supervisor.stopProcess, name, True)
+                    await self._call_rpc(
+                        self.server.supervisor.stopProcess, self._namespec(process), True
+                    )
                     stopped.append(name)
             return SupervisorActionResult(status="stopped", result={"stopped": stopped})
         except Exception as e:
@@ -227,19 +242,25 @@ class SupervisorService:
             started = []
             # 只停止确实运行中的进程；已停止/异常进程直接启动，避免 stopProcess 报错。
             deadline = time.monotonic() + 8  # 总超时：单进程卡住不拖死整个请求
-            running = [process["name"] for process in managed
+            # 先统一算好 namespec 再执行 RPC，避免边遍历边调用时中途失败留下半停状态。
+            running = [self._namespec(process) for process in managed
                        if process.get("statename", "RUNNING") == "RUNNING"]
-            for name in reversed(running):
+            for namespec in reversed(running):
                 if time.monotonic() > deadline:
                     logger.warning("restart 总超时，剩余进程跳过停止")
                     break
-                stopped.append(await self._call_rpc(self.server.supervisor.stopProcess, name, True))
+                stopped.append(
+                    await self._call_rpc(self.server.supervisor.stopProcess, namespec, True)
+                )
             for process in managed:
-                name = process["name"]
                 if time.monotonic() > deadline:
                     logger.warning("restart 总超时，剩余进程跳过启动")
                     break
-                started.append(await self._call_rpc(self.server.supervisor.startProcess, name, True))
+                started.append(
+                    await self._call_rpc(
+                        self.server.supervisor.startProcess, self._namespec(process), True
+                    )
+                )
             return SupervisorActionResult(status="restarted", stop_result=stopped, start_result=started)
         except Exception as e:
             logger.error(f"重启Supervisor子进程失败: {e}")

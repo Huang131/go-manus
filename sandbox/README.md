@@ -25,6 +25,8 @@
 
 ## API 接口
 
+http://localhost:8090/docs —— FastAPI 自动生成的 Swagger UI，
+
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/api/file/read-file` | 读取文件 |

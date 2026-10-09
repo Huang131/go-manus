@@ -151,7 +151,10 @@ services:
       dockerfile: Dockerfile
     image: go-manus-sandbox:latest
     container_name: go-manus-sandbox
-    restart: unless-stopped
+    # 沙箱支持 server_timeout 自动销毁：supervisord 收到 shutdown 后是优雅退出（退出码 0），
+    # 容器这时应该真正停下来。因此这里不能跟随其他服务用 unless-stopped，否则会被反复拉起。
+    # on-failure 只兜住非 0 退出（supervisord 意外崩溃），优雅销毁不受影响。
+    restart: on-failure
     networks:
       - go-manus-network
     ports:

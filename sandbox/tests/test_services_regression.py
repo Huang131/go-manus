@@ -564,23 +564,85 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
                     await FileService.upload_file(Upload(), target)
             self.assertFalse(Path(target).exists())
 
-    async def test_restart_skips_fastapi_process(self):
+    def test_namespec_handles_grouped_and_standalone_processes(self):
+        """getAllProcessInfo 返回拆开的 name/group，RPC 需要拼好的 namespec。"""
+        from app.services.supervisor import SupervisorService
+
+        self.assertEqual(
+            SupervisorService._namespec({"name": "chrome", "group": "services"}),
+            "services:chrome",
+        )
+        # 未分组时 group == name，用单名即可被 supervisor 解析
+        self.assertEqual(
+            SupervisorService._namespec({"name": "app", "group": "app"}), "app"
+        )
+        self.assertEqual(SupervisorService._namespec({"name": "app"}), "app")
+
+    async def test_restart_passes_group_namespec_to_rpc(self):
+        """回归：进程归属 [group:services] 后，裸传短名会被 supervisor 判为 BAD_NAME。
+
+        真实 getAllProcessInfo 返回 name=chrome / group=services，
+        stopProcess/startProcess 只接受 services:chrome 这种 namespec。
+        """
         from app.services.supervisor import SupervisorService
 
         service = SupervisorService.__new__(SupervisorService)
         service.server = type("Server", (), {})()
         service.server.supervisor = type("Supervisor", (), {})()
         service.server.supervisor.getAllProcessInfo = lambda: [
-            {"name": "app", "statename": "RUNNING"},
-            {"name": "chrome", "statename": "RUNNING"},
-            {"name": "xvfb", "statename": "STOPPED"},
+            {"name": "app", "group": "services", "statename": "RUNNING"},
+            {"name": "chrome", "group": "services", "statename": "RUNNING"},
+            {"name": "xvfb", "group": "services", "statename": "STOPPED"},
         ]
-        service.server.supervisor.stopProcess = lambda name, wait: [name, wait]
-        service.server.supervisor.startProcess = lambda name, wait: [name, wait]
+        stopped_names = []
+        started_names = []
+
+        def stop_process(name, wait):
+            stopped_names.append(name)
+            return [name, wait]
+
+        def start_process(name, wait):
+            started_names.append(name)
+            return [name, wait]
+
+        service.server.supervisor.stopProcess = stop_process
+        service.server.supervisor.startProcess = start_process
+
         result = await service.restart()
+
         self.assertEqual(result.status, "restarted")
-        self.assertEqual(result.stop_result, [["chrome", True]])
-        self.assertEqual(result.start_result, [["chrome", True], ["xvfb", True]])
+        self.assertEqual(stopped_names, ["services:chrome"])
+        self.assertEqual(started_names, ["services:chrome", "services:xvfb"])
+        self.assertEqual(result.stop_result, [["services:chrome", True]])
+        self.assertEqual(
+            result.start_result, [["services:chrome", True], ["services:xvfb", True]]
+        )
+
+    async def test_stop_all_processes_uses_group_namespec_and_skips_app(self):
+        """回归：stop_all_processes 同样要拼 namespec，且必须排除 app 自身。"""
+        from app.services.supervisor import SupervisorService
+
+        service = SupervisorService.__new__(SupervisorService)
+        service.server = type("Server", (), {})()
+        service.server.supervisor = type("Supervisor", (), {})()
+        service.server.supervisor.getAllProcessInfo = lambda: [
+            {"name": "app", "group": "services", "statename": "RUNNING"},
+            {"name": "chrome", "group": "services", "statename": "RUNNING"},
+            {"name": "xvfb", "group": "services", "statename": "STOPPED"},
+        ]
+        stopped_names = []
+
+        def stop_process(name, wait):
+            stopped_names.append(name)
+            return True
+
+        service.server.supervisor.stopProcess = stop_process
+
+        result = await service.stop_all_processes()
+
+        self.assertEqual(result.status, "stopped")
+        self.assertEqual(result.result, {"stopped": ["chrome"]})
+        self.assertEqual(stopped_names, ["services:chrome"])
 
     def test_request_schemas_reject_unbounded_values(self):
         with self.assertRaises(ValueError):
