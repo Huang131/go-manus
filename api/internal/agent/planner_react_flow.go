@@ -8,6 +8,7 @@ import (
 
 	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/settings"
 	"github.com/bytedance/sonic"
 
 	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
@@ -21,7 +22,7 @@ type PlannerReActFlow struct {
 	status    FlowStatus
 	plan      *model.Plan
 	sessionID string
-	config    *AgentConfig
+	settings  settings.AgentSettings
 	llm       llm.LLM
 	tools     []toolspkg.Tool
 
@@ -32,7 +33,7 @@ type PlannerReActFlow struct {
 // NewPlannerReActFlow 创建规划与执行流
 func NewPlannerReActFlow(
 	sessionID string,
-	config *AgentConfig,
+	agentSettings settings.AgentSettings,
 	llm llm.LLM,
 	tools []toolspkg.Tool,
 ) *PlannerReActFlow {
@@ -40,14 +41,14 @@ func NewPlannerReActFlow(
 		status:    FlowStatusIdle,
 		plan:      nil,
 		sessionID: sessionID,
-		config:    config,
+		settings:  agentSettings,
 		llm:       llm,
 		tools:     tools,
 	}
 
 	// 创建 Planner 和 ReAct Agent
-	flow.planner = NewPlannerAgent(sessionID, config, llm, tools)
-	flow.react = NewReActAgent(sessionID, config, llm, tools)
+	flow.planner = NewPlannerAgent(sessionID, agentSettings, llm, tools)
+	flow.react = NewReActAgent(sessionID, agentSettings, llm, tools)
 
 	return flow
 }

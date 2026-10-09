@@ -72,7 +72,7 @@ func TestAgentServiceChatUsesDetachedContextForMessagePersistence(t *testing.T) 
 	svc := &AgentService{
 		repos:         Repositories{Session: repo},
 		caps:          Capabilities{LLM: &mockLLM{}, MessageQueue: mq},
-		agentConfig:   DefaultAgentConfig(),
+		agentSettings: defaultAgentSettings(),
 		toolsProvider: &toolspkg.ToolProvider{},
 		taskBySession: make(map[string]*RedisStreamTask),
 	}

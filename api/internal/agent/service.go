@@ -16,6 +16,7 @@ import (
 	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/settings"
 
 	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
 
@@ -33,7 +34,7 @@ type AgentService struct {
 	mu            sync.RWMutex
 	repos         Repositories
 	caps          Capabilities
-	agentConfig   *AgentConfig
+	agentSettings settings.AgentSettings
 	toolsProvider *toolspkg.ToolProvider
 
 	// Session 与 Task 的映射（用于对接 Task 架构）
@@ -45,15 +46,14 @@ func NewAgentService(
 	ctx context.Context,
 	repos Repositories,
 	caps Capabilities,
-	agentConfig *AgentConfig,
+	agentSettings settings.AgentSettings,
 	mcpConfig *model.MCPConfig,
 	a2aConfig *A2AConfig,
 ) *AgentService {
-	agentConfig = NormalizeAgentConfig(agentConfig)
 	return &AgentService{
 		repos:         repos,
 		caps:          caps,
-		agentConfig:   agentConfig,
+		agentSettings: agentSettings,
 		toolsProvider: toolspkg.NewToolProvider(ctx, caps.Sandbox, caps.Browser, caps.SearchEngine, mcpConfig, a2aConfig),
 		taskBySession: make(map[string]*RedisStreamTask),
 	}
@@ -114,11 +114,8 @@ func (s *AgentService) Chat(ctx context.Context, sessionID string, message *llmc
 		logger.WarnContext(ctx, "添加用户消息事件失败", logger.String("session_id", sessionID), logger.Err(err))
 	}
 
-	// 获取或创建 RedisStreamTask
-	s.mu.RLock()
-	searchLimit := s.agentConfig.MaxSearchResults
-	s.mu.RUnlock()
-	task, err := s.getOrCreateTask(ctx, session, searchLimit)
+	// 获取或创建 RedisStreamTask。任务创建时一次性快照 Settings，确保 Runner 与工具使用同一版本。
+	task, err := s.getOrCreateTask(ctx, session)
 	if err != nil {
 		return "", fmt.Errorf("创建任务失败: %w", err)
 	}
@@ -241,14 +238,15 @@ func (s *AgentService) Shutdown() {
 	logger.Info("Agent 服务已关闭")
 }
 
-// ReloadAgentConfig 原子替换后续任务使用的 Agent 配置。
-func (s *AgentService) ReloadAgentConfig(cfg *AgentConfig) {
-	if cfg == nil {
-		return
+// ReloadAgentSettings 原子替换后续任务使用的已验证配置。
+func (s *AgentService) ReloadAgentSettings(next settings.AgentSettings) error {
+	if err := next.Validate(); err != nil {
+		return err
 	}
 	s.mu.Lock()
-	s.agentConfig = NormalizeAgentConfig(cfg)
+	s.agentSettings = next
 	s.mu.Unlock()
+	return nil
 }
 
 // ReloadMCPConfig 重建 MCP 客户端，确保配置接口保存后立即生效。
@@ -263,7 +261,7 @@ func (s *AgentService) ReloadA2AConfig(ctx context.Context, cfg *A2AConfig) erro
 
 // getOrCreateTask 获取或创建 RedisStreamTask
 // 对齐 Python: task = await RedisStreamTask.create(task_runner)
-func (s *AgentService) getOrCreateTask(ctx context.Context, session *model.Session, searchLimit int) (*RedisStreamTask, error) {
+func (s *AgentService) getOrCreateTask(ctx context.Context, session *model.Session) (*RedisStreamTask, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -278,11 +276,12 @@ func (s *AgentService) getOrCreateTask(ctx context.Context, session *model.Sessi
 	}
 
 	// 创建新的 task
-	toolSet := s.toolsProvider.Acquire(searchLimit)
+	agentSettings := s.agentSettings
+	toolSet := s.toolsProvider.Acquire(agentSettings.MaxSearchResults)
 	runtime := NewSessionRuntime(session.ID, s.repos.Session, s.repos.File, s.caps.Sandbox, s.caps.FileStorage)
 	runner := NewAgentTaskRunner(&AgentTaskRunnerConfig{
 		SessionID:       session.ID,
-		AgentConfig:     s.agentConfig,
+		AgentSettings:   agentSettings,
 		InitialMessages: conversationMessages(session.Events),
 		LLM:             s.caps.LLM,
 		Tools:           toolSet.Tools(),

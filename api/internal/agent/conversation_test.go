@@ -37,7 +37,7 @@ func TestNewAgentTaskRunnerLoadsInitialConversation(t *testing.T) {
 	}
 	runner := NewAgentTaskRunner(&AgentTaskRunnerConfig{
 		SessionID:       "session-1",
-		AgentConfig:     DefaultAgentConfig(),
+		AgentSettings:   defaultAgentSettings(),
 		InitialMessages: history,
 	})
 

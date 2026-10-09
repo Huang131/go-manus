@@ -11,6 +11,7 @@ import (
 	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/settings"
 	"github.com/google/uuid"
 
 	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
@@ -31,7 +32,7 @@ const (
 type AgentTaskRunner struct {
 	mu        sync.Mutex
 	sessionID string
-	config    *AgentConfig
+	settings  settings.AgentSettings
 	llm       llm.LLM
 	tools     []toolspkg.Tool
 	flow      *PlannerReActFlow
@@ -41,7 +42,7 @@ type AgentTaskRunner struct {
 // AgentTaskRunnerConfig AgentTaskRunner 配置
 type AgentTaskRunnerConfig struct {
 	SessionID       string
-	AgentConfig     *AgentConfig
+	AgentSettings   settings.AgentSettings
 	InitialMessages []llmcore.Message
 	LLM             llm.LLM
 	Tools           []toolspkg.Tool
@@ -52,14 +53,14 @@ type AgentTaskRunnerConfig struct {
 func NewAgentTaskRunner(cfg *AgentTaskRunnerConfig) *AgentTaskRunner {
 	runner := &AgentTaskRunner{
 		sessionID: cfg.SessionID,
-		config:    cfg.AgentConfig,
+		settings:  cfg.AgentSettings,
 		llm:       cfg.LLM,
 		tools:     cfg.Tools,
 		runtime:   cfg.Runtime,
 	}
 
 	// 创建流程
-	runner.flow = NewPlannerReActFlow(cfg.SessionID, cfg.AgentConfig, cfg.LLM, cfg.Tools)
+	runner.flow = NewPlannerReActFlow(cfg.SessionID, cfg.AgentSettings, cfg.LLM, cfg.Tools)
 	if len(cfg.InitialMessages) > 0 {
 		runner.flow.planner.mergeMemory(context.Background(), cfg.InitialMessages)
 		runner.flow.react.mergeMemory(context.Background(), cfg.InitialMessages)
@@ -73,7 +74,7 @@ func NewAgentTaskRunner(cfg *AgentTaskRunnerConfig) *AgentTaskRunner {
 func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) error {
 	r.mu.Lock()
 	if r.flow == nil {
-		r.flow = NewPlannerReActFlow(r.sessionID, r.config, r.llm, r.tools)
+		r.flow = NewPlannerReActFlow(r.sessionID, r.settings, r.llm, r.tools)
 	}
 	r.mu.Unlock()
 

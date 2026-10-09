@@ -58,8 +58,8 @@ func SetupRoutes(engine *gin.Engine, h *Handlers) {
 		// 配置模块（对齐原项目：/app-config/mcp-servers、/a2a-servers）
 		appConfig := api.Group("/app-config")
 		{
-			appConfig.GET("/agent", h.AppConfig.GetAgentConfig)
-			appConfig.POST("/agent", h.AppConfig.UpdateAgentConfig)
+			appConfig.GET("/agent", h.AppConfig.GetAgentSettings)
+			appConfig.POST("/agent", h.AppConfig.UpdateAgentSettings)
 			appConfig.GET("/mcp-servers", h.AppConfig.GetMCPConfig)
 			appConfig.POST("/mcp-servers", h.AppConfig.UpdateMCPConfig)
 			appConfig.POST("/mcp-servers/:server_name/delete", h.AppConfig.DeleteMCPServer)

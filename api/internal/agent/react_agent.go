@@ -7,6 +7,7 @@ import (
 
 	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/settings"
 
 	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
 
@@ -21,12 +22,12 @@ type ReActAgent struct {
 // NewReActAgent 创建执行 Agent
 func NewReActAgent(
 	sessionID string,
-	config *AgentConfig,
+	agentSettings settings.AgentSettings,
 	llm llm.LLM,
 	tools []toolspkg.Tool,
 ) *ReActAgent {
 	agent := &ReActAgent{}
-	agent.BaseAgent = *NewBaseAgent("react", sessionID, config, llm, tools)
+	agent.BaseAgent = *NewBaseAgent("react", sessionID, agentSettings, llm, tools)
 	return agent
 }
 

@@ -62,7 +62,7 @@ func TestBaseAgent_InvokeWithEmptyRetry(t *testing.T) {
 		},
 	}
 
-	agent := NewBaseAgent("test", "session-1", DefaultAgentConfig(), mock, nil)
+	agent := NewBaseAgent("test", "session-1", defaultAgentSettings(), mock, nil)
 
 	resp, attempts, err := agent.invokeWithEmptyRetry(context.Background(), &llm.LLMRequest{
 		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
@@ -102,7 +102,7 @@ func TestBaseAgent_InvokeWithEmptyRetry_AllEmpty(t *testing.T) {
 			{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: ""}},
 		},
 	}
-	agent := NewBaseAgent("test", "session-1", DefaultAgentConfig(), mock, nil)
+	agent := NewBaseAgent("test", "session-1", defaultAgentSettings(), mock, nil)
 
 	_, _, err := agent.invokeWithEmptyRetry(context.Background(), &llm.LLMRequest{
 		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
@@ -119,7 +119,7 @@ func TestBaseAgent_InvokeWithEmptyRetry_FirstSuccess(t *testing.T) {
 			{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: `{"ok":true}`}},
 		},
 	}
-	agent := NewBaseAgent("test", "session-1", DefaultAgentConfig(), mock, nil)
+	agent := NewBaseAgent("test", "session-1", defaultAgentSettings(), mock, nil)
 
 	resp, attempts, err := agent.invokeWithEmptyRetry(context.Background(), &llm.LLMRequest{
 		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
@@ -137,7 +137,7 @@ func TestBaseAgent_InvokeWithEmptyRetry_FirstSuccess(t *testing.T) {
 
 func TestBaseAgent_InvokeWithEmptyRetry_StopsOnCancellation(t *testing.T) {
 	mock := &mockLLM{errs: []error{context.Canceled, context.Canceled, context.Canceled}}
-	agent := NewBaseAgent("test", "session-1", DefaultAgentConfig(), mock, nil)
+	agent := NewBaseAgent("test", "session-1", defaultAgentSettings(), mock, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
@@ -156,7 +156,7 @@ func TestBaseAgent_InvokeWithEmptyRetry_RejectsLateSuccessAfterCancellation(t *t
 	mock := &mockLLM{responses: []*llmcore.LLMResponse{
 		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: "late success"}},
 	}}
-	agent := NewBaseAgent("test", "session-1", DefaultAgentConfig(), mock, nil)
+	agent := NewBaseAgent("test", "session-1", defaultAgentSettings(), mock, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 

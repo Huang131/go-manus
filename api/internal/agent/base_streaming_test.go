@@ -26,7 +26,7 @@ func (m *streamingAgentLLM) Stream(context.Context, *llm.LLMRequest) (<-chan llm
 
 func TestBaseAgentInvokePublishesTextDeltas(t *testing.T) {
 	llm := &streamingAgentLLM{}
-	agent := NewBaseAgent("react", "session-1", DefaultAgentConfig(), llm, nil)
+	agent := NewBaseAgent("react", "session-1", defaultAgentSettings(), llm, nil)
 	events := make(chan model.BaseEvent, 4)
 	agent.SetEventCh(events)
 
@@ -51,7 +51,7 @@ func TestBaseAgentInvokePublishesTextDeltas(t *testing.T) {
 
 func TestReActAgentSummarizeReportsWhetherDeltasWereEmitted(t *testing.T) {
 	llm := &streamingAgentLLM{}
-	agent := NewReActAgent("session-1", DefaultAgentConfig(), llm, nil)
+	agent := NewReActAgent("session-1", defaultAgentSettings(), llm, nil)
 	events := make(chan model.BaseEvent, 4)
 	agent.SetEventCh(events)
 
@@ -98,7 +98,7 @@ func (m *blockingStreamingAgentLLM) Stream(context.Context, *llm.LLMRequest) (<-
 
 func TestBaseAgentInvokeStreamingStopsWhenProviderLeavesStreamOpen(t *testing.T) {
 	mock := &blockingStreamingAgentLLM{streamStarted: make(chan struct{})}
-	agent := NewBaseAgent("react", "session-1", DefaultAgentConfig(), mock, nil)
+	agent := NewBaseAgent("react", "session-1", defaultAgentSettings(), mock, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

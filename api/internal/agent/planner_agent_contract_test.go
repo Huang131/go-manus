@@ -14,7 +14,7 @@ func TestPlanner_CreatePlanUsesStructuredRequestWithoutTools(t *testing.T) {
 		Role:        model.RoleAssistant,
 		ContentText: `{"message":"可以计算","goal":"回答计算问题","title":"计算","language":"zh-CN","steps":[{"id":"step_1","description":"计算 1+3+4"}]}`,
 	}}}}
-	planner := NewPlannerAgent("s", DefaultAgentConfig(), mock, nil)
+	planner := NewPlannerAgent("s", defaultAgentSettings(), mock, nil)
 	_, _, err := planner.CreatePlan(context.Background(), &TaskInput{Message: llmcore.Message{ContentText: "1+3+4等于多少"}})
 	if err != nil {
 		t.Fatal(err)
@@ -35,7 +35,7 @@ func TestPlanner_CreatePlanRejectsNonJSONContent(t *testing.T) {
 		Role:        model.RoleAssistant,
 		ContentText: "8",
 	}}}}
-	planner := NewPlannerAgent("s", DefaultAgentConfig(), mock, nil)
+	planner := NewPlannerAgent("s", defaultAgentSettings(), mock, nil)
 	_, reply, err := planner.CreatePlan(context.Background(), &TaskInput{Message: llmcore.Message{ContentText: "1+3+4等于多少"}})
 	if err == nil || !strings.Contains(err.Error(), "解析计划失败") {
 		t.Fatalf("err = %v, want planner parse error", err)

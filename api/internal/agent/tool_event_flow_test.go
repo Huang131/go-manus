@@ -281,11 +281,11 @@ func TestToolCallingEvents_SSEStream(t *testing.T) {
 	mq := newInMemoryMessageQueue()
 	mockRepo := &mockSessionRepo{}
 	runner := NewAgentTaskRunner(&AgentTaskRunnerConfig{
-		SessionID:   "session-tool-event-test",
-		AgentConfig: DefaultAgentConfig(),
-		LLM:         mock,
-		Tools:       []toolspkg.Tool{&mockEchoTool{}},
-		Runtime:     NewSessionRuntime("session-tool-event-test", mockRepo, nil, nil, nil),
+		SessionID:     "session-tool-event-test",
+		AgentSettings: defaultAgentSettings(),
+		LLM:           mock,
+		Tools:         []toolspkg.Tool{&mockEchoTool{}},
+		Runtime:       NewSessionRuntime("session-tool-event-test", mockRepo, nil, nil, nil),
 	})
 	task := NewRedisStreamTask(mq, runner)
 	defer task.Cancel()
@@ -420,11 +420,11 @@ func TestToolCallingEvents_SSEStream_Failure(t *testing.T) {
 	mq := newInMemoryMessageQueue()
 	mockRepo := &mockSessionRepo{}
 	runner := NewAgentTaskRunner(&AgentTaskRunnerConfig{
-		SessionID:   "session-tool-event-fail-test",
-		AgentConfig: DefaultAgentConfig(),
-		LLM:         mock,
-		Tools:       []toolspkg.Tool{&mockFailingTool{}},
-		Runtime:     NewSessionRuntime("session-tool-event-fail-test", mockRepo, nil, nil, nil),
+		SessionID:     "session-tool-event-fail-test",
+		AgentSettings: defaultAgentSettings(),
+		LLM:           mock,
+		Tools:         []toolspkg.Tool{&mockFailingTool{}},
+		Runtime:       NewSessionRuntime("session-tool-event-fail-test", mockRepo, nil, nil, nil),
 	})
 	task := NewRedisStreamTask(mq, runner)
 	defer task.Cancel()
@@ -574,11 +574,11 @@ func TestToolCalledEvent_CarriesArtifactRefInsteadOfBytes(t *testing.T) {
 	fileRepo := &generatedFileRepository{}
 	mq := newInMemoryMessageQueue()
 	runner := NewAgentTaskRunner(&AgentTaskRunnerConfig{
-		SessionID:   "session-artifact-test",
-		AgentConfig: DefaultAgentConfig(),
-		LLM:         mock,
-		Tools:       []toolspkg.Tool{&artifactTool{}},
-		Runtime:     NewSessionRuntime("session-artifact-test", &mockSessionRepo{}, fileRepo, nil, storage),
+		SessionID:     "session-artifact-test",
+		AgentSettings: defaultAgentSettings(),
+		LLM:           mock,
+		Tools:         []toolspkg.Tool{&artifactTool{}},
+		Runtime:       NewSessionRuntime("session-artifact-test", &mockSessionRepo{}, fileRepo, nil, storage),
 	})
 	task := NewRedisStreamTask(mq, runner)
 	defer task.Cancel()

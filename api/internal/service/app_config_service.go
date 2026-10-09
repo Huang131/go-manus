@@ -13,13 +13,14 @@ import (
 	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
+	"github.com/Huang131/go-manus/api/internal/settings"
 	"github.com/google/uuid"
 )
 
 // AppConfigService 应用配置服务接口
 type AppConfigService interface {
-	GetAgentConfig(ctx context.Context) (*model.AgentConfig, error)
-	UpdateAgentConfig(ctx context.Context, cfg *model.AgentConfig) error
+	GetAgentSettings(ctx context.Context) (*settings.AgentSettings, error)
+	UpdateAgentSettings(ctx context.Context, cfg *settings.AgentSettings) error
 	GetMCPConfig(ctx context.Context) (*model.MCPConfig, error)
 	UpdateMCPConfig(ctx context.Context, cfg *model.MCPConfig) error
 	DeleteMCPServer(ctx context.Context, serverName string) error
@@ -78,19 +79,32 @@ func getConfig[T any](s *DefaultAppConfigService, ctx context.Context, configTyp
 	return &v, nil
 }
 
-// GetAgentConfig 获取 Agent 配置
-func (s *DefaultAppConfigService) GetAgentConfig(ctx context.Context) (*model.AgentConfig, error) {
-	return getConfig[model.AgentConfig](s, ctx, model.AppConfigTypeAgent)
+// GetAgentSettings 获取 Agent 运行配置。
+func (s *DefaultAppConfigService) GetAgentSettings(ctx context.Context) (*settings.AgentSettings, error) {
+	cfg, err := getConfig[settings.AgentSettings](s, ctx, model.AppConfigTypeAgent)
+	if err != nil || cfg == nil {
+		return cfg, err
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid persisted agent settings: %w", err)
+	}
+	return cfg, nil
 }
 
-// UpdateAgentConfig 更新 Agent 配置
-func (s *DefaultAppConfigService) UpdateAgentConfig(ctx context.Context, cfg *model.AgentConfig) error {
+// UpdateAgentSettings 更新完整且合法的 Agent 运行配置。
+func (s *DefaultAppConfigService) UpdateAgentSettings(ctx context.Context, cfg *settings.AgentSettings) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.saveAgentConfig(ctx, cfg)
+	return s.saveAgentSettings(ctx, cfg)
 }
 
-func (s *DefaultAppConfigService) saveAgentConfig(ctx context.Context, cfg *model.AgentConfig) error {
+func (s *DefaultAppConfigService) saveAgentSettings(ctx context.Context, cfg *settings.AgentSettings) error {
+	if cfg == nil {
+		return apperr.BadRequest("Agent 配置不能为空")
+	}
+	if err := cfg.Validate(); err != nil {
+		return apperr.BadRequest(err.Error())
+	}
 	appConfig, err := newAppConfig(model.AppConfigTypeAgent, model.AppConfigKeyDefault, cfg)
 	if err != nil {
 		return err

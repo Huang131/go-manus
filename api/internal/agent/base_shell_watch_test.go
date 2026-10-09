@@ -38,7 +38,7 @@ func TestBaseAgentStopShellWatchWaitsForWatcherExit(t *testing.T) {
 		release:        make(chan struct{}),
 		exited:         make(chan struct{}),
 	}
-	agent := NewBaseAgent("test", "session-1", DefaultAgentConfig(), nil, nil)
+	agent := NewBaseAgent("test", "session-1", defaultAgentSettings(), nil, nil)
 	agent.SetEventCh(make(chan model.BaseEvent, 1))
 	agent.startShellWatch(context.Background(), sandbox, "session-1")
 

@@ -7,6 +7,7 @@ import (
 	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/service"
+	"github.com/Huang131/go-manus/api/internal/settings"
 	"github.com/Huang131/go-manus/api/pkg/response"
 	"github.com/gin-gonic/gin"
 )
@@ -18,7 +19,7 @@ type AppConfigHandler struct {
 }
 
 type configRuntimeReloader interface {
-	ReloadAgentConfig(*agent.AgentConfig)
+	ReloadAgentSettings(settings.AgentSettings) error
 	ReloadMCPConfig(context.Context, *model.MCPConfig) error
 	ReloadA2AConfig(context.Context, *agent.A2AConfig) error
 }
@@ -67,23 +68,30 @@ func reloadOrFail(c *gin.Context, label string, reload func(*gin.Context) error)
 	return nil
 }
 
-// GetAgentConfig 获取 Agent 配置
-func (h *AppConfigHandler) GetAgentConfig(c *gin.Context) {
-	getConfig(c, h.service.GetAgentConfig)
+// GetAgentSettings 获取 Agent 配置；尚未持久化时返回完整默认值。
+func (h *AppConfigHandler) GetAgentSettings(c *gin.Context) {
+	cfg, err := h.service.GetAgentSettings(c.Request.Context())
+	if err != nil {
+		response.FromError(c, err)
+		return
+	}
+	if cfg == nil {
+		defaults := settings.DefaultAgentSettings()
+		cfg = &defaults
+	}
+	response.Success(c, cfg)
 }
 
-// UpdateAgentConfig 更新 Agent 配置
-func (h *AppConfigHandler) UpdateAgentConfig(c *gin.Context) {
-	updateConfig(c, func(ctx context.Context, cfg *model.AgentConfig) error {
-		if err := h.service.UpdateAgentConfig(ctx, cfg); err != nil {
+// UpdateAgentSettings 更新 Agent 配置。
+func (h *AppConfigHandler) UpdateAgentSettings(c *gin.Context) {
+	updateConfig(c, func(ctx context.Context, cfg *settings.AgentSettings) error {
+		if err := h.service.UpdateAgentSettings(ctx, cfg); err != nil {
 			return err
 		}
 		if h.reloader != nil {
-			h.reloader.ReloadAgentConfig(&agent.AgentConfig{
-				MaxIterations:    cfg.MaxIterations,
-				MaxRetries:       cfg.MaxRetries,
-				MaxSearchResults: cfg.MaxSearchResults,
-			})
+			if err := h.reloader.ReloadAgentSettings(*cfg); err != nil {
+				return apperr.Unavailable("Agent 运行时重载失败: " + err.Error())
+			}
 		}
 		return nil
 	})

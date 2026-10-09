@@ -9,6 +9,7 @@ import (
 
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
+	"github.com/Huang131/go-manus/api/internal/settings"
 )
 
 // MockAppConfigRepository 用于测试的 AppConfig Repository Mock
@@ -90,6 +91,41 @@ func (m *MockAppConfigRepository) WithTx(ctx context.Context, fn func(repo repos
 
 // 确保 Mock 实现正确的接口
 var _ repository.AppConfigRepository = (*MockAppConfigRepository)(nil)
+
+func TestAppConfigServiceUpdateAgentSettingsRejectsInvalidValue(t *testing.T) {
+	repo := NewMockAppConfigRepository()
+	svc := NewAppConfigService(repo)
+
+	err := svc.UpdateAgentSettings(context.Background(), &settings.AgentSettings{})
+	if err == nil {
+		t.Fatal("UpdateAgentSettings() error = nil, want validation error")
+	}
+	if len(repo.configs) != 0 {
+		t.Fatalf("saved configs = %d, want 0", len(repo.configs))
+	}
+}
+
+func TestAppConfigServiceGetAgentSettingsRejectsInvalidPersistedValue(t *testing.T) {
+	repo := NewMockAppConfigRepository()
+	raw, err := sonic.Marshal(settings.AgentSettings{
+		MaxIterations:    0,
+		MaxRetries:       3,
+		MaxSearchResults: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.configs["agent:default"] = &model.AppConfig{
+		ConfigType:  model.AppConfigTypeAgent,
+		ConfigKey:   model.AppConfigKeyDefault,
+		ConfigValue: raw,
+	}
+
+	_, err = NewAppConfigService(repo).GetAgentSettings(context.Background())
+	if err == nil {
+		t.Fatal("GetAgentSettings() error = nil, want persisted settings validation error")
+	}
+}
 
 func TestAppConfigService_UpdateMCPConfig(t *testing.T) {
 	repo := NewMockAppConfigRepository()

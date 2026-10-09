@@ -17,24 +17,38 @@ import (
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/service"
+	"github.com/Huang131/go-manus/api/internal/settings"
 )
 
-func TestResolveAgentConfigOverlaysPersistedValues(t *testing.T) {
-	got := resolveAgentConfig(&model.AgentConfig{
+func TestResolveAgentSettingsUsesValidPersistedValues(t *testing.T) {
+	want := settings.AgentSettings{
 		MaxIterations:    4,
 		MaxRetries:       1,
 		MaxSearchResults: 6,
-	})
-	if got.MaxIterations != 4 || got.MaxRetries != 1 || got.MaxSearchResults != 6 {
-		t.Fatalf("resolved config = %+v, want persisted runtime values", got)
+	}
+	got, err := resolveAgentSettings(&want)
+	if err != nil {
+		t.Fatalf("resolveAgentSettings() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("resolved settings = %+v, want %+v", got, want)
 	}
 }
 
-func TestResolveAgentConfigKeepsDefaultsForMissingValues(t *testing.T) {
-	defaults := agent.DefaultAgentConfig()
-	got := resolveAgentConfig(&model.AgentConfig{})
-	if got.MaxIterations != defaults.MaxIterations || got.MaxRetries != defaults.MaxRetries || got.MaxSearchResults != defaults.MaxSearchResults {
-		t.Fatalf("resolved config = %+v, want defaults", got)
+func TestResolveAgentSettingsUsesDefaultsOnlyWhenRecordMissing(t *testing.T) {
+	want := settings.DefaultAgentSettings()
+	got, err := resolveAgentSettings(nil)
+	if err != nil {
+		t.Fatalf("resolveAgentSettings() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("resolved settings = %+v, want defaults %+v", got, want)
+	}
+}
+
+func TestResolveAgentSettingsRejectsInvalidPersistedRecord(t *testing.T) {
+	if _, err := resolveAgentSettings(&settings.AgentSettings{}); err == nil {
+		t.Fatal("resolveAgentSettings() error = nil, want invalid persisted settings error")
 	}
 }
 

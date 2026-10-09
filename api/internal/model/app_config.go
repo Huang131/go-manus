@@ -30,13 +30,6 @@ type ServiceStatus struct {
 	Error  string      `json:"error,omitempty"`
 }
 
-// AgentConfig Agent 行为参数配置
-type AgentConfig struct {
-	MaxIterations    int `json:"max_iterations"`     // 单次任务最大迭代次数，防止无限循环
-	MaxRetries       int `json:"max_retries"`        // 工具调用失败时的最大重试次数
-	MaxSearchResults int `json:"max_search_results"` // 搜索工具返回的最大结果数
-}
-
 // A2AConfig A2A 配置
 type A2AConfig struct {
 	Servers []A2AServer `json:"servers"`

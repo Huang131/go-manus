@@ -6,10 +6,11 @@ import (
 	"github.com/bytedance/sonic"
 	"strings"
 
+	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
 	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
-	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
+	"github.com/Huang131/go-manus/api/internal/settings"
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
@@ -21,12 +22,12 @@ type PlannerAgent struct {
 // NewPlannerAgent 创建规划 Agent
 func NewPlannerAgent(
 	sessionID string,
-	config *AgentConfig,
+	agentSettings settings.AgentSettings,
 	llm llm.LLM,
 	tools []toolspkg.Tool,
 ) *PlannerAgent {
 	agent := &PlannerAgent{}
-	agent.BaseAgent = *NewBaseAgent("planner", sessionID, config, llm, tools)
+	agent.BaseAgent = *NewBaseAgent("planner", sessionID, agentSettings, llm, tools)
 	return agent
 }
 
@@ -63,7 +64,7 @@ func (a *PlannerAgent) CreatePlan(ctx context.Context, input *TaskInput) (*model
 		ResponseFormat: &llmcore.ResponseFormat{
 			Type: llmcore.ResponseFormatJSONObject,
 		},
-	}, a.config.MaxRetries)
+	}, a.settings.MaxRetries)
 	if err != nil {
 		return nil, "", fmt.Errorf("LLM调用失败: %w", err)
 	}
@@ -154,7 +155,7 @@ func (a *PlannerAgent) UpdatePlan(ctx context.Context, plan *model.Plan, complet
 		ResponseFormat: &llmcore.ResponseFormat{
 			Type: llmcore.ResponseFormatJSONObject,
 		},
-	}, a.config.MaxRetries)
+	}, a.settings.MaxRetries)
 	if err != nil {
 		return nil, fmt.Errorf("LLM调用失败: %w", err)
 	}

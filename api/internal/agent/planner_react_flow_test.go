@@ -13,14 +13,14 @@ import (
 // TestPlannerReActFlow_StateTransitions 测试状态转换逻辑
 func TestPlannerReActFlow_StateTransitions(t *testing.T) {
 	// 创建测试配置
-	config := DefaultAgentConfig()
+	config := defaultAgentSettings()
 
 	// 测试状态转换
 	flow := &PlannerReActFlow{
 		status:    FlowStatusIdle,
 		plan:      nil,
 		sessionID: "test-session",
-		config:    config,
+		settings:  config,
 	}
 
 	// 初始状态应该是 Idle
@@ -181,7 +181,7 @@ func TestPlannerReActFlow_InvokeContext(t *testing.T) {
 	}
 
 	// 使用 NewPlannerReActFlow 正确初始化所有字段
-	config := DefaultAgentConfig()
+	config := defaultAgentSettings()
 
 	flow := NewPlannerReActFlow(
 		"test-session",

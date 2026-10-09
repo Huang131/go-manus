@@ -15,6 +15,7 @@ import (
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/sandbox"
+	"github.com/Huang131/go-manus/api/internal/settings"
 
 	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
 
@@ -25,7 +26,7 @@ import (
 type BaseAgent struct {
 	name             string // 角色名"planner"/"react"
 	sessionID        string
-	config           *AgentConfig
+	settings         settings.AgentSettings
 	llm              llm.LLM
 	tools            []toolspkg.Tool
 	memory           Memory
@@ -39,7 +40,7 @@ type BaseAgent struct {
 }
 
 // NewBaseAgent 创建基础 Agent
-func NewBaseAgent(name, sessionID string, config *AgentConfig, llm llm.LLM, tools []toolspkg.Tool) *BaseAgent {
+func NewBaseAgent(name, sessionID string, agentSettings settings.AgentSettings, llm llm.LLM, tools []toolspkg.Tool) *BaseAgent {
 	registry := toolspkg.NewToolRegistry()
 	for _, tool := range tools {
 		registry.Register(tool)
@@ -51,7 +52,7 @@ func NewBaseAgent(name, sessionID string, config *AgentConfig, llm llm.LLM, tool
 	return &BaseAgent{
 		name:           name,
 		sessionID:      sessionID,
-		config:         config,
+		settings:       agentSettings,
 		llm:            llm,
 		tools:          tools,
 		memory:         NewSimpleMemory(),
@@ -333,7 +334,7 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 	mergeFrom := len(messages) - 1
 
 	// 2. 循环调用 LLM 直到达到最大迭代次数或 LLM 不再调用工具
-	for iteration < a.config.MaxIterations {
+	for iteration < a.settings.MaxIterations {
 		iteration++
 		// 3. 调用 LLM
 		llmReq := &llm.LLMRequest{
@@ -346,7 +347,7 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 				return nil, ctx.Err()
 			}
 			// LLM 调用失败，尝试重试
-			for retry := 0; retry < a.config.MaxRetries; retry++ {
+			for retry := 0; retry < a.settings.MaxRetries; retry++ {
 				logger.WarnContext(ctx, "LLM 调用失败，执行重试",
 					logger.Int("retry", retry+1),
 					logger.Err(err))
@@ -372,7 +373,7 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 
 			if err != nil {
 				// 硬失败：本轮对话被重试注入污染，不合并进记忆
-				return nil, fmt.Errorf("LLM 调用失败，已达到最大重试次数(%d): %w", a.config.MaxRetries, err)
+				return nil, fmt.Errorf("LLM 调用失败，已达到最大重试次数(%d): %w", a.settings.MaxRetries, err)
 			}
 		}
 
@@ -487,8 +488,8 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 
 	return &InvokeResult{
 		Content: "",
-		Error:   fmt.Errorf("Agent 迭代超过最大次数: %d", a.config.MaxIterations),
-	}, fmt.Errorf("Agent 迭代超过最大次数: %d", a.config.MaxIterations)
+		Error:   fmt.Errorf("Agent 迭代超过最大次数: %d", a.settings.MaxIterations),
+	}, fmt.Errorf("Agent 迭代超过最大次数: %d", a.settings.MaxIterations)
 }
 
 // shouldPublishDeltas 对非结构化响应发布文本增量。
