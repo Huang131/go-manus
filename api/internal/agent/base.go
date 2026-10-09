@@ -129,18 +129,41 @@ func (a *BaseAgent) GetToolsForLLM() []llmcore.ToolSpec {
 	return a.toolRegistry.GetToolsForLLM()
 }
 
-// InvokeResult ReAct 循环的返回结果
+// OutcomeKind 是 Engine 对外暴露的唯一控制结果。
+type OutcomeKind string
+
+const (
+	OutcomeCompleted    OutcomeKind = "completed"
+	OutcomeWaitingInput OutcomeKind = "waiting_input"
+	OutcomeFatalFailure OutcomeKind = "fatal_failure"
+	OutcomeCancelled    OutcomeKind = "cancelled"
+)
+
+// WaitingInput 描述 Engine 请求用户补充的信息。
+type WaitingInput struct {
+	Question        string
+	Attachments     []string
+	SuggestTakeover string
+	StepID          string
+}
+
+// StepOutcome 是 Engine 与 Flow 之间的唯一结果契约。
+type StepOutcome struct {
+	Kind        OutcomeKind
+	Text        string
+	Waiting     *WaitingInput
+	Failure     error
+	Attachments []string
+}
+
+// InvokeResult ReAct 循环的返回结果。
 type InvokeResult struct {
 	// Content LLM 返回的文本内容
 	Content string
 	// ToolCall 是否调用了工具
 	ToolCall bool
-	// WaitForUser 是否需要等待用户输入
-	WaitForUser bool
-	// UserQuestion 如果需要等待用户输入，返回要展示给用户的问题
-	UserQuestion string
-	// Error 错误信息
-	Error error
+	// Outcome 是本轮执行结果。
+	Outcome StepOutcome
 }
 
 // invokeWithEmptyRetry 调用 LLM，当返回空 content 时自动注入"AI 无响应内容，请继续。"
@@ -291,12 +314,9 @@ type ToolCallResult struct {
 	Arguments map[string]interface{}
 	// Result 工具执行结果
 	Result *model.ToolResult
-	// WaitForUser 是否需要等待用户输入
-	WaitForUser bool
+	// Outcome 是工具调用产生的业务结果。
+	Outcome StepOutcome
 }
-
-// ErrWaitForUser 等待用户输入的错误
-var ErrWaitForUser = fmt.Errorf("waiting for user input")
 
 // retryInterval 重试间隔 (秒)
 const retryInterval = 1.0
@@ -415,7 +435,7 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 				}
 
 				// 检测是否需要等待用户输入
-				if result.WaitForUser {
+				if result.Outcome.Kind == OutcomeWaitingInput {
 					// 将工具结果添加到历史
 					messages = append(messages, llmcore.Message{
 						Role:        model.RoleTool,
@@ -424,21 +444,13 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 						ContentText: result.Result.LLMJSON(),
 					})
 
-					// 获取用户问题
-					userQuestion := ""
-					if text, ok := result.Arguments["text"].(string); ok {
-						userQuestion = text
-					}
-
 					// 合并本轮对话进记忆（assistant+tool_calls 与 tool 结果保持配对）
 					a.mergeMemory(ctx, messages[mergeFrom:])
 
 					// 返回等待用户输入的特殊结果
 					return &InvokeResult{
-						Content:      "",
-						ToolCall:     true,
-						WaitForUser:  true,
-						UserQuestion: userQuestion,
+						ToolCall: true,
+						Outcome:  result.Outcome,
 					}, nil
 				}
 
@@ -480,6 +492,7 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 		return &InvokeResult{
 			Content:  resp.Message.ContentText,
 			ToolCall: false,
+			Outcome:  StepOutcome{Kind: OutcomeCompleted, Text: resp.Message.ContentText},
 		}, nil
 	}
 
@@ -488,7 +501,7 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 
 	return &InvokeResult{
 		Content: "",
-		Error:   fmt.Errorf("Agent 迭代超过最大次数: %d", a.settings.MaxIterations),
+		Outcome: StepOutcome{Kind: OutcomeFatalFailure, Failure: fmt.Errorf("Agent 迭代超过最大次数: %d", a.settings.MaxIterations)},
 	}, fmt.Errorf("Agent 迭代超过最大次数: %d", a.settings.MaxIterations)
 }
 
@@ -597,13 +610,14 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 	a.emitEvent(ctx, calledEvent)
 
 	if waiting, ok := toolResultWaitingForUser(result); ok && waiting {
+		waitingInput := waitingInputFromToolResult(result)
 		return &ToolCallResult{
 			ToolCallID:   toolCallID,
 			ToolName:     tool.Name(),
 			FunctionName: functionName,
 			Arguments:    arguments,
 			Result:       result,
-			WaitForUser:  true,
+			Outcome:      StepOutcome{Kind: OutcomeWaitingInput, Waiting: waitingInput},
 		}, nil
 	}
 
@@ -645,6 +659,37 @@ func toolResultWaitingForUser(result *model.ToolResult) (bool, bool) {
 	}
 	waiting, ok := data["waiting_for_user"].(bool)
 	return waiting, ok
+}
+
+func waitingInputFromToolResult(result *model.ToolResult) *WaitingInput {
+	data, _ := result.Data.(map[string]interface{})
+	waiting := &WaitingInput{}
+	if data != nil {
+		waiting.Question, _ = data["text"].(string)
+		waiting.Attachments = waitingInputAttachments(data["attachments"])
+		waiting.SuggestTakeover, _ = data["suggest_user_takeover"].(string)
+	}
+	return waiting
+}
+
+func waitingInputAttachments(value interface{}) []string {
+	switch attachments := value.(type) {
+	case string:
+		if attachments != "" {
+			return []string{attachments}
+		}
+	case []string:
+		return append([]string(nil), attachments...)
+	case []interface{}:
+		result := make([]string, 0, len(attachments))
+		for _, attachment := range attachments {
+			if text, ok := attachment.(string); ok && text != "" {
+				result = append(result, text)
+			}
+		}
+		return result
+	}
+	return nil
 }
 
 // shellOutputWatchTimeout 单条长命令输出 watch 的最长时长。

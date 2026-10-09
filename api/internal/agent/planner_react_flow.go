@@ -265,24 +265,28 @@ func (f *PlannerReActFlow) handleExecuting(ctx context.Context, input *TaskInput
 		logger.String("step_id", step.ID),
 		logger.String("description", step.Description))
 
-	if err := f.react.ExecuteStep(ctx, plan, step, input); err != nil {
-		if ctx.Err() != nil {
-			f.setStatus(FlowStatusCancelled)
+	outcome, err := f.react.ExecuteStep(ctx, plan, step, input)
+	if outcome != nil && outcome.Kind == OutcomeCancelled {
+		f.setStatus(FlowStatusCancelled)
+		return true
+	}
+	if outcome != nil && outcome.Kind == OutcomeWaitingInput {
+		// 需要等待用户输入：先把步骤状态（含 UserQuestion）写回 flow，
+		// 然后终止本轮 goroutine。flow 停在 Waiting，runner 继续等下一条输入；
+		// 用户回复会触发下一轮 Invoke，从 Waiting -> Executing 用新消息继续当前计划。
+		f.setPlan(plan)
+		logger.InfoContext(ctx, "ReActAgent 等待用户输入",
+			logger.String("question", step.UserQuestion))
+		if !f.emitEvent(ctx, ch, model.NewMessageEvent(model.RoleAssistant, step.UserQuestion)) ||
+			!f.emitEvent(ctx, ch, model.NewWaitEvent()) {
 			return true
 		}
-		if err == ErrWaitForUser {
-			// 需要等待用户输入：先把步骤状态（含 UserQuestion）写回 flow，
-			// 然后终止本轮 goroutine。flow 停在 Waiting，runner 继续等下一条输入；
-			// 用户回复会触发下一轮 Invoke，从 Waiting -> Executing 用新消息继续当前计划。
-			f.setPlan(plan)
-			logger.InfoContext(ctx, "ReActAgent 等待用户输入",
-				logger.String("question", step.UserQuestion))
-			if !f.emitEvent(ctx, ch, model.NewMessageEvent(model.RoleAssistant, step.UserQuestion)) ||
-				!f.emitEvent(ctx, ch, model.NewWaitEvent()) {
-				return true
-			}
-			f.setStatus(FlowStatusWaiting)
-			// 不压缩记忆，保留上下文
+		f.setStatus(FlowStatusWaiting)
+		return true
+	}
+	if err != nil {
+		if ctx.Err() != nil {
+			f.setStatus(FlowStatusCancelled)
 			return true
 		}
 		logger.ErrorContext(ctx, "ReActAgent 执行步骤失败", logger.Err(err))
@@ -291,9 +295,9 @@ func (f *PlannerReActFlow) handleExecuting(ctx context.Context, input *TaskInput
 		}
 		step.Status = model.ExecutionStatusFailed
 		step.Error = err.Error()
-	} else if step.Status == model.ExecutionStatusFailed {
+	} else if outcome != nil && outcome.Kind == OutcomeFatalFailure {
 		// 步骤业务执行失败（模型返回 success=false 或 JSON 解析失败）：
-		// ReActAgent 已把 step.Status 置为 Failed，应按真实结果发失败事件，而非误报完成。
+		// Outcome 是控制信号，step 只保存供计划展示和恢复的领域状态。
 		if !f.emitEvent(ctx, ch, model.NewStepEvent(*step, model.StepEventStatusFailed)) {
 			return true
 		}

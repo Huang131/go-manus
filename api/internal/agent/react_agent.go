@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -32,7 +33,7 @@ func NewReActAgent(
 }
 
 // ExecuteStep 执行单个步骤
-func (a *ReActAgent) ExecuteStep(ctx context.Context, plan *model.Plan, step *model.PlanStep, input *TaskInput) error {
+func (a *ReActAgent) ExecuteStep(ctx context.Context, plan *model.Plan, step *model.PlanStep, input *TaskInput) (*StepOutcome, error) {
 	message := &input.Message
 
 	// 构建附件字符串
@@ -60,22 +61,21 @@ func (a *ReActAgent) ExecuteStep(ctx context.Context, plan *model.Plan, step *mo
 	// 步骤执行的响应是结构化 JSON；先完整聚合后解析，避免把半截 JSON 当作用户消息展示。
 	result, err := a.InvokeWithoutStreaming(ctx, systemPrompt, prompt)
 	if err != nil {
-		// 如果是等待用户输入的错误，记录用户问题到 step
-		if err == ErrWaitForUser {
-			step.UserQuestion = result.UserQuestion
-			step.Status = model.ExecutionStatusRunning
-			return ErrWaitForUser
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return &StepOutcome{Kind: OutcomeCancelled, Failure: err}, err
 		}
 		step.Status = model.ExecutionStatusFailed
 		step.Error = err.Error()
-		return fmt.Errorf("LLM调用失败: %w", err)
+		return &StepOutcome{Kind: OutcomeFatalFailure, Failure: err}, fmt.Errorf("LLM调用失败: %w", err)
 	}
 
-	// 检查是否是等待用户输入
-	if result.WaitForUser {
-		step.UserQuestion = result.UserQuestion
+	if result.Outcome.Kind == OutcomeWaitingInput {
+		if result.Outcome.Waiting != nil {
+			step.UserQuestion = result.Outcome.Waiting.Question
+			result.Outcome.Waiting.StepID = step.ID
+		}
 		step.Status = model.ExecutionStatusRunning
-		return ErrWaitForUser
+		return &result.Outcome, nil
 	}
 
 	// 解析响应（使用 JSON 修复解析器）
@@ -94,7 +94,7 @@ func (a *ReActAgent) ExecuteStep(ctx context.Context, plan *model.Plan, step *mo
 		step.Result = result.Content
 		step.Status = model.ExecutionStatusFailed
 		step.Error = "JSON 解析失败"
-		return nil
+		return &StepOutcome{Kind: OutcomeFatalFailure, Text: result.Content, Failure: err}, nil
 	}
 
 	// 更新步骤状态
@@ -113,7 +113,12 @@ func (a *ReActAgent) ExecuteStep(ctx context.Context, plan *model.Plan, step *mo
 		logger.Bool("success", step.Success),
 		logger.String("result", step.Result))
 
-	return nil
+	outcome := &StepOutcome{Kind: OutcomeCompleted, Text: stepResult.Result, Attachments: stepResult.Attachments}
+	if !stepResult.Success {
+		outcome.Kind = OutcomeFatalFailure
+		outcome.Failure = fmt.Errorf("%s", stepResult.Result)
+	}
+	return outcome, nil
 }
 
 // Summarize 总结任务执行结果
