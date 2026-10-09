@@ -4,6 +4,7 @@ package integration
 
 import (
 	"net/http"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -41,6 +42,47 @@ func TestAppConfigAPI_AgentConfig_Lifecycle(t *testing.T) {
 	assert.Equal(t, float64(20), data["max_iterations"])
 	assert.Equal(t, float64(5), data["max_retries"])
 	assert.Equal(t, float64(10), data["max_search_results"])
+}
+
+func TestAppConfigAPI_AgentConfigRejectsInvalidValues(t *testing.T) {
+	defer CleanupAppConfig(t, "agent", "default")
+
+	w := postJSON(t, "/api/app-config/agent", map[string]any{
+		"max_iterations":     0,
+		"max_retries":        3,
+		"max_search_results": 10,
+	})
+
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+}
+
+func TestAgentSettingsMigrationNormalizesInvalidRecordIdempotently(t *testing.T) {
+	defer CleanupAppConfig(t, "agent", "default")
+	ctx, cancel := NewTestContext()
+	defer cancel()
+
+	_, err := testDB.Pool.Exec(ctx, `
+		INSERT INTO app_configs (id, config_type, config_key, config_value)
+		VALUES ('agent-settings-migration-test', 'agent', 'default',
+		        '{"max_iterations":0,"max_retries":2.5,"max_search_results":99,"legacy":true}'::jsonb)
+		ON CONFLICT (config_type, config_key) DO UPDATE SET config_value = EXCLUDED.config_value
+	`)
+	require.NoError(t, err)
+
+	migration, err := os.ReadFile("../migrations/005_normalize_agent_settings.sql")
+	require.NoError(t, err)
+	for range 2 {
+		_, err = testDB.Pool.Exec(ctx, string(migration))
+		require.NoError(t, err)
+	}
+
+	var raw []byte
+	err = testDB.Pool.QueryRow(ctx, `
+		SELECT config_value FROM app_configs
+		WHERE config_type = 'agent' AND config_key = 'default'
+	`).Scan(&raw)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"max_iterations":10,"max_retries":3,"max_search_results":10}`, string(raw))
 }
 
 // TestAppConfigAPI_MCPConfig_Lifecycle 测试 MCP 配置完整生命周期
