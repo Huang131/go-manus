@@ -7,8 +7,8 @@
 3. [完成] StepOutcome 唯一信号并删除旧等待表达。
 4. [完成] ContextPolicy：统一 context window、输出预留、工具 schema 预算和完整工具链裁剪。
 5. [完成] MCP 动态路由、初始化与错误契约收敛。
-6. [进行中] Run、Message、execution snapshot、状态机和 Repository（3A 领域契约、3B persistence/migration/component tests 完成；3C 纯 RunService 待实现）。
-7. RunExecutor 生命周期、取消收敛、ToolSet 释放和可观测性。
+6. [完成] Run、Message、execution snapshot、状态机、Repository 和纯 RunService（3A/3B/3C 完成，仍未接生产）。
+7. [进行中] RunExecutor 生命周期、取消收敛、ToolSet 释放和可观测性。
 8. 后端生产写路径原子切换。
 9. Run API、SSE、Last-Event-ID 和 UI 切换。
 10. 删除 RedisStreamTask、Session 执行字段与旧投影。

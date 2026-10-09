@@ -142,7 +142,7 @@ Session 继续保存标题、未读数和最新消息等会话摘要，但不再
 1. 评审状态矩阵、执行快照、消息转换、幂等、active 唯一约束和重启语义。
 2. 新增 `runs`、`messages` migration 和 model。
 3. 实现 Repository、聚合事务入口和数据库约束测试。
-4. 实现纯 RunService 测试，但不从 bootstrap 注入、不改 Handler、不写生产 Run。
+4. 实现纯 RunService 测试，但不从 bootstrap 注入、不改 Handler、不写生产 Run。该步骤已完成。
 
 ## 已完成检查点 3B：Run/Message 持久化
 
@@ -154,12 +154,13 @@ Session 继续保存标题、未读数和最新消息等会话摘要，但不再
 - PostgreSQL 部分唯一索引保证同一 Session 同时只有一个 active Run。
 - 组件测试在真实 PostgreSQL、Redis、MinIO 测试环境中覆盖聚合创建、单活跃约束、创建幂等、等待/恢复、输入幂等和事务回滚；`make test-component` 已将 `TestRunRepo_` 纳入门禁。
 
-下一步是 3C：在不接入生产路径的前提下实现纯 `RunService`，把 Repository 的持久化操作收敛成可测试的领域用例。
+3C 已实现纯 `RunService`：在不接入生产路径的前提下，把创建、启动、等待、恢复输入、取消请求和取消收敛收敛成可测试的领域用例。服务不启动 Engine、不持有进程内控制句柄、不发布事件。
 
 建议提交拆分：
 
 - `feat(api): define run domain contracts`
 - `feat(api): add run persistence`
+- `refactor(api): add pure run service`
 
 ## 完成条件与回滚
 

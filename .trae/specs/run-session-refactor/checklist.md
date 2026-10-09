@@ -30,3 +30,5 @@
 - [x] 3B `runs/messages` migration、Run/Message Repository、Run aggregate 窄事务入口与真实 PostgreSQL 组件测试。
 - [x] 3B 创建幂等、每 Session 单 active Run、waiting_input 快照/问题原子写入、恢复输入幂等与事务回滚测试。
 - [x] 3B 将 `TestRunRepo_` 纳入 `make test-component` 门禁；重复执行 migration 后组件测试通过。
+- [x] 3C 纯 RunService：创建、启动、waiting_input、恢复输入、取消请求和取消收敛用例。
+- [x] 3C 服务层拒绝 cancelling/终态输入，重复恢复输入幂等，损坏快照在持久化变更前失败。
