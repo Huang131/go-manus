@@ -27,3 +27,6 @@
 - [x] 3A waiting_input 执行快照校验：当前步骤、问题消息、恢复模式和已完成步骤摘要。
 - [x] 3A 纯恢复转换器：初始输入、完成步骤摘要、问题和回答的固定 role/顺序/附件契约。
 - [x] 3A 测试先失败；全量 Go 测试、目标包 race、vet 与 diff 检查。
+- [x] 3B `runs/messages` migration、Run/Message Repository、Run aggregate 窄事务入口与真实 PostgreSQL 组件测试。
+- [x] 3B 创建幂等、每 Session 单 active Run、waiting_input 快照/问题原子写入、恢复输入幂等与事务回滚测试。
+- [x] 3B 将 `TestRunRepo_` 纳入 `make test-component` 门禁；重复执行 migration 后组件测试通过。

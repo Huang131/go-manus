@@ -9,7 +9,7 @@
 | 0. 事实基线与方案校准 | complete | `0382404` | 已核对当前 Session/Task 链、配置、Engine、ToolSet，并形成可恢复的阶段方案 |
 | 1. Settings 与 Prompt | complete | `4df77fe`、`e9dcba2`、`9548b84`、`dd5c2cf`、`b0f5328` | Settings、严格校验、migration、UI 与 PromptCatalog/hash 已完成 |
 | 2. Engine 与 Context | complete | `4650cc4`、`aba7f43`、`8fd0fa6` | Outcome、ContextPolicy 与 MCP 动态调用契约已完成 |
-| 3. Run 领域与存储 | in_progress | `a8de838` | 3A 领域、状态机和等待恢复转换器已完成；3B Repository 与 migration 待实现 |
+| 3. Run 领域与存储 | in_progress | `a8de838`、`待提交：feat(api): add run persistence` | 3A 领域、状态机和等待恢复转换器已完成；3B Repository、migration 与组件测试已完成；3C RunService 待实现 |
 | 4. 执行生产切换 | pending | - | 唯一后端生产语义切换点；Session 路由只剩薄适配 |
 | 5. API/UI/SSE | pending | - | 唯一公开契约切换点；完成后删除旧路由 |
 | 6. 遗留删除 | pending | - | 依赖阶段 4/5 的引用扫描和回归 |
@@ -47,7 +47,8 @@ go vet ./...
 | 2B ContextPolicy | complete | `aba7f43` |
 | 2C MCP 动态路由、初始化与错误契约 | complete | `8fd0fa6` |
 | 3A Run、执行快照与等待恢复契约 | complete | `a8de838` |
-| 3B Run/Message Repository | pending | `04-run-domain-and-storage.md` |
+| 3B Run/Message Repository | complete | `待提交：feat(api): add run persistence` |
+| 3C 纯 RunService | pending | `04-run-domain-and-storage.md` |
 | 4A RunExecutor 生命周期与观测，未接生产 | pending | `05-run-execution-cutover.md` |
 | 4B 唯一后端生产切换 | pending | `05-run-execution-cutover.md` |
 | 5A Run API/SSE | pending | `06-api-ui-sse-cutover.md` |
@@ -103,6 +104,21 @@ git diff --check                                                         PASS
 行为契约：Run 的 active/terminal 分类和状态迁移集中在 `model.RunStatus`；损坏的等待快照在进入恢复前被拒绝；恢复消息保留输入和附件，并按快照中完成步骤的稳定顺序重建上下文。该检查点没有 migration、Repository、bootstrap 注入或 Chat/Stop/SSE 生产路径改动。
 
 下一入口：检查点 3B Run/Message Repository 与 migration。先实现 PostgreSQL 表、窄事务入口、幂等和 active 唯一约束测试，仍不得接入生产写路径。
+
+## 最近完成：检查点 3B Run/Message Repository 与 migration
+
+提交：待创建，建议 `feat(api): add run persistence`。
+
+验证结果：
+
+```text
+make test-up（重复执行 001-006 migration）                         PASS
+go test -tags=integration ./tests -run '^TestRunRepo_' -count=1 -v PASS
+```
+
+行为契约：创建 Run 与首条用户消息、进入等待状态与助手问题、恢复输入与状态切换均使用聚合内窄事务；数据库以唯一键、部分唯一索引和条件更新承担幂等与并发约束。新增的回滚测试确认问题消息 Session 与 Run 不匹配时，Run 保持 `running`，快照与 `waiting_message_id` 不写入，问题消息也不落库。该检查点没有 bootstrap、Handler、Chat、Session、Task 或 SSE 生产路径改动。
+
+下一入口：检查点 3C 纯 RunService。先以 Repository 为依赖写领域用例测试，再实现最小服务方法；仍不得创建 Run 生产写入或改造现有 Chat 路径。
 
 ## 最近完成：检查点 2C MCP 动态路由、初始化与错误契约
 
