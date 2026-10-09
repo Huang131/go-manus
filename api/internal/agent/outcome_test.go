@@ -37,6 +37,18 @@ func (waitingOutcomeTool) InvokeWithName(string, context.Context, map[string]int
 	}), nil
 }
 
+type contextPairTool struct{}
+
+func (contextPairTool) Name() string        { return "context_pair_tool" }
+func (contextPairTool) Description() string { return "returns a deterministic result" }
+func (contextPairTool) Parameters() map[string]interface{} {
+	return map[string]interface{}{"type": "object"}
+}
+func (contextPairTool) ReadOnly() bool { return true }
+func (contextPairTool) Invoke(context.Context, map[string]interface{}) (*model.ToolResult, error) {
+	return model.NewToolResult(map[string]interface{}{"result": "ok"}), nil
+}
+
 func TestBaseAgentInvokeReturnsWaitingInputOutcome(t *testing.T) {
 	mock := &mockLLM{responses: []*llmcore.LLMResponse{{
 		Message: llmcore.Message{
@@ -62,6 +74,42 @@ func TestBaseAgentInvokeReturnsWaitingInputOutcome(t *testing.T) {
 	}
 	if result.Outcome.Waiting == nil || result.Outcome.Waiting.Question != "需要补充信息" || result.Outcome.Waiting.SuggestTakeover != "browser" {
 		t.Fatalf("Outcome.Waiting = %+v", result.Outcome.Waiting)
+	}
+}
+
+func TestBaseAgentRecordsOnlyExecutedToolCallInFollowUpContext(t *testing.T) {
+	mock := &mockLLM{responses: []*llmcore.LLMResponse{
+		{Message: llmcore.Message{Role: model.RoleAssistant, ToolCalls: []llmcore.ToolCall{
+			{ID: "call-1", Type: "function", Function: llmcore.ToolCallFunction{Name: "context_pair_tool", Arguments: `{}`}},
+			{ID: "call-2", Type: "function", Function: llmcore.ToolCallFunction{Name: "not_executed", Arguments: `{}`}},
+		}}},
+		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: "done"}},
+	}}
+	agent := NewBaseAgent("react", "session-1", defaultAgentSettings(), mock, []toolspkg.Tool{contextPairTool{}})
+
+	if _, err := agent.Invoke(context.Background(), "system", "query"); err != nil {
+		t.Fatalf("Invoke() error = %v", err)
+	}
+	if len(mock.calls) != 2 {
+		t.Fatalf("LLM calls = %d, want 2", len(mock.calls))
+	}
+
+	var assistant *llmcore.Message
+	var toolResult *llmcore.Message
+	for i := range mock.calls[1].Messages {
+		message := &mock.calls[1].Messages[i]
+		if len(message.ToolCalls) > 0 {
+			assistant = message
+		}
+		if message.Role == model.RoleTool {
+			toolResult = message
+		}
+	}
+	if assistant == nil || len(assistant.ToolCalls) != 1 || assistant.ToolCalls[0].ID != "call-1" {
+		t.Fatalf("follow-up assistant call = %+v, want only executed call-1", assistant)
+	}
+	if toolResult == nil || toolResult.ToolCallID != "call-1" {
+		t.Fatalf("follow-up tool result = %+v, want result for call-1", toolResult)
 	}
 }
 

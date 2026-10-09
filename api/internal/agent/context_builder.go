@@ -1,63 +1,169 @@
 package agent
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"unicode/utf8"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 )
 
-var ErrContextLimitExceeded = errors.New("minimum context exceeds input token budget")
+var (
+	ErrContextLimitExceeded = errors.New("minimum context exceeds input token budget")
+	ErrInvalidContextPolicy = errors.New("invalid context policy")
+)
 
-const defaultMaxInputTokens = 32_000
+const defaultMaxContextTokens = 32_000
 
-type ContextPolicy struct {
-	MaxInputTokens int
+// TokenEstimator 估算 LLM 请求各部分的 token 成本。
+// 不同 provider 有各自 tokenizer 时，可替换默认近似估算器。
+type TokenEstimator interface {
+	EstimateMessage(message llmcore.Message) (int, error)
+	EstimateTools(tools []llmcore.ToolSpec) (int, error)
 }
 
-// ContextBuilder 构建对话上下文
+// ContextPolicy 约束一次 LLM 请求的完整 context window。
+// 输出预留和工具 schema 与消息共享同一个窗口，不能单独绕开预算。
+type ContextPolicy struct {
+	MaxContextTokens    int
+	OutputReserveTokens int
+	Estimator           TokenEstimator
+}
+
+// ContextRequest 是构建初始对话上下文的输入。
+type ContextRequest struct {
+	SystemPrompt string
+	History      []llmcore.Message
+	CurrentQuery string
+	Tools        []llmcore.ToolSpec
+}
+
+// ContextBuilder 构建并裁剪对话上下文。
 type ContextBuilder struct {
 	policy ContextPolicy
 }
 
-// NewContextBuilder 创建上下文构建器
+// NewContextBuilder 创建上下文构建器。
 func NewContextBuilder(policy ContextPolicy) *ContextBuilder {
-	if policy.MaxInputTokens <= 0 {
-		policy.MaxInputTokens = defaultMaxInputTokens
+	if policy.MaxContextTokens <= 0 {
+		policy.MaxContextTokens = defaultMaxContextTokens
+	}
+	if policy.Estimator == nil {
+		policy.Estimator = approximateTokenEstimator{}
 	}
 	return &ContextBuilder{policy: policy}
 }
 
-func (b *ContextBuilder) Build(systemPrompt string, history []llmcore.Message, currentQuery string) ([]llmcore.Message, error) {
+// Build 组装 system、持久化历史和当前请求；当前请求始终保留，历史按完整组从近到远回填。
+func (b *ContextBuilder) Build(request ContextRequest) ([]llmcore.Message, error) {
 	prefix := make([]llmcore.Message, 0, 1)
-	if systemPrompt != "" {
-		prefix = append(prefix, llmcore.Message{Role: model.RoleSystem, ContentText: systemPrompt})
+	if request.SystemPrompt != "" {
+		prefix = append(prefix, llmcore.Message{Role: model.RoleSystem, ContentText: request.SystemPrompt})
 	}
-	current := llmcore.Message{Role: model.RoleUser, ContentText: currentQuery}
-	used := estimateMessages(prefix) + estimateMessage(current)
-	if used > b.policy.MaxInputTokens {
+	current := llmcore.Message{Role: model.RoleUser, ContentText: request.CurrentQuery}
+	return b.selectMessages(prefix, request.History, []llmcore.Message{current}, request.Tools)
+}
+
+// Compact 在每次真实 LLM 调用前应用同一策略。
+// 它只裁剪发给 provider 的副本，调用方维护的完整消息仍可用于记忆合并。
+func (b *ContextBuilder) Compact(messages []llmcore.Message, tools []llmcore.ToolSpec) ([]llmcore.Message, error) {
+	prefixEnd := 0
+	for prefixEnd < len(messages) && messages[prefixEnd].Role == model.RoleSystem {
+		prefixEnd++
+	}
+	prefix := append([]llmcore.Message(nil), messages[:prefixEnd]...)
+
+	currentIndex := -1
+	for i := len(messages) - 1; i >= prefixEnd; i-- {
+		if messages[i].Role == model.RoleUser {
+			currentIndex = i
+			break
+		}
+	}
+
+	history := messages[prefixEnd:]
+	var required []llmcore.Message
+	if currentIndex >= 0 {
+		history = messages[prefixEnd:currentIndex]
+		required = messages[currentIndex:]
+	}
+	return b.selectMessages(prefix, history, required, tools)
+}
+
+func (b *ContextBuilder) selectMessages(prefix, history, required []llmcore.Message, tools []llmcore.ToolSpec) ([]llmcore.Message, error) {
+	budget, err := b.inputBudget(tools)
+	if err != nil {
+		return nil, err
+	}
+	used, err := b.estimateMessages(prefix)
+	if err != nil {
+		return nil, err
+	}
+	requiredCost, err := b.estimateMessages(required)
+	if err != nil {
+		return nil, err
+	}
+	used += requiredCost
+	if used > budget {
 		return nil, ErrContextLimitExceeded
 	}
 
 	groups := completeConversationGroups(history)
 	selected := make([][]llmcore.Message, 0, len(groups))
 	for i := len(groups) - 1; i >= 0; i-- {
-		cost := estimateMessages(groups[i])
-		if used+cost > b.policy.MaxInputTokens {
+		cost, err := b.estimateMessages(groups[i])
+		if err != nil {
+			return nil, err
+		}
+		if used+cost > budget {
 			break
 		}
 		used += cost
 		selected = append(selected, groups[i])
 	}
 
-	result := make([]llmcore.Message, 0, len(prefix)+len(history)+1)
+	result := make([]llmcore.Message, 0, len(prefix)+len(history)+len(required))
 	result = append(result, prefix...)
 	for i := len(selected) - 1; i >= 0; i-- {
 		result = append(result, selected[i]...)
 	}
-	result = append(result, current)
+	result = append(result, required...)
 	return result, nil
+}
+
+func (b *ContextBuilder) inputBudget(tools []llmcore.ToolSpec) (int, error) {
+	if b.policy.OutputReserveTokens < 0 || b.policy.OutputReserveTokens >= b.policy.MaxContextTokens {
+		return 0, ErrInvalidContextPolicy
+	}
+	toolTokens, err := b.policy.Estimator.EstimateTools(tools)
+	if err != nil {
+		return 0, fmt.Errorf("estimate tool schemas: %w", err)
+	}
+	if toolTokens < 0 {
+		return 0, ErrInvalidContextPolicy
+	}
+	budget := b.policy.MaxContextTokens - b.policy.OutputReserveTokens - toolTokens
+	if budget < 0 {
+		return 0, ErrContextLimitExceeded
+	}
+	return budget, nil
+}
+
+func (b *ContextBuilder) estimateMessages(messages []llmcore.Message) (int, error) {
+	total := 0
+	for _, message := range messages {
+		cost, err := b.policy.Estimator.EstimateMessage(message)
+		if err != nil {
+			return 0, fmt.Errorf("estimate message: %w", err)
+		}
+		if cost < 0 {
+			return 0, ErrInvalidContextPolicy
+		}
+		total += cost
+	}
+	return total, nil
 }
 
 func completeConversationGroups(messages []llmcore.Message) [][]llmcore.Message {
@@ -96,20 +202,28 @@ func completeConversationGroups(messages []llmcore.Message) [][]llmcore.Message 
 	return groups
 }
 
-func estimateMessages(messages []llmcore.Message) int {
-	total := 0
-	for _, message := range messages {
-		total += estimateMessage(message)
+type approximateTokenEstimator struct{}
+
+func (approximateTokenEstimator) EstimateMessage(message llmcore.Message) (int, error) {
+	payload, err := json.Marshal(message)
+	if err != nil {
+		return 0, err
 	}
-	return total
+	return approximateTokens(string(payload)) + 4, nil
 }
 
-func estimateMessage(message llmcore.Message) int {
-	characters := utf8.RuneCountInString(message.ContentText) + utf8.RuneCountInString(message.Reasoning)
-	for _, call := range message.ToolCalls {
-		characters += utf8.RuneCountInString(call.ID) + utf8.RuneCountInString(call.Function.Name) + utf8.RuneCountInString(call.Function.Arguments)
+func (approximateTokenEstimator) EstimateTools(tools []llmcore.ToolSpec) (int, error) {
+	if len(tools) == 0 {
+		return 0, nil
 	}
-	// Four characters per token plus a small per-message envelope. This is a
-	// conservative fallback and can be replaced by a model tokenizer later.
-	return (characters+3)/4 + 4
+	payload, err := json.Marshal(tools)
+	if err != nil {
+		return 0, err
+	}
+	return approximateTokens(string(payload)), nil
+}
+
+func approximateTokens(content string) int {
+	characters := utf8.RuneCountInString(content)
+	return (characters + 3) / 4
 }

@@ -108,9 +108,29 @@ func (a *BaseAgent) AddMemory(ctx context.Context, msg llmcore.Message) error {
 
 // buildConversationMessages 构建带记忆的完整 LLM 消息列表：system + 记忆原生消息 + 本次请求。
 // 记忆以原生消息形态参与对话，tool 消息保留 tool_call_id 配对。
-func (a *BaseAgent) buildConversationMessages(systemPrompt, query string) ([]llmcore.Message, error) {
+func (a *BaseAgent) buildConversationMessages(systemPrompt, query string, tools []llmcore.ToolSpec) ([]llmcore.Message, error) {
 	memoryMessages := a.memory.GetMessages()
-	return a.contextBuilder.Build(systemPrompt, memoryMessages, query)
+	return a.contextBuilder.Build(ContextRequest{
+		SystemPrompt: systemPrompt,
+		History:      memoryMessages,
+		CurrentQuery: query,
+		Tools:        tools,
+	})
+}
+
+// prepareLLMRequest 在每次真正调用 provider 前裁剪消息副本。
+// 完整对话仍由调用方持有，保证记忆合并不会因 provider 上下文裁剪丢失事实。
+func (a *BaseAgent) prepareLLMRequest(request *llm.LLMRequest) (*llm.LLMRequest, error) {
+	if request == nil {
+		return nil, fmt.Errorf("LLM request is nil")
+	}
+	prepared := *request
+	messages, err := a.contextBuilder.Compact(request.Messages, request.Tools)
+	if err != nil {
+		return nil, err
+	}
+	prepared.Messages = messages
+	return &prepared, nil
 }
 
 // mergeMemory 把本轮对话产生的新消息合并进记忆。
@@ -188,7 +208,11 @@ func (a *BaseAgent) invokeWithEmptyRetry(ctx context.Context, req *llm.LLMReques
 
 	var lastErr error
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		resp, err := a.invokeLLM(ctx, &current, false)
+		prepared, err := a.prepareLLMRequest(&current)
+		if err != nil {
+			return nil, attempt, err
+		}
+		resp, err := a.invokeLLM(ctx, prepared, false)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, attempt, ctx.Err()
@@ -346,7 +370,8 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 	}()
 
 	// 1. 构建初始消息：system + 记忆 + 本次用户消息
-	messages, err := a.buildConversationMessages(systemPrompt, query)
+	tools := a.GetToolsForLLM()
+	messages, err := a.buildConversationMessages(systemPrompt, query, tools)
 	if err != nil {
 		return nil, err
 	}
@@ -357,9 +382,12 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 	for iteration < a.settings.MaxIterations {
 		iteration++
 		// 3. 调用 LLM
-		llmReq := &llm.LLMRequest{
+		llmReq, err := a.prepareLLMRequest(&llm.LLMRequest{
 			Messages: messages,
-			Tools:    a.GetToolsForLLM(),
+			Tools:    tools,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("构建 LLM 上下文失败: %w", err)
 		}
 		resp, err := a.invokeLLM(ctx, llmReq, publishDeltas && shouldPublishDeltas(llmReq))
 		if err != nil {
@@ -378,9 +406,12 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 					llmcore.Message{Role: model.RoleUser, ContentText: "AI 无响应内容，请继续。"},
 				)
 
-				llmReq = &llm.LLMRequest{
+				llmReq, err = a.prepareLLMRequest(&llm.LLMRequest{
 					Messages: messages,
-					Tools:    a.GetToolsForLLM(),
+					Tools:    tools,
+				})
+				if err != nil {
+					return nil, fmt.Errorf("构建 LLM 上下文失败: %w", err)
 				}
 				resp, err = a.invokeLLM(ctx, llmReq, publishDeltas && shouldPublishDeltas(llmReq))
 				if err == nil {
@@ -399,15 +430,6 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 
 		// 4. 处理工具调用
 		if len(resp.Message.ToolCalls) > 0 {
-			// 4a. 把 assistant + tool_calls 写回历史
-			assistantMsg := llmcore.Message{
-				Role:        model.RoleAssistant,
-				ContentText: resp.Message.ContentText,
-				ToolCalls:   resp.Message.ToolCalls,
-				Reasoning:   resp.Message.Reasoning,
-			}
-			messages = append(messages, assistantMsg)
-
 			// 限制只处理第一个工具调用（避免并发问题）
 			toolCalls := resp.Message.ToolCalls
 			if len(toolCalls) > 1 {
@@ -415,6 +437,17 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 					logger.Int("total", len(toolCalls)))
 				toolCalls = toolCalls[:1]
 			}
+
+			// 4a. 只记录实际执行的调用，确保 assistant 调用与 tool 结果完整配对。
+			// 当前执行模型顺序处理单个调用；若把未执行的调用写入历史，下一轮请求会
+			// 带着没有对应结果的 tool_call，违反 provider 消息协议。
+			assistantMsg := llmcore.Message{
+				Role:        model.RoleAssistant,
+				ContentText: resp.Message.ContentText,
+				ToolCalls:   toolCalls,
+				Reasoning:   resp.Message.Reasoning,
+			}
+			messages = append(messages, assistantMsg)
 
 			// 处理每个工具调用
 			for _, tc := range toolCalls {

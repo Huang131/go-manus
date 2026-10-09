@@ -54,7 +54,7 @@ func (a *PlannerAgent) CreatePlan(ctx context.Context, input *TaskInput) (*model
 	// 添加系统提示词
 	systemPrompt := catalog.MustText(PromptSystem) + "\n" + catalog.MustText(PromptPlannerSystem)
 
-	messages, err := a.buildConversationMessages(systemPrompt, prompt)
+	messages, err := a.buildConversationMessages(systemPrompt, prompt, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("构建计划上下文失败: %w", err)
 	}
@@ -146,7 +146,7 @@ func (a *PlannerAgent) UpdatePlan(ctx context.Context, plan *model.Plan, complet
 	// 添加系统提示词
 	systemPrompt := catalog.MustText(PromptSystem) + "\n" + catalog.MustText(PromptPlannerSystem)
 
-	messages, err := a.buildConversationMessages(systemPrompt, prompt)
+	messages, err := a.buildConversationMessages(systemPrompt, prompt, nil)
 	if err != nil {
 		return nil, fmt.Errorf("构建计划更新上下文失败: %w", err)
 	}
