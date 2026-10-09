@@ -9,7 +9,7 @@
 | 0. 事实基线与方案校准 | complete | `0382404` | 已核对当前 Session/Task 链、配置、Engine、ToolSet，并形成可恢复的阶段方案 |
 | 1. Settings 与 Prompt | complete | `4df77fe`、`e9dcba2`、`9548b84`、`dd5c2cf`、`b0f5328` | Settings、严格校验、migration、UI 与 PromptCatalog/hash 已完成 |
 | 2. Engine 与 Context | complete | `4650cc4`、`aba7f43`、`8fd0fa6` | Outcome、ContextPolicy 与 MCP 动态调用契约已完成 |
-| 3. Run 领域与存储 | pending | - | 当前源码没有 Run 类型、表或 Repository；必须先评审契约 |
+| 3. Run 领域与存储 | in_progress | `a8de838` | 3A 领域、状态机和等待恢复转换器已完成；3B Repository 与 migration 待实现 |
 | 4. 执行生产切换 | pending | - | 唯一后端生产语义切换点；Session 路由只剩薄适配 |
 | 5. API/UI/SSE | pending | - | 唯一公开契约切换点；完成后删除旧路由 |
 | 6. 遗留删除 | pending | - | 依赖阶段 4/5 的引用扫描和回归 |
@@ -46,7 +46,7 @@ go vet ./...
 | 2A StepOutcome 唯一信号并删除旧等待表达 | complete | `4650cc4` |
 | 2B ContextPolicy | complete | `aba7f43` |
 | 2C MCP 动态路由、初始化与错误契约 | complete | `8fd0fa6` |
-| 3A Run、执行快照与等待恢复契约 | pending | `04-run-domain-and-storage.md` |
+| 3A Run、执行快照与等待恢复契约 | complete | `a8de838` |
 | 3B Run/Message Repository | pending | `04-run-domain-and-storage.md` |
 | 4A RunExecutor 生命周期与观测，未接生产 | pending | `05-run-execution-cutover.md` |
 | 4B 唯一后端生产切换 | pending | `05-run-execution-cutover.md` |
@@ -85,6 +85,24 @@ go vet ./...
 - 2C 已完成：MCP function name 在发现时建立不可变索引，名称碰撞拒绝初始化；连接、发现与协议错误返回 Go error，远端 `IsError` 保留为可交给模型处理的失败 `ToolResult`。
 - Agent Settings 的持久化记录必须完整合法：记录缺失才使用 `10/3/10` 默认值；非法更新返回 400，非法存量记录由 `005_normalize_agent_settings.sql` 一次性修正，启动读取不再静默 clamp。
 - Task/Run 创建必须只读取一次 Settings；Runner 与 ToolSet 必须使用同一快照，热更新只影响后续创建的执行。
+- 3A 已完成：`RunStatus` 是唯一状态迁移矩阵；`RunExecutionSnapshot` 对 waiting_input 强制校验当前步骤、等待问题、恢复模式和已完成步骤摘要。`BuildResumeMessages` 是纯转换器，固定重建“初始用户输入 → 已完成步骤摘要 → 助手问题 → 用户回答”的 LLM 消息序列，不读取存储、不获取 ToolSet、不改变 Run 状态。
+
+## 最近完成：检查点 3A Run 领域与等待恢复契约
+
+提交：`a8de838 feat(api): define run domain contracts`。
+
+验证结果：
+
+```text
+go test ./... -count=1                                                   PASS
+go test -race ./internal/agent/... ./internal/service ./internal/repository -count=1  PASS
+go vet ./...                                                             PASS
+git diff --check                                                         PASS
+```
+
+行为契约：Run 的 active/terminal 分类和状态迁移集中在 `model.RunStatus`；损坏的等待快照在进入恢复前被拒绝；恢复消息保留输入和附件，并按快照中完成步骤的稳定顺序重建上下文。该检查点没有 migration、Repository、bootstrap 注入或 Chat/Stop/SSE 生产路径改动。
+
+下一入口：检查点 3B Run/Message Repository 与 migration。先实现 PostgreSQL 表、窄事务入口、幂等和 active 唯一约束测试，仍不得接入生产写路径。
 
 ## 最近完成：检查点 2C MCP 动态路由、初始化与错误契约
 

@@ -37,6 +37,16 @@ cancelling -> cancelled
 
 `succeeded`、`failed`、`cancelled`、`interrupted` 是终态。状态迁移必须集中在 Run 领域/服务中，并由条件更新执行；Handler 和 Engine 不得各自维护另一份迁移规则。
 
+### 3A 领域检查点（已完成）
+
+`a8de838` 已实现但尚未接入存储的最小领域契约：
+
+- `model.RunStatus` 集中定义 active、terminal 和允许的状态迁移；后续 Repository 只能复用该矩阵，不能自行发明状态转换。
+- `model.RunExecutionSnapshot`、`RunStepSnapshot` 和 `WaitingCheckpoint` 是 JSONB 的 Go 契约。进入 `waiting_input` 恢复前必须验证正修订号、当前步骤、稳定问题消息、`continue_step` 恢复模式、唯一步骤 ID，以及每个 completed 步骤的非空结果摘要。
+- `service.BuildResumeMessages` 是无副作用转换器：它按“初始用户输入 → 已完成步骤摘要（原步骤顺序）→ 助手问题 → 用户回答”构造 `llmcore.Message`，并保留输入、摘要和回答上的附件。问题 ID 与回答的 `reply_to_message_id` 不匹配时拒绝恢复。
+
+该实现只锁定模型与行为测试，未新增表、Repository、Handler、bootstrap 注入或生产双写；3B 必须在这组模型之上实现存储约束。
+
 ## 状态与重启语义
 
 - 服务重启时，`pending`、`running` 没有持久化队列可接管，统一条件迁移为 `interrupted`。

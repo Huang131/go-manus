@@ -23,3 +23,7 @@
 - [x] 2B 全量 Go 测试、Agent race、vet 与 diff 检查。
 - [x] 2C MCP 动态 function 索引、名称碰撞拒绝、初始化资源清理与基础设施/远端业务错误分类。
 - [x] 2C 全量 Go 测试、Agent race、vet 与 diff 检查。
+- [x] 3A Run active/terminal 分类和唯一状态迁移矩阵。
+- [x] 3A waiting_input 执行快照校验：当前步骤、问题消息、恢复模式和已完成步骤摘要。
+- [x] 3A 纯恢复转换器：初始输入、完成步骤摘要、问题和回答的固定 role/顺序/附件契约。
+- [x] 3A 测试先失败；全量 Go 测试、目标包 race、vet 与 diff 检查。
