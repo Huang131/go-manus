@@ -27,10 +27,8 @@ type Tool interface {
 // MultiFunctionTool 一个工具包可以向 LLM 暴露多个函数。
 // MessageTool 使用该接口同时提供通知用户和询问用户两个函数。
 //
-// 阶段 1d 决策：保留 GetTools() []map 契约不变。
-// 原因：MessageTool / tool_message 内部把每个 function 写死成 map[string]interface{}，
-// 改 llmcore.ToolSpec 会引入"双 schema 表达"成本（map → ToolSpec → map 反向）。
-// 阶段 2 可以整体重构成 []llmcore.ToolSpec。
+// GetTools 返回动态 function 的协议描述；ToolRegistry 会将其转换为 ToolDescriptor，
+// 因此普通工具和多函数工具最终使用同一份注册索引。
 type MultiFunctionTool interface {
 	Tool
 	GetTools() []map[string]interface{}

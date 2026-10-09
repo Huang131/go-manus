@@ -15,7 +15,7 @@ import (
 //
 // 原 AgentService 既渲染消息、管理任务，又负责拼装工具和处理 MCP/A2A 客户端的
 // 初始化/热重载/清理，职责过宽。把工具相关的状态与生命周期收敛到本协作者后，
-// 服务的其他部分只需调用 Tools() 即可得到当前可用的工具集合。
+// 服务的其他部分通过 Acquire() 获取当前工具快照，并在任务完成后 Release()。
 type ToolProvider struct {
 	mu           sync.RWMutex
 	sandbox      sandbox.Sandbox
