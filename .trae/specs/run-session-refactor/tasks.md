@@ -6,7 +6,7 @@
 2. [完成] PromptCatalog、版本和 hash。
 3. [完成] StepOutcome 唯一信号并删除旧等待表达。
 4. [完成] ContextPolicy：统一 context window、输出预留、工具 schema 预算和完整工具链裁剪。
-5. MCP 动态路由、初始化与错误契约收敛。
+5. [完成] MCP 动态路由、初始化与错误契约收敛。
 6. Run、Message、execution snapshot、状态机和 Repository。
 7. RunExecutor 生命周期、取消收敛、ToolSet 释放和可观测性。
 8. 后端生产写路径原子切换。

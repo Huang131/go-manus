@@ -21,3 +21,5 @@
 - [x] 2B ContextPolicy 统一应用于初始组装和每次 provider 调用。
 - [x] 2B 工具 schema、输出预留、超预算、完整 tool pair 与原始消息顺序行为测试。
 - [x] 2B 全量 Go 测试、Agent race、vet 与 diff 检查。
+- [x] 2C MCP 动态 function 索引、名称碰撞拒绝、初始化资源清理与基础设施/远端业务错误分类。
+- [x] 2C 全量 Go 测试、Agent race、vet 与 diff 检查。

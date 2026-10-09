@@ -8,7 +8,7 @@
 |---|---|---|---|
 | 0. 事实基线与方案校准 | complete | `0382404` | 已核对当前 Session/Task 链、配置、Engine、ToolSet，并形成可恢复的阶段方案 |
 | 1. Settings 与 Prompt | complete | `4df77fe`、`e9dcba2`、`9548b84`、`dd5c2cf`、`b0f5328` | Settings、严格校验、migration、UI 与 PromptCatalog/hash 已完成 |
-| 2. Engine 与 Context | in_progress | `4650cc4`、`aba7f43` | 2A Outcome、2B ContextPolicy 已完成；MCP 契约待完成 |
+| 2. Engine 与 Context | complete | `4650cc4`、`aba7f43`、`8fd0fa6` | Outcome、ContextPolicy 与 MCP 动态调用契约已完成 |
 | 3. Run 领域与存储 | pending | - | 当前源码没有 Run 类型、表或 Repository；必须先评审契约 |
 | 4. 执行生产切换 | pending | - | 唯一后端生产语义切换点；Session 路由只剩薄适配 |
 | 5. API/UI/SSE | pending | - | 唯一公开契约切换点；完成后删除旧路由 |
@@ -45,7 +45,7 @@ go vet ./...
 | 1B PromptCatalog 与 hash | complete | `b0f5328` |
 | 2A StepOutcome 唯一信号并删除旧等待表达 | complete | `4650cc4` |
 | 2B ContextPolicy | complete | `aba7f43` |
-| 2C MCP 动态路由、初始化与错误契约 | pending | `03-engine-and-context.md` |
+| 2C MCP 动态路由、初始化与错误契约 | complete | `8fd0fa6` |
 | 3A Run、执行快照与等待恢复契约 | pending | `04-run-domain-and-storage.md` |
 | 3B Run/Message Repository | pending | `04-run-domain-and-storage.md` |
 | 4A RunExecutor 生命周期与观测，未接生产 | pending | `05-run-execution-cutover.md` |
@@ -82,11 +82,28 @@ go vet ./...
 - `MaxPlanSteps` 不作为伪配置加入；必须先有真实消费逻辑。
 - `sessions.memories` 和 `Session.Memories` 当前不存在，不在方案中虚构。
 - ToolRegistry 三份映射、MCP/A2A retired 无界释放问题已在工具重构提交中解决，不重复规划。
-- MCP function name 碰撞、初始化吞错和基础设施错误分类仍是待办，归入 2C；这不否定已经完成的 ToolRegistry/ToolSet 生命周期重构。
+- 2C 已完成：MCP function name 在发现时建立不可变索引，名称碰撞拒绝初始化；连接、发现与协议错误返回 Go error，远端 `IsError` 保留为可交给模型处理的失败 `ToolResult`。
 - Agent Settings 的持久化记录必须完整合法：记录缺失才使用 `10/3/10` 默认值；非法更新返回 400，非法存量记录由 `005_normalize_agent_settings.sql` 一次性修正，启动读取不再静默 clamp。
 - Task/Run 创建必须只读取一次 Settings；Runner 与 ToolSet 必须使用同一快照，热更新只影响后续创建的执行。
 
-## 最近完成：检查点 2B ContextPolicy
+## 最近完成：检查点 2C MCP 动态路由、初始化与错误契约
+
+提交：`8fd0fa6 refactor(mcp): enforce dynamic tool contracts`。
+
+验证结果：
+
+```text
+go test ./... -count=1                                                   PASS
+go test -race ./internal/agent/... ./internal/service ./internal/repository -count=1  PASS
+go vet ./...                                                             PASS
+git diff --check                                                         PASS
+```
+
+行为契约：MCP 工具发现阶段建立稳定的 `functionName -> {server, tool}` 索引，调用不再扫描或反解名称；碰撞、连接、发现和协议失败立即返回 Go error 并释放已创建资源；远端 `IsError` 仍作为失败 `ToolResult` 返回给 Engine。`ToolProvider` 只注册完整初始化的 MCP 工具。
+
+下一入口：检查点 3A Run、执行快照与等待恢复契约；先只建立领域和存储契约，不接入生产写路径。
+
+## 已完成：检查点 2B ContextPolicy
 
 提交：`aba7f43 refactor(agent): enforce context policy per request`。
 
@@ -101,7 +118,7 @@ git diff --check                                                         PASS
 
 行为契约：`ContextPolicy` 在初始组装和每次 provider 调用前统一生效；工具 schema 与输出预留计入同一 token 窗口；裁剪从近到远回填完整历史组，并固定保留最后一个用户请求及其后续完整工具链。当前顺序执行模型仅把实际执行的第一个 tool call 写入历史，避免留下没有对应 tool result 的协议残片。
 
-下一入口：检查点 2C MCP 动态路由、初始化和错误契约；不得触碰 Run 存储或创建双写路径。
+后续入口：阶段 2 已完成；下一步进入检查点 3A Run、执行快照与等待恢复契约。
 
 ## 已完成：检查点 2A StepOutcome
 
