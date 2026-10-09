@@ -10,8 +10,9 @@ Settings 检查点已完成：
 - `e9dcba2`：删除 `model.AgentConfig`、`agent.AgentConfig` 与静默 `NormalizeAgentConfig`，启动、配置服务、Agent 与任务创建统一使用值快照。
 - `9548b84`：新增幂等 migration，修正非法存量配置并补真实 PostgreSQL/HTTP 契约测试。
 - `dd5c2cf`：UI 使用完整 `AgentSettings`，输入范围与后端一致。
+- `b0f5328`：七类 Prompt 收敛为不可变 `PromptCatalog`，提供稳定名称、目录版本、模板 SHA-256 和确定性目录 hash。
 
-本阶段剩余工作只有 PromptCatalog、目录版本与 hash。Run 配置快照在阶段 3 随 Run 表实现，不提前创建无消费者存储。
+本阶段已完成。Run 的 Settings/Prompt 元数据快照在阶段 3 随 Run 表实现，不提前创建无消费者存储。
 
 ## 目标
 
@@ -61,11 +62,11 @@ type AgentSettings struct {
 1. [完成] `internal/settings.AgentSettings` 替换两个旧配置类型，搜索 limit 的有效值行为不变。
 2. [完成] Handler 拒绝非法更新；启动对缺失配置使用默认值，对已存在的非法配置 fail fast。
 3. [完成] 一次性配置 migration 能识别并处理缺失、非整数、零值、负值和超过 provider 上限的存量配置；重复执行保持一致。
-4. PromptCatalog 能返回模板和 hash；同一内容 hash 稳定。
+4. [完成] PromptCatalog 能返回模板和 hash；同一内容 hash 稳定，模板变化会改变目录 hash。
 5. [完成] Task 创建使用不可变配置值快照；Run 表仍留到阶段 3。
 6. [完成] 删除 `NormalizeAgentConfig` 的静默 clamp 路径，不保留第二套兼容语义。
 
-PromptCatalog 建议独立提交：`refactor(agent): add versioned prompt catalog`。
+PromptCatalog 提交：`b0f5328 refactor(agent): add versioned prompt catalog`。
 
 ## 验证与回滚
 

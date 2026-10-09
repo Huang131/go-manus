@@ -14,3 +14,5 @@
 
 - [x] 1A Settings 单一类型、严格校验、幂等 migration 与 UI 契约。
 - [x] 1A 全量 Go 测试、目标包 race、vet、UI lint/build 和真实 PostgreSQL migration 验证。
+- [x] 1B PromptCatalog 稳定名称、版本、内容 hash 与目录 hash。
+- [x] 阶段 1 全量 Go 测试、Agent race 与 vet。

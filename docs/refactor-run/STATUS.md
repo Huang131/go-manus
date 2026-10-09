@@ -7,7 +7,7 @@
 | 阶段 | 状态 | 提交/依据 | 说明 |
 |---|---|---|---|
 | 0. 事实基线与方案校准 | complete | 文档工作区；代码基线 `4c3d39d` | 已核对当前 Session/Task 链、配置、Engine、ToolSet；文档完成后再记录独立文档提交 |
-| 1. Settings 与 Prompt | in_progress | `4df77fe`、`e9dcba2`、`9548b84`、`dd5c2cf` | Settings、严格校验、migration 和 UI 已完成；PromptCatalog/hash 待实现 |
+| 1. Settings 与 Prompt | complete | `4df77fe`、`e9dcba2`、`9548b84`、`dd5c2cf`、`b0f5328` | Settings、严格校验、migration、UI 与 PromptCatalog/hash 已完成 |
 | 2. Engine 与 Context | pending | - | Flow 已拆状态处理；Outcome 和 ContextPolicy 未完成 |
 | 3. Run 领域与存储 | pending | - | 当前源码没有 Run 类型、表或 Repository；必须先评审契约 |
 | 4. 执行生产切换 | pending | - | 唯一后端生产语义切换点；Session 路由只剩薄适配 |
@@ -42,7 +42,7 @@ go vet ./...
 | 检查点 | 状态 | 入口 |
 |---|---|---|
 | 1A Settings 单一类型、配置 migration 与校验 | complete | `4df77fe`、`e9dcba2`、`9548b84`、`dd5c2cf` |
-| 1B PromptCatalog 与 hash | pending | `02-settings-and-prompts.md` |
+| 1B PromptCatalog 与 hash | complete | `b0f5328` |
 | 2A StepOutcome 唯一信号并删除旧等待表达 | pending | `03-engine-and-context.md` |
 | 2B ContextPolicy | pending | `03-engine-and-context.md` |
 | 2C MCP 动态路由、初始化与错误契约 | pending | `03-engine-and-context.md` |
@@ -85,7 +85,7 @@ go vet ./...
 - Agent Settings 的持久化记录必须完整合法：记录缺失才使用 `10/3/10` 默认值；非法更新返回 400，非法存量记录由 `005_normalize_agent_settings.sql` 一次性修正，启动读取不再静默 clamp。
 - Task/Run 创建必须只读取一次 Settings；Runner 与 ToolSet 必须使用同一快照，热更新只影响后续创建的执行。
 
-## 最近完成：1A Settings
+## 最近完成：阶段 1 Settings 与 Prompt
 
 验证结果：
 
@@ -103,7 +103,9 @@ npm run build                                                       PASS
 - 非法配置更新稳定返回 HTTP 400。
 - `005_normalize_agent_settings.sql` 在真实 PostgreSQL 连续执行两次后结果一致。
 
-下一入口：检查点 1B `PromptCatalog` 与稳定 hash，不修改 Session/Task API。
+PromptCatalog 额外验证：七个模板可枚举；每个模板 hash 等于内容 SHA-256；目录 hash 不受 map 顺序影响并随内容变化。
+
+下一入口：检查点 2A `StepOutcome` 唯一信号，先删除 `ErrWaitForUser` 与 `InvokeResult.WaitForUser` 的双表达，不修改 Run 存储。
 
 ## 恢复流程
 

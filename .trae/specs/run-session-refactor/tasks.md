@@ -3,7 +3,7 @@
 任务状态以 `docs/refactor-run/STATUS.md` 为唯一恢复入口。
 
 1. [完成] Settings 单一类型、严格校验与配置 migration。
-2. PromptCatalog、版本和 hash。
+2. [完成] PromptCatalog、版本和 hash。
 3. StepOutcome 唯一信号、ContextPolicy 与 MCP 契约收敛。
 4. Run、Message、execution snapshot、状态机和 Repository。
 5. RunExecutor 生命周期、取消收敛、ToolSet 释放和可观测性。
