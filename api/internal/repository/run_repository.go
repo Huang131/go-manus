@@ -14,6 +14,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ErrActiveRunExists 表示该 Session 已有 pending/running/waiting_input/cancelling Run。
+var ErrActiveRunExists = errors.New("session already has an active run")
+
 // RunRepository 按 Run 聚合持久化执行事实与长期消息。
 //
 // 它只负责事务、约束和条件更新；不启动 Engine、不发布 Redis 事件，也不维护 Session 摘要。
@@ -70,6 +73,9 @@ func (r *PostgresRunRepository) CreateWithInitialMessage(ctx context.Context, ru
 		return run, true, nil
 	}
 	if !isUniqueConstraint(err, "uq_runs_session_idempotency") {
+		if isUniqueConstraint(err, "idx_runs_one_active_per_session") {
+			return nil, false, ErrActiveRunExists
+		}
 		return nil, false, err
 	}
 
