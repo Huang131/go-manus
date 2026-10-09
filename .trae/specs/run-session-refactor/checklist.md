@@ -18,3 +18,6 @@
 - [x] 阶段 1 全量 Go 测试、Agent race 与 vet。
 - [x] 2A StepOutcome 唯一信号，删除 `ErrWaitForUser`、`InvokeResult.WaitForUser` 与 `ToolCallResult.WaitForUser`。
 - [x] 2A 等待输入、取消、失败、完成和 Flow 事件顺序行为测试；全量 Go 测试、目标包 race、vet 与 diff 检查。
+- [x] 2B ContextPolicy 统一应用于初始组装和每次 provider 调用。
+- [x] 2B 工具 schema、输出预留、超预算、完整 tool pair 与原始消息顺序行为测试。
+- [x] 2B 全量 Go 测试、Agent race、vet 与 diff 检查。

@@ -8,7 +8,7 @@
 |---|---|---|---|
 | 0. 事实基线与方案校准 | complete | `0382404` | 已核对当前 Session/Task 链、配置、Engine、ToolSet，并形成可恢复的阶段方案 |
 | 1. Settings 与 Prompt | complete | `4df77fe`、`e9dcba2`、`9548b84`、`dd5c2cf`、`b0f5328` | Settings、严格校验、migration、UI 与 PromptCatalog/hash 已完成 |
-| 2. Engine 与 Context | in_progress | `4650cc4` | 2A Outcome 已完成；ContextPolicy 与 MCP 契约待完成 |
+| 2. Engine 与 Context | in_progress | `4650cc4`、`aba7f43` | 2A Outcome、2B ContextPolicy 已完成；MCP 契约待完成 |
 | 3. Run 领域与存储 | pending | - | 当前源码没有 Run 类型、表或 Repository；必须先评审契约 |
 | 4. 执行生产切换 | pending | - | 唯一后端生产语义切换点；Session 路由只剩薄适配 |
 | 5. API/UI/SSE | pending | - | 唯一公开契约切换点；完成后删除旧路由 |
@@ -44,7 +44,7 @@ go vet ./...
 | 1A Settings 单一类型、配置 migration 与校验 | complete | `4df77fe`、`e9dcba2`、`9548b84`、`dd5c2cf` |
 | 1B PromptCatalog 与 hash | complete | `b0f5328` |
 | 2A StepOutcome 唯一信号并删除旧等待表达 | complete | `4650cc4` |
-| 2B ContextPolicy | pending | `03-engine-and-context.md` |
+| 2B ContextPolicy | complete | `aba7f43` |
 | 2C MCP 动态路由、初始化与错误契约 | pending | `03-engine-and-context.md` |
 | 3A Run、执行快照与等待恢复契约 | pending | `04-run-domain-and-storage.md` |
 | 3B Run/Message Repository | pending | `04-run-domain-and-storage.md` |
@@ -86,7 +86,24 @@ go vet ./...
 - Agent Settings 的持久化记录必须完整合法：记录缺失才使用 `10/3/10` 默认值；非法更新返回 400，非法存量记录由 `005_normalize_agent_settings.sql` 一次性修正，启动读取不再静默 clamp。
 - Task/Run 创建必须只读取一次 Settings；Runner 与 ToolSet 必须使用同一快照，热更新只影响后续创建的执行。
 
-## 最近完成：检查点 2A StepOutcome
+## 最近完成：检查点 2B ContextPolicy
+
+提交：`aba7f43 refactor(agent): enforce context policy per request`。
+
+验证结果：
+
+```text
+go test ./... -count=1                                                   PASS
+go test -race ./internal/agent/... -count=1                              PASS
+go vet ./...                                                             PASS
+git diff --check                                                         PASS
+```
+
+行为契约：`ContextPolicy` 在初始组装和每次 provider 调用前统一生效；工具 schema 与输出预留计入同一 token 窗口；裁剪从近到远回填完整历史组，并固定保留最后一个用户请求及其后续完整工具链。当前顺序执行模型仅把实际执行的第一个 tool call 写入历史，避免留下没有对应 tool result 的协议残片。
+
+下一入口：检查点 2C MCP 动态路由、初始化和错误契约；不得触碰 Run 存储或创建双写路径。
+
+## 已完成：检查点 2A StepOutcome
 
 提交：`4650cc4 refactor(agent): return explicit step outcomes`。
 
@@ -101,7 +118,7 @@ git diff --check                                                         PASS
 
 行为契约：等待输入返回 `OutcomeWaitingInput` 而非 error；取消返回 `OutcomeCancelled` 且不会把 PlanStep 标记为失败；Flow 保证先发助手问题、后发 wait 事件；ReAct 为等待结果写入当前 `StepID`。
 
-下一入口：检查点 2B `ContextPolicy`，先为超预算、空历史、工具调用配对和输出预留补齐行为测试，不修改 Run 存储。
+后续入口：检查点 2B 已完成，下一步进入 2C MCP 动态路由、初始化和错误契约。
 
 ## 阶段 1 完成记录
 

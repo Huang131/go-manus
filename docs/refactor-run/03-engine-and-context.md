@@ -59,9 +59,11 @@ RunExecutor 会把任务级 `ToolSet` 作为 Engine 输入，因此在本阶段�
 
 - Flow 的等待输入、成功、失败、取消行为测试保持通过。
 - BaseAgent 的 LLM 错误和空响应重试仍在 Engine 内闭环；测试证明重试不跨越 Flow/RunExecutor 边界，且耗尽后只产生一个最终 Outcome。
-- 全仓不再存在 `ErrWaitForUser`、`InvokeResult.WaitForUser` 或 `ToolCallResult.WaitForUser`；等待输入只由 `StepOutcomeWaitingInput` 表达。
+- 全仓不再存在 `ErrWaitForUser`、`InvokeResult.WaitForUser` 或 `ToolCallResult.WaitForUser`；等待输入只由 `OutcomeWaitingInput` 表达。
 - 旧 TaskRunner 的临时适配只消费 `StepOutcome`，不定义另一套 Outcome。
-- ContextPolicy 对超预算、空历史、工具调用配对和输出预留有行为测试。
+- ContextPolicy 在首次组装和每次真实 provider 调用前都生效；system、历史、当前请求、工具 schema 与输出预留共享同一窗口。
+- 裁剪必须保留最后一个用户请求及其后的完整工具链原始顺序；不得把用户请求移动到 tool result 之后，也不得写入未实际执行的 tool call。
+- ContextPolicy 对超预算、空历史、工具调用配对、工具 schema 预算和输出预留有行为测试。
 - MCP 动态 function 无名称碰撞和随机路由；初始化错误、协议错误与远端业务失败的测试分别锁定契约。
 - 旧 Session/RedisStreamTask 生产写路径完全不变。
 
