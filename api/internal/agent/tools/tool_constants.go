@@ -23,6 +23,7 @@ const (
 	FileActionDelete  = "delete"
 	FileActionExists  = "exists"
 	FileActionList    = "list"
+	FileActionFind    = "find"
 	FileActionSearch  = "search"
 	FileActionReplace = "replace"
 )

@@ -35,7 +35,7 @@ func (t *FileTool) Parameters() map[string]interface{} {
 			"action": map[string]interface{}{
 				"type":        "string",
 				"description": "操作类型",
-				"enum":        []string{FileActionRead, FileActionWrite, FileActionDelete, FileActionExists, FileActionList, FileActionSearch, FileActionReplace},
+				"enum":        []string{FileActionRead, FileActionWrite, FileActionDelete, FileActionExists, FileActionList, FileActionFind, FileActionSearch, FileActionReplace},
 			},
 			"filepath": map[string]interface{}{
 				"type":        "string",
@@ -137,6 +137,17 @@ func (t *FileTool) Invoke(ctx context.Context, params map[string]interface{}) (*
 			dirPath = v
 		}
 		return t.sandbox.ListFiles(ctx, dirPath)
+
+	case FileActionFind:
+		globPattern, toolErr := requiredToolString(params, "glob_pattern")
+		if toolErr != nil {
+			return toolErr, nil
+		}
+		dirPath := filepath
+		if v := optionalToolString(params, "dir_path"); v != "" {
+			dirPath = v
+		}
+		return t.sandbox.FindFiles(ctx, dirPath, globPattern)
 
 	case FileActionSearch:
 		regex, toolErr := requiredToolString(params, "regex")

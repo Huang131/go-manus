@@ -9,11 +9,27 @@ import (
 
 type searchEngineStub struct {
 	limit int
+	query string
 }
 
-func (s *searchEngineStub) Invoke(_ context.Context, _ string, _ *string, limit int) (*model.ToolResult, error) {
+func (s *searchEngineStub) Invoke(_ context.Context, query string, _ *string, limit int) (*model.ToolResult, error) {
 	s.limit = limit
+	s.query = query
 	return model.NewToolResult("ok"), nil
+}
+
+func TestSearchToolRejectsEmptyQuery(t *testing.T) {
+	search := &searchEngineStub{}
+	result, err := NewSearchTool(search, 6).Invoke(context.Background(), map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v, want nil", err)
+	}
+	if result == nil || result.Success {
+		t.Fatalf("Invoke() = %+v, want validation error", result)
+	}
+	if search.query != "" {
+		t.Fatalf("search query = %q, want no backend call", search.query)
+	}
 }
 
 func TestSearchToolForwardsConfiguredLimit(t *testing.T) {

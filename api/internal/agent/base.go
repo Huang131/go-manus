@@ -23,7 +23,7 @@ import (
 
 // BaseAgent Agent 基类
 type BaseAgent struct {
-	name             string
+	name             string // 角色名"planner"/"react"
 	sessionID        string
 	config           *AgentConfig
 	llm              llm.LLM
@@ -71,30 +71,6 @@ func formatRepairTypes(repairs []jsonx.Repair) string {
 		types = append(types, r.Type)
 	}
 	return strings.Join(types, ",")
-}
-
-// NewBaseAgentWithParser 创建基础 Agent（带自定义 JSON 解析器）
-func NewBaseAgentWithParser(name, sessionID string, config *AgentConfig, llm llm.LLM, tools []toolspkg.Tool, jsonParser jsonx.JSONParser) *BaseAgent {
-	registry := toolspkg.NewToolRegistry()
-	for _, tool := range tools {
-		registry.Register(tool)
-	}
-
-	if jsonParser == nil {
-		jsonParser = jsonx.NewRepairJSONParser()
-	}
-
-	return &BaseAgent{
-		name:           name,
-		sessionID:      sessionID,
-		config:         config,
-		llm:            llm,
-		tools:          tools,
-		memory:         NewSimpleMemory(),
-		contextBuilder: NewContextBuilder(ContextPolicy{}),
-		toolRegistry:   registry,
-		jsonParser:     jsonParser,
-	}
 }
 
 // SetEventCh 注入事件输出通道（Flow 创建事件流后调用）
@@ -562,13 +538,7 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 	// 获取工具
 	tool, ok := a.toolRegistry.Get(functionName)
 	if !ok {
-		// 可能是 MCP 工具，格式为 mcp_serverName_toolName
-		if strings.HasPrefix(functionName, toolspkg.MCPFunctionPrefix) {
-			tool, ok = a.toolRegistry.Get(toolspkg.ToolNameMCP)
-		}
-		if !ok {
-			return nil, fmt.Errorf("未知工具: %s", functionName)
-		}
+		return nil, fmt.Errorf("未知工具: %s", functionName)
 	}
 
 	logger.InfoContext(ctx, "执行工具调用",
@@ -587,19 +557,6 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 	callingEvent := model.NewToolCallingEvent(toolCallID, functionName, arguments)
 	callingEvent.Name = tool.Name()
 	a.emitEvent(ctx, callingEvent)
-
-	// 特殊处理 message_ask_user 工具
-	if functionName == toolspkg.MessageFunctionAskUser {
-		// 返回成功结果，并标记需要等待用户输入
-		return &ToolCallResult{
-			ToolCallID:   toolCallID,
-			ToolName:     tool.Name(),
-			FunctionName: functionName,
-			Arguments:    arguments,
-			Result:       model.NewToolResult(map[string]interface{}{"waiting_for_user": true}),
-			WaitForUser:  true,
-		}, nil
-	}
 
 	// 不重试工具调用：click/exec/write 这类操作没有幂等保证，
 	// 超时后重放可能重复点击、重复执行带副作用的命令。
@@ -638,6 +595,17 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 	calledEvent.Name = tool.Name()
 	a.emitEvent(ctx, calledEvent)
 
+	if waiting, ok := toolResultWaitingForUser(result); ok && waiting {
+		return &ToolCallResult{
+			ToolCallID:   toolCallID,
+			ToolName:     tool.Name(),
+			FunctionName: functionName,
+			Arguments:    arguments,
+			Result:       result,
+			WaitForUser:  true,
+		}, nil
+	}
+
 	// 长命令输出实时推流：shell exec 返回 running（同步等待窗口内未结束）时，
 	// 启动后台 watch 周期性推送控制台快照，前端据此刷新 shell 预览。
 	if functionName == "shell" && result != nil && result.Success {
@@ -664,6 +632,18 @@ func (a *BaseAgent) handleToolCall(ctx context.Context, toolCall llmcore.ToolCal
 		Arguments:    arguments,
 		Result:       result,
 	}, nil
+}
+
+func toolResultWaitingForUser(result *model.ToolResult) (bool, bool) {
+	if result == nil {
+		return false, false
+	}
+	data, ok := result.Data.(map[string]interface{})
+	if !ok {
+		return false, false
+	}
+	waiting, ok := data["waiting_for_user"].(bool)
+	return waiting, ok
 }
 
 // shellOutputWatchTimeout 单条长命令输出 watch 的最长时长。

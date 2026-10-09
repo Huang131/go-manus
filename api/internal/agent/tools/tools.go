@@ -5,6 +5,7 @@ package tools
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
@@ -13,7 +14,6 @@ import (
 
 // Tool 工具接口
 type Tool interface {
-	// Name 返回工具名称
 	Name() string
 	// Description 返回工具描述
 	Description() string
@@ -120,13 +120,16 @@ func (r *ToolRegistry) GetToolsForLLM() []llmcore.ToolSpec {
 			ReadOnly: tool.ReadOnly(),
 		})
 	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Function.Name < result[j].Function.Name
+	})
 	return result
 }
 
 // isReadOnlyToolSchema 根据工具名给出保守的只读判断。
 // 先保证 shell/browser/a2a 这类显式写操作默认为 false，其余默认 true。
 func isReadOnlyToolSchema(name string) bool {
-	if strings.HasPrefix(name, MessageFunctionPrefix) {
+	if strings.HasPrefix(name, MessageFunctionPrefix) || strings.HasPrefix(name, MCPFunctionPrefix) {
 		return false
 	}
 	switch name {

@@ -131,6 +131,22 @@ func TestToolRegistry_GetToolsForLLM_ReadOnlyFlag(t *testing.T) {
 	}
 }
 
+func TestToolRegistryGetToolsForLLMSortsByName(t *testing.T) {
+	registry := NewToolRegistry()
+	registry.Register(NewMessageTool())
+	registry.Register(&mockTool{nameVal: "z_tool", descriptionVal: "z"})
+	registry.Register(&mockTool{nameVal: "a_tool", descriptionVal: "a"})
+
+	for i := 0; i < 20; i++ {
+		tools := registry.GetToolsForLLM()
+		for j := 1; j < len(tools); j++ {
+			if tools[j-1].Function.Name > tools[j].Function.Name {
+				t.Fatalf("tool order = %q before %q, want sorted order", tools[j-1].Function.Name, tools[j].Function.Name)
+			}
+		}
+	}
+}
+
 func TestA2ATool_Name(t *testing.T) {
 	tool := NewA2ATool()
 	if tool.Name() != "a2a" {

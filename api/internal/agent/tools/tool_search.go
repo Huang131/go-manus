@@ -53,9 +53,9 @@ func (t *SearchTool) ReadOnly() bool {
 
 // Invoke 调用工具
 func (t *SearchTool) Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
-	query := ""
-	if v, ok := params["query"].(string); ok {
-		query = v
+	query, toolErr := requiredToolString(params, "query")
+	if toolErr != nil {
+		return toolErr, nil
 	}
 
 	var dateRange *string

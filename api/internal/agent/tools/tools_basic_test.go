@@ -23,6 +23,9 @@ type mockSandbox struct {
 	waitSessionID  string
 	waitSeconds    *int
 	killSessionID  string
+	findDirPath    string
+	findGlob       string
+	findResult     *model.ToolResult
 
 	// 可注入的错误与返回
 	execError   error
@@ -106,7 +109,26 @@ func (m *mockSandbox) SearchInFile(ctx context.Context, filepath, regex string, 
 }
 
 func (m *mockSandbox) FindFiles(ctx context.Context, dirPath, globPattern string) (*model.ToolResult, error) {
-	return nil, nil
+	m.findDirPath, m.findGlob = dirPath, globPattern
+	return m.findResult, nil
+}
+
+func TestFileToolFindUsesGlobPattern(t *testing.T) {
+	sb := &mockSandbox{findResult: model.NewToolResult("found")}
+	result, err := NewFileTool(sb).Invoke(context.Background(), map[string]interface{}{
+		"action":       FileActionFind,
+		"filepath":     "/workspace",
+		"glob_pattern": "*.go",
+	})
+	if err != nil {
+		t.Fatalf("Invoke() error = %v, want nil", err)
+	}
+	if result != sb.findResult {
+		t.Fatalf("Invoke() result = %+v, want sandbox result", result)
+	}
+	if sb.findDirPath != "/workspace" || sb.findGlob != "*.go" {
+		t.Fatalf("FindFiles() args = (%q, %q), want (/workspace, *.go)", sb.findDirPath, sb.findGlob)
+	}
 }
 
 func (m *mockSandbox) UploadFile(ctx context.Context, fileData []byte, filepath, filename string) (*model.ToolResult, error) {
@@ -287,13 +309,34 @@ func TestMessageTool_Invoke_PassesTextThrough(t *testing.T) {
 	}
 }
 
+func TestMessageToolAskUserPreservesInteractionFields(t *testing.T) {
+	result, err := NewMessageTool().InvokeWithName(MessageFunctionAskUser, context.Background(), map[string]interface{}{
+		"text":                  "需要你确认",
+		"attachments":           []interface{}{"/tmp/a.txt"},
+		"suggest_user_takeover": "browser",
+	})
+	if err != nil {
+		t.Fatalf("InvokeWithName() error = %v", err)
+	}
+	data, ok := result.Data.(map[string]interface{})
+	if !ok || data["waiting_for_user"] != true {
+		t.Fatalf("InvokeWithName() data = %#v, want waiting_for_user", result.Data)
+	}
+	if data["suggest_user_takeover"] != "browser" {
+		t.Fatalf("suggest_user_takeover = %v, want browser", data["suggest_user_takeover"])
+	}
+	if len(data["attachments"].([]interface{})) != 1 {
+		t.Fatalf("attachments = %#v, want one item", data["attachments"])
+	}
+}
+
 // TestMCPTool_InitializeWithoutConfig 验证无配置时初始化为空且不暴露工具。
 func TestMCPTool_InitializeWithoutConfig(t *testing.T) {
 	tool := NewMCPTool()
 	if err := tool.Initialize(context.Background(), nil); err != nil {
 		t.Errorf("Initialize(nil) error = %v", err)
 	}
-	if tools := tool.GetToolsForLLM(); len(tools) != 0 {
-		t.Errorf("GetToolsForLLM() = %d tools, want 0", len(tools))
+	if tools := tool.GetTools(); len(tools) != 0 {
+		t.Errorf("GetTools() = %d tools, want 0", len(tools))
 	}
 }

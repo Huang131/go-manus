@@ -8,47 +8,37 @@ import (
 	"github.com/Huang131/go-manus/api/internal/mcp"
 )
 
-func TestMCPToolInvokeValidatesParameters(t *testing.T) {
-	tests := []struct {
-		name   string
-		params map[string]interface{}
-		want   string
-	}{
-		{name: "missing server", params: map[string]interface{}{"tool": "search"}, want: "server"},
-		{name: "empty server", params: map[string]interface{}{"server": " ", "tool": "search"}, want: "server"},
-		{name: "invalid server type", params: map[string]interface{}{"server": 1, "tool": "search"}, want: "server"},
-		{name: "missing tool", params: map[string]interface{}{"server": "demo"}, want: "tool"},
-		{name: "empty tool", params: map[string]interface{}{"server": "demo", "tool": " "}, want: "tool"},
-		{name: "invalid tool type", params: map[string]interface{}{"server": "demo", "tool": true}, want: "tool"},
-		{name: "invalid params type", params: map[string]interface{}{"server": "demo", "tool": "search", "params": "bad"}, want: "params"},
+func TestMCPToolRegistersDynamicFunctions(t *testing.T) {
+	tool := NewMCPTool()
+	tool.tools = map[string]map[string]mcp.MCPToolInfo{
+		"demo": {
+			"search": {Name: "search", Description: "Search demo", InputSchema: map[string]interface{}{"type": "object"}},
+		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := NewMCPTool().Invoke(context.Background(), tt.params)
-			if err != nil {
-				t.Fatalf("Invoke() error = %v", err)
-			}
-			if result == nil || result.Success {
-				t.Fatalf("Invoke() result = %+v, want validation error", result)
-			}
-			if !strings.Contains(result.Message, tt.want) {
-				t.Fatalf("Invoke() message = %q, want field %q", result.Message, tt.want)
-			}
-		})
+	functions := tool.GetTools()
+	if len(functions) != 1 {
+		t.Fatalf("GetTools() count = %d, want 1", len(functions))
+	}
+	if functions[0]["name"] != "mcp_demo_search" {
+		t.Fatalf("function name = %v, want mcp_demo_search", functions[0]["name"])
+	}
+
+	registry := NewToolRegistry()
+	registry.Register(tool)
+	specs := registry.GetToolsForLLM()
+	if len(specs) != 1 || specs[0].Function.Name != "mcp_demo_search" {
+		t.Fatalf("registry specs = %+v, want one dynamic MCP function", specs)
 	}
 }
 
-func TestMCPToolInvokeAllowsMissingParams(t *testing.T) {
-	result, err := NewMCPTool().Invoke(context.Background(), map[string]interface{}{
-		"server": "demo",
-		"tool":   "search",
-	})
+func TestMCPToolInvokeWithNameRejectsUnknownFunction(t *testing.T) {
+	result, err := NewMCPTool().InvokeWithName("mcp_demo_missing", context.Background(), nil)
 	if err != nil {
-		t.Fatalf("Invoke() error = %v", err)
+		t.Fatalf("InvokeWithName() error = %v", err)
 	}
-	if result == nil || result.Success || result.Message != "MCP manager not initialized" {
-		t.Fatalf("Invoke() result = %+v, want manager initialization error", result)
+	if result == nil || result.Success || !strings.Contains(result.Message, "未知 MCP 工具") {
+		t.Fatalf("InvokeWithName() result = %+v, want unknown function error", result)
 	}
 }
 
@@ -61,18 +51,15 @@ func TestMCPToolCleanupDropsLoadedTools(t *testing.T) {
 		"demo": {"search": {Name: "search"}},
 	}
 
-	if !tool.HasTool("search") {
-		t.Fatal("precondition failed: injected tool should be visible")
+	if got := len(tool.GetTools()); got != 1 {
+		t.Fatalf("precondition dynamic tools = %d, want 1", got)
 	}
 
 	if err := tool.Cleanup(); err != nil {
 		t.Fatalf("Cleanup() error = %v, want nil", err)
 	}
 
-	if tool.HasTool("search") {
-		t.Error("Cleanup() should drop loaded tools")
-	}
-	if got := len(tool.GetToolsForLLM()); got != 0 {
-		t.Errorf("GetToolsForLLM() after Cleanup = %d tools, want 0", got)
+	if got := len(tool.GetTools()); got != 0 {
+		t.Errorf("GetTools() after Cleanup = %d tools, want 0", got)
 	}
 }

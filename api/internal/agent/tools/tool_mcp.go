@@ -2,7 +2,7 @@ package tools
 
 import (
 	"context"
-	"strings"
+	"sort"
 	"sync"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
@@ -38,24 +38,7 @@ func (t *MCPTool) Description() string {
 
 // Parameters 返回工具参数定义
 func (t *MCPTool) Parameters() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"server": map[string]interface{}{
-				"type":        "string",
-				"description": "MCP 服务器名称",
-			},
-			"tool": map[string]interface{}{
-				"type":        "string",
-				"description": "工具名称",
-			},
-			"params": map[string]interface{}{
-				"type":        "object",
-				"description": "工具参数",
-			},
-		},
-		"required": []string{"server", "tool"},
-	}
+	return map[string]interface{}{"type": "object", "properties": map[string]interface{}{}}
 }
 
 // ReadOnly MCP 工具可能映射到任意远端动作，保守视为有副作用。
@@ -65,81 +48,7 @@ func (t *MCPTool) ReadOnly() bool {
 
 // Invoke 调用工具
 func (t *MCPTool) Invoke(ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
-	serverName, toolName, paramsRaw, validationErr := parseMCPInvokeParams(params)
-	if validationErr != "" {
-		return model.NewToolError(validationErr), nil
-	}
-
-	t.mu.RLock()
-	manager := t.manager
-	t.mu.RUnlock()
-
-	if manager == nil {
-		return model.NewToolError("MCP manager not initialized"), nil
-	}
-
-	client, ok := manager.GetClient(serverName)
-	if !ok {
-		return model.NewToolError("MCP server not found: " + serverName), nil
-	}
-
-	logger.InfoContext(ctx, "调用 MCP 工具",
-		logger.String("server", serverName),
-		logger.String("tool", toolName))
-
-	// 调用 MCP 工具
-	result, err := client.CallTool(ctx, toolName, paramsRaw)
-	if err != nil {
-		logger.ErrorContext(ctx, "MCP 工具调用失败",
-			logger.String("server", serverName),
-			logger.String("tool", toolName),
-			logger.Err(err))
-		return model.NewToolError(err.Error()), nil
-	}
-
-	// 处理结果
-	if result.IsError {
-		var errorMsg string
-		for _, content := range result.Content {
-			errorMsg += content.Text + "\n"
-		}
-		return model.NewToolError(errorMsg), nil
-	}
-
-	// 构建成功结果
-	var message string
-	for _, content := range result.Content {
-		if content.Type == llmcore.ContentTypeText {
-			message += content.Text + "\n"
-		}
-	}
-
-	return model.NewToolResultWithMessage(message, map[string]interface{}{
-		"server": serverName,
-		"tool":   toolName,
-		"result": result,
-	}), nil
-}
-
-// parseMCPInvokeParams 在访问远端 MCP manager 前校验模型生成的动态参数。
-func parseMCPInvokeParams(params map[string]interface{}) (string, string, map[string]interface{}, string) {
-	serverName, ok := params["server"].(string)
-	if !ok || strings.TrimSpace(serverName) == "" {
-		return "", "", nil, "server must be a non-empty string"
-	}
-	toolName, ok := params["tool"].(string)
-	if !ok || strings.TrimSpace(toolName) == "" {
-		return "", "", nil, "tool must be a non-empty string"
-	}
-	paramsValue, exists := params["params"]
-	if !exists || paramsValue == nil {
-		return strings.TrimSpace(serverName), strings.TrimSpace(toolName), map[string]interface{}{}, ""
-	}
-	paramsRaw, ok := paramsValue.(map[string]interface{})
-	if !ok {
-		return "", "", nil, "params must be an object"
-	}
-	return strings.TrimSpace(serverName), strings.TrimSpace(toolName), paramsRaw, ""
+	return model.NewToolError("MCP 工具必须通过发现的 function name 调用"), nil
 }
 
 // Initialize 初始化 MCP 工具
@@ -188,27 +97,20 @@ func (t *MCPTool) Initialize(ctx context.Context, cfg *model.MCPConfig) error {
 	return nil
 }
 
-// GetToolsForLLM 获取所有 MCP 工具的 schema 列表
-//
-// 阶段 1d 改造点：返回 []llmcore.ToolSpec 而非 []map，与 ToolRegistry.GetToolsForLLM 协议统一。
-func (t *MCPTool) GetToolsForLLM() []llmcore.ToolSpec {
+// GetTools 将发现的 MCP 工具转换为注册表可调用的动态 function schema。
+func (t *MCPTool) GetTools() []map[string]interface{} {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	result := make([]llmcore.ToolSpec, 0)
+	result := make([]map[string]interface{}, 0)
 
 	for serverName, tools := range t.tools {
 		for _, tool := range tools {
-			// 生成工具名称：mcp_{serverName}_{toolName}
 			toolName := MCPFunctionPrefix + serverName + "_" + tool.Name
-
-			// 描述前缀
 			description := "[" + serverName + "] " + tool.Description
 			if description == "["+serverName+"] " {
 				description = "[" + serverName + "] " + tool.Name
 			}
-
-			// 输入 Schema
 			inputSchema := tool.InputSchema
 			if inputSchema == nil {
 				inputSchema = map[string]interface{}{
@@ -217,46 +119,79 @@ func (t *MCPTool) GetToolsForLLM() []llmcore.ToolSpec {
 				}
 			}
 
-			result = append(result, llmcore.ToolSpec{
-				Type: llmcore.ToolTypeFunction,
-				Function: llmcore.ToolSpecFunction{
-					Name:        toolName,
-					Description: description,
-					Parameters:  inputSchema,
-				},
+			result = append(result, map[string]interface{}{
+				"type":        llmcore.ToolTypeFunction,
+				"name":        toolName,
+				"description": description,
+				"parameters":  inputSchema,
 			})
 		}
 	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i]["name"].(string) < result[j]["name"].(string)
+	})
 
 	return result
 }
 
-// HasTool 检查工具是否存在
-func (t *MCPTool) HasTool(toolName string) bool {
+// InvokeWithName 根据注册的动态 function name 调用对应 MCP server/tool。
+func (t *MCPTool) InvokeWithName(functionName string, ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
 	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	for _, tools := range t.tools {
-		for _, tool := range tools {
-			// 支持两种格式的检查：mcp_{server}_{name} 或 {name}
-			expectedName := tool.Name
-			fullName := MCPFunctionPrefix + t.getServerNamePrefix() + "_" + tool.Name
-
-			if toolName == expectedName || toolName == fullName {
-				return true
+	var serverName, toolName string
+	for candidateServer, tools := range t.tools {
+		for candidateName, tool := range tools {
+			if functionName == MCPFunctionPrefix+candidateServer+"_"+tool.Name {
+				serverName, toolName = candidateServer, candidateName
+				break
 			}
 		}
+		if serverName != "" {
+			break
+		}
 	}
-	return false
+	manager := t.manager
+	t.mu.RUnlock()
+	if serverName == "" {
+		return model.NewToolError("未知 MCP 工具: " + functionName), nil
+	}
+	if manager == nil {
+		return model.NewToolError("MCP manager 未初始化"), nil
+	}
+	client, ok := manager.GetClient(serverName)
+	if !ok {
+		return model.NewToolError("MCP server 不存在: " + serverName), nil
+	}
+	logger.InfoContext(ctx, "调用 MCP 工具",
+		logger.String("server", serverName),
+		logger.String("tool", toolName))
+	result, err := client.CallTool(ctx, toolName, params)
+	if err != nil {
+		return model.NewToolError(err.Error()), nil
+	}
+	if result == nil {
+		return model.NewToolError("MCP 工具返回空结果"), nil
+	}
+	if result.IsError {
+		return model.NewToolError(mcpResultText(result)), nil
+	}
+	return model.NewToolResultWithMessage(mcpResultText(result), map[string]interface{}{
+		"server": serverName,
+		"tool":   toolName,
+		"result": result,
+	}), nil
 }
 
-// getServerNamePrefix 获取服务器名称前缀
-func (t *MCPTool) getServerNamePrefix() string {
-	// 返回第一个服务器名称作为前缀
-	for serverName := range t.tools {
-		return serverName
+func mcpResultText(result *mcp.MCPToolResult) string {
+	if result == nil {
+		return ""
 	}
-	return ""
+	var text string
+	for _, content := range result.Content {
+		if content.Type == llmcore.ContentTypeText {
+			text += content.Text + "\n"
+		}
+	}
+	return text
 }
 
 // Cleanup 清理 MCP 资源

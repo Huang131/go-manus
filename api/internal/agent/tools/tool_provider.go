@@ -45,15 +45,24 @@ func NewToolProvider(
 	}
 
 	if mcpConfig != nil && len(mcpConfig.Servers) > 0 {
-		p.mcpTool = NewMCPTool()
-		if err := p.mcpTool.Initialize(ctx, mcpConfig); err != nil {
+		mcpTool := NewMCPTool()
+		if err := mcpTool.Initialize(ctx, mcpConfig); err != nil {
 			logger.Warn("MCP 工具初始化失败，继续启动 Agent 服务", logger.Err(err))
+			_ = mcpTool.Cleanup()
+		} else if !usableMCPTool(mcpTool) {
+			logger.Warn("MCP 未发现可用工具，跳过注册")
+			_ = mcpTool.Cleanup()
+		} else {
+			p.mcpTool = mcpTool
 		}
 	}
 	if a2aConfig != nil && len(a2aConfig.Agents) > 0 {
-		p.a2aTool = NewA2ATool()
-		if err := p.a2aTool.Initialize(ctx, a2aConfig); err != nil {
+		a2aTool := NewA2ATool()
+		if err := a2aTool.Initialize(ctx, a2aConfig); err != nil {
 			logger.Warn("A2A 工具初始化失败，继续启动 Agent 服务", logger.Err(err))
+			_ = a2aTool.Cleanup()
+		} else {
+			p.a2aTool = a2aTool
 		}
 	}
 
@@ -126,7 +135,13 @@ func (p *ToolProvider) ReloadMCPConfig(ctx context.Context, cfg *model.MCPConfig
 	}
 	newTool := NewMCPTool()
 	if err := newTool.Initialize(ctx, cfg); err != nil {
+		_ = newTool.Cleanup()
 		return err
+	}
+	if !usableMCPTool(newTool) {
+		logger.Warn("MCP 未发现可用工具，保留当前工具配置")
+		_ = newTool.Cleanup()
+		return nil
 	}
 	p.mu.Lock()
 	oldTool := p.mcpTool
@@ -136,6 +151,10 @@ func (p *ToolProvider) ReloadMCPConfig(ctx context.Context, cfg *model.MCPConfig
 	}
 	p.mu.Unlock()
 	return nil
+}
+
+func usableMCPTool(tool *MCPTool) bool {
+	return tool != nil && len(tool.GetTools()) > 0
 }
 
 // ReloadA2AConfig 重建 A2A 客户端，确保配置接口保存后立即生效。
