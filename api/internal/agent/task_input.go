@@ -10,8 +10,6 @@ import (
 // Message 进入记忆与 LLM 上下文；AttachmentContexts 是 AttachmentLoader
 // 预加载的附件正文，仅用于 prompt 注入，不持久化、不进入记忆。
 type TaskInput struct {
-	// Message 用户消息（user 角色）
-	Message llmcore.Message
-	// AttachmentContexts 已加载到 LLM 上下文的附件内容
-	AttachmentContexts []attachment.FileContext
+	Message            llmcore.Message          // 用户消息（user 角色）
+	AttachmentContexts []attachment.FileContext // 已加载到 LLM 上下文的附件内容
 }

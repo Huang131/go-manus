@@ -26,8 +26,6 @@ const (
 )
 
 // AgentTaskRunner 基于 Agent 智能体的任务运行器
-// 对齐 Python 版本的 AgentTaskRunner。
-//
 // 运行器只关心"驱动 Flow 的事件循环"，会话持久化与文件/附件协作交由 SessionRuntime 承担，
 // 避免把仓储、沙箱、对象存储等依赖平铺在结构体里。
 type AgentTaskRunner struct {
@@ -72,7 +70,6 @@ func NewAgentTaskRunner(cfg *AgentTaskRunnerConfig) *AgentTaskRunner {
 
 // Invoke 实现 TaskRunner 接口
 // 从 task.input_stream 获取事件，执行 Flow，结果写入 task.output_stream
-// 对齐 Python: await self._task_runner.invoke(self)
 func (r *AgentTaskRunner) Invoke(ctx context.Context, task *RedisStreamTask) error {
 	r.mu.Lock()
 	if r.flow == nil {
