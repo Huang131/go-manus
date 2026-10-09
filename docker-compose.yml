@@ -23,6 +23,7 @@ services:
       - ./api/migrations/003_create_app_configs.sql:/docker-entrypoint-initdb.d/003_create_app_configs.sql
       - ./api/migrations/004_create_llm_models.sql:/docker-entrypoint-initdb.d/004_create_llm_models.sql
       - ./api/migrations/005_normalize_agent_settings.sql:/docker-entrypoint-initdb.d/005_normalize_agent_settings.sql
+      - ./api/migrations/006_create_runs_and_messages.sql:/docker-entrypoint-initdb.d/006_create_runs_and_messages.sql
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     networks:

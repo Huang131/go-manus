@@ -21,6 +21,8 @@ migrate-up:
 # 回滚所有迁移 (按倒序回滚)
 migrate-down:
 	@echo "Rolling back migrations..."
+	@echo "DROP TABLE IF EXISTS messages;" | psql "$(DATABASE_URL)"
+	@echo "DROP TABLE IF EXISTS runs;" | psql "$(DATABASE_URL)"
 	@echo "DROP TABLE IF EXISTS app_configs;" | psql "$(DATABASE_URL)"
 	@echo "DROP TABLE IF EXISTS files;" | psql "$(DATABASE_URL)"
 	@echo "DROP TABLE IF EXISTS sessions;" | psql "$(DATABASE_URL)"
