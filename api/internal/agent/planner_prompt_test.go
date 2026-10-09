@@ -27,7 +27,7 @@ func TestBuildAttachmentContextSection_IncludesContent(t *testing.T) {
 }
 
 func TestCreatePlanPrompt_UsesAttachmentContext(t *testing.T) {
-	prompt := CreatePlanPrompt
+	prompt := DefaultPromptCatalog().MustText(PromptCreatePlan)
 	prompt = strings.Replace(prompt, "{message}", "分析文档", 1)
 	prompt = strings.Replace(prompt, "{attachments}", "- /home/ubuntu/upload/manual.md\n", 1)
 	prompt = strings.Replace(prompt, "{context}", BuildAttachmentContextSection([]attachment.FileContext{

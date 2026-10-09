@@ -45,13 +45,14 @@ func (a *PlannerAgent) CreatePlan(ctx context.Context, input *TaskInput) (*model
 	contextSection := BuildAttachmentContextSection(input.AttachmentContexts)
 
 	// 构建提示词
-	prompt := CreatePlanPrompt
+	catalog := DefaultPromptCatalog()
+	prompt := catalog.MustText(PromptCreatePlan)
 	prompt = strings.Replace(prompt, "{message}", message.ContentText, 1)
 	prompt = strings.Replace(prompt, "{attachments}", attachments, 1)
 	prompt = strings.Replace(prompt, "{context}", contextSection, 1)
 
 	// 添加系统提示词
-	systemPrompt := SystemPrompt + "\n" + PlannerSystemPrompt
+	systemPrompt := catalog.MustText(PromptSystem) + "\n" + catalog.MustText(PromptPlannerSystem)
 
 	messages, err := a.buildConversationMessages(systemPrompt, prompt)
 	if err != nil {
@@ -137,12 +138,13 @@ func (a *PlannerAgent) UpdatePlan(ctx context.Context, plan *model.Plan, complet
 	}
 
 	// 构建提示词
-	prompt := UpdatePlanPrompt
+	catalog := DefaultPromptCatalog()
+	prompt := catalog.MustText(PromptUpdatePlan)
 	prompt = strings.Replace(prompt, "{plan}", string(planJSON), 1)
 	prompt = strings.Replace(prompt, "{step}", string(stepJSON), 1)
 
 	// 添加系统提示词
-	systemPrompt := SystemPrompt + "\n" + PlannerSystemPrompt
+	systemPrompt := catalog.MustText(PromptSystem) + "\n" + catalog.MustText(PromptPlannerSystem)
 
 	messages, err := a.buildConversationMessages(systemPrompt, prompt)
 	if err != nil {

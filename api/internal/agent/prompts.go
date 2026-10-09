@@ -1,8 +1,8 @@
 package agent
 
-// SystemPrompt 系统预设提示词
+// systemPromptContent 系统预设提示词
 // 强制中文 + 中文思考 + 散文式回复
-const SystemPrompt = `你是 Manus，一个行动引擎智能体。
+const systemPromptContent = `你是 Manus，一个行动引擎智能体。
 
 <intro>
 你的专长在于处理以下任务：
@@ -38,8 +38,8 @@ const SystemPrompt = `你是 Manus，一个行动引擎智能体。
 </important_notes>
 `
 
-// PlannerSystemPrompt 规划 Agent 系统提示词
-const PlannerSystemPrompt = `你是一个任务规划智能体。
+// plannerSystemPromptContent 规划 Agent 系统提示词
+const plannerSystemPromptContent = `你是一个任务规划智能体。
 
 职责：分析需求 → 确定工具 → 生成计划
 
@@ -55,8 +55,8 @@ const PlannerSystemPrompt = `你是一个任务规划智能体。
 - language: 工作语言
 - steps: [{id, description}]`
 
-// CreatePlanPrompt 创建计划的提示词模板
-const CreatePlanPrompt = `你现在正在根据用户的消息创建一个计划。
+// createPlanPromptContent 创建计划的提示词模板
+const createPlanPromptContent = `你现在正在根据用户的消息创建一个计划。
 
 用户消息：
 {message}
@@ -87,8 +87,8 @@ const CreatePlanPrompt = `你现在正在根据用户的消息创建一个计划
 - 如果任务不可行，返回空计划
 - 如果任务只是简单回答，直接给出单步计划，不要伪装成多步任务`
 
-// UpdatePlanPrompt 更新计划的提示词模板
-const UpdatePlanPrompt = `你正在更新计划，根据步骤的执行结果来调整后续计划。
+// updatePlanPromptContent 更新计划的提示词模板
+const updatePlanPromptContent = `你正在更新计划，根据步骤的执行结果来调整后续计划。
 
 当前计划：
 {plan}
@@ -113,8 +113,8 @@ const UpdatePlanPrompt = `你正在更新计划，根据步骤的执行结果来
   ]
 }}`
 
-// ReActSystemPrompt ReAct Agent 系统提示词
-const ReActSystemPrompt = `你是一个任务执行智能体 (ReAct Agent)。
+// reactSystemPromptContent ReAct Agent 系统提示词
+const reactSystemPromptContent = `你是一个任务执行智能体 (ReAct Agent)。
 
 职责：根据计划选择合适的工具执行步骤，并记录执行结果。
 
@@ -123,8 +123,8 @@ const ReActSystemPrompt = `你是一个任务执行智能体 (ReAct Agent)。
 - result: 执行结果描述
 - attachments: 生成的文件路径数组（如有）`
 
-// ExecutionPrompt 执行步骤的提示词模板
-const ExecutionPrompt = `你正在执行任务中的一个步骤。
+// executionPromptContent 执行步骤的提示词模板
+const executionPromptContent = `你正在执行任务中的一个步骤。
 
 用户原始请求：
 {message}
@@ -152,9 +152,9 @@ const ExecutionPrompt = `你正在执行任务中的一个步骤。
 - 必要时再调用 file.read 工具读取完整文件
 - 如附件是二进制或截断状态，请显式说明`
 
-// SummarizePrompt 总结提示词。
+// summarizePromptContent 总结提示词。
 // 总结是直接展示给用户的内容，使用纯文本输出才能实现端到端 token streaming。
-const SummarizePrompt = `任务已完成。
+const summarizePromptContent = `任务已完成。
 
 要求：
 - 核心结果：1-3 句话总结完成内容

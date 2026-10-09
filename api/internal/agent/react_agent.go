@@ -45,7 +45,8 @@ func (a *ReActAgent) ExecuteStep(ctx context.Context, plan *model.Plan, step *mo
 	contextSection := BuildAttachmentContextSection(input.AttachmentContexts)
 
 	// 构建提示词
-	prompt := ExecutionPrompt
+	catalog := DefaultPromptCatalog()
+	prompt := catalog.MustText(PromptExecution)
 	prompt = strings.Replace(prompt, "{message}", message.ContentText, 1)
 	prompt = strings.Replace(prompt, "{attachments}", attachments, 1)
 	prompt = strings.Replace(prompt, "{context}", contextSection, 1)
@@ -53,7 +54,7 @@ func (a *ReActAgent) ExecuteStep(ctx context.Context, plan *model.Plan, step *mo
 	prompt = strings.Replace(prompt, "{step}", step.Description, 1)
 
 	// 总结阶段是面向用户的纯文本输出，不能叠加要求结构化 JSON 的 ReAct 系统提示。
-	systemPrompt := SystemPrompt
+	systemPrompt := catalog.MustText(PromptSystem)
 
 	// 使用完整的 ReAct 循环调用 LLM（记忆以原生消息注入，不再拼字符串）
 	// 步骤执行的响应是结构化 JSON；先完整聚合后解析，避免把半截 JSON 当作用户消息展示。
@@ -118,10 +119,11 @@ func (a *ReActAgent) ExecuteStep(ctx context.Context, plan *model.Plan, step *mo
 // Summarize 总结任务执行结果
 func (a *ReActAgent) Summarize(ctx context.Context) (string, []string, bool, error) {
 	// 构建提示词
-	prompt := SummarizePrompt
+	catalog := DefaultPromptCatalog()
+	prompt := catalog.MustText(PromptSummarize)
 
 	// 添加系统提示词
-	systemPrompt := SystemPrompt + "\n" + ReActSystemPrompt
+	systemPrompt := catalog.MustText(PromptSystem) + "\n" + catalog.MustText(PromptReActSystem)
 
 	// 构建消息历史：system + 记忆原生消息 + 总结请求
 	messages, err := a.buildConversationMessages(systemPrompt, prompt)
