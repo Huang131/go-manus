@@ -21,7 +21,7 @@ import {A2ASetting} from '@/components/settings/A2ASetting'
 import {MCPSetting, normalizeMCPConfig} from '@/components/settings/MCPSetting'
 import {configApi} from '@/lib/api'
 import type {
-  AgentConfig,
+  AgentSettings,
   ListMCPServerItem,
   ListA2AServerItem,
   CreateA2AServerParams,
@@ -52,7 +52,11 @@ export function ManusSettings() {
   const [activeSetting, setActiveSetting] = useState<SettingTab>('common-setting')
 
   // ---- 数据 ----
-  const [agentConfig, setAgentConfig] = useState<AgentConfig>({})
+  const [agentSettings, setAgentSettings] = useState<AgentSettings>({
+    max_iterations: 10,
+    max_retries: 3,
+    max_search_results: 10,
+  })
   const [mcpServers, setMcpServers] = useState<ListMCPServerItem[]>([])
   const [a2aServers, setA2aServers] = useState<ListA2AServerItem[]>([])
 
@@ -70,12 +74,11 @@ export function ManusSettings() {
     if (fetchingRef.current) return
     fetchingRef.current = true
 
-    // 1. Agent + LLM 配置（通常很快）
-    setLoadingConfig(true)
-    setLoadingConfig(true)
-    configApi.getAgentConfig()
+	// 1. Agent + LLM 配置（通常很快）
+	setLoadingConfig(true)
+	configApi.getAgentSettings()
       .then((agent) => {
-        setAgentConfig(agent)
+        setAgentSettings(agent)
       })
       .catch((err) => {
         console.error('[Settings] 获取基础配置失败:', err)
@@ -128,7 +131,7 @@ export function ManusSettings() {
     setSaving(true)
     try {
       if (activeSetting === 'common-setting') {
-        await configApi.updateAgentConfig(agentConfig)
+        await configApi.updateAgentSettings(agentSettings)
         toast.success('通用配置保存成功')
       }
     } catch (err) {
@@ -302,7 +305,7 @@ export function ManusSettings() {
             ) : (
               <>
                 {activeSetting === 'common-setting' && (
-                  <CommonSetting config={agentConfig} onChange={setAgentConfig}/>
+                  <CommonSetting config={agentSettings} onChange={setAgentSettings}/>
                 )}
                 {activeSetting === 'llm-setting' && (
                   <ModelConfigManager/>

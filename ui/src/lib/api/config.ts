@@ -1,6 +1,6 @@
 import { get, post, put, del } from "./fetch";
 import type {
-  AgentConfig,
+  AgentSettings,
   MCPConfig,
   MCPServersData,
   A2AServersData,
@@ -45,15 +45,15 @@ export const configApi = {
   /**
    * 获取 Agent 通用配置
    */
-  getAgentConfig: (): Promise<AgentConfig> => {
-    return get<AgentConfig>("/app-config/agent");
+  getAgentSettings: (): Promise<AgentSettings> => {
+    return get<AgentSettings>("/app-config/agent");
   },
 
   /**
    * 更新 Agent 通用配置
    */
-  updateAgentConfig: (config: AgentConfig): Promise<AgentConfig> => {
-    return post<AgentConfig>("/app-config/agent", config);
+  updateAgentSettings: (config: AgentSettings): Promise<void> => {
+    return post<void>("/app-config/agent", config);
   },
 
   /**

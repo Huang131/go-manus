@@ -63,11 +63,10 @@ export type LLMModelTestResponse = {
 /**
  * Agent 通用配置
  */
-export type AgentConfig = {
-  max_iterations?: number;
-  max_retries?: number;
-  max_search_results?: number;
-  [key: string]: unknown;
+export type AgentSettings = {
+  max_iterations: number;
+  max_retries: number;
+  max_search_results: number;
 };
 
 /**
