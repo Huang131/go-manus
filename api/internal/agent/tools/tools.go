@@ -6,7 +6,6 @@ package tools
 import (
 	"context"
 	"sort"
-	"strings"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -38,50 +37,81 @@ type MultiFunctionTool interface {
 	InvokeWithName(functionName string, ctx context.Context, params map[string]interface{}) (*model.ToolResult, error)
 }
 
+// ToolDescriptor 描述一个可被 Agent 调用的 function。
+// 普通工具和动态工具都落到同一份描述中，避免 schema、实现和只读标记分开维护。
+type ToolDescriptor struct {
+	Name        string
+	Description string
+	Parameters  map[string]interface{}
+	ReadOnly    bool
+	Tool        Tool
+	Owner       string
+}
+
 // ToolRegistry 工具注册表
 type ToolRegistry struct {
-	tools      map[string]Tool
-	schemas    map[string]map[string]interface{}
-	registered map[string]Tool
+	descriptors map[string]ToolDescriptor
 }
 
 // NewToolRegistry 创建工具注册表
 func NewToolRegistry() *ToolRegistry {
 	return &ToolRegistry{
-		tools:      make(map[string]Tool),
-		schemas:    make(map[string]map[string]interface{}),
-		registered: make(map[string]Tool),
+		descriptors: make(map[string]ToolDescriptor),
 	}
 }
 
 // Register 注册工具
 func (r *ToolRegistry) Register(tool Tool) {
-	r.registered[tool.Name()] = tool
+	if tool == nil {
+		return
+	}
+	owner := tool.Name()
+	for name, descriptor := range r.descriptors {
+		if descriptor.Owner == owner {
+			delete(r.descriptors, name)
+		}
+	}
+
 	if multiTool, ok := tool.(MultiFunctionTool); ok {
 		for _, schema := range multiTool.GetTools() {
-			name, ok := schema["name"].(string)
-			if !ok || name == "" {
+			descriptor, ok := descriptorFromSchema(tool, owner, schema)
+			if !ok {
 				continue
 			}
-			r.tools[name] = tool
-			r.schemas[name] = schema
+			r.descriptors[descriptor.Name] = descriptor
 		}
 		return
 	}
-	r.tools[tool.Name()] = tool
+	r.descriptors[owner] = ToolDescriptor{
+		Name:        owner,
+		Description: tool.Description(),
+		Parameters:  tool.Parameters(),
+		ReadOnly:    tool.ReadOnly(),
+		Tool:        tool,
+		Owner:       owner,
+	}
 }
 
 // Get 获取工具
 func (r *ToolRegistry) Get(name string) (Tool, bool) {
-	tool, ok := r.tools[name]
-	return tool, ok
+	descriptor, ok := r.descriptors[name]
+	if !ok {
+		return nil, false
+	}
+	return descriptor.Tool, true
 }
 
 // List 返回所有工具
 func (r *ToolRegistry) List() []Tool {
-	result := make([]Tool, 0, len(r.registered))
-	for _, tool := range r.registered {
-		result = append(result, tool)
+	descriptors := r.sortedDescriptors()
+	result := make([]Tool, 0, len(descriptors))
+	seenOwners := make(map[string]struct{}, len(descriptors))
+	for _, descriptor := range descriptors {
+		if _, ok := seenOwners[descriptor.Owner]; ok {
+			continue
+		}
+		seenOwners[descriptor.Owner] = struct{}{}
+		result = append(result, descriptor.Tool)
 	}
 	return result
 }
@@ -91,51 +121,46 @@ func (r *ToolRegistry) List() []Tool {
 // 阶段 1d 改造点：返回 []llmcore.ToolSpec 而非 []map。
 // 业务侧 / LLM adapter 只看到协议级类型，不再拼接 map。
 func (r *ToolRegistry) GetToolsForLLM() []llmcore.ToolSpec {
-	result := make([]llmcore.ToolSpec, 0, len(r.tools))
-	for name, schema := range r.schemas {
-		parameters, _ := schema["parameters"].(map[string]interface{})
-		description, _ := schema["description"].(string)
+	descriptors := r.sortedDescriptors()
+	result := make([]llmcore.ToolSpec, 0, len(descriptors))
+	for _, descriptor := range descriptors {
 		result = append(result, llmcore.ToolSpec{
 			Type: llmcore.ToolTypeFunction,
 			Function: llmcore.ToolSpecFunction{
-				Name:        name,
-				Description: description,
-				Parameters:  parameters,
+				Name:        descriptor.Name,
+				Description: descriptor.Description,
+				Parameters:  descriptor.Parameters,
 			},
-			ReadOnly: isReadOnlyToolSchema(name),
+			ReadOnly: descriptor.ReadOnly,
 		})
 	}
-
-	for name, tool := range r.registered {
-		if _, ok := tool.(MultiFunctionTool); ok {
-			continue
-		}
-		result = append(result, llmcore.ToolSpec{
-			Type: llmcore.ToolTypeFunction,
-			Function: llmcore.ToolSpecFunction{
-				Name:        name,
-				Description: tool.Description(),
-				Parameters:  tool.Parameters(),
-			},
-			ReadOnly: tool.ReadOnly(),
-		})
-	}
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].Function.Name < result[j].Function.Name
-	})
 	return result
 }
 
-// isReadOnlyToolSchema 根据工具名给出保守的只读判断。
-// 先保证 shell/browser/a2a 这类显式写操作默认为 false，其余默认 true。
-func isReadOnlyToolSchema(name string) bool {
-	if strings.HasPrefix(name, MessageFunctionPrefix) || strings.HasPrefix(name, MCPFunctionPrefix) {
-		return false
+func descriptorFromSchema(tool Tool, owner string, schema map[string]interface{}) (ToolDescriptor, bool) {
+	name, ok := schema["name"].(string)
+	if !ok || name == "" {
+		return ToolDescriptor{}, false
 	}
-	switch name {
-	case ToolNameShell, ToolNameBrowser, ToolNameA2A, ToolNameFile, ToolNameMessage:
-		return false
-	default:
-		return true
+	parameters, _ := schema["parameters"].(map[string]interface{})
+	description, _ := schema["description"].(string)
+	return ToolDescriptor{
+		Name:        name,
+		Description: description,
+		Parameters:  parameters,
+		ReadOnly:    tool.ReadOnly(),
+		Tool:        tool,
+		Owner:       owner,
+	}, true
+}
+
+func (r *ToolRegistry) sortedDescriptors() []ToolDescriptor {
+	result := make([]ToolDescriptor, 0, len(r.descriptors))
+	for _, descriptor := range r.descriptors {
+		result = append(result, descriptor)
 	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name < result[j].Name
+	})
+	return result
 }

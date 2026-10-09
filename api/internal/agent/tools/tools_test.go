@@ -21,6 +21,31 @@ type mockTool struct {
 	readOnlyVal    bool
 }
 
+type dynamicTestTool struct {
+	name  string
+	tools []map[string]interface{}
+}
+
+func (t *dynamicTestTool) Name() string { return t.name }
+
+func (t *dynamicTestTool) Description() string { return "dynamic test tool" }
+
+func (t *dynamicTestTool) Parameters() map[string]interface{} {
+	return map[string]interface{}{"type": "object"}
+}
+
+func (t *dynamicTestTool) ReadOnly() bool { return true }
+
+func (t *dynamicTestTool) Invoke(context.Context, map[string]interface{}) (*model.ToolResult, error) {
+	return model.NewToolResult("ok"), nil
+}
+
+func (t *dynamicTestTool) GetTools() []map[string]interface{} { return t.tools }
+
+func (t *dynamicTestTool) InvokeWithName(string, context.Context, map[string]interface{}) (*model.ToolResult, error) {
+	return model.NewToolResult("ok"), nil
+}
+
 func (m *mockTool) Name() string {
 	return m.nameVal
 }
@@ -144,6 +169,31 @@ func TestToolRegistryGetToolsForLLMSortsByName(t *testing.T) {
 				t.Fatalf("tool order = %q before %q, want sorted order", tools[j-1].Function.Name, tools[j].Function.Name)
 			}
 		}
+	}
+}
+
+func TestToolRegistryReRegisterRemovesStaleFunctions(t *testing.T) {
+	tool := &dynamicTestTool{
+		name: "dynamic",
+		tools: []map[string]interface{}{
+			{"name": "dynamic_old", "description": "old", "parameters": map[string]interface{}{"type": "object"}},
+			{"name": "dynamic_current", "description": "current", "parameters": map[string]interface{}{"type": "object"}},
+		},
+	}
+	registry := NewToolRegistry()
+	registry.Register(tool)
+
+	tool.tools = []map[string]interface{}{
+		{"name": "dynamic_current", "description": "updated", "parameters": map[string]interface{}{"type": "object"}},
+	}
+	registry.Register(tool)
+
+	if _, ok := registry.Get("dynamic_old"); ok {
+		t.Fatal("re-registering a dynamic tool retained stale function")
+	}
+	specs := registry.GetToolsForLLM()
+	if len(specs) != 1 || specs[0].Function.Description != "updated" {
+		t.Fatalf("re-registered specs = %+v, want one updated function", specs)
 	}
 }
 
