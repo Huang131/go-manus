@@ -6,7 +6,7 @@
 
 | 阶段 | 状态 | 提交/依据 | 说明 |
 |---|---|---|---|
-| 0. 事实基线与方案校准 | complete | 文档工作区；代码基线 `4c3d39d` | 已核对当前 Session/Task 链、配置、Engine、ToolSet；文档完成后再记录独立文档提交 |
+| 0. 事实基线与方案校准 | complete | `0382404` | 已核对当前 Session/Task 链、配置、Engine、ToolSet，并形成可恢复的阶段方案 |
 | 1. Settings 与 Prompt | complete | `4df77fe`、`e9dcba2`、`9548b84`、`dd5c2cf`、`b0f5328` | Settings、严格校验、migration、UI 与 PromptCatalog/hash 已完成 |
 | 2. Engine 与 Context | pending | - | Flow 已拆状态处理；Outcome 和 ContextPolicy 未完成 |
 | 3. Run 领域与存储 | pending | - | 当前源码没有 Run 类型、表或 Repository；必须先评审契约 |
