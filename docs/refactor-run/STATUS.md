@@ -1,78 +1,95 @@
 # Run/Session 重构实施状态
 
-该文件是跨会话恢复入口。实施模型必须在每个阶段提交后更新它。
+本文件是跨会话恢复入口。状态只反映当前代码，不把目标设计写成已完成。
 
 ## 当前状态
 
-| 阶段 | 状态 | 提交 SHA | 验证结果 |
+| 阶段 | 状态 | 提交/依据 | 说明 |
 |---|---|---|---|
-| 1. Settings 与 Prompt | in_progress | `1d9d5cd`, `236972f` | 启动加载和搜索 limit 已接通；PromptCatalog、SettingsManager、任务快照和 max_plan_steps 未完成 |
-| 2. Engine 与 Context | in_progress | `fa64e78` | 基础 ContextBuilder 已接入；模型预算来源、StepOutcome 未完成 |
-| 3. Run 领域与存储 | pending | - | - |
-| 4. 后端执行切换 | pending | - | - |
-| 5. API/UI/SSE 切换 | pending | - | - |
-| 6. 遗留删除 | pending | - | - |
+| 0. 事实基线与方案校准 | complete | 文档工作区；代码基线 `4c3d39d` | 已核对当前 Session/Task 链、配置、Engine、ToolSet；文档完成后再记录独立文档提交 |
+| 1. Settings 与 Prompt | pending | - | 启动加载和搜索 limit 已存在；唯一 Settings、严格校验、Prompt hash 未完成 |
+| 2. Engine 与 Context | pending | - | Flow 已拆状态处理；Outcome 和 ContextPolicy 未完成 |
+| 3. Run 领域与存储 | pending | - | 当前源码没有 Run 类型、表或 Repository；必须先评审契约 |
+| 4. 执行生产切换 | pending | - | 唯一后端生产语义切换点；Session 路由只剩薄适配 |
+| 5. API/UI/SSE | pending | - | 唯一公开契约切换点；完成后删除旧路由 |
+| 6. 遗留删除 | pending | - | 依赖阶段 4/5 的引用扫描和回归 |
 
-允许的状态只有：`pending`、`in_progress`、`complete`、`blocked`。
+允许状态：`pending`、`in_progress`、`complete`、`blocked`。
 
-## 当前入口
-
-- 下一入口：先阅读 [00-current-review-2026-09.md](./00-current-review-2026-09.md)，再进入阶段 1 检查点 1A（PromptCatalog）
-- 方案文档：[02-settings-and-prompts.md](./02-settings-and-prompts.md)
-- 状态核对基线：当前分支 `911c89c`；阶段文档中的历史 SHA 只用于追溯，不作为当前源码前提
-- 生产业务语义：现有 Session/RedisStreamTask；Run 模型、表、Repository、API 和 UI 均未开始切换
-
-## 阶段内检查点
-
-| 检查点 | 状态 | 提交 SHA | 独立验证 |
-|---|---|---|---|
-| 1A. PromptCatalog 切换 | pending | - | - |
-| 1B. SettingsManager 与搜索 limit 切换 | in_progress | `1d9d5cd`, `236972f` | 搜索 limit、启动加载和无效字段清理已完成；统一 SettingsManager、任务快照和 `max_plan_steps` 尚未完成 |
-| 2A. ContextBuilder 切换 | in_progress | `fa64e78` | Builder 已进入生产 LLM 请求路径，伪记忆容量已删除；模型画像预算、输出预留和完整裁剪策略尚未完成 |
-| 2B. StepOutcome 切换 | pending | - | - |
-| 3A. Run 模型与 migration | pending | - | - |
-| 3B. Run/Message Repository | pending | - | - |
-| 4A. 新执行组件（不接生产） | pending | - | - |
-| 4B. 生产装配原子切换 | pending | - | - |
-| 4C. 生命周期并发加固 | pending | - | - |
-| 5A. Run API 与 SSE | pending | - | - |
-| 5B1. UI Run client 与 Hook（未启用） | pending | - | - |
-| 5B2. UI 切换与旧路由删除 | pending | - | - |
-| 6A. 删除 Task 基础设施 | pending | - | - |
-| 6B. 删除 Session 执行字段 | pending | - | - |
-| 6C. 收紧 model 依赖 | pending | - | - |
-
-检查点允许的状态同样只有 `pending`、`in_progress`、`complete`、`blocked`。每个检查点提交时必须保持 API 可编译、相关单元测试通过，并可单独回滚；阶段门禁通过前阶段状态不得改为 complete。
-
-## 最近一次验证
-
-- `GOCACHE=/private/tmp/go-manus-gocache make test-api`：历史检查点记录；重新实施前必须在当前分支重跑。
-- `TestChatEndpoint_LastEventIDResumesWithoutDuplicatesOrGaps`：历史检查点记录，验证旧 Session/RedisStreamTask SSE 契约，不代表 Run SSE 已实现。
-- 当前工作区验证：`GOCACHE=/private/tmp/go-manus-review-cache go test ./...` 在受限环境下因回环临时端口权限导致 `internal/handler`、`internal/sandbox` 两个测试失败；其余包通过。最终门禁需在允许本地监听的开发终端完成。
-- Run/Session 方案检查：生产源码中无 `RunStatus`、`Run` 表、Run Repository 或 Run API。
-- 当前配置治理和基础 ContextBuilder 的提交均已在当前分支，阶段 1/2 的未完成项仍可按各自检查点独立实施。
-
-## 决策偏差
-
-- 本方案形成前，配置加载/搜索 limit（`1d9d5cd`、`236972f`）和基础 ContextBuilder（`fa64e78`）已独立落地。当前 Builder 仍使用固定默认预算，未完成阶段 2A 设计中的模型画像预算与输出预留；状态表按实际能力回填，不把这些提交追认成完整阶段交付。
-- 当前取消生命周期已由 `2535c3c`、`e45c48c` 加固，并由 `a0f1965` 覆盖 HTTP 契约；这仍属于旧 Session/RedisStreamTask 语义，不等同于检查点 4C 的 Run 生命周期加固。
-- 最新源码核对：`agent.Task`、`Stream`、`RedisStreamTask`、`defaultTaskRegistry`、`cfg.LLM`、MCP/A2A runtime 和 `SimpleMemory` 都仍有生产消费者，暂不删除；`PlannerReActFlow.Invoke` 已拆为状态处理函数。
-
-## 阻塞记录
-
-尚无。
-
-## 更新模板
-
-完成阶段后追加：
+## 当前生产语义
 
 ```text
-阶段：
-状态：complete
-提交：<sha>
-验证：<命令及结果>
-生产语义：<当前唯一写路径>
-删除内容：<已删除接口/字段>
-决策偏差：<无或具体说明>
-下一入口：<下一阶段文档和首个任务>
+SessionHandler -> AgentService -> RedisStreamTask -> AgentTaskRunner
+              -> PlannerReActFlow -> LLM + ToolSet
 ```
+
+当前不存在 Run 生产写入。`ToolRegistry`、MCP/A2A ToolSet 引用生命周期已完成，不属于本方案待办。
+
+## 最近验证基线
+
+实施新阶段前，在 `api/` 重跑：
+
+```bash
+go test ./...
+go test -race ./internal/agent/... ./internal/service ./internal/repository -count=1
+go vet ./...
+```
+
+受限环境的回环端口失败必须单独记录，不能改写为通过。
+
+## 检查点
+
+| 检查点 | 状态 | 入口 |
+|---|---|---|
+| 1A Settings 单一类型、配置 migration 与校验 | pending | `02-settings-and-prompts.md` |
+| 1B PromptCatalog 与 hash | pending | `02-settings-and-prompts.md` |
+| 2A StepOutcome 唯一信号并删除旧等待表达 | pending | `03-engine-and-context.md` |
+| 2B ContextPolicy | pending | `03-engine-and-context.md` |
+| 2C MCP 动态路由、初始化与错误契约 | pending | `03-engine-and-context.md` |
+| 3A Run、执行快照与等待恢复契约 | pending | `04-run-domain-and-storage.md` |
+| 3B Run/Message Repository | pending | `04-run-domain-and-storage.md` |
+| 4A RunExecutor 生命周期与观测，未接生产 | pending | `05-run-execution-cutover.md` |
+| 4B 唯一后端生产切换 | pending | `05-run-execution-cutover.md` |
+| 5A Run API/SSE | pending | `06-api-ui-sse-cutover.md` |
+| 5B UI 切换 | pending | `06-api-ui-sse-cutover.md` |
+| 5C 删除旧路由 | pending | `06-api-ui-sse-cutover.md` |
+| 6A 删除 Task 基础设施 | pending | `07-legacy-removal.md` |
+| 6B 删除 Session 执行字段 | pending | `07-legacy-removal.md` |
+| 6C 收紧 model 依赖 | pending | `07-legacy-removal.md` |
+
+## 阶段验收归属
+
+| 验收项 | 归属阶段 |
+|---|---|
+| Settings 单一真相、范围校验、Prompt hash | 1 |
+| 等待输入不再依赖错误字符串、上下文裁剪可替换 | 2 |
+| Run 状态、等待恢复、幂等、单活跃约束、消息存储 | 3 |
+| 所有生产执行只写 Run/Message，取消收敛后 ToolSet 必然释放 | 4 |
+| Run API、Last-Event-ID、UI 只消费 Run 语义 | 5 |
+| 旧 Task、Session 执行字段和旧路由物理删除 | 6 |
+
+## 决策记录
+
+- 首期不引入 Worker、Lease、Outbox、永久事件溯源、Plan/Step 独立表或通用 UnitOfWork；达到 `01-architecture.md` 的演进触发条件后单独立项。
+- `PlannerReActFlow.Invoke` 已拆分，后续只调整结果和状态边界。
+- `StepOutcome.Kind` 是目标唯一等待控制信号；阶段 2 必须删除旧 error/boolean 双表达。Engine 内部完成有限重试，Flow/RunExecutor 不消费 `retryable_failure`，也不重复执行同一次调用。
+- `waiting_input` 依靠 execution snapshot、已完成步骤摘要和问题/回答关联恢复，不依赖旧 goroutine 或 `SimpleMemory`。
+- 一次客户端提交只使用一个幂等键；创建 Run 与初始消息共享该键，后续输入在 Run 内去重。
+- 阶段 4 不回填 `sessions.events` 或旧 Task 历史，从切换点开始写 Run/Message。
+- Run input 只接受 `waiting_input`；`cancelling`、其他活跃状态和终态分别返回稳定的 409 业务错误，重复幂等输入返回原结果。
+- 取消先条件写入 `cancelling`，再发出 cancel signal；Engine 退出并释放 ToolSet、持久化 `cancelled` 后才注销控制句柄。Cancel 发现句柄不存在或终态写入失败时，必须通过幂等 `ReconcileCancelling` 在当前进程或启动恢复中收敛。
+- `MaxPlanSteps` 不作为伪配置加入；必须先有真实消费逻辑。
+- `sessions.memories` 和 `Session.Memories` 当前不存在，不在方案中虚构。
+- ToolRegistry 三份映射、MCP/A2A retired 无界释放问题已在工具重构提交中解决，不重复规划。
+- MCP function name 碰撞、初始化吞错和基础设施错误分类仍是待办，归入 2C；这不否定已经完成的 ToolRegistry/ToolSet 生命周期重构。
+
+## 恢复流程
+
+```bash
+cd /Users/huanghao2/GolandProjects/study/imooc-mas/go-manus
+git status --short --branch
+git log -8 --oneline --decorate
+sed -n '1,220p' docs/refactor-run/STATUS.md
+```
+
+读取第一个 `pending` 或 `in_progress` 检查点，确认上一提交存在，运行该阶段恢复基线后再修改。任何中断都从最近一个通过门禁的提交继续。

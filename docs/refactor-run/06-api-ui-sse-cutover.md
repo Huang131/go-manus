@@ -1,162 +1,77 @@
-# 阶段 5：Run API、UI 与 SSE 契约切换
+# 阶段 5：唯一 Run API、UI 与 SSE 契约
 
-> 当前源码校准（2026-09）：Run API 尚不存在。当前 SSE 仍是 `GET/POST /api/sessions/:id/chat` 的 task stream 契约，支持 `Last-Event-ID` 和兼容 body `event_id`；本文的 `/runs/{id}/events`、snapshot_required 和 UI 切换均为阶段 5 目标。
+阶段 4 已完成后端执行切换。本阶段发布唯一的 Run 对外契约、切换 UI，并删除 Session Chat/Stop/SSE 路由。项目未上线，不保留版本化兼容 API，也不设置新旧客户端并行期。
 
-## 目标
+## API 契约
 
-发布面向 Run 的最终 HTTP 契约，把 UI 的状态、输入、停止和断线恢复全部切到 Run，并删除阶段 4 的旧 chat/stop 适配路由。本阶段结束后 Session API 只返回会话信息，执行状态只通过 Run API 表达。
+- `POST /sessions/:sessionId/runs`：携带客户端幂等键创建顶层 Run，返回 `run_id`、初始状态和必要快照。
+- `POST /runs/:runId/input`：携带消息幂等键，只对 `waiting_input` Run 提交输入并继续同一 Run。
+- `POST /runs/:runId/cancel`：条件迁移到 `cancelling`，重复取消返回稳定结果；`cancelled` 只在执行 goroutine 退出和 ToolSet 释放后出现。
+- `GET /runs/:runId`：查询 Run、Plan 快照、错误和最终消息。
+- `GET /runs/:runId/events`：按 Run ID 订阅 SSE。
+- `GET /sessions/:sessionId/runs`：按时间分页查询历史 Run，供会话恢复和 UI 展示。
 
-## 非目标
+响应 DTO 与数据库 model 分离，字段和错误码在 Handler 契约测试中锁定。Handler 只负责鉴权、输入校验和协议转换，不自行拼装状态机。
 
-- 不改变 Run 的状态机和执行内核。
-- 不删除已不可达的 Task/Registry 源文件；阶段 6 统一清理。
-- 不持久化逐 token 事件，不引入第二套 SSE 游标。
-- 不为旧客户端保留版本化兼容 API。
+`POST /runs/:runId/input` 的状态冲突必须使用稳定协议错误，不能由实现细节决定返回 500：
 
-## 前置条件与唯一语义
-
-- 阶段 4 complete，生产执行路径已经只写 Run。
-- 旧 chat/stop 即使存在也只委托 RunService，因此本阶段短暂路由并存不构成双业务语义。
-- 开始前分别运行 API 全量测试和 UI `npm run lint`、`npm run build`。
-
-## 最终 HTTP 契约
-
-```text
-POST /api/sessions/{sessionID}/runs
-GET  /api/sessions/{sessionID}/runs?limit=20&offset=0
-GET  /api/runs/{runID}
-POST /api/runs/{runID}/input
-POST /api/runs/{runID}/cancel
-GET  /api/runs/{runID}/events
-
-GET /api/settings/agent
-PUT /api/settings/agent
-```
-
-创建请求：
-
-```json
-{
-  "message": "用户消息",
-  "attachments": ["file-id"],
-  "model_id": "可省略的模型 ID"
-}
-```
-
-`Idempotency-Key` 通过 HTTP header 传递，空值由服务端生成但客户端重试必须复用原值。创建成功返回 201；同一 key 返回原 Run 的 200；同 Session 有另一活跃 Run 返回 409。input 只接受 waiting_input，返回 202；cancel 幂等，已 cancelled 返回 200，其他终态返回 409。不存在或不属于当前 Session 的资源返回 404。
-
-`GET /runs/{id}` 返回 `RunSnapshot`：Run 元数据、当前 Plan/revision、按 ordinal 排序的 messages、prompt hashes 和 settings snapshot。不得返回密钥、内部 cancel 句柄或 Redis key。Session 列表 DTO 可携带可空的 `active_run_summary`，但 `model.Session` 本身不增加执行状态。
-
-## 文件清单
-
-创建：
-
-- `api/internal/handler/run_handler.go`、`run_handler_test.go`。
-- `api/internal/handler/settings_handler.go`、`settings_handler_test.go`。
-- `ui/src/lib/api/run.ts`：Run CRUD、input/cancel、SSE。
-- `ui/src/hooks/use-run-detail.ts`：RunSnapshot 和增量事件的唯一客户端状态入口。
-
-修改：
-
-- `api/internal/router/router.go`：注册 Run/Settings 路由，最终删除 chat/stop 和旧 agent settings 路由。
-- `api/internal/handler/sse.go`：只保留通用 SSE 编码；Run handler 使用标准 `Last-Event-ID`。
-- `api/internal/handler/session_handler.go`：移除 Chat、Stop、执行事件订阅和兼容 status/events DTO。
-- `api/internal/service/run_service.go`：增加 RunSnapshot 查询和 Session 下分页列表。
-- `api/internal/service/session_service.go`：返回纯 Session DTO 与可选 active_run_summary，不返回 events/status。
-- `api/internal/bootstrap/app.go`：注入 RunHandler 和 SettingsHandler。
-- `ui/src/lib/api/types.ts`：新增 RunStatus、Run、RunSnapshot、Plan/Step；删除 SessionStatus 和 ChatParams。
-- `ui/src/lib/api/session.ts`：删除 chat/stop/空流续读。
-- `ui/src/hooks/use-session-detail.ts`：改为会话元数据组合 `use-run-detail`，或删除后由新 Hook 替代。
-- `ui/src/components/session-detail-view.tsx`、`session-item.tsx`、`chat-input.tsx`、`plan-panel.tsx`：状态判断改为 active Run。
-- `ui/src/app/sessions/[id]/page.tsx`、`ui/src/app/page.tsx`：创建 Session 后通过 Run API 发首条消息。
-- `ui/src/lib/session-events.ts`：支持 Snapshot 初始化和 Run SSE 增量，不从 Session.events 恢复。
-- `ui/src/components/settings/CommonSetting.tsx`、`ui/src/lib/api/config.ts`：Agent settings 改用 GET/PUT `/settings/agent`。
-
-删除：
-
-- 路由 `POST /api/sessions/:id/chat`、`POST /api/sessions/:id/stop`。
-- 路由 `GET/POST /api/app-config/agent`。
-- UI 中 `startEmptyStream`、`event_id` body 字段和 Session status 本地伪更新。
+- Run 为 `cancelling`：HTTP 409，错误码 `run_cancelling`。
+- Run 为 `pending` 或 `running`：HTTP 409，错误码 `run_not_waiting_input`。
+- Run 为 `succeeded`、`failed`、`cancelled` 或 `interrupted`：HTTP 409，错误码 `run_terminal`。
+- Run 为 `waiting_input` 且消息幂等键已处理：返回原提交结果，不创建第二条回答消息，也不启动第二个 Engine goroutine。
 
 ## SSE 契约
 
-`GET /api/runs/{runID}/events` 返回标准 `text/event-stream`：
+- `id` 使用 Redis Stream 游标或等价的稳定可排序游标，服务端接受 `Last-Event-ID`。
+- SSE 采用至少一次投递语义。服务端重放同一事件时必须保留原 `event_id`，不能为重放生成新 ID。
+- 客户端按 `run_id + event_id` 幂等去重；重复的终态事件必须内容一致，不得重复追加最终消息。
+- 正常续读边界应从 `Last-Event-ID` 之后返回，不跳过紧随游标的下一条事件；网络边界仍允许客户端收到尚未确认的重复事件。
+- Redis Stream 存在时从游标继续；游标过期时返回明确的 `event_stream_expired` 协议结果，并要求客户端查询 Run 快照，不能伪造逐 token 历史。
+- 终态事件发送后关闭流；客户端以 `GET /runs/:id` 的 PostgreSQL 快照作为最终事实。
+- `cancelling` 是可展示的过渡态但不是终态；只允许 `cancelled` 事件关闭取消中的流。
+- 事件只包含 UI 所需增量和展示数据，不把完整内部 ToolResult、Prompt 或敏感参数写入流。
 
-- 客户端通过 `Last-Event-ID` header 续读，服务端不再接受 body `event_id`。
-- 每条 Redis 事件输出 `id: <redis-stream-id>`、`event: <event-type>`、`data: <json>`。
-- 每 15 秒发送无 id 的心跳注释。
-- Run 到终态且积压事件发送完毕后关闭连接；客户端随后以 RunSnapshot 校准最终状态。
+## UI 切换
 
-Redis stream 过期、游标早于 stream 首条记录或 Redis 重启时，服务端先输出无 id 的 `snapshot_required` 事件，然后从当前最新位置订阅仍活跃 Run；终态 Run 直接关闭。UI 收到该事件或网络重连后无法续读时，调用 `GET /runs/{id}`，用 messages + Plan 完整替换页面快照，再以新的空游标订阅。`snapshot_required` 不带 SSE id，避免把数据库快照伪装成 Redis 游标。
+UI 以 `run_id` 作为执行标识，Session 仅作为会话容器。会话详情通过消息和历史 Run 展示，不再解析 task ID、SessionStatus 或旧 Chat 响应。
 
-SSE Handler 不拼装业务状态，只调用 RunService 获取权限/终态并调用 RunEventStream 读取事件。Redis 不可用时 Run 查询仍正常，SSE 返回明确 503，UI 采用短退避轮询 RunSnapshot，终态后停止。
+断线恢复顺序固定为：先按 event ID 去重并落本地状态 -> 保存最后游标 -> 使用 `Last-Event-ID` 重连 -> 过期时查询 Run 快照 -> Run 非终态时重新订阅。UI 不自行推断后端状态迁移。
 
-## UI 状态规则
+## 代码范围
 
-- Session 列表运行标记来自 `active_run_summary.status`，没有 active Run 即空闲。
-- 页面初次加载：取 Session 元数据和 Run 列表，选择 URL 指定 Run 或最新 Run，再取 RunSnapshot。
-- 发送消息：无活跃 Run 时 Create；waiting_input 时 SubmitInput；pending/running 时禁用输入或显示 409。
-- 停止按钮只在 pending/running/waiting_input 显示，调用 cancel 后以服务端响应覆盖状态。
-- UI 不预写 succeeded/cancelled，不把 SSE 断开当 completed。
-- 历史 Run 可选择查看；历史终态 Run 不建立持续 SSE。
+- `internal/handler`、`internal/router`：增加 Run DTO/路由并删除 Session 执行路由。
+- `internal/service`：仅补查询组合，不新增第二套状态迁移。
+- `ui/src`：API client、store/hook、事件解析、取消和等待输入交互全部改用 Run。
+- HTTP/SSE 测试：成功链、输入状态冲突与稳定错误码、Last-Event-ID、过期游标、终态关闭和取消竞争。
 
-## 实施顺序与提交检查点
+## 检查点
 
-### A. 新 API 和 SSE（旧 UI 仍可运行）
+### 5A：Run API/SSE
 
-新增 RunHandler、SettingsHandler、RunSnapshot 和新路由。保留旧 chat/stop 薄适配，完成 Handler/SSE 契约测试。此时两组路由调用同一个 RunService，没有双写。建议提交：`feat(api): expose run lifecycle and event APIs`。
+发布 Run Handler/Router 和契约测试。阶段结束前旧 Session 路由仍可短暂存在，但必须调用同一 RunService，不能保留 Task 读取路径。
 
-### B. UI 切换并删除旧路由
+建议提交：`feat(api): expose run lifecycle and event APIs`。
 
-先修改类型和 API client，再切 Hook/组件，最后删除旧前后端入口。一个提交内保持 `npm run build` 通过；提交前确认源码不存在旧 URL。建议提交：`refactor(ui): switch session execution to runs`。
+### 5B：UI 切换
 
-B 固定拆为两个提交：B1 新增 API client + Hook，但生产页面尚未启用；B2 切换页面并删除旧前后端路由。B1 不得并行发起旧、新请求，生产页面仍只走旧薄适配；B2 完成后才能标记阶段 complete。
+切换 API client、状态存储、SSE 重连、等待输入和取消交互；前端测试、lint、build 通过。
 
-## 针对性测试
+建议提交：`refactor(ui): consume run lifecycle`。
 
-- Handler：状态码、Idempotency-Key、分页边界、Session/Run 归属校验、敏感字段不输出。
-- SSE：Last-Event-ID 续读、严格大于游标、心跳无 id、积压后终态关闭、过期游标发 snapshot_required、Redis 故障 503。
-- RunSnapshot：Plan/messages 顺序稳定，终态与条件更新一致。
-- UI 静态检查：不再引用 SessionStatus、`/chat`、`/stop`、`event_id`。
-- UI 手工契约场景：首条消息、运行中刷新、等待输入后继续、取消、断网重连、Redis stream 过期后恢复、查看历史 Run。
+### 5C：删除旧路由
 
-## 阶段验证命令
+删除 Session Chat/Stop/SSE 路由、DTO 和 UI 旧解析。因为项目未上线，不增加 deprecated 标记或兼容版本。
 
-```bash
-cd api
-GOCACHE=/private/tmp/go-manus-gocache go test ./internal/handler ./internal/service ./internal/router ./internal/bootstrap -count=1
-GOCACHE=/private/tmp/go-manus-gocache go test ./...
-GOCACHE=/private/tmp/go-manus-gocache go test -race ./internal/agent ./internal/service ./internal/repository -count=1
-GOCACHE=/private/tmp/go-manus-gocache go vet ./...
-cd ../ui
-npm run lint
-npm run build
-cd ..
-rg -n '/sessions/.*/(chat|stop)|event_id|SessionStatus|startEmptyStream' api/internal ui/src
-git diff --check
-```
+建议提交：`refactor(api): remove legacy session execution routes`。
 
-最终 `rg` 不得命中生产代码；测试名称或迁移说明若命中需记录并说明。
+## 完成条件
 
-## 回滚
+- UI 和 API 只出现 Run 执行语义；全仓不存在旧 Session Chat/Stop/SSE 调用。
+- Last-Event-ID 的重复、丢失、过期、稳定 event ID、客户端幂等和终态重复边界有 HTTP 层真实测试。
+- input API 对 `cancelling`、非等待活跃状态、终态和重复幂等输入的 HTTP 状态码与业务错误码有契约测试。
+- Run 查询在 Redis 不可用时仍返回终态、错误、Plan 和最终消息。
+- API test/race/vet、UI test/lint/build 和 diff 检查全部通过。
 
-检查点 A 可独立 revert，阶段 4 旧适配仍可服务 UI。B 尚未发布时可 revert B 回到旧 UI；后端执行仍是 Run 语义。B 已部署后若回滚，必须同时回滚 UI 与路由删除，恢复的旧路由仍只能薄委托 RunService，禁止恢复 Session 执行写入。开发数据无需转换。
+## 回滚边界
 
-## 完成定义
-
-- UI 只通过 Run API 控制执行，Session 不承载执行状态。
-- 旧 chat/stop 和 app-config/agent 路由已删除。
-- Last-Event-ID、快照恢复和 Redis 故障行为有测试。
-- API 全量 test/race/vet 与 UI lint/build 均通过。
-- `STATUS.md` 写入 A/B 提交、验证结果和阶段 6 入口。
-
-## 失败或中断恢复
-
-```bash
-git log -6 --oneline
-rg -n '/sessions/.*/(chat|stop)|/runs/|event_id|SessionStatus' api/internal ui/src
-(cd api && GOCACHE=/private/tmp/go-manus-gocache go test ./internal/handler ./internal/service -count=1)
-(cd ui && npm run build)
-```
-
-根据页面实际调用的 URL 判断当前入口。若 UI 已调用 Run API，旧路由是否存在不影响语义，但必须完成删除后才能进入阶段 6。
+5A、5B 可分别 revert。5C 只能在 UI 已切换且引用扫描为零后执行；回滚 5C 只恢复薄路由，不得恢复旧 Task 语义。若回滚 UI，后端仍以 Run 为唯一事实来源。

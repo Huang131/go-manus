@@ -1,288 +1,101 @@
-# Run/Session 重构目标架构
+# 目标架构：Session、Run 与进程内 Engine
 
-## 1. 背景
+## 1. 适用范围
 
-当前实现把长期对话、一次执行和 Redis 作业生命周期混在一起：
+这是面向当前模块化单体的目标架构。它解决 Session 与一次执行混合、进程内 task 映射承担事实、实时事件无法可靠恢复的问题。它不把系统提前设计成分布式任务平台。
 
-- `model.Session` 同时保存对话字段、`Events` 和执行 `Status`。
-- `AgentService` 通过 `taskBySession` 把一个 Session 绑定到一个 `RedisStreamTask`。
-- 等待用户输入通过 `ErrWaitForUser` 表达。
-- 用户停止任务已经有取消优先的收敛逻辑，但终态仍通过 Flow 投影写回 Session，状态事实没有独立边界。
-- Agent 动态配置已经能从数据库加载并把搜索 limit 传给 provider，但仍有 `model.AgentConfig`/`agent.AgentConfig` 两份类型，没有任务级快照。
-- 进程内 `SimpleMemory` 只是运行期消息缓存；ContextBuilder 已按近似 token 预算裁剪，但尚无模型画像和输出预留。
+## 2. 核心边界
 
-本方案重建这些业务边界，同时保持当前模块化单体目录。
+### Session
 
-## 2. 范围
+保存会话标题、最近消息摘要、未读数、软删除和 `SandboxID`。Session 不再保存执行状态、task ID 或完整事件流。
 
-本轮包含：
+### Run
 
-- Session 与 Run 分离。
-- Run、Plan、Step 显式状态机。
-- 进程内 RunExecutor。
-- Agent Settings 单一来源与 Run 配置快照。
-- PromptCatalog 和 ContextBuilder。
-- 新 Run API、SSE 和 UI 切换。
-- 旧 RedisStreamTask 与 Session 执行字段删除。
+表示一次用户请求的执行事实。Run 至少包含：`id`、`session_id`、`status`、错误信息、配置快照、Prompt hash、可恢复执行快照、等待检查点、创建/结束时间和幂等键。
 
-本轮不包含：
+一个 Session 可有多个历史 Run；数据库约束保证一个 Session 同时最多一个 active Run。
 
-- 多实例并发执行。
-- Redis 作业队列、lease 或崩溃后接管。
-- Transactional Outbox。
-- 永久保存逐 token 或所有 UI 事件。
-- 完整事件溯源。
-- `domain/application/adapter/transport` 目录重排。
+### Engine
 
-## 3. 业务概念
+保留当前 Planner/ReAct/Flow 的实现，负责执行计划、调用 LLM 和工具并返回结构化结果。Engine 不写数据库状态，也不依赖 Handler 或 Repository。
 
-### 3.1 Session
+### RunService
 
-Session 是长期对话容器。它拥有标题、最近消息、未读数和软删除信息，但不拥有执行状态。
+负责创建 Run、提交用户输入、取消、查询和条件状态迁移。它是执行事实的唯一业务入口。
 
-### 3.2 Run
+### RunExecutor
 
-Run 是一次用户请求触发的 Agent 执行。一个 Session 可以有多个历史 Run，同一时间只能有一个非终态 Run。
+在进程内启动一次 Engine 执行，持有创建时的 Settings、Prompt 和 `ToolSet` 快照。它通过 RunService 提交持久化状态和结果，通过 EventStream 发布短期实时事件，并在结束时释放 ToolSet；不得绕过服务直接写 Repository。
 
-```go
-type RunStatus string
+### EventStream
 
-const (
-    RunStatusPending      RunStatus = "pending"
-    RunStatusRunning      RunStatus = "running"
-    RunStatusWaitingInput RunStatus = "waiting_input"
-    RunStatusSucceeded    RunStatus = "succeeded"
-    RunStatusFailed       RunStatus = "failed"
-    RunStatusCancelled    RunStatus = "cancelled"
-    RunStatusInterrupted  RunStatus = "interrupted"
-)
-```
+Redis Stream 只保存短期实时事件，例如文本增量、计划变化、工具展示和终态通知。业务终态不依赖 Redis 是否存在。
 
-`interrupted` 表示服务重启或进程异常造成的中断。首期不自动恢复，用户可以创建新 Run。
-
-合法迁移：
-
-```mermaid
-stateDiagram-v2
-    [*] --> pending
-    pending --> running
-    pending --> cancelled
-    pending --> interrupted
-    running --> waiting_input
-    waiting_input --> running
-    running --> succeeded
-    running --> failed
-    running --> cancelled
-    waiting_input --> cancelled
-    running --> interrupted
-    waiting_input --> interrupted
-```
-
-所有终态都不可再次迁移。
-
-### 3.3 Plan 与 Step
-
-首期每个 Run 保存一份当前 Plan JSONB 和 `plan_revision`。Go 模型使用 `PlanSnapshot`/`StepSnapshot`，强调它是 Run 当前快照；API 中仍称 plan/step。重新规划时原子替换未完成步骤并增加 revision，不单独建立 Plan 历史表。
-
-开发阶段不保留旧 Plan 类型的长期兼容：阶段 3 先增加未接生产的 Snapshot 类型，阶段 4 生产切换后旧类型立即不可达，阶段 6 物理删除。
-
-Plan 和 Step 使用自己的状态类型，不再共用 `ExecutionStatus`：
-
-```go
-type PlanStatus string
-type StepStatus string
-```
-
-Plan 状态：`pending/running/succeeded/failed/cancelled`。
-
-Step 状态：`pending/running/succeeded/failed/skipped/cancelled`。
-
-### 3.4 基础设施作业
-
-基础设施不再暴露 `Task` 领域概念。首期 `RunExecutor` 在进程内启动执行并保存 `runID -> cancel`。Redis Stream 只承载 Run 的实时输出。
-
-## 4. 目标调用链
+## 3. 目标调用链
 
 ```mermaid
 flowchart LR
-    H[handler] --> RS[RunService]
-    RS --> RR[RunRepository]
-    RS --> RD[RunDispatcher]
-    RD --> RX[RunExecutor]
-    RX --> E[Agent Engine]
+    H[HTTP Handler] --> S[RunService]
+    S --> R[RunRepository]
+    S --> X[RunExecutor]
+    X --> E[Planner/ReAct Engine]
     E --> L[LLM]
-    E --> T[Tools]
-    RX --> RR
-    RX --> M[MessageRepository]
-    RX --> R[Redis Run Stream]
-    S[SSE Handler] --> R
-    S --> RR
+    E --> T[ToolSet snapshot]
+    S --> M[MessageRepository]
+    X --> ES[Redis RunEventStream]
+    S --> ES
 ```
 
-`RunService` 是创建、恢复、取消和查询 Run 的唯一业务入口。Handler 不直接操作 Agent Engine 或 Repository。
+依赖方向保持：`handler -> service -> repository/model`，`RunExecutor -> agent/tools`，`agent` 不反向依赖 service 或 handler。
 
-## 5. 数据所有权
+## 4. 状态原则
 
-### PostgreSQL
+Run 状态建议使用：`pending`、`running`、`waiting_input`、`cancelling`、`succeeded`、`failed`、`cancelled`、`interrupted`。
 
-- Session 元数据。
-- Run 状态、错误、当前 Plan、配置快照和 Prompt hash。
-- 用户消息和最终助手消息。
-- 文件元数据。
+- `pending -> running/cancelling/interrupted`
+- `running -> waiting_input/succeeded/failed/cancelling/interrupted`
+- `waiting_input -> running/cancelling`
+- `cancelling -> cancelled`
+- 终态不可再次迁移。
+- 取消使用条件更新：先把可取消状态迁移为 `cancelling`，阻止成功、失败或继续输入等迟到写入；执行 goroutine 退出并释放 `ToolSet` 后再迁移为 `cancelled`。
+- Engine 的迟到结果不得覆盖 `cancelled`、`failed` 或 `interrupted`。
+- 进程重启将 `pending`、`running` 标记为 `interrupted`，将没有存活 goroutine 的 `cancelling` 收敛为 `cancelled`；`waiting_input` 只有在执行快照和等待检查点完整时才保持可恢复，否则迁移为带明确错误码的 `interrupted`。
 
-### Redis Stream
+Plan/Step 首期作为 Run 内 JSONB 快照，不单独建立 Plan 历史表；只有当查询、权限或并发需求真实出现时，才拆独立表。
 
-- `message_delta`。
-- plan/step/tool/shell 等实时展示事件。
-- SSE 短期断线续读游标。
-- Run 结束后的有限 TTL。
+## 5. 等待输入恢复原则
 
-Redis 数据丢失不会改变 Run 业务状态。Redis Stream 过期后，客户端通过 PostgreSQL 中的 Run、Plan 和消息快照重建页面。
+`waiting_input` 是没有存活执行 goroutine 的持久化状态，不持有旧 `ToolSet`。进入该状态时必须原子保存：
 
-## 6. 配置
+- 当前 Plan revision、当前 step ID 和 step 状态。
+- 已完成步骤的稳定结果摘要及必要 artifact 引用。
+- 等待问题对应的 assistant message ID、step ID 和恢复方式。
+- 构造上下文所需的原始用户输入与消息关联。
 
-### 部署配置
+用户提交回答后，RunService 通过等待消息 ID 建立问题与回答的对应关系，重新获取 Settings、Prompt 和新的 `ToolSet`，按“原始输入 + 已完成步骤摘要 + 当前问题 + 用户回答”重建 Engine Context，并继续原来的等待步骤。快照不完整、revision 不匹配或步骤不存在时不得静默重新规划。
 
-YAML/环境变量管理数据库、Redis、OSS、外部地址、密钥、HTTP timeout 和关闭等待时间。这些字段不通过业务 API 修改。
+## 6. 数据所有权
 
-### 动态 Agent Settings
+| 数据 | 事实来源 |
+|---|---|
+| Session 元数据 | PostgreSQL `sessions` |
+| Run 状态和快照 | PostgreSQL `runs` |
+| 用户/助手最终消息 | PostgreSQL `messages` 或等价消息表 |
+| 实时增量和 SSE 游标 | Redis Stream，带 TTL |
+| Agent 运行期上下文 | Engine/`SimpleMemory`，可丢弃缓存；恢复所需稳定摘要属于 Run 执行快照 |
+| 外部工具连接 | ToolProvider/ToolSet 生命周期 |
 
-```go
-type AgentSettings struct {
-    MaxIterations    int `json:"max_iterations"`
-    MaxRetries       int `json:"max_retries"`
-    MaxPlanSteps     int `json:"max_plan_steps"`
-    MaxSearchResults int `json:"max_search_results"`
-}
-```
+Redis 丢失时，Run 查询仍应返回终态；SSE 只能报告无法续读或从 PostgreSQL 快照恢复，不能把 Redis 当作唯一业务数据库。
 
-运行时只有一个 `AgentSettings` 类型。SettingsManager 启动时读取数据库，没有记录时使用完整默认值；更新时校验、保存并原子替换。创建 Run 时把完整 Settings 保存为 JSONB 快照。
+## 7. 演进边界
 
-### Prompt
+首期不引入 Worker、Lease、分布式锁、Outbox、永久逐 token 事件溯源、跨实例接管或四层目录迁移。它们不是永久删除的方向，而是在出现以下真实需求后单独设计：
 
-默认 Prompt 存在 `internal/agent/prompts/*.tmpl`，由 `go:embed` 加载。PromptCatalog 对模板内容计算 SHA-256，Run 保存该 hash。首期不实现外部目录覆盖。
+- 多实例必须接管正在运行的 Run 时，再引入 Worker/Lease 或持久化调度队列。
+- PostgreSQL 状态与外部消息发布必须保证跨进程最终一致时，再评估 Outbox。
+- 产品需要完整重放、审计或逐事件查询时，再评估永久事件模型。
+- Plan/Step 需要独立查询、权限、局部并发更新或长期审计时，再拆独立表。
+- 多个聚合持续出现同一事务编排模式时，再提炼通用 UnitOfWork。
 
-## 7. Engine 契约
-
-```go
-type StepOutcomeKind string
-
-const (
-    StepOutcomeSucceeded    StepOutcomeKind = "succeeded"
-    StepOutcomeFailed       StepOutcomeKind = "failed"
-    StepOutcomeWaitingInput StepOutcomeKind = "waiting_input"
-)
-
-type StepOutcome struct {
-    Kind        StepOutcomeKind
-    Result      string
-    Question    string
-    Failure     *Failure
-    Attachments []string
-}
-```
-
-- 等待输入和业务失败通过 `StepOutcome` 返回。
-- `error` 只表示 LLM、存储、协议解析或其他系统错误。
-- Engine 不更新 Run 数据库状态；RunExecutor 根据 outcome 调用 RunService/Repository。
-
-## 8. ContextBuilder
-
-ContextBuilder 从持久化消息、当前 Plan、步骤结果和附件上下文构建 LLM 输入。首期使用可替换的保守估算器：
-
-- ASCII 按约 4 字符/token。
-- 非 ASCII 按约 1 字符/token。
-- 结果乘以 `1.2` 安全系数。
-- tool call 与对应 tool result 成对保留或删除。
-- 优先删除旧工具输出，再删除旧对话；system、当前用户输入和最近一轮消息必须保留。
-
-不在首期调用 LLM 自动总结历史。
-
-## 9. 并发和一致性
-
-### 单 Session 活跃 Run
-
-数据库部分唯一索引保证每个 Session 最多一个 `pending/running/waiting_input` Run。
-
-### 取消优先
-
-终态更新使用条件 SQL：
-
-```sql
-UPDATE runs
-SET status = 'succeeded', finished_at = NOW(), updated_at = NOW()
-WHERE id = $1 AND status = 'running';
-```
-
-更新行数为零时重新读取 Run。若已 cancelled，执行协程不得覆盖终态。
-
-### 服务重启
-
-启动时将遗留的 `running` 和 `waiting_input` 标记为 `interrupted`。`pending` 也标记 interrupted，因为首期没有持久化队列保证重新派发。
-
-## 10. API 目标
-
-```text
-POST /api/sessions
-GET  /api/sessions
-GET  /api/sessions/{sessionID}
-
-POST /api/sessions/{sessionID}/runs
-GET  /api/sessions/{sessionID}/runs
-GET  /api/runs/{runID}
-POST /api/runs/{runID}/input
-POST /api/runs/{runID}/cancel
-GET  /api/runs/{runID}/events
-
-GET /api/settings/agent
-PUT /api/settings/agent
-```
-
-创建 Run 支持 `Idempotency-Key`。同一 key 和 Session 重试返回原 Run；同一 Session 已有其他活跃 Run 时返回 409。
-
-## 11. 包依赖约束
-
-保留当前目录，新增文件而非整体搬迁：
-
-```text
-handler -> service -> model
-service -> repository + agent facade
-agent -> model + external capability interfaces
-repository -> model + infrastructure
-bootstrap -> all concrete constructors
-```
-
-禁止：
-
-- `model` 依赖 logger、sonic、repository 或 external。
-- `agent` 不依赖 service 或 repository；目标 Engine 只声明自己消费的窄接口，由 service/bootstrap 提供实现。阶段 6 完成后必须满足此约束。
-- `handler` 直接操作 Repository 或 Agent Engine。
-- 包级可变 Task registry。
-- 业务状态在 Session 和 Run 两处同时写入。
-
-## 12. 最终删除项
-
-- `agent.Task`、`Stream` 和 `RedisStreamTask`。
-- `defaultTaskRegistry` 及相关方法。
-- `taskBySession`。
-- `AgentTaskRunner.Done/GetStatus/GetPlan`。
-- `Session.Status`、`Session.Events`。
-- `sessions.status/events/task_id`（当前 schema 没有 `memories` 列）。
-- `SimpleMemory` 仅在 Run 链路切换后评估是否保留为缓存；当前没有可删除的大小字段或固定 10 条压缩实现。
-- `BaseEvent.ToJSON` 以及 model 对 logger/sonic 的依赖。
-- `/sessions/:id/chat`、`/sessions/:id/stop`。
-- 只有在确认没有其它动态模型管理消费者后，才评估遗留 LLM 配置入口；当前 `cfg.LLM` 仍用于 fallback、seed、timeout 和开关。
-
-## 13. 架构验收
-
-完成全部阶段后必须满足：
-
-- 一个 Session 可查询多个历史 Run。
-- 任一时刻最多一个活跃 Run。
-- cancelled 不能被迟到的成功结果覆盖。
-- waiting_input 可以通过 Run input 恢复。
-- 服务重启不会把遗留 Run 显示为 running。
-- Settings API 返回值与新 Run 实际快照一致。
-- 搜索 limit 来自 Run settings snapshot。
-- model 包不依赖日志或 JSON 实现。
-- 生产代码不再出现 RedisStreamTask、SessionStatus 或全局任务注册表。
+在这些触发条件出现前，只保留演进接口和数据边界，不预先实现基础设施。

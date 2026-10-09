@@ -1,148 +1,75 @@
-# 阶段 2：Engine 结果契约与 ContextBuilder
+# 阶段 2：Engine、Outcome 与 ContextPolicy
 
-> 当前源码校准（2026-09）：`ContextBuilder` 已在 `api/internal/agent/context_builder.go` 接入生产 Agent，但预算仍固定为 32,000，估算器仍是 rune/4 近似值；`StepOutcome` 尚不存在，`ErrWaitForUser` 仍被 Flow/React/Task 链使用。本文是后续增量设计，不代表这些目标契约已经存在。
+## 当前事实
+
+`PlannerReActFlow.Invoke` 已经由多个状态处理函数组成；本阶段不再拆 Invoke。当前等待输入同时由 `InvokeResult.WaitForUser`、`ToolCallResult.WaitForUser` 和 `ErrWaitForUser` 表达，本阶段必须一次性收敛，不能只增加第四个长期适配信号。
 
 ## 目标
 
-把 Agent 执行内核从“用特殊 error 表达等待输入”改为显式结果契约，并继续完善已经接入的预算化 ContextBuilder。本阶段只替换 Engine 内部协作方式，仍由现有 AgentService、AgentTaskRunner 和 RedisStreamTask 驱动，外部 Session API 行为不变。
+让 Engine 只负责计算并返回明确结果，把等待用户、业务失败、取消和系统错误区分开；让上下文预算成为可替换策略，而不是散落的常量。
 
-## 非目标
+## Engine 输出
 
-- 不新增或写入 Run。
-- 不改变 Session 状态字段、Redis stream key 或 SSE 事件格式。
-- 不重写 `PlannerReActFlow.Invoke`；该方法已经拆分为多个状态处理函数，本阶段只调整它们的输入输出契约。
-- 不接入第三方 tokenizer，不做 LLM 自动摘要。
-
-## 前置条件与唯一语义
-
-- 阶段 1 的 1A/1B 检查点必须先在 `STATUS.md` 标记完成并有独立验证；当前状态仍是部分完成，不得提前实施本阶段。
-- 唯一生产业务语义仍是 Session + RedisStreamTask。本阶段不得出现 Run 写路径。
-- AgentSettings 和 PromptCatalog 必须直接复用阶段 1 类型，禁止新增配置副本。
-
-## 文件清单
-
-创建：
-
-- `api/internal/agent/outcome.go`：`StepOutcome`、`StepOutcomeKind`、`Failure`。
-- `api/internal/agent/context_builder.go`：预算计算、裁剪和消息配对。
-- `api/internal/agent/token_estimator.go`：`TokenEstimator` 与保守估算实现。
-- `api/internal/agent/context_builder_test.go`、`outcome_test.go`、`token_estimator_test.go`。
-
-修改：
-
-- `api/internal/agent/react_agent.go`：`ExecuteStep` 返回 `StepOutcome, error`，不再修改 Step 来传递等待语义。
-- `api/internal/agent/planner_react_flow.go`：按 outcome 更新 Step/Flow；等待输入仍投影成现有 wait 事件和 Session waiting 状态。
-- `api/internal/agent/base.go`：保持所有 LLM 请求经过现有 ContextBuilder；补齐模型预算策略，并在迁移完成后删除仍存在的 `ErrWaitForUser` 识别。当前代码已经没有 `LoadMemory`、`CompactMemory`、`maxSize` 或固定 `keepCount=10`。
-- `api/internal/agent/memory.go`：收敛为并发安全的运行期消息缓冲，不包含容量、Compact 或持久化承诺；如无独立价值可改名为 `conversation.go`。
-- `api/internal/agent/planner_agent.go`、`react_agent.go`：规划、执行、更新计划、总结均使用同一 ContextBuilder 入口。
-- `api/internal/agent/task_runner.go`：保持外部循环，适配 Flow 新结果；不得继续识别 `ErrWaitForUser`。
-- 对应 Agent 单元测试与集成测试。
-
-删除：
-
-- `api/internal/agent/base.go` 中 `ErrWaitForUser`、`LoadMemory`、`CompactMemory`。
-- `Memory.Compact`、`SimpleMemory.maxSize` 和只保留 10 条消息的实现。
-
-当前 SessionRepository 没有 `GetMemory/SaveMemory` 接口，数据库 migration 也没有 `sessions.memories` 列；后续消息持久化设计应直接以 Message/Run 模型为准，不要为不存在的记忆链路补兼容代码。
-
-## 关键契约
+建议引入内部值对象：
 
 ```go
-type StepOutcomeKind string
-
-const (
-    StepOutcomeSucceeded    StepOutcomeKind = "succeeded"
-    StepOutcomeFailed       StepOutcomeKind = "failed"
-    StepOutcomeWaitingInput StepOutcomeKind = "waiting_input"
-)
-
-type Failure struct {
-    Code      string `json:"code"`
-    Message   string `json:"message"`
-    Retryable bool   `json:"retryable"`
-}
-
 type StepOutcome struct {
-    Kind        StepOutcomeKind
-    Result      string
-    Question    string
+    Kind        OutcomeKind // completed / waiting_input / fatal_failure / cancelled
+    Text        string
+    Waiting     *WaitingInput
     Failure     *Failure
-    Attachments []string
-}
-
-type TokenEstimator interface {
-    EstimateMessages([]llmcore.Message) int
-}
-
-type ContextPolicy struct {
-    MaxInputTokens     int
-    ReservedOutputTokens int
-}
-
-type ContextBuilder interface {
-    Build(ContextInput) ([]llmcore.Message, error)
+    Attachments []Attachment
 }
 ```
 
-`error` 只表示调用无法得到业务结果：LLM/工具基础设施失败、上下文无法满足最低保留集、协议解析失败等。业务 `success=false` 返回 `StepOutcomeFailed`；向用户提问返回 `StepOutcomeWaitingInput`。
+- `StepOutcome.Kind` 是 Engine/Flow 唯一控制信号；`waiting_input` 是正常业务结果，不用 error 或布尔字段表达。
+- LLM、工具、存储和协议错误继续返回 `error`，同时保留可诊断原因。
+- 取消由 `context.Context` 传播，不把取消伪装成普通失败。
 
-`MaxInputTokens` 从所选模型的 `Capabilities.MaxContextTokens` 减去 `RequestPolicy.DefaultMaxTokens` 或模型默认输出预算得出，并设置安全余量。模型画像缺失时使用明确的保守默认值。估算规则为 ASCII 约 4 字符/token、非 ASCII 约 1 字符/token，再乘 1.2；实现必须可替换。
+`StepOutcome` 不暴露 `retryable_failure`。当前 LLM 调用失败重试和空响应重试已经在 BaseAgent 内闭环，并由任务级 `MaxRetries` 快照限制次数；重试耗尽后才向外返回 `fatal_failure` 或 `error`。Flow、RunExecutor 和 RunService 不得再次重试同一次 LLM/工具调用，避免出现双重重试、重复工具副作用和悬空 Outcome 枚举。未来如需跨进程重派发，应由独立的 Run 调度契约设计，不能复用 Engine 内部重试语义。
 
-阶段 2 仍使用现有 Session/Task 链：AgentService 在创建任务前通过 LLMModelRepository 解析本次 `model_id` 或默认模型，把 `ContextPolicy` 作为任务快照传入 Engine；不允许从 `LLM.MaxTokens()` 的动态 fallback getter 猜测上下文窗口。阶段 4 创建 Run 时保存同一 model ID 和预算来源，确保后续可复现。
+迁移顺序固定为：工具调用结果在 BaseAgent 边界转换成 `StepOutcome`，ReAct 和 Flow 只判断 `Kind`，旧 TaskRunner 临时把 `StepOutcome` 映射到当前 Session/Task 行为。本阶段结束前删除 `ErrWaitForUser`、`InvokeResult.WaitForUser` 和 `ToolCallResult.WaitForUser`，不得让过渡字段进入 Run 设计。
 
-ContextBuilder 的最低保留集是 system、当前用户输入和当前步骤。tool call 与同 `tool_call_id` 的 tool result 形成不可拆分组。裁剪顺序：旧工具组、旧助手/用户轮次、较早步骤结果。若最低保留集已超预算，返回可识别的 context limit error，禁止静默截断当前输入。
+`WaitingInput` 至少包含稳定问题文本、附件、是否建议用户接管以及当前 step 标识；进入 Run 阶段后再由持久化层分配 message ID。
 
-## 数据库与 API 变更
+## ContextPolicy
 
-无数据库和公开 API 变更。现有 wait/error/done/step SSE 事件继续输出相同结构，Session 的 `waiting/completed/failed` 投影暂时保留。此约束用于让阶段 2 可独立回滚和部署。
+把当前固定预算抽象为策略输入：
 
-## 实施顺序与检查点
+- 模型 context window
+- 输出预留
+- system/history/current message/tool schema 的预算
+- token 估算器
+- 工具调用与结果的成组保留规则
 
-1. 检查点 2A：新增 TokenEstimator/ContextBuilder，将所有 LLM 输入切入 Builder，删除伪容量和固定压缩逻辑；运行 Agent 与现有 Session 契约测试，提交 `refactor(api): centralize agent context budgeting`。
-2. 检查点 2B：新增 StepOutcome，一次性迁移 ReActAgent、PlannerReActFlow、TaskRunner 并删除 ErrWaitForUser；运行阶段全量门禁，提交 `refactor(api): make step outcomes explicit`。
+首期仍可使用近似估算；不要为没有 provider tokenizer 的场景伪造精确 token 数。必须保证裁剪不会拆散工具调用和结果配对。
 
-每个检查点都只能存在一种生产行为：2A 完成后所有 LLM 请求必须走 Builder；2B 提交后所有等待语义必须走 outcome。
+## 工具边界前置治理
 
-## 针对性测试
+RunExecutor 会把任务级 `ToolSet` 作为 Engine 输入，因此在本阶段同时收紧 MCP 的动态调用契约：
 
-- StepOutcome：waiting 必须有 question，failed 必须有 failure，非法组合构造失败。
-- ContextBuilder：中英文估算、最低保留集、tool call/result 成对保留、裁剪优先级、预算不足错误、输入切片不被修改。
-- Flow：等待输入不再返回 `ErrWaitForUser`，仍发 message + wait 事件并停在 waiting；业务失败与系统错误分开。
-- 回归：waiting 后下一条用户消息继续当前计划，不重新创建计划；总结流式输出和现有事件顺序不变。
-- race：并发读取消息快照时无数据竞争。
+- `MCPTool.GetTools` 在发现阶段生成稳定且唯一的 function name，并建立只读的 `functionName -> {server, tool}` 索引；`InvokeWithName` 只查索引，不再通过拼接字符串和遍历 map 反解。
+- 名称编码必须可逆或由索引直接解释；发现重复 function name 时初始化失败，不允许依赖 map 迭代顺序选择目标。
+- manager 初始化、工具发现、连接、超时和协议错误返回 `error`；远端工具明确返回 `IsError` 时使用失败 `ToolResult`，让 Engine 能区分系统错误与可交给模型处理的工具业务失败。
+- 初始化失败必须释放已创建的 manager/client，`ToolProvider` 不注册半初始化工具。
 
-## 阶段验证命令
+这组修复独立于 Run 状态机，可以作为单独提交完成；不得借机重写 ToolRegistry 或 ToolSet 引用生命周期。
 
-```bash
-cd api
-GOCACHE=/private/tmp/go-manus-gocache go test ./internal/agent -run 'Test(ContextBuilder|StepOutcome|PlannerReActFlow)' -count=1
-GOCACHE=/private/tmp/go-manus-gocache go test ./...
-GOCACHE=/private/tmp/go-manus-gocache go test -race ./internal/agent ./internal/service ./internal/repository -count=1
-GOCACHE=/private/tmp/go-manus-gocache go vet ./...
-cd ..
-git diff --check
-```
+## 检查点
 
-## 提交与回滚
+- Flow 的等待输入、成功、失败、取消行为测试保持通过。
+- BaseAgent 的 LLM 错误和空响应重试仍在 Engine 内闭环；测试证明重试不跨越 Flow/RunExecutor 边界，且耗尽后只产生一个最终 Outcome。
+- 全仓不再存在 `ErrWaitForUser`、`InvokeResult.WaitForUser` 或 `ToolCallResult.WaitForUser`；等待输入只由 `StepOutcomeWaitingInput` 表达。
+- 旧 TaskRunner 的临时适配只消费 `StepOutcome`，不定义另一套 Outcome。
+- ContextPolicy 对超预算、空历史、工具调用配对和输出预留有行为测试。
+- MCP 动态 function 无名称碰撞和随机路由；初始化错误、协议错误与远端业务失败的测试分别锁定契约。
+- 旧 Session/RedisStreamTask 生产写路径完全不变。
 
-回滚使用 `git revert` 按 2B、2A 逆序执行，回滚任一点后都必须保持现有 Session API 可运行。
+建议提交：
 
-## 完成定义
+- `refactor(tools): make mcp dispatch unambiguous`
+- `refactor(agent): return explicit outcomes and context policy`
 
-- 生产代码不存在固定 `keepCount=10` 和无效 maxSize；Outcome 检查点完成后再删除 `ErrWaitForUser`。
-- 所有 LLM 请求通过 ContextBuilder；工具消息不会被拆对。
-- 业务失败、等待输入和系统错误具有不同类型。
-- Session/Task 外部契约未改变，全量 test、race、vet 通过。
-- `STATUS.md` 记录提交与结果；阶段 3 可与本阶段之后独立开始，阶段 4 必须等待阶段 2、3 都完成。
+## 回滚
 
-## 失败或中断恢复
-
-读取 `STATUS.md` 后运行：
-
-```bash
-git log -4 --oneline
-rg -n 'ErrWaitForUser|CompactMemory|keepCount|maxSize' api/internal/agent
-GOCACHE=/private/tmp/go-manus-gocache go test ./internal/agent -count=1
-```
-
-若 Outcome 迁移只完成一半，不得用适配器长期同时支持 error 和 outcome。回到最近通过测试的提交，继续一次性迁完调用链。
+本阶段没有 migration 和路由切换。若新 Outcome 或 ContextPolicy 影响旧 Flow，回滚该提交即可；不得为了兼容而保留两套 Engine 结果长期并行。

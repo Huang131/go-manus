@@ -1,65 +1,50 @@
 # Run/Session 重构方案集
 
-本文档集把一次大范围重构拆成六个可以独立实施、验证、提交和回滚的工作包。设计基于当前单实例部署，不引入分布式 Worker、Lease、Outbox 或永久事件溯源。
+本目录是基于当前 `api` 源码整理的实施方案。当前生产语义仍是 `Session + AgentService + RedisStreamTask`；源码中没有 `Run`、`RunService`、`RunExecutor`、Run migration 或 Run API。方案中的 Run 代码均为后续目标，不代表已经实现。
 
-本目录描述未来目标和实施顺序，不代表当前代码已经采用 Run 模型。当前源码事实、证据和已推翻的旧结论以 [00-current-review-2026-09.md](./00-current-review-2026-09.md) 为准；真实进度只看 [STATUS.md](./STATUS.md)。`../ARCHITECTURE.md` 是较早的架构说明，若与当前审查冲突，以 00 文档和源码为准。
-
-当前生产语义仍是 `Session + RedisStreamTask`。截至当前分支，生产代码中没有 `Run`、`RunStatus`、`RunService`、`RunExecutor`、Run migration 或 Run API；Run 相关阶段必须先完成领域 spec 和 migration，不能把目标接口当作已有代码。
+事实基线见 [00-current-review-2026-10.md](./00-current-review-2026-10.md)，实施状态见 [STATUS.md](./STATUS.md)。`docs/重构.md` 只作为历史提案，不作为实施依据。
 
 ## 目标
 
-- `Session` 只表示长期对话容器。
-- `Run` 表示一次用户请求触发的 Agent 执行。
-- `Plan` 是 Run 内的执行快照，通过 `revision` 标识修订次数。
-- PostgreSQL 保存业务状态，Redis Stream 只保存短期实时事件。
-- 配置只有一个运行时模型和一个生效入口。
-- 等待输入、业务失败、取消和系统错误具有不同语义。
-- 保留现有 `model/service/agent/repository/external/handler/bootstrap` 工程骨架。
+- Session 只管理会话元数据、消息查询入口和 Sandbox 关联。
+- Run 表示一次用户请求对应的一次执行，允许一个 Session 拥有多个历史 Run，但同一时间只有一个 active Run。
+- `waiting_input` 必须依靠 PostgreSQL 中的执行快照恢复，不能依赖存活 goroutine 或 `SimpleMemory`。
+- Engine 负责计算，RunService/Repository 负责状态持久化，Handler 不直接操作 Engine 或数据库。
+- PostgreSQL 是业务状态事实来源，Redis Stream 只承载短期实时事件。
+- 保留当前 `internal/model`、`agent`、`service`、`repository`、`handler`、`bootstrap` 骨架，不做目录大迁移。
 
-完整目标架构和决策见 [01-architecture.md](./01-architecture.md)。
+## 阶段总览
 
-## 工作包
-
-| 阶段 | 文档 | 交付结果 | 依赖 |
+| 阶段 | 文档 | 交付物 | 是否改变生产语义 |
 |---|---|---|---|
-| 1 | [02-settings-and-prompts.md](./02-settings-and-prompts.md) | 在已接通启动加载和搜索 limit 的基础上，统一 Settings 来源并让 Prompt 可版本化 | 无 |
-| 2 | [03-engine-and-context.md](./03-engine-and-context.md) | 显式 StepOutcome，完善已接入的 ContextBuilder 预算策略 | 阶段 1 |
-| 3 | [04-run-domain-and-storage.md](./04-run-domain-and-storage.md) | Run 状态机、表和 Repository 完成，但暂不接生产请求 | 阶段 1 |
-| 4 | [05-run-execution-cutover.md](./05-run-execution-cutover.md) | 后端生产写路径全部切到 RunService/RunExecutor | 阶段 2、3 |
-| 5 | [06-api-ui-sse-cutover.md](./06-api-ui-sse-cutover.md) | UI 和公开 API 切到 Run 契约，旧路由删除 | 阶段 4 |
-| 6 | [07-legacy-removal.md](./07-legacy-removal.md) | 在确认生产不可达后删除 RedisStreamTask、Session 执行字段和死代码 | 阶段 5 |
+| 1 | [02-settings-and-prompts.md](./02-settings-and-prompts.md) | 唯一 Settings、校验、Prompt 版本和快照接口 | 否 |
+| 2 | [03-engine-and-context.md](./03-engine-and-context.md) | Engine 输入输出契约、ContextPolicy、StepOutcome | 否 |
+| 3 | [04-run-domain-and-storage.md](./04-run-domain-and-storage.md) | Run 领域模型、可恢复执行快照、migration、Repository 和契约测试 | 否，暂不接请求 |
+| 4 | [05-run-execution-cutover.md](./05-run-execution-cutover.md) | RunExecutor 装配、取消与 ToolSet 生命周期、可观测性、Session 薄适配 | 是，唯一后端语义切换点 |
+| 5 | [06-api-ui-sse-cutover.md](./06-api-ui-sse-cutover.md) | 发布唯一 Run API、至少一次 SSE、切换 UI 并删除旧路由 | 是，唯一对外契约切换点 |
+| 6 | [07-legacy-removal.md](./07-legacy-removal.md) | 删除旧 Task、Session 执行字段和无用投影 | 否，清理已不可达代码 |
 
-阶段 2 和阶段 3 在阶段 1 完成后可以分别实施，但不要并行修改同一工作树。阶段 3 开始前必须先阅读 00 审查；阶段 4 是唯一的业务语义切换点。
+阶段 1、2 可以独立实施；阶段 3 必须先完成领域契约；阶段 4 之前不得让 Run 写入生产请求；阶段 4 之后禁止恢复旧 Session 执行写路径。阶段 4 暂存的 Session 路由只是调用 RunService 的适配层，阶段 5 必须随 UI 切换直接删除，不设置兼容期。
 
-## 每个工作包的硬门禁
+## 每个阶段的完成标准
 
-每个阶段都必须满足以下条件才能标记完成：
+- `cd api && go test ./...`
+- `cd api && go test -race ./internal/agent/... ./internal/service ./internal/repository -count=1`
+- `cd api && go vet ./...`
+- `git diff --check`
+- 涉及 UI 时，再运行 `cd ui && npm run lint && npm run build`
+- 新增的状态、存储、HTTP 或 SSE 契约均有行为测试；不为 getter、常量或 mock 自身重复写低收益测试。
+- 新增生产切换时必须同时提供状态迁移、恢复、取消收敛和关键指标，不能只验证成功路径。
+- 一个阶段对应一个或多个独立 Conventional Commit，每个提交都能单独 revert。
+- `STATUS.md` 记录提交 SHA、真实验证结果、生产语义和下一入口。
 
-1. 在 `api/` 运行 `go test ./...` 通过。
-2. 在 `api/` 运行 `go test -race ./internal/agent ./internal/service ./internal/repository -count=1` 通过。
-3. 在 `api/` 运行 `go vet ./...` 通过。
-4. 涉及 UI 的阶段在 `ui/` 运行 `npm run lint` 和 `npm run build` 通过。
-5. 在项目根目录运行 `git diff --check` 通过。
-6. 阶段内新增的契约测试通过。
-7. 每个文档定义的检查点形成独立 Conventional Commit，可单独 `git revert`。
-8. [STATUS.md](./STATUS.md) 已写入检查点 SHA、测试结果和下一阶段入口。
+受限环境不能监听回环端口时，必须记录失败原因并在允许本地监听的开发环境补跑，不能把环境失败写成通过。
 
-在受限沙箱中，如果现有 `httptest` 因禁止监听 `127.0.0.1:0` 失败，必须记录完整失败命令，并在允许本地监听的开发终端补跑。不能把环境失败记录为测试通过。
+## 禁止双轨长期存在
 
-## 不保留两套长期业务语义
+阶段 3 可以有未接生产的 Run 代码；阶段 4 一次性切换所有创建、继续、等待、完成、失败和取消写入。旧路由若暂时保留，只能薄委托 RunService，不得继续写 `sessions.task_id/status/events`。阶段 5 完成 UI 切换后，阶段 6 才删除旧实现。
 
-“可增量实施”不等于“双写”。本方案使用以下约束：
-
-- 阶段 1、2 只替换内部组件，外部行为不变。
-- 阶段 3 新增 Run 表和纯领域能力，但不接生产请求，不写生产 Run 数据。
-- 阶段 4 一次性把所有生产创建、等待、恢复、完成、失败和取消写入切到 `RunService`。
-- 阶段 4 后，旧 `/chat` 和 `/stop` 如暂时存在，只能委托 `RunService`，禁止更新 `sessions.status`。
-- 阶段 5 删除旧路由，前端只读取 Run 状态。
-- 阶段 6 删除旧 Task 基础设施和 Session 执行字段。
-
-## 后续模型的恢复步骤
-
-任何新会话开始时执行：
+## 中断恢复
 
 ```bash
 cd /Users/huanghao2/GolandProjects/study/imooc-mas/go-manus
@@ -68,20 +53,4 @@ git log -8 --oneline --decorate
 sed -n '1,240p' docs/refactor-run/STATUS.md
 ```
 
-然后：
-
-1. 找到 `STATUS.md` 中第一个 `pending` 或 `in_progress` 阶段；若为 `in_progress`，从第一个未完成检查点继续。
-2. 阅读本 `README`、[00-current-review-2026-09.md](./00-current-review-2026-09.md)、[01-architecture.md](./01-architecture.md) 和该阶段文档。
-3. 核对上一阶段记录的提交 SHA 是否仍在当前分支。
-4. 运行上一阶段的“恢复基线命令”。
-5. 只实施当前工作包，不提前修改后续阶段文件。
-
-如果工作区有未提交代码，先用 `git diff` 判断它属于当前阶段还是用户已有修改。不得覆盖或重置用户修改。
-
-## 文档与代码的更新规则
-
-- 当前实现完成一个阶段后，更新 `STATUS.md`，不要改写已完成阶段的目标。
-- 如果当前源码与阶段文档前提不一致，先修正文档或增加决策记录，再开始编码；不能用静态命中把基础设施接口判为死代码。
-- 实际实现与方案有合理偏差时，在 `STATUS.md` 的“决策偏差”记录原因和最终接口。
-- 如果发现设计前提错误，停止当前阶段，新增决策记录；不要静默引入另一套状态或配置模型。
-- `docs/重构.md` 是历史原始提案，仅用于追溯；本目录是 Run 重构的实施依据。
+从 `STATUS.md` 中第一个 `pending` 或 `in_progress` 检查点继续；先运行该检查点的恢复基线命令，再修改对应文档列出的代码范围。不要通过复制旧 Task 或新增双写来绕过编译错误。

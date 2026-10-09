@@ -1,189 +1,149 @@
-# 阶段 3：Run 领域模型与 PostgreSQL 存储
+# 阶段 3：Run 领域与存储（未接生产）
 
-> 开工前置事实：当前生产源码中没有 `Run`、`RunStatus`、`PlanSnapshot`、`RunRepository`、`MessageRepository` 或 Run migration。必须先按本文定义并验证领域契约，再实现测试和存储；不能让测试从不存在的生产类型反推契约。阶段 3 全部能力在接入生产前都属于新代码，生产唯一语义仍是 Session/RedisStreamTask。
+> 当前源码没有 Run、RunStatus、RunRepository、MessageRepository 或 Run migration。本阶段先锁定领域和事务契约，再写代码与测试。
 
-## 目标
+## 目标与边界
 
-建立 Run、Plan、Step 的领域状态、数据库表和仓储原语，为下一阶段一次性切换生产执行语义提供稳定基础。本阶段的 Run 能力只由单元/集成测试调用，生产 Handler、AgentService 和任务执行链不得创建或更新 Run。
+建立最小 Run 领域模型和 PostgreSQL 存储，不接入现有 Chat/Stop/SSE 生产路径。阶段结束时可以独立创建、迁移、查询和测试 Run；生产请求仍只使用 Session/RedisStreamTask。
 
-## 非目标
+本阶段不引入 Worker、Lease、Outbox、永久事件表、Plan/Step 表或通用 UnitOfWork。首期 Run 由当前进程执行，PostgreSQL 保存业务事实，Redis 只承载短期实时事件。这些能力并非永久排除，只有达到 [目标架构](./01-architecture.md#7-演进边界) 中的触发条件后才单独立项。
 
-- 不接生产请求，不新增 Run Handler/公开路由。
-- 不修改 Session.Status、Events 或 task_id；当前 migration 中不存在 `memories` 列，不为它新增兼容结构。
-- 不创建 Worker、lease、outbox、run_events 或永久 token 事件表。
-- 不实现自动恢复 interrupted Run；首期只准确标记中断。
+## Run 领域模型
 
-## 前置条件与唯一语义
+建议最小字段：
 
-- 阶段 1 的 1A/1B 检查点必须先在 `STATUS.md` 标记完成。阶段 2 可以已完成或尚未开始，但阶段 4 必须同时依赖阶段 2、3；当前状态仍是部分完成，不能把本阶段当作可直接开工。
-- 生产唯一语义仍是 Session + RedisStreamTask。本阶段禁止在 bootstrap 注入 RunRepository 到生产写链路。
-- 开始前运行全量 Go 测试，并在 `STATUS.md` 记录当前提交。
+| 字段 | 语义 |
+|---|---|
+| `id`、`session_id` | Run 标识与所属会话 |
+| `status` | 唯一执行状态 |
+| `idempotency_key` | 顶层创建请求幂等键 |
+| `settings_snapshot` | 创建时冻结的运行配置 |
+| `prompt_hash` | 本次运行使用的 Prompt 版本标识 |
+| `execution_snapshot`、`snapshot_revision` | 可恢复计划、步骤摘要、当前位置与乐观修订号 |
+| `waiting_message_id` | 当前等待问题；非 waiting 状态为空 |
+| `error_code`、`error_message` | 稳定错误分类与可展示错误 |
+| `started_at`、`finished_at` | 实际执行时间 |
+| `created_at`、`updated_at` | 持久化时间 |
 
-## 文件清单
+首期状态固定为：
 
-创建：
-
-- `api/internal/model/run.go`：Run、RunStatus、状态迁移和终态判断。
-- `api/internal/model/plan.go`：新增 Run 使用的 PlanSnapshot、PlanStatus、StepSnapshot、StepStatus 与快照复制。
-- `api/internal/model/message.go`：持久化对话消息模型，不包含 Redis 游标。
-- `api/internal/repository/run_repository.go`：RunRepository 与 PostgreSQL 实现。
-- `api/internal/repository/message_repository.go`：MessageRepository 与 PostgreSQL 实现。
-- `api/internal/repository/run_unit_of_work.go`：在同一个 pgx 事务中绑定 Run 与 Message 仓储。
-- `api/migrations/005_create_runs_and_messages.sql`。
-- `api/internal/model/run_test.go`、`plan_test.go`。
-- `api/tests/run_repository_integration_test.go`、`message_repository_integration_test.go`。
-
-修改：
-
-- `api/internal/repository/queryer.go`：只在确有公共扫描需求时扩展，不增加业务规则。
-- `api/internal/bootstrap/app.go`：在 repositories 容器中构造 Run/Message Repository；本阶段不向 AgentService/Handler 注入。
-- `api/migrations/Makefile`：`migrate-down` 按外键顺序增加 `messages`、`runs` 删除项。
-
-本阶段不删除生产文件。
-
-## 领域模型
-
-```go
-type Run struct {
-    ID               string
-    SessionID        string
-    Status           RunStatus
-    ModelID          string
-    SettingsSnapshot AgentSettingsSnapshot
-    PromptHashes     map[string]string
-    Plan             *PlanSnapshot
-    PlanRevision     int
-    IdempotencyKey   string
-    ErrorCode        string
-    ErrorMessage     string
-    StartedAt        *time.Time
-    FinishedAt       *time.Time
-    CreatedAt        time.Time
-    UpdatedAt        time.Time
-}
+```text
+pending -> running -> waiting_input -> running
+pending -> cancelling | interrupted
+running -> succeeded | failed | cancelling | interrupted
+waiting_input -> cancelling | running
+cancelling -> cancelled
 ```
 
-为避免 `model` 反向依赖 `agent`，`AgentSettingsSnapshot` 在 model 内定义为与 JSON 契约一致的值对象，阶段 4 的 RunService 从 `agent.AgentSettings` 显式转换。它没有默认值和运行时更新逻辑，不能成为第二份配置来源。
+`succeeded`、`failed`、`cancelled`、`interrupted` 是终态。状态迁移必须集中在 Run 领域/服务中，并由条件更新执行；Handler 和 Engine 不得各自维护另一份迁移规则。
 
-Run 状态：`pending/running/waiting_input/succeeded/failed/cancelled/interrupted`。合法迁移严格采用 `01-architecture.md` 的状态图。PlanSnapshot 状态为 `pending/running/succeeded/failed/cancelled`，StepSnapshot 为 `pending/running/succeeded/failed/skipped/cancelled`。
+## 状态与重启语义
 
-当前 `event.go` 中的 `Plan/PlanStep/ExecutionStatus` 暂时只服务旧 Session/Task 生产链。本阶段不迁移、不复用它们，避免在还没有切换 UI/SSE 时改变 wire status。阶段 4 的新 Engine 改用 PlanSnapshot；阶段 6 随旧 Task 文件一起删除这些 legacy 类型。这是有明确删除期限的迁移适配，不是两套生产事实来源：本阶段 RunPlan 仍不接生产，阶段 4 后 legacy Plan 不再被生产装配使用。
+- 服务重启时，`pending`、`running` 没有持久化队列可接管，统一条件迁移为 `interrupted`。
+- `waiting_input` 不持有执行 goroutine 或旧 ToolSet。执行快照与等待检查点完整时，重启后保持该状态；快照缺失或损坏时条件迁移为 `interrupted` 并记录稳定错误码。
+- 同一 Session 最多存在一个 `pending`、`running`、`waiting_input` 或 `cancelling` Run。
+- 取消只允许从前三个可取消状态进入 `cancelling`；该状态阻止新的输入和 Engine 终态写入。执行 goroutine 退出并释放 `ToolSet` 后才进入 `cancelled`。
+- 服务重启时不存在存活 goroutine，遗留 `cancelling` 可直接条件收敛为 `cancelled`。
 
-Plan 是 Run 当前快照。每次替换 Plan 必须携带 expected revision，SQL 仅在 revision 匹配时更新并加一；失败返回 conflict。首期不保留历史 Plan 版本。
+## 等待输入恢复契约
 
-## 数据库设计
+`execution_snapshot` 首期使用 Run 内 JSONB，结构至少包含：
 
-`runs` 至少包含：
+~~~text
+snapshot_revision
+plan_id / plan_revision
+current_step_id
+steps[]
+  - id
+  - status
+  - result_summary
+  - artifact_refs
+waiting_checkpoint
+  - question_message_id
+  - step_id
+  - resume_mode = continue_step
+~~~
 
-```sql
-id VARCHAR(255) PRIMARY KEY,
-session_id VARCHAR(255) NOT NULL REFERENCES sessions(id),
-status VARCHAR(32) NOT NULL,
-model_id VARCHAR(255) NOT NULL REFERENCES llm_models(id),
-settings_snapshot JSONB NOT NULL,
-prompt_hashes JSONB NOT NULL,
-plan JSONB,
-plan_revision INT NOT NULL DEFAULT 0,
-idempotency_key VARCHAR(255),
-error_code VARCHAR(64),
-error_message TEXT,
-started_at TIMESTAMP,
-finished_at TIMESTAMP,
-created_at TIMESTAMP NOT NULL,
-updated_at TIMESTAMP NOT NULL
-```
+只保存恢复后继续执行所需的稳定摘要，不保存逐 token 输出、完整内部 ToolResult、外部连接句柄或 Provider 特定的 tool-call 协议对象。已完成步骤的 `result_summary` 必须足以支持后续步骤；不能只保存 completed 状态。
 
-`messages` 至少包含 `id`、`session_id`、可空 `run_id`、`role`、`content`、`attachments JSONB`、单调递增 `ordinal`、`created_at`。`run_id` 可空是为了未来保留不触发执行的系统/导入消息；本轮由 Run 产生的消息必须填写 run_id。附件只保存文件 ID/引用，不能复制二进制内容。
+恢复流程固定为：
 
-创建 Run 时先解析用户指定模型或当前默认模型，并把解析后的实际 ID 固化到 `model_id`；若没有可用模型，创建请求失败，不创建 pending Run。后续默认模型变化不影响已创建 Run。
+1. 对 `waiting_input` Run 幂等写入用户回答，并通过 `reply_to_message_id` 绑定当前 `waiting_message_id`。
+2. 校验 Run 状态、snapshot revision、current step 和等待消息仍一致。
+3. 读取初始用户消息、已完成步骤摘要、当前问题和本次回答，按固定转换器构造新的 `llmcore.Message` 序列。
+4. 重新获取当前 Run 创建时冻结的 Settings/Prompt 标识和新的 `ToolSet`。
+5. 从原 `current_step_id` 继续执行，不默认重规划；快照无法解释时返回领域错误并转 `interrupted`。
 
-约束与索引：
+转换器必须是纯函数并有行为测试，保证同一持久化输入生成稳定的 role、顺序和内容。恢复不要求重造已经过期的 Redis 逐 token 事件。
 
-- `CHECK` 限制 Run/role 状态枚举。
-- `UNIQUE(session_id, idempotency_key) WHERE idempotency_key IS NOT NULL`。
-- `UNIQUE(session_id) WHERE status IN ('pending','running','waiting_input')`，数据库保证单 Session 单活跃 Run。
-- `runs(session_id, created_at DESC)`、`messages(session_id, ordinal)`、`messages(run_id, ordinal)`。
-- migration 使用 `IF NOT EXISTS` 保持现有简易迁移器可重复执行。
+## Messages 契约
 
-## Repository 契约
+`messages` 保存会话中需要长期查询的用户/助手消息，不保存逐 token 增量、内部 ToolResult 或完整 Prompt。建议最小字段：
 
-```go
-type RunRepository interface {
-    Create(context.Context, *model.Run) error
-    GetByID(context.Context, string) (*model.Run, error)
-    GetByIdempotencyKey(context.Context, string, string) (*model.Run, error)
-    ListBySession(context.Context, string, int, int) ([]*model.Run, int, error)
-    Transition(context.Context, string, model.RunStatus, model.RunStatus, RunPatch) (bool, error)
-    ReplacePlan(context.Context, string, int, *model.PlanSnapshot) (bool, error)
-    MarkActiveInterrupted(context.Context) (int64, error)
-    WithTx(context.Context, func(RunRepository) error) error
-}
-```
+- `id`、`session_id`、`run_id`、`idempotency_key`、`reply_to_message_id`
+- `role`：首期持久化 `user`、`assistant`
+- `content`、`attachments`
+- `created_at`
 
-`Transition` 必须在 SQL 的 `WHERE id=$1 AND status=$expected` 中完成比较更新，不能先读后写。返回 `false,nil` 表示状态已变化，由服务层重读判断取消优先。`MarkActiveInterrupted` 覆盖 pending/running/waiting_input，并设置 finished_at。
+初始用户输入、等待输入时的助手问题、后续用户输入和最终助手回复都关联同一个 Run。一次客户端提交只生成一个幂等键：创建 Run 时该键同时用于 Run 和初始用户消息；后续输入使用新的键并关联当前问题。客户端不需要生成两套键。
 
-MessageRepository 提供 `Create`、`ListBySession`、`ListByRun` 和事务绑定。阶段 4 创建 Run 和首条用户消息时必须使用同一数据库事务，因此两个仓储需支持在同一个 `pgx.Tx` 上构造；不要在 model 定义 Repository 接口。
+助手问题由服务端分配稳定 message ID，并写入 `runs.waiting_message_id`；回答必须设置 `reply_to_message_id`。不要使用 `run_id + role` 唯一约束，因为一个等待输入 Run 可以包含多轮用户/助手消息。
 
-```go
-type RunUnitOfWork interface {
-    WithTx(context.Context, func(RunRepository, MessageRepository) error) error
-}
-```
+工具调用明细继续通过实时事件展示；只有确有长期审计和查询需求时才增加独立持久化模型。
 
-Service 只依赖该接口，不接触 `pgx.Tx`；实现复用现有 `runInTx` 的提交、回滚和 panic 语义。
+## 数据库约束
 
-## 实施顺序与检查点
+- `UNIQUE(session_id, idempotency_key)` 保证创建 Run 幂等。
+- `UNIQUE(run_id, idempotency_key)` 保证初始消息和后续每次客户端输入幂等；Run 创建事务内的初始消息复用创建请求的同一个键。
+- 对 `pending`、`running`、`waiting_input`、`cancelling` 建 PostgreSQL 部分唯一索引，保证一个 Session 只有一个 active Run，取消收敛完成前不能创建新 Run。
+- 状态迁移使用 `WHERE id = ? AND status IN (...)` 条件更新，并检查影响行数。
+- 执行快照更新同时校验 Run 状态和 `snapshot_revision`，避免迟到写入覆盖新的等待检查点或步骤结果。
+- `messages.session_id`、`messages.run_id` 建外键和按时间查询索引；客户端消息建立幂等唯一约束。
+- Run/Message 的 ID、时间精度、软硬删除策略与现有项目规范保持一致。
 
-1. 检查点 3A：新增 Run/PlanSnapshot/StepSnapshot/Message 模型、状态测试和 migration；在空测试库执行两次验证幂等，提交 `feat(api): define run domain and schema`。
-2. 检查点 3B：实现 RunRepository、MessageRepository、RunUnitOfWork 与集成测试；在 bootstrap 的 repositories 容器构造仓储，但确认生产链路没有 Create/Transition，提交 `feat(api): add run persistence repositories`。
+首期 Plan/Step 保存在 Run 的 JSONB 快照中。只有独立查询、局部更新或审计需求被真实证明后才拆表。
 
-3A、3B 都不接生产请求，单独回滚不会改变现有业务语义。
+## 原子事务
 
-## 针对性测试
+以下写入必须在同一 PostgreSQL 事务中完成：
 
-- model：完整合法/非法迁移矩阵，终态不可迁移，快照复制不泄漏可变切片。
-- repository：同 Session 第二个活跃 Run 触发可识别 conflict；终态历史 Run 不阻止新 Run。
-- repository：running -> cancelled 后，expected running -> succeeded 更新行数为零，状态仍 cancelled。
-- repository：同 idempotency key 只能存在一个 Run；不同 Session 可复用 key。
-- plan：expected revision 不匹配时不覆盖更新。
-- startup cleanup：三种活跃状态变 interrupted，终态不变。
-- messages：按 ordinal 稳定排序，Session/Run 过滤正确，附件 round-trip。
+1. 创建 Run + 写入初始用户消息。
+2. 进入 `waiting_input` + 更新执行快照和等待检查点 + 写入助手提问消息。
+3. 幂等写入用户输入 + `waiting_input -> running`。
+4. 写入最终助手消息 + Run 终态迁移 + 更新 Session 摘要投影。
 
-## 阶段验证命令
+Session 继续保存标题、未读数和最新消息等会话摘要，但不再保存执行状态。Session 摘要由最终持久化消息投影更新，不从 Redis 增量事件反推。
 
-```bash
-cd api
-GOCACHE=/private/tmp/go-manus-gocache go test ./internal/model ./internal/repository -count=1
-GOCACHE=/private/tmp/go-manus-gocache go test -tags=integration ./tests -run 'Test(Run|Message)Repository' -count=1
-GOCACHE=/private/tmp/go-manus-gocache go test ./...
-GOCACHE=/private/tmp/go-manus-gocache go test -race ./internal/agent ./internal/service ./internal/repository -count=1
-GOCACHE=/private/tmp/go-manus-gocache go vet ./...
-rg -n 'RunRepository|MessageRepository' internal/handler internal/agent
-cd ..
-git diff --check
-```
+不要先抽象通用 UnitOfWork。实现时使用面向 Run 聚合的窄事务入口，让 Run、Message 和 Session 投影共享同一个数据库事务；Repository 只做持久化和条件更新，不执行 Engine，也不发布 Redis 事件。
 
-最后一条 `rg` 必须没有生产写调用；测试引用可以存在。
+## 历史数据策略
 
-## 提交与回滚
+阶段 3 的 `runs/messages` 不接生产，因此表最初为空。阶段 4 从切换点开始写入，不回填 `sessions.events`、旧 task 状态或 Redis 历史；开发环境旧执行数据可以通过 migration 重置。不得为回填历史而引入双写、兼容读取或一次性事件解释器。
 
-回滚 3B 只需 `git revert <3B-sha>`。回滚 3A 时先停止应用，在开发数据库执行 `DROP TABLE IF EXISTS messages; DROP TABLE IF EXISTS runs;`，再 `git revert <3A-sha>` 并运行全量测试。因为本阶段没有生产 Run 数据，删除新表不会损失已生效业务语义。
+## Redis 与恢复边界
 
-## 完成定义
+- 流式文本、工具进度和状态通知写入按 Run ID 分区的 Redis Stream。
+- Redis 事件可过期，不作为终态、最终消息或 Plan 的事实来源。
+- Redis 丢失后，客户端通过 Run、Message 和执行快照恢复；服务端不重造逐 token 历史。
+- 最终助手消息只在内容完整且 Run 终态条件更新成功时写入，避免取消后出现伪成功回复。
 
-- Run 状态和数据库约束一致，取消优先由条件 SQL 保证。
-- 单 Session 单活跃 Run 由部分唯一索引保证。
-- Plan revision 和消息稳定顺序有集成测试。
-- 生产请求仍只写 Session/RedisStreamTask，没有双写。
-- 全量 test、integration、race、vet 通过，`STATUS.md` 已更新。
+## 实施顺序
 
-## 失败或中断恢复
+1. 评审状态矩阵、执行快照、消息转换、幂等、active 唯一约束和重启语义。
+2. 新增 `runs`、`messages` migration 和 model。
+3. 实现 Repository、聚合事务入口和数据库约束测试。
+4. 实现纯 RunService 测试，但不从 bootstrap 注入、不改 Handler、不写生产 Run。
 
-```bash
-git status --short --branch
-psql "$DATABASE_URL" -c '\d runs'
-psql "$DATABASE_URL" -c '\d messages'
-GOCACHE=/private/tmp/go-manus-gocache go test ./internal/model ./internal/repository -count=1
-```
+建议提交拆分：
 
-如果 migration 已执行而源码未完成，可以保留空表继续实现；生产链路没有写入，因此不会形成第二套语义。若要退回基线，按“提交与回滚”删除两表并 revert。
+- `feat(api): define run domain contracts`
+- `feat(api): add run persistence`
+
+## 完成条件与回滚
+
+- 状态迁移、幂等、active 唯一索引、消息去重、事务回滚和 waiting_input 恢复测试通过。
+- 恢复测试覆盖已完成步骤摘要、问题回答配对、同一步继续、重复回答幂等及损坏快照转 interrupted。
+- `go test ./...`、Repository component 测试、migration 测试和 `go vet ./...` 通过。
+- 旧生产链行为不变，bootstrap/Handler 没有 Run 依赖。
+
+回滚只删除本阶段新增的 Run/Message 文件和 migration，不触碰 `sessions` 现有执行列；阶段 4 切换前不得清理旧列。
