@@ -70,6 +70,13 @@ uv sync --frozen
 uv run uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 ```
 
+依赖以 `pyproject.toml`（声明意图）+ `uv.lock`（锁定版本）为唯一事实来源，仓库不再
+维护 `requirements.txt`。如需 pip 格式的依赖清单（例如给不使用 uv 的环境），按需现场生成：
+
+```bash
+uv export --format requirements.txt --no-dev --no-hashes
+```
+
 ## Docker 部署
 
 沙箱服务通过根目录的 `docker-compose.yml` 统一部署。API 服务通过容器网络中的
