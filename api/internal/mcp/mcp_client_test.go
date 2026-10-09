@@ -1,9 +1,11 @@
 package mcp
 
 import (
+	"context"
 	"errors"
 	"testing"
 
+	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -36,6 +38,39 @@ func TestMCPClientManager_Close(t *testing.T) {
 	require.NoError(t, err, "Close should not return error for nil config")
 }
 
+func TestMCPClientManagerInitializeReturnsConnectionFailure(t *testing.T) {
+	manager := NewMCPClientManager(&model.MCPConfig{Servers: []model.MCPServer{{
+		Name:    "missing",
+		Command: "/definitely/not/a/mcp-server",
+	}}})
+
+	err := manager.Initialize(context.Background())
+	require.Error(t, err, "Initialize should expose MCP connection failures")
+	assert.Empty(t, manager.clients, "failed initialization must not retain partial clients")
+}
+
+func TestMCPClientManagerListAllToolsReturnsDiscoveryFailure(t *testing.T) {
+	manager := NewMCPClientManager(nil)
+	manager.clients["broken"] = &stubMCPClient{listErr: errors.New("protocol error")}
+
+	_, err := manager.ListAllTools(context.Background())
+	require.Error(t, err, "ListAllTools should expose discovery failures")
+}
+
+type stubMCPClient struct {
+	listErr error
+}
+
+func (*stubMCPClient) Connect(context.Context) error { return nil }
+
+func (c *stubMCPClient) ListTools(context.Context) ([]MCPToolInfo, error) { return nil, c.listErr }
+
+func (*stubMCPClient) CallTool(context.Context, string, map[string]interface{}) (*MCPToolResult, error) {
+	return nil, nil
+}
+
+func (*stubMCPClient) Close() error { return nil }
+
 // ============================================================================
 // 错误类型测试
 // ============================================================================
@@ -63,34 +98,34 @@ func TestErrInvalidResponse(t *testing.T) {
 
 func TestMCPToolResult_MCPToolError(t *testing.T) {
 	tests := []struct {
-		name     string
-		result   *MCPToolResult
-		wantErr  bool
-		errMsg   string
+		name    string
+		result  *MCPToolResult
+		wantErr bool
+		errMsg  string
 	}{
 		{
-			name:     "success result",
-			result:   &MCPToolResult{IsError: false, Content: []MCPContent{{Type: "text", Text: "ok"}}},
-			wantErr:  false,
-			errMsg:   "",
+			name:    "success result",
+			result:  &MCPToolResult{IsError: false, Content: []MCPContent{{Type: "text", Text: "ok"}}},
+			wantErr: false,
+			errMsg:  "",
 		},
 		{
-			name:     "error result with content",
-			result:   &MCPToolResult{IsError: true, Content: []MCPContent{{Type: "text", Text: "tool error"}}},
-			wantErr:  true,
-			errMsg:   "tool error",
+			name:    "error result with content",
+			result:  &MCPToolResult{IsError: true, Content: []MCPContent{{Type: "text", Text: "tool error"}}},
+			wantErr: true,
+			errMsg:  "tool error",
 		},
 		{
-			name:     "error result without content",
-			result:   &MCPToolResult{IsError: true, Content: []MCPContent{}},
-			wantErr:  false,
-			errMsg:   "",
+			name:    "error result without content",
+			result:  &MCPToolResult{IsError: true, Content: []MCPContent{}},
+			wantErr: false,
+			errMsg:  "",
 		},
 		{
-			name:     "nil result",
-			result:   nil,
-			wantErr:  false,
-			errMsg:   "",
+			name:    "nil result",
+			result:  nil,
+			wantErr: false,
+			errMsg:  "",
 		},
 	}
 

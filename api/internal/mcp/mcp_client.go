@@ -529,10 +529,8 @@ func (m *MCPClientManager) Initialize(ctx context.Context) error {
 		})
 
 		if err := client.Connect(ctx); err != nil {
-			logger.Warn("连接 MCP 服务器失败，跳过",
-				logger.String("server", server.Name),
-				logger.Err(err))
-			continue
+			m.closeClientsLocked()
+			return fmt.Errorf("connect MCP server %q: %w", server.Name, err)
 		}
 
 		m.clients[server.Name] = client
@@ -540,6 +538,17 @@ func (m *MCPClientManager) Initialize(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (m *MCPClientManager) closeClientsLocked() {
+	for name, client := range m.clients {
+		if err := client.Close(); err != nil {
+			logger.Warn("关闭 MCP 客户端失败",
+				logger.String("server", name),
+				logger.Err(err))
+		}
+	}
+	m.clients = make(map[string]MCPClient)
 }
 
 // GetClient 获取 MCP 客户端
@@ -561,10 +570,7 @@ func (m *MCPClientManager) ListAllTools(ctx context.Context) (map[string][]MCPTo
 	for name, client := range m.clients {
 		tools, err := client.ListTools(ctx)
 		if err != nil {
-			logger.Warn("获取 MCP 工具列表失败",
-				logger.String("server", name),
-				logger.Err(err))
-			continue
+			return nil, fmt.Errorf("list MCP server %q tools: %w", name, err)
 		}
 		result[name] = tools
 	}
@@ -576,15 +582,6 @@ func (m *MCPClientManager) ListAllTools(ctx context.Context) (map[string][]MCPTo
 func (m *MCPClientManager) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	for name, client := range m.clients {
-		if err := client.Close(); err != nil {
-			logger.Warn("关闭 MCP 客户端失败",
-				logger.String("server", name),
-				logger.Err(err))
-		}
-	}
-
-	m.clients = make(map[string]MCPClient)
+	m.closeClientsLocked()
 	return nil
 }

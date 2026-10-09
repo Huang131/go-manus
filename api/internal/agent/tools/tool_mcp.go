@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"sync"
 
@@ -14,15 +15,34 @@ import (
 
 // MCPTool MCP 工具 (Model Context Protocol)
 type MCPTool struct {
-	mu      sync.RWMutex
-	manager *mcp.MCPClientManager
-	tools   map[string]map[string]mcp.MCPToolInfo // serverName -> toolName -> toolInfo
+	mu         sync.RWMutex
+	manager    mcpToolManager
+	newManager func(*model.MCPConfig) mcpToolManager
+	functions  map[string]mcpFunction
+}
+
+// mcpToolManager is the narrow lifecycle and routing contract MCPTool needs.
+// Keeping it local makes the tool contract testable without starting a process.
+type mcpToolManager interface {
+	Initialize(context.Context) error
+	GetClient(string) (mcp.MCPClient, bool)
+	ListAllTools(context.Context) (map[string][]mcp.MCPToolInfo, error)
+	Close() error
+}
+
+type mcpFunction struct {
+	serverName string
+	toolName   string
+	tool       mcp.MCPToolInfo
 }
 
 // NewMCPTool 创建 MCP 工具
 func NewMCPTool() *MCPTool {
 	return &MCPTool{
-		tools: make(map[string]map[string]mcp.MCPToolInfo),
+		newManager: func(cfg *model.MCPConfig) mcpToolManager {
+			return mcp.NewMCPClientManager(cfg)
+		},
+		functions: make(map[string]mcpFunction),
 	}
 }
 
@@ -57,44 +77,59 @@ func (t *MCPTool) Initialize(ctx context.Context, cfg *model.MCPConfig) error {
 		return nil
 	}
 
+	manager := t.newManager(cfg)
+	if manager == nil {
+		return fmt.Errorf("create MCP manager: nil manager")
+	}
+	if err := manager.Initialize(ctx); err != nil {
+		_ = manager.Close()
+		return fmt.Errorf("initialize MCP manager: %w", err)
+	}
+
+	allTools, err := manager.ListAllTools(ctx)
+	if err != nil {
+		_ = manager.Close()
+		return fmt.Errorf("discover MCP tools: %w", err)
+	}
+	functions, err := buildMCPFunctionIndex(allTools)
+	if err != nil {
+		_ = manager.Close()
+		return err
+	}
+
 	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	// agent.MCPConfig 已经是 model.MCPConfig，直接传递
-	t.manager = mcp.NewMCPClientManager(cfg)
-
-	// 初始化所有 MCP 客户端
-	if err := t.manager.Initialize(ctx); err != nil {
-		logger.Warn("MCP 客户端管理器初始化失败", logger.Err(err))
-		// 不返回错误，继续运行
-	}
-
-	// 获取所有工具列表
 	if t.manager != nil {
-		allTools, err := t.manager.ListAllTools(ctx)
-		if err != nil {
-			logger.Warn("获取 MCP 工具列表失败", logger.Err(err))
-		} else {
-			// 转换为 map[string]map[string]MCPToolInfo
-			t.tools = make(map[string]map[string]mcp.MCPToolInfo)
-			for serverName, tools := range allTools {
-				t.tools[serverName] = make(map[string]mcp.MCPToolInfo)
-				for _, tool := range tools {
-					t.tools[serverName][tool.Name] = tool
-				}
-			}
-			// 统计工具数量
-			total := 0
-			for _, tools := range allTools {
-				total += len(tools)
-			}
-			logger.Info("MCP 工具加载成功",
-				logger.Int("servers", len(allTools)),
-				logger.Int("tools", total))
-		}
+		t.mu.Unlock()
+		_ = manager.Close()
+		return fmt.Errorf("MCP tool is already initialized")
 	}
+	t.manager = manager
+	t.functions = functions
+	t.mu.Unlock()
+
+	logger.Info("MCP 工具加载成功",
+		logger.Int("servers", len(allTools)),
+		logger.Int("tools", len(functions)))
 
 	return nil
+}
+
+func buildMCPFunctionIndex(allTools map[string][]mcp.MCPToolInfo) (map[string]mcpFunction, error) {
+	functions := make(map[string]mcpFunction)
+	for serverName, tools := range allTools {
+		for _, tool := range tools {
+			functionName := MCPFunctionPrefix + serverName + "_" + tool.Name
+			if previous, exists := functions[functionName]; exists {
+				return nil, fmt.Errorf("duplicate MCP function %q from %s/%s and %s/%s", functionName, previous.serverName, previous.toolName, serverName, tool.Name)
+			}
+			functions[functionName] = mcpFunction{
+				serverName: serverName,
+				toolName:   tool.Name,
+				tool:       tool,
+			}
+		}
+	}
+	return functions, nil
 }
 
 // GetTools 将发现的 MCP 工具转换为注册表可调用的动态 function schema。
@@ -104,28 +139,25 @@ func (t *MCPTool) GetTools() []map[string]interface{} {
 
 	result := make([]map[string]interface{}, 0)
 
-	for serverName, tools := range t.tools {
-		for _, tool := range tools {
-			toolName := MCPFunctionPrefix + serverName + "_" + tool.Name
-			description := "[" + serverName + "] " + tool.Description
-			if description == "["+serverName+"] " {
-				description = "[" + serverName + "] " + tool.Name
-			}
-			inputSchema := tool.InputSchema
-			if inputSchema == nil {
-				inputSchema = map[string]interface{}{
-					"type":       "object",
-					"properties": map[string]interface{}{},
-				}
-			}
-
-			result = append(result, map[string]interface{}{
-				"type":        llmcore.ToolTypeFunction,
-				"name":        toolName,
-				"description": description,
-				"parameters":  inputSchema,
-			})
+	for functionName, function := range t.functions {
+		description := "[" + function.serverName + "] " + function.tool.Description
+		if description == "["+function.serverName+"] " {
+			description = "[" + function.serverName + "] " + function.toolName
 		}
+		inputSchema := function.tool.InputSchema
+		if inputSchema == nil {
+			inputSchema = map[string]interface{}{
+				"type":       "object",
+				"properties": map[string]interface{}{},
+			}
+		}
+
+		result = append(result, map[string]interface{}{
+			"type":        llmcore.ToolTypeFunction,
+			"name":        functionName,
+			"description": description,
+			"parameters":  inputSchema,
+		})
 	}
 	sort.Slice(result, func(i, j int) bool {
 		return result[i]["name"].(string) < result[j]["name"].(string)
@@ -137,46 +169,35 @@ func (t *MCPTool) GetTools() []map[string]interface{} {
 // InvokeWithName 根据注册的动态 function name 调用对应 MCP server/tool。
 func (t *MCPTool) InvokeWithName(functionName string, ctx context.Context, params map[string]interface{}) (*model.ToolResult, error) {
 	t.mu.RLock()
-	var serverName, toolName string
-	for candidateServer, tools := range t.tools {
-		for candidateName, tool := range tools {
-			if functionName == MCPFunctionPrefix+candidateServer+"_"+tool.Name {
-				serverName, toolName = candidateServer, candidateName
-				break
-			}
-		}
-		if serverName != "" {
-			break
-		}
-	}
+	function, exists := t.functions[functionName]
 	manager := t.manager
 	t.mu.RUnlock()
-	if serverName == "" {
-		return model.NewToolError("未知 MCP 工具: " + functionName), nil
+	if !exists {
+		return nil, fmt.Errorf("unknown MCP function: %s", functionName)
 	}
 	if manager == nil {
-		return model.NewToolError("MCP manager 未初始化"), nil
+		return nil, fmt.Errorf("MCP manager is not initialized")
 	}
-	client, ok := manager.GetClient(serverName)
+	client, ok := manager.GetClient(function.serverName)
 	if !ok {
-		return model.NewToolError("MCP server 不存在: " + serverName), nil
+		return nil, fmt.Errorf("MCP server is unavailable: %s", function.serverName)
 	}
 	logger.InfoContext(ctx, "调用 MCP 工具",
-		logger.String("server", serverName),
-		logger.String("tool", toolName))
-	result, err := client.CallTool(ctx, toolName, params)
+		logger.String("server", function.serverName),
+		logger.String("tool", function.toolName))
+	result, err := client.CallTool(ctx, function.toolName, params)
 	if err != nil {
-		return model.NewToolError(err.Error()), nil
+		return nil, fmt.Errorf("call MCP tool %s: %w", functionName, err)
 	}
 	if result == nil {
-		return model.NewToolError("MCP 工具返回空结果"), nil
+		return nil, fmt.Errorf("MCP tool %s returned an empty result", functionName)
 	}
 	if result.IsError {
 		return model.NewToolError(mcpResultText(result)), nil
 	}
 	return model.NewToolResultWithMessage(mcpResultText(result), map[string]interface{}{
-		"server": serverName,
-		"tool":   toolName,
+		"server": function.serverName,
+		"tool":   function.toolName,
 		"result": result,
 	}), nil
 }
@@ -197,13 +218,14 @@ func mcpResultText(result *mcp.MCPToolResult) string {
 // Cleanup 清理 MCP 资源
 func (t *MCPTool) Cleanup() error {
 	t.mu.Lock()
-	defer t.mu.Unlock()
+	manager := t.manager
+	t.manager = nil
+	t.functions = make(map[string]mcpFunction)
+	t.mu.Unlock()
 
-	if t.manager != nil {
-		t.manager.Close()
+	if manager != nil {
+		return manager.Close()
 	}
-
-	t.tools = make(map[string]map[string]mcp.MCPToolInfo)
 
 	return nil
 }

@@ -15,8 +15,10 @@ func TestUsableMCPToolRequiresDiscoveredFunction(t *testing.T) {
 	}
 
 	tool := NewMCPTool()
-	tool.tools["demo"] = map[string]mcp.MCPToolInfo{
-		"search": {Name: "search"},
+	tool.functions["mcp_demo_search"] = mcpFunction{
+		serverName: "demo",
+		toolName:   "search",
+		tool:       mcp.MCPToolInfo{Name: "search"},
 	}
 	if !usableMCPTool(tool) {
 		t.Fatal("MCP tool with discovered function considered unusable")
