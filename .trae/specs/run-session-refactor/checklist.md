@@ -16,3 +16,5 @@
 - [x] 1A 全量 Go 测试、目标包 race、vet、UI lint/build 和真实 PostgreSQL migration 验证。
 - [x] 1B PromptCatalog 稳定名称、版本、内容 hash 与目录 hash。
 - [x] 阶段 1 全量 Go 测试、Agent race 与 vet。
+- [x] 2A StepOutcome 唯一信号，删除 `ErrWaitForUser`、`InvokeResult.WaitForUser` 与 `ToolCallResult.WaitForUser`。
+- [x] 2A 等待输入、取消、失败、完成和 Flow 事件顺序行为测试；全量 Go 测试、目标包 race、vet 与 diff 检查。

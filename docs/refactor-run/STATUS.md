@@ -8,7 +8,7 @@
 |---|---|---|---|
 | 0. 事实基线与方案校准 | complete | `0382404` | 已核对当前 Session/Task 链、配置、Engine、ToolSet，并形成可恢复的阶段方案 |
 | 1. Settings 与 Prompt | complete | `4df77fe`、`e9dcba2`、`9548b84`、`dd5c2cf`、`b0f5328` | Settings、严格校验、migration、UI 与 PromptCatalog/hash 已完成 |
-| 2. Engine 与 Context | pending | - | Flow 已拆状态处理；Outcome 和 ContextPolicy 未完成 |
+| 2. Engine 与 Context | in_progress | `4650cc4` | 2A Outcome 已完成；ContextPolicy 与 MCP 契约待完成 |
 | 3. Run 领域与存储 | pending | - | 当前源码没有 Run 类型、表或 Repository；必须先评审契约 |
 | 4. 执行生产切换 | pending | - | 唯一后端生产语义切换点；Session 路由只剩薄适配 |
 | 5. API/UI/SSE | pending | - | 唯一公开契约切换点；完成后删除旧路由 |
@@ -43,7 +43,7 @@ go vet ./...
 |---|---|---|
 | 1A Settings 单一类型、配置 migration 与校验 | complete | `4df77fe`、`e9dcba2`、`9548b84`、`dd5c2cf` |
 | 1B PromptCatalog 与 hash | complete | `b0f5328` |
-| 2A StepOutcome 唯一信号并删除旧等待表达 | pending | `03-engine-and-context.md` |
+| 2A StepOutcome 唯一信号并删除旧等待表达 | complete | `4650cc4` |
 | 2B ContextPolicy | pending | `03-engine-and-context.md` |
 | 2C MCP 动态路由、初始化与错误契约 | pending | `03-engine-and-context.md` |
 | 3A Run、执行快照与等待恢复契约 | pending | `04-run-domain-and-storage.md` |
@@ -73,6 +73,7 @@ go vet ./...
 - 首期不引入 Worker、Lease、Outbox、永久事件溯源、Plan/Step 独立表或通用 UnitOfWork；达到 `01-architecture.md` 的演进触发条件后单独立项。
 - `PlannerReActFlow.Invoke` 已拆分，后续只调整结果和状态边界。
 - `StepOutcome.Kind` 是目标唯一等待控制信号；阶段 2 必须删除旧 error/boolean 双表达。Engine 内部完成有限重试，Flow/RunExecutor 不消费 `retryable_failure`，也不重复执行同一次调用。
+- 2A 已完成：BaseAgent 在工具边界将等待输入归一为 `OutcomeWaitingInput`，`WaitingInput.Attachments` 固定为 `[]string`；ReAct 补充 `StepID`，Flow 只按 `Kind` 决定等待、取消、完成和失败。
 - `waiting_input` 依靠 execution snapshot、已完成步骤摘要和问题/回答关联恢复，不依赖旧 goroutine 或 `SimpleMemory`。
 - 一次客户端提交只使用一个幂等键；创建 Run 与初始消息共享该键，后续输入在 Run 内去重。
 - 阶段 4 不回填 `sessions.events` 或旧 Task 历史，从切换点开始写 Run/Message。
@@ -85,7 +86,24 @@ go vet ./...
 - Agent Settings 的持久化记录必须完整合法：记录缺失才使用 `10/3/10` 默认值；非法更新返回 400，非法存量记录由 `005_normalize_agent_settings.sql` 一次性修正，启动读取不再静默 clamp。
 - Task/Run 创建必须只读取一次 Settings；Runner 与 ToolSet 必须使用同一快照，热更新只影响后续创建的执行。
 
-## 最近完成：阶段 1 Settings 与 Prompt
+## 最近完成：检查点 2A StepOutcome
+
+提交：`4650cc4 refactor(agent): return explicit step outcomes`。
+
+验证结果：
+
+```text
+go test ./... -count=1                                                   PASS
+go test -race ./internal/agent/... ./internal/service ./internal/repository -count=1  PASS
+go vet ./...                                                             PASS
+git diff --check                                                         PASS
+```
+
+行为契约：等待输入返回 `OutcomeWaitingInput` 而非 error；取消返回 `OutcomeCancelled` 且不会把 PlanStep 标记为失败；Flow 保证先发助手问题、后发 wait 事件；ReAct 为等待结果写入当前 `StepID`。
+
+下一入口：检查点 2B `ContextPolicy`，先为超预算、空历史、工具调用配对和输出预留补齐行为测试，不修改 Run 存储。
+
+## 阶段 1 完成记录
 
 验证结果：
 
@@ -105,7 +123,7 @@ npm run build                                                       PASS
 
 PromptCatalog 额外验证：七个模板可枚举；每个模板 hash 等于内容 SHA-256；目录 hash 不受 map 顺序影响并随内容变化。
 
-下一入口：检查点 2A `StepOutcome` 唯一信号，先删除 `ErrWaitForUser` 与 `InvokeResult.WaitForUser` 的双表达，不修改 Run 存储。
+阶段 1 的下一入口已完成，当前按检查点 2B 推进。
 
 ## 恢复流程
 

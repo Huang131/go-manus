@@ -2,7 +2,7 @@
 
 ## 当前事实
 
-`PlannerReActFlow.Invoke` 已经由多个状态处理函数组成；本阶段不再拆 Invoke。当前等待输入同时由 `InvokeResult.WaitForUser`、`ToolCallResult.WaitForUser` 和 `ErrWaitForUser` 表达，本阶段必须一次性收敛，不能只增加第四个长期适配信号。
+`PlannerReActFlow.Invoke` 已经由多个状态处理函数组成；本阶段不再拆 Invoke。检查点 2A 已完成：等待输入已从 `InvokeResult.WaitForUser`、`ToolCallResult.WaitForUser` 和 `ErrWaitForUser` 三套表达收敛为唯一的 `StepOutcome.Kind`。
 
 ## 目标
 
@@ -17,8 +17,8 @@ type StepOutcome struct {
     Kind        OutcomeKind // completed / waiting_input / fatal_failure / cancelled
     Text        string
     Waiting     *WaitingInput
-    Failure     *Failure
-    Attachments []Attachment
+    Failure     error
+    Attachments []string
 }
 ```
 
@@ -28,9 +28,9 @@ type StepOutcome struct {
 
 `StepOutcome` 不暴露 `retryable_failure`。当前 LLM 调用失败重试和空响应重试已经在 BaseAgent 内闭环，并由任务级 `MaxRetries` 快照限制次数；重试耗尽后才向外返回 `fatal_failure` 或 `error`。Flow、RunExecutor 和 RunService 不得再次重试同一次 LLM/工具调用，避免出现双重重试、重复工具副作用和悬空 Outcome 枚举。未来如需跨进程重派发，应由独立的 Run 调度契约设计，不能复用 Engine 内部重试语义。
 
-迁移顺序固定为：工具调用结果在 BaseAgent 边界转换成 `StepOutcome`，ReAct 和 Flow 只判断 `Kind`，旧 TaskRunner 临时把 `StepOutcome` 映射到当前 Session/Task 行为。本阶段结束前删除 `ErrWaitForUser`、`InvokeResult.WaitForUser` 和 `ToolCallResult.WaitForUser`，不得让过渡字段进入 Run 设计。
+迁移顺序固定为：工具调用结果在 BaseAgent 边界转换成 `StepOutcome`，ReAct 和 Flow 只判断 `Kind`，旧 TaskRunner 临时把 `StepOutcome` 映射到当前 Session/Task 行为。检查点 2A 已删除 `ErrWaitForUser`、`InvokeResult.WaitForUser` 和 `ToolCallResult.WaitForUser`；不得让过渡字段重新进入 Run 设计。
 
-`WaitingInput` 至少包含稳定问题文本、附件、是否建议用户接管以及当前 step 标识；进入 Run 阶段后再由持久化层分配 message ID。
+`WaitingInput` 至少包含稳定问题文本、附件、是否建议用户接管以及当前 step 标识；附件在 BaseAgent 边界归一为 `[]string`，避免工具参数的动态类型泄漏到 Flow。进入 Run 阶段后再由持久化层分配 message ID。
 
 ## ContextPolicy
 
