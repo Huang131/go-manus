@@ -9,3 +9,8 @@
 - [ ] 没有新增无消费方的配置、状态或抽象。
 - [ ] 提交仅包含当前检查点，可单独 revert。
 - [ ] `docs/refactor-run/STATUS.md` 已记录提交、验证结果和下一入口。
+
+## 已完成检查点
+
+- [x] 1A Settings 单一类型、严格校验、幂等 migration 与 UI 契约。
+- [x] 1A 全量 Go 测试、目标包 race、vet、UI lint/build 和真实 PostgreSQL migration 验证。

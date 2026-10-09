@@ -7,7 +7,7 @@
 | 阶段 | 状态 | 提交/依据 | 说明 |
 |---|---|---|---|
 | 0. 事实基线与方案校准 | complete | 文档工作区；代码基线 `4c3d39d` | 已核对当前 Session/Task 链、配置、Engine、ToolSet；文档完成后再记录独立文档提交 |
-| 1. Settings 与 Prompt | pending | - | 启动加载和搜索 limit 已存在；唯一 Settings、严格校验、Prompt hash 未完成 |
+| 1. Settings 与 Prompt | in_progress | `4df77fe`、`e9dcba2`、`9548b84`、`dd5c2cf` | Settings、严格校验、migration 和 UI 已完成；PromptCatalog/hash 待实现 |
 | 2. Engine 与 Context | pending | - | Flow 已拆状态处理；Outcome 和 ContextPolicy 未完成 |
 | 3. Run 领域与存储 | pending | - | 当前源码没有 Run 类型、表或 Repository；必须先评审契约 |
 | 4. 执行生产切换 | pending | - | 唯一后端生产语义切换点；Session 路由只剩薄适配 |
@@ -41,7 +41,7 @@ go vet ./...
 
 | 检查点 | 状态 | 入口 |
 |---|---|---|
-| 1A Settings 单一类型、配置 migration 与校验 | pending | `02-settings-and-prompts.md` |
+| 1A Settings 单一类型、配置 migration 与校验 | complete | `4df77fe`、`e9dcba2`、`9548b84`、`dd5c2cf` |
 | 1B PromptCatalog 与 hash | pending | `02-settings-and-prompts.md` |
 | 2A StepOutcome 唯一信号并删除旧等待表达 | pending | `03-engine-and-context.md` |
 | 2B ContextPolicy | pending | `03-engine-and-context.md` |
@@ -82,6 +82,28 @@ go vet ./...
 - `sessions.memories` 和 `Session.Memories` 当前不存在，不在方案中虚构。
 - ToolRegistry 三份映射、MCP/A2A retired 无界释放问题已在工具重构提交中解决，不重复规划。
 - MCP function name 碰撞、初始化吞错和基础设施错误分类仍是待办，归入 2C；这不否定已经完成的 ToolRegistry/ToolSet 生命周期重构。
+- Agent Settings 的持久化记录必须完整合法：记录缺失才使用 `10/3/10` 默认值；非法更新返回 400，非法存量记录由 `005_normalize_agent_settings.sql` 一次性修正，启动读取不再静默 clamp。
+- Task/Run 创建必须只读取一次 Settings；Runner 与 ToolSet 必须使用同一快照，热更新只影响后续创建的执行。
+
+## 最近完成：1A Settings
+
+验证结果：
+
+```text
+go test ./...                                                        PASS
+go test -race ./internal/agent/... ./internal/service ./internal/repository -count=1  PASS
+go vet ./...                                                        PASS
+npm run lint                                                        PASS（仅既有 warning）
+npm run build                                                       PASS
+```
+
+独立测试环境中额外验证：
+
+- Agent 配置合法值 HTTP 生命周期通过。
+- 非法配置更新稳定返回 HTTP 400。
+- `005_normalize_agent_settings.sql` 在真实 PostgreSQL 连续执行两次后结果一致。
+
+下一入口：检查点 1B `PromptCatalog` 与稳定 hash，不修改 Session/Task API。
 
 ## 恢复流程
 

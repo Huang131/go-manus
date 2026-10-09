@@ -2,6 +2,17 @@
 
 > 当前已存在：启动加载 Agent 配置、Handler 传递 `max_search_results`、搜索 provider 使用 limit。此阶段不重复实现这些链路。
 
+## 实施状态
+
+Settings 检查点已完成：
+
+- `4df77fe`：新增独立 `internal/settings.AgentSettings`、默认值和范围校验。
+- `e9dcba2`：删除 `model.AgentConfig`、`agent.AgentConfig` 与静默 `NormalizeAgentConfig`，启动、配置服务、Agent 与任务创建统一使用值快照。
+- `9548b84`：新增幂等 migration，修正非法存量配置并补真实 PostgreSQL/HTTP 契约测试。
+- `dd5c2cf`：UI 使用完整 `AgentSettings`，输入范围与后端一致。
+
+本阶段剩余工作只有 PromptCatalog、目录版本与 hash。Run 配置快照在阶段 3 随 Run 表实现，不提前创建无消费者存储。
+
 ## 目标
 
 把 `model.AgentConfig` 和 `agent.AgentConfig` 收敛为一个运行时 Settings 类型，明确校验边界，并为未来 Run 保存创建时快照。Prompt 从散落常量收敛为可枚举、可 hash 的目录。
@@ -24,7 +35,7 @@ type AgentSettings struct {
 
 默认值沿用当前行为：`10/3/10`。默认值只用于“配置记录不存在”，不能用于覆盖已经存在但非法的字段。`MaxSearchResults` 还要按 provider 约束校验，Google 等 provider 的上限不能超过其协议允许值。
 
-SettingsManager 负责加载、校验、保存和原子替换；创建 Run 时复制值，不持有可变指针。配置更新不改变已经运行的 Run。
+配置服务负责加载、校验和保存，`AgentService` 负责原子替换后续任务使用的值。当前 Task 创建时一次性复制完整 Settings，并用同一快照构建 Runner 和搜索工具；未来 Run 沿用该规则。配置更新不改变已经运行的 Task/Run。
 
 ### 校验行为变更
 
@@ -47,14 +58,14 @@ SettingsManager 负责加载、校验、保存和原子替换；创建 Run 时�
 
 ## 检查点
 
-1. `internal/settings.AgentSettings` 替换两个旧配置类型，搜索 limit 的有效值行为不变。
-2. Handler 拒绝非法更新；启动对缺失配置使用默认值，对已存在的非法配置 fail fast。
-3. 一次性配置 migration 能识别并处理零值、负值和超过 provider 上限的存量配置；migration 前后数据与回滚行为有集成测试。
+1. [完成] `internal/settings.AgentSettings` 替换两个旧配置类型，搜索 limit 的有效值行为不变。
+2. [完成] Handler 拒绝非法更新；启动对缺失配置使用默认值，对已存在的非法配置 fail fast。
+3. [完成] 一次性配置 migration 能识别并处理缺失、非整数、零值、负值和超过 provider 上限的存量配置；重复执行保持一致。
 4. PromptCatalog 能返回模板和 hash；同一内容 hash 稳定。
-5. 增加配置快照转换测试，但暂不写 Run 表。
-6. 删除 `NormalizeAgentConfig` 的静默 clamp 路径，不保留第二套兼容语义。
+5. [完成] Task 创建使用不可变配置值快照；Run 表仍留到阶段 3。
+6. [完成] 删除 `NormalizeAgentConfig` 的静默 clamp 路径，不保留第二套兼容语义。
 
-建议提交：`refactor(agent): unify settings and prompt catalog`。
+PromptCatalog 建议独立提交：`refactor(agent): add versioned prompt catalog`。
 
 ## 验证与回滚
 
