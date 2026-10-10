@@ -65,6 +65,7 @@ plan_id / plan_revision
 current_step_id
 steps[]
   - id
+  - description
   - status
   - result_summary
   - artifact_refs
@@ -82,7 +83,7 @@ waiting_checkpoint
 2. 校验 Run 状态、snapshot revision、current step 和等待消息仍一致。
 3. 读取初始用户消息、已完成步骤摘要、当前问题和本次回答，按固定转换器构造新的 `llmcore.Message` 序列。
 4. 重新获取当前 Run 创建时冻结的 Settings/Prompt 标识和新的 `ToolSet`。
-5. 从原 `current_step_id` 继续执行，不默认重规划；快照无法解释时返回领域错误并转 `interrupted`。
+5. 从原 `current_step_id` 继续执行，不默认重规划；快照无法解释时返回领域错误并转 `interrupted`。恢复时把持久化消息重新装入 Planner/ReAct 的运行期 memory，但最新用户回答只作为本轮 `TaskInput` 注入 ReAct 一次，不能重复进入步骤上下文。
 
 转换器必须是纯函数并有行为测试，保证同一持久化输入生成稳定的 role、顺序和内容。恢复不要求重造已经过期的 Redis 逐 token 事件。
 
@@ -143,6 +144,7 @@ Session 继续保存标题、未读数和最新消息等会话摘要，但不再
 2. 新增 `runs`、`messages` migration 和 model。
 3. 实现 Repository、聚合事务入口和数据库约束测试。
 4. 实现纯 RunService 测试，但不从 bootstrap 注入、不改 Handler、不写生产 Run。该步骤已完成。
+5. 在 Engine adapter 中实现 `RunExecutionSnapshot -> Plan` 恢复和 waiting_input 继续当前步骤；通过行为测试证明恢复不重新规划、步骤摘要可用、问题回答上下文不重复。该步骤已完成，生产切换仍留在阶段 4B。
 
 ## 已完成检查点 3B：Run/Message 持久化
 
@@ -165,7 +167,7 @@ Session 继续保存标题、未读数和最新消息等会话摘要，但不再
 ## 完成条件与回滚
 
 - 状态迁移、幂等、active 唯一索引、消息去重、事务回滚和 waiting_input 恢复测试通过。
-- 恢复测试覆盖已完成步骤摘要、问题回答配对、同一步继续、重复回答幂等及损坏快照转 interrupted。
+- 恢复测试覆盖已完成步骤摘要、问题回答配对、同一步继续、重复回答幂等、损坏快照转 interrupted，以及 adapter 重启恢复不重新规划和回答只注入一次。
 - `go test ./...`、Repository component 测试、migration 测试和 `go vet ./...` 通过。
 - 旧生产链行为不变，bootstrap/Handler 没有 Run 依赖。
 

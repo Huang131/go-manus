@@ -1,6 +1,6 @@
 # Run/Session 重构方案集
 
-本目录是基于当前 `api` 源码整理的实施方案。当前生产语义仍是 `Session + AgentService + RedisStreamTask`；源码中没有 `Run`、`RunService`、`RunExecutor`、Run migration 或 Run API。方案中的 Run 代码均为后续目标，不代表已经实现。
+本目录是基于当前 `api` 源码整理的实施方案。当前生产语义仍是 `Session + AgentService + RedisStreamTask`；Run 领域、Repository、RunService 和 RunExecutor 已分阶段实现，但尚未接入 Bootstrap、Handler、Chat 或 SSE 生产路径。Run API 仍是后续目标，不代表已经实现。
 
 事实基线见 [00-current-review-2026-10.md](./00-current-review-2026-10.md)，实施状态见 [STATUS.md](./STATUS.md)。`docs/重构.md` 只作为历史提案，不作为实施依据。
 

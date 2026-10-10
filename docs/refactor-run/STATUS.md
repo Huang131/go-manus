@@ -10,7 +10,7 @@
 | 1. Settings 与 Prompt | complete | `4df77fe`、`e9dcba2`、`9548b84`、`dd5c2cf`、`b0f5328` | Settings、严格校验、migration、UI 与 PromptCatalog/hash 已完成 |
 | 2. Engine 与 Context | complete | `4650cc4`、`aba7f43`、`8fd0fa6` | Outcome、ContextPolicy 与 MCP 动态调用契约已完成 |
 | 3. Run 领域与存储 | complete | `a8de838`、`f0ada6a`、`6055590`、`cb50565` | 3A 领域、3B Repository/migration、3C 纯 RunService 已完成；尚未接入生产执行路径 |
-| 4. 执行生产切换 | in_progress | `cb50565`、`d7bb0cb` | 4A 已完成 RunExecutor、终态事务和 Planner adapter；尚未接入 Bootstrap、Handler、Chat 或 SSE |
+| 4. 执行生产切换 | in_progress | `cb50565`、`d7bb0cb`、`20b622f` | 4A 生命周期与 waiting_input 恢复前置已完成；尚未接入 Bootstrap、Handler、Chat 或 SSE |
 | 5. API/UI/SSE | pending | - | 唯一公开契约切换点；完成后删除旧路由 |
 | 6. 遗留删除 | pending | - | 依赖阶段 4/5 的引用扫描和回归 |
 
@@ -41,20 +41,21 @@ go vet ./...
 
 本检查点代码尚未接入 Bootstrap、Handler、Chat 或 SSE。
 
-验证结果：
+验证结果（4A/恢复前置）：
 
 ```text
-go test ./... -count=1                                                   PASS
-go test -race ./internal/agent/... ./internal/service ./internal/repository -count=1  PASS
-go vet ./...                                                             PASS
+go test ./internal/model ./internal/service ./internal/agent ./internal/repository -count=1  PASS
+go test ./internal/agent -run TestPlannerEngineAdapterResumesWaitingPlanWithoutReplanning -count=1  PASS
+go vet ./...                                                             未完成：当前环境 Go 编译阶段长时间无输出
 git diff --check                                                         PASS
+go test ./... -count=1                                                   未完成：当前环境 Go 编译阶段长时间无输出，已停止
 go test -tags=integration ./tests -run '^TestRunRepo_FinishTerminal' -count=1
   BLOCKED: 当前受限环境无法连接 localhost:15432（operation not permitted）
 ```
 
-行为契约：RunExecutor 启动后冻结 Settings、消息和 ToolSet；Engine 退出后才释放 ToolSet，再提交 waiting 或终态。工具获取失败、`nil` ToolSet、Engine panic、取消无句柄和终态持久化失败均有测试。Repository 终态、执行快照和最终助手消息使用同一事务，迟到终态受条件更新拒绝。
+行为契约：RunExecutor 启动后冻结 Settings、消息和 ToolSet；Engine 退出后才释放 ToolSet，再提交 waiting 或终态。工具获取失败、`nil` ToolSet、Engine panic、取消无句柄和终态持久化失败均有测试。Repository 终态、执行快照和最终助手消息使用同一事务，迟到终态受条件更新拒绝。Planner adapter 已能从快照恢复计划和当前步骤，恢复时重建持久化上下文且不重新规划，最新回答只注入一次。
 
-边界：Planner adapter 能转换当前 Flow 的成功、失败、取消和等待问题，但尚未把持久化 `RunExecutionSnapshot` 重新灌回 Flow；waiting_input 跨重启恢复仍由 3A 的消息重建契约覆盖。4B 接入生产前必须补齐恢复 Engine 输入边界。
+边界：Planner adapter 已能把持久化 `RunExecutionSnapshot` 重建为 Plan，恢复 Flow 并继续原步骤；恢复测试覆盖不重新规划、步骤摘要和用户回答单次注入。该能力仍是未接生产的前置实现，4B 仍需完成 Bootstrap、Handler、Chat、SSE 切换及取消竞争的 HTTP 验收。
 
 ## 检查点
 
@@ -69,6 +70,7 @@ go test -tags=integration ./tests -run '^TestRunRepo_FinishTerminal' -count=1
 | 3B Run/Message Repository | complete | `f0ada6a` |
 | 3C 纯 RunService | complete | `cb50565 refactor(api): add pure run service` |
 | 4A RunExecutor 生命周期与观测，未接生产 | complete | `refactor(api): add run executor lifecycle` |
+| 4A waiting_input 恢复前置 | complete | `20b622f feat(run): restore waiting input execution context` |
 | 4B 唯一后端生产切换 | pending | `05-run-execution-cutover.md` |
 | 5A Run API/SSE | pending | `06-api-ui-sse-cutover.md` |
 | 5B UI 切换 | pending | `06-api-ui-sse-cutover.md` |
@@ -95,6 +97,7 @@ go test -tags=integration ./tests -run '^TestRunRepo_FinishTerminal' -count=1
 - `StepOutcome.Kind` 是目标唯一等待控制信号；阶段 2 必须删除旧 error/boolean 双表达。Engine 内部完成有限重试，Flow/RunExecutor 不消费 `retryable_failure`，也不重复执行同一次调用。
 - 2A 已完成：BaseAgent 在工具边界将等待输入归一为 `OutcomeWaitingInput`，`WaitingInput.Attachments` 固定为 `[]string`；ReAct 补充 `StepID`，Flow 只按 `Kind` 决定等待、取消、完成和失败。
 - `waiting_input` 依靠 execution snapshot、已完成步骤摘要和问题/回答关联恢复，不依赖旧 goroutine 或 `SimpleMemory`。
+- `20b622f` 已把快照中的计划元数据、步骤描述、完成结果和附件恢复为 `model.Plan`；Planner/ReAct memory 从持久化消息重建，最新回答仅作为当前步骤输入注入一次。
 - 一次客户端提交只使用一个幂等键；创建 Run 与初始消息共享该键，后续输入在 Run 内去重。
 - 阶段 4 不回填 `sessions.events` 或旧 Task 历史，从切换点开始写 Run/Message。
 - Run input 只接受 `waiting_input`；`cancelling`、其他活跃状态和终态分别返回稳定的 409 业务错误，重复幂等输入返回原结果。

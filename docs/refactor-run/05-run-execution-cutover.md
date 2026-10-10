@@ -38,7 +38,7 @@ Handler 不直接创建 `RedisStreamTask`，Engine 和 RunExecutor 都不直接�
 
 实现 RunExecutor 与 Engine adapter，使用服务级测试验证 Settings/Prompt/ToolSet 快照、等待输入和释放路径。此检查点不得修改 Handler，不得产生生产 Run。
 
-本检查点的 adapter 只负责把现有 `PlannerReActFlow` 的事件/状态转换为 `RunExecutionResult`，不负责把持久化的 `RunExecutionSnapshot` 重新灌回 Flow。因而它可以验证成功、失败、取消和本轮等待问题的转换，但**不能宣称已经完成 waiting_input 跨重启恢复**；跨重启恢复仍由 `RunService.SubmitInput` 的 `BuildResumeMessages` 契约承担，生产接入前必须补齐“从快照恢复计划并继续当前步骤”的 Engine 输入边界。
+本检查点的 adapter 已负责把持久化的 `RunExecutionSnapshot` 重建为 `model.Plan`，灌回 `PlannerReActFlow` 并从原 `current_step_id` 继续执行；恢复时复用持久化消息重建运行期 memory，最新用户回答只作为当前 `TaskInput` 注入一次。行为测试已证明恢复不重新规划、已完成步骤摘要和当前步骤描述可用。该能力仍未接入 Bootstrap、Handler、Chat 或 SSE，不能宣称 4B 生产切换已完成。
 
 4A 还要求：工具集合获取返回错误或 `nil` 时，已进入 `running` 的 Run 必须立即执行 `RequestCancel -> ReconcileCancelling`；终态持久化失败时保留控制句柄，允许后续 reconciliation 收敛，不能报告执行已完成。
 
@@ -47,7 +47,7 @@ Handler 不直接创建 `RedisStreamTask`，Engine 和 RunExecutor 都不直接�
 - `RunExecutor` 在 Engine 退出后才调用 `ToolSet.Release`，再提交 waiting 或终态结果。
 - `FinishTerminal` 将终态、执行快照和最终助手消息放在同一事务中；取消后的迟到成功/失败受条件更新拒绝。
 - Engine panic、工具集合获取失败、`nil` 工具集合、取消无句柄和终态持久化失败均有服务测试。
-- adapter 已覆盖成功、等待问题归属（`run_id/session_id`）、快照 revision 和 context cancel 转换。
+- adapter 已覆盖成功、等待问题归属（`run_id/session_id`）、快照 revision、context cancel，以及 waiting_input 快照恢复不重新规划和用户回答不重复注入。
 
 建议提交：`refactor(api): add run executor lifecycle`。
 
