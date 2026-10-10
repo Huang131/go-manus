@@ -7,6 +7,7 @@ import (
 	"runtime/debug"
 	"sync"
 
+	"github.com/Huang131/go-manus/api/internal/agent/attachment"
 	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -31,6 +32,8 @@ type RunExecutionInput struct {
 	Snapshot  model.RunExecutionSnapshot
 	Messages  []llmcore.Message
 	Tools     []toolspkg.Tool
+	// AttachmentContexts 是本轮输入已加载的文件正文，只存在于执行期，不写入 Run 快照。
+	AttachmentContexts []attachment.FileContext
 	// EventPublisher 只承载短期实时事件；发布失败不能改变 Run 持久化结果。
 	EventPublisher RunEventPublisher
 }

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/Huang131/go-manus/api/internal/agent/attachment"
 	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
 	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
@@ -181,6 +182,29 @@ func TestPlannerEngineAdapterPublishesFlowEventsWithoutChangingResult(t *testing
 	events := publisher.snapshot()
 	if len(events) == 0 {
 		t.Fatal("event publisher received no flow events")
+	}
+}
+
+func TestPlannerEngineAdapterPassesAttachmentContextToExecutionPrompt(t *testing.T) {
+	llm := &adapterLLM{responses: []*llmcore.LLMResponse{
+		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: "{\"message\":\"开始\",\"goal\":\"分析\",\"title\":\"任务\",\"language\":\"zh\",\"steps\":[{\"id\":\"step-1\",\"description\":\"分析附件\"}]}"}},
+		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: "{\"success\":true,\"result\":\"已分析\"}"}},
+		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: "总结"}},
+	}}
+	adapter := &PlannerEngineAdapter{LLM: llm}
+	result, err := adapter.Execute(context.Background(), service.RunExecutionInput{
+		RunID: "run-1", SessionID: "session-1", Settings: adapterSettings(),
+		Messages:           []llmcore.Message{{Role: model.RoleUser, ContentText: "分析附件"}},
+		AttachmentContexts: []attachment.FileContext{{Filename: "report.txt", Mode: attachment.ModeInline, Content: "关键结论：通过"}},
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Kind != service.RunExecutionSucceeded || len(llm.requests) < 2 {
+		t.Fatalf("result = %+v, requests = %d", result, len(llm.requests))
+	}
+	if countText(llm.requests[1], "关键结论：通过") == 0 {
+		t.Fatalf("execution prompt omitted attachment context: %#v", llm.requests[1])
 	}
 }
 

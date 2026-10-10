@@ -39,7 +39,7 @@ func (a *PlannerEngineAdapter) Execute(ctx context.Context, input service.RunExe
 	}
 
 	var lastAssistant string
-	for event := range flow.Invoke(ctx, &TaskInput{Message: *message}) {
+	for event := range flow.Invoke(ctx, &TaskInput{Message: *message, AttachmentContexts: input.AttachmentContexts}) {
 		if input.EventPublisher != nil {
 			if err := input.EventPublisher.Publish(ctx, input.RunID, event); err != nil {
 				logger.WarnContext(ctx, "发布 Run 实时事件失败",
