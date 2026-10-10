@@ -2,43 +2,43 @@
 
 这是整个方案唯一的后端生产语义切换点。切换前 Run 代码不接请求；切换后所有执行事实只写 Run/Message，不再写 Session 的 task/status/events。当前切换已完成，本文保留为实施和回滚依据。
 
-本阶段暂不发布新的公开 Run 路由。现有 Session Chat/Stop/SSE 路由可保留一个阶段，但只能作为 RunService 的薄适配，阶段 5 随 UI 切换直接删除。
+Run API 已接入生产路由，旧 Session Chat/Stop 路由已经删除。Session 下保留的 `/sessions/stream` 只推送会话列表变化，不承载 Run 执行事件；一次 Run 的实时事件统一通过 `/runs/:runId/events` 读取。
 
 ## 切换前置条件
 
 - 阶段 1、2、3 已完成并在 `STATUS.md` 记录真实验证结果。
 - Run 状态矩阵、active 唯一约束、取消条件更新、幂等和消息事务测试通过。
 - RunExecutor 可执行现有 Engine，并在成功、失败、等待、取消和 panic 防护路径释放 `ToolSet`。
-- 当前 Chat/Stop/SSE 行为有回归测试，能证明切换没有丢失用户可见能力。
+- 当前 Run API、等待输入、取消和 Run SSE 行为有回归测试，能证明切换没有丢失用户可见能力。
 
 ## 目标调用链
 
 ```text
-SessionHandler（临时适配）
-  -> RunService.Create / SubmitInput / Cancel / GetEvents
+RunHandler / SessionHandler
+  -> RunApplicationService.Create / SubmitInput / Cancel / Get / ListBySession
   -> RunExecutor
   -> Planner/ReAct Engine
-  -> RunService persistence boundary + RunEventStream
+  -> RunRepository + RunEventStream
 ```
 
-Handler 不直接创建 `RedisStreamTask`，Engine 和 RunExecutor 都不直接调用 Repository。RunExecutor 只负责编排一次运行，通过 RunService 提交状态、Plan 和最终消息，不对外提供业务 API。
+Handler 不直接创建执行对象，Engine 和 RunExecutor 都不直接调用 Repository。RunExecutor 只负责编排一次运行，通过 RunService 提交状态、Plan 和最终消息，不对外提供业务 API。
 
 ## 代码范围
 
 - `internal/bootstrap`：装配 Settings、PromptCatalog、ToolProvider、RunService、RunExecutor 和 RunEventStream。
-- `internal/service`：新增 RunService/RunExecutor；旧 AgentService 执行入口缩减为适配或删除。
+- `internal/service`：提供 RunApplicationService/RunExecutor；AgentService 仅保留工具快照和运行时配置协作能力。
 - `internal/agent`：提供稳定 Engine facade，复用现有 Planner/ReAct/Flow，不复制状态机。
-- `internal/handler`：现有 Chat/Stop/SSE 只做请求转换和 RunService 调用，不再访问 Task。
+- `internal/handler`：RunHandler 负责 Run 创建、输入、取消、查询和 Run SSE；SessionHandler 只负责会话与会话列表 SSE，不访问 Task。
 - `internal/repository`：Run/Message 成为唯一执行事实写入口。
-- `internal/runstream`：定义 RunEventStream 契约和 Redis 实现，使用 Run ID 作为 stream key，保留短期实时事件。
+- `internal/service`：定义 RunEventStream 契约和 Redis 实现，使用 Run ID 作为 stream key，保留短期实时事件。
 
 ## 检查点
 
 ### 4A：装配但不接生产
 
-实现 RunExecutor 与 Engine adapter，使用服务级测试验证 Settings/Prompt/ToolSet 快照、等待输入和释放路径。此检查点不得修改 Handler，不得产生生产 Run。
+实现 RunExecutor 与 Engine adapter，使用服务级测试验证 Settings/Prompt/ToolSet 快照、等待输入和释放路径。该检查点曾经不接生产请求，当前已由 4B 完成接线。
 
-本检查点的 adapter 已负责把持久化的 `RunExecutionSnapshot` 重建为 `model.Plan`，灌回 `PlannerReActFlow` 并从原 `current_step_id` 继续执行；恢复时复用持久化消息重建运行期 memory，最新用户回答只作为当前 `TaskInput` 注入一次。行为测试已证明恢复不重新规划、已完成步骤摘要和当前步骤描述可用。该能力仍未接入 Bootstrap、Handler、Chat 或 SSE，不能宣称 4B 生产切换已完成。
+本检查点的 adapter 负责把持久化的 `RunExecutionSnapshot` 重建为 `model.Plan`，灌回 `PlannerReActFlow` 并从原 `current_step_id` 继续执行；恢复时复用持久化消息重建运行期 memory，最新用户回答只作为当前 `TaskInput` 注入一次。行为测试已证明恢复不重新规划、已完成步骤摘要和当前步骤描述可用。
 
 4A 还要求：工具集合获取返回错误或 `nil` 时，已进入 `running` 的 Run 必须立即执行 `RequestCancel -> ReconcileCancelling`；终态持久化失败时保留控制句柄，允许后续 reconciliation 收敛，不能报告执行已完成。
 
@@ -49,13 +49,13 @@ Handler 不直接创建 `RedisStreamTask`，Engine 和 RunExecutor 都不直接�
 - Engine panic、工具集合获取失败、`nil` 工具集合、取消无句柄和终态持久化失败均有服务测试。
 - adapter 已覆盖成功、等待问题归属（`run_id/session_id`）、快照 revision、context cancel，以及 waiting_input 快照恢复不重新规划和用户回答不重复注入。
 
-建议提交：`refactor(api): add run executor lifecycle`。
+对应提交：`refactor(api): add run executor lifecycle`、`feat(run): restore waiting input execution context`。
 
 ### 4B：原子切换生产语义
 
-在一个提交中完成 bootstrap、Handler、Service 和事件读取切换。旧 Session 路由继续存在时，只解析旧请求并调用 RunService；旧 SSE 路由根据当前 Run 定位 RunEventStream，不再读取 Task registry。切换从本提交开始写入 Run/Message，不回填旧 `sessions.events`。当前实现已满足这一边界：旧 Chat 的 `task_id` SSE 字段只作为协议兼容字段，值为 Run ID。
+在一个切换窗口内完成 bootstrap、Handler、Service 和事件读取切换。Run 创建、输入、取消、查询和 Run SSE 均通过 RunApplicationService；Session 列表 SSE 保持会话级语义，不读取 Task registry。切换从对应提交开始写入 Run/Message，不回填旧 `sessions.events`。
 
-实际提交：`refactor(api): switch session execution to runs`。
+实际提交：`refactor(api): switch session execution to runs`、`feat(api): expose run lifecycle and event APIs`、`refactor(api): remove legacy session execution routes`。
 
 禁止拆成“先双写验证，再删除旧写入”的两个生产提交。项目尚未上线，直接用测试和数据库约束证明切换正确。
 
@@ -105,4 +105,4 @@ Handler 不直接创建 `RedisStreamTask`，Engine 和 RunExecutor 都不直接�
 
 ## 回滚边界
 
-4A 可独立 revert。4B 必须整体 revert，不能只恢复 Handler 或只恢复 Executor。回滚到阶段 3 后，旧 Session 语义仍完整；不得保留 Run/Session 双写作为回滚手段。
+4A 可独立 revert。4B 必须整体 revert，不能只恢复 Handler 或只恢复 Executor。当前阶段 5/6 已删除旧 Task 和 Session 执行字段，不能通过恢复旧代码形成 Run/Session 双写；若需要回滚，必须连同对应 migration 和 UI/API 提交一起回滚。

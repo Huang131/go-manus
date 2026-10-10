@@ -1,10 +1,10 @@
-# 阶段 3：Run 领域与存储（未接生产）
+# 阶段 3：Run 领域与存储（已完成）
 
-> 当前源码没有 Run、RunStatus、RunRepository、MessageRepository 或 Run migration。本阶段先锁定领域和事务契约，再写代码与测试。
+> 本文保留阶段 3 的领域与事务决策。Run、RunStatus、RunRepository、MessageRepository 与 migration 已实现，并在阶段 4 接入生产路径。
 
 ## 目标与边界
 
-建立最小 Run 领域模型和 PostgreSQL 存储，不接入现有 Chat/Stop/SSE 生产路径。阶段结束时可以独立创建、迁移、查询和测试 Run；生产请求仍只使用 Session/RedisStreamTask。
+建立最小 Run 领域模型和 PostgreSQL 存储。阶段 3 完成时仅独立创建、迁移、查询和测试 Run；阶段 4 已将生产请求切换到 Run/Message 与 Run Stream。
 
 本阶段不引入 Worker、Lease、Outbox、永久事件表、Plan/Step 表或通用 UnitOfWork。首期 Run 由当前进程执行，PostgreSQL 保存业务事实，Redis 只承载短期实时事件。这些能力并非永久排除，只有达到 [目标架构](./01-architecture.md#7-演进边界) 中的触发条件后才单独立项。
 
@@ -39,7 +39,7 @@ cancelling -> cancelled
 
 ### 3A 领域检查点（已完成）
 
-`a8de838` 已实现但尚未接入存储的最小领域契约：
+`a8de838` 实现的最小领域契约：
 
 - `model.RunStatus` 集中定义 active、terminal 和允许的状态迁移；后续 Repository 只能复用该矩阵，不能自行发明状态转换。
 - `model.RunExecutionSnapshot`、`RunStepSnapshot` 和 `WaitingCheckpoint` 是 JSONB 的 Go 契约。进入 `waiting_input` 恢复前必须验证正修订号、当前步骤、稳定问题消息、`continue_step` 恢复模式、唯一步骤 ID，以及每个 completed 步骤的非空结果摘要。
@@ -129,7 +129,7 @@ Session 继续保存标题、未读数和最新消息等会话摘要，但不再
 
 ## 历史数据策略
 
-阶段 3 的 `runs/messages` 不接生产，因此表最初为空。阶段 4 从切换点开始写入，不回填 `sessions.events`、旧 task 状态或 Redis 历史；开发环境旧执行数据可以通过 migration 重置。不得为回填历史而引入双写、兼容读取或一次性事件解释器。
+阶段 3 的 `runs/messages` 不接生产，因此表最初为空；阶段 4 从切换点开始写入，不回填 `sessions.events`、旧 task 状态或 Redis 历史。当前仍禁止为历史回填引入双写、兼容读取或一次性事件解释器。
 
 ## Redis 与恢复边界
 
@@ -138,7 +138,7 @@ Session 继续保存标题、未读数和最新消息等会话摘要，但不再
 - Redis 丢失后，客户端通过 Run、Message 和执行快照恢复；服务端不重造逐 token 历史。
 - 最终助手消息只在内容完整且 Run 终态条件更新成功时写入，避免取消后出现伪成功回复。
 
-## 实施顺序
+## 历史实施顺序
 
 1. 评审状态矩阵、执行快照、消息转换、幂等、active 唯一约束和重启语义。
 2. 新增 `runs`、`messages` migration 和 model。
@@ -148,7 +148,7 @@ Session 继续保存标题、未读数和最新消息等会话摘要，但不再
 
 ## 已完成检查点 3B：Run/Message 持久化
 
-已新增 `006_create_runs_and_messages.sql` 与 `PostgresRunRepository`。该检查点只建立 Run 聚合的数据库事实来源，尚未注入 bootstrap，也没有修改 Chat、Session、Task 或 SSE 的生产写路径。
+已新增 `006_create_runs_and_messages.sql` 与 `PostgresRunRepository`。该检查点建立了 Run 聚合的数据库事实来源；阶段 4 随后完成 bootstrap、执行和 SSE 生产接线。
 
 - 创建 Run 与首条用户消息在同一事务中写入，并以 `(session_id, idempotency_key)` 返回首个聚合。
 - `waiting_input` 同事务写入执行快照、助手问题和 `waiting_message_id`；问题消息归属不一致时，状态更新和消息插入必须整体回滚。
@@ -156,9 +156,9 @@ Session 继续保存标题、未读数和最新消息等会话摘要，但不再
 - PostgreSQL 部分唯一索引保证同一 Session 同时只有一个 active Run。
 - 组件测试在真实 PostgreSQL、Redis、MinIO 测试环境中覆盖聚合创建、单活跃约束、创建幂等、等待/恢复、输入幂等和事务回滚；`make test-component` 已将 `TestRunRepo_` 纳入门禁。
 
-3C 已实现纯 `RunService`：在不接入生产路径的前提下，把创建、启动、等待、恢复输入、取消请求和取消收敛收敛成可测试的领域用例。服务不启动 Engine、不持有进程内控制句柄、不发布事件。
+3C 已实现纯 `RunService`：把创建、启动、等待、恢复输入、取消请求和取消收敛收敛成可测试的领域用例。服务不启动 Engine、不持有进程内控制句柄、不发布事件；这些职责由阶段 4 的 RunExecutor 和应用层编排。
 
-建议提交拆分：
+历史提交拆分：
 
 - `feat(api): define run domain contracts`
 - `feat(api): add run persistence`
@@ -169,6 +169,6 @@ Session 继续保存标题、未读数和最新消息等会话摘要，但不再
 - 状态迁移、幂等、active 唯一索引、消息去重、事务回滚和 waiting_input 恢复测试通过。
 - 恢复测试覆盖已完成步骤摘要、问题回答配对、同一步继续、重复回答幂等、损坏快照转 interrupted，以及 adapter 重启恢复不重新规划和回答只注入一次。
 - `go test ./...`、Repository component 测试、migration 测试和 `go vet ./...` 通过。
-- 旧生产链行为不变，bootstrap/Handler 没有 Run 依赖。
+- 生产接线已在阶段 4 完成，当前 bootstrap/Handler 只通过 Run 应用边界执行。
 
-回滚只删除本阶段新增的 Run/Message 文件和 migration，不触碰 `sessions` 现有执行列；阶段 4 切换前不得清理旧列。
+阶段 3 的独立回滚边界是删除本阶段新增的 Run/Message 文件和 migration；当前阶段 4/6 已完成，不能单独回滚存储而保留生产 Run 写路径。

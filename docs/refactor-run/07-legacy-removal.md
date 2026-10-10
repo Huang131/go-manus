@@ -45,12 +45,12 @@
 - `refactor(api): make session a conversation container`
 - `refactor(api): decouple model from infrastructure`
 
-每个提交都必须编译、测试、可单独 revert；不通过复制旧 Task 临时修复编译错误。
+实际提交为 `2bd649d`、`afcedfd`、`2e3fa27`。每个提交都必须编译、测试、可单独 revert；不通过复制旧 Task 临时修复编译错误。
 
 ## 完成定义
 
 - 生产代码不再包含旧 Task/registry 和 Session 执行写路径。
 - RunService/RunRepository 是唯一执行状态写入口。
-- `model` 不依赖 logger、sonic、repository 或 external 实现。
+- `model` 不依赖 logger、repository 或 external 实现；JSON 编解码统一使用项目已有的 `sonic`，`json.RawMessage` 仅保留标准库类型依赖。
 - API 全量 test、race、vet 及 UI lint/build 通过。
 - `STATUS.md` 记录最终删除清单、migration、验证结果和回滚方式。

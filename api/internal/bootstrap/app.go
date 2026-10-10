@@ -774,7 +774,7 @@ func (a *App) initAgent(opts Options, clients *externalClients) error {
 	return nil
 }
 
-// initRunExecution 装配 Run 的生产协作者，但暂不替换旧 SessionHandler 路由。
+// initRunExecution 装配 Run 的生产协作者。
 // 生产切换单独进行，避免新旧执行链在同一请求中双写。
 func (a *App) initRunExecution(clients *externalClients) error {
 	if a.RunService == nil || a.AgentService == nil || clients == nil || clients.llm == nil {

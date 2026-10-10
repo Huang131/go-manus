@@ -156,7 +156,7 @@ type runControl struct {
 	cancel context.CancelFunc
 }
 
-// NewRunExecutor 创建未接入生产路由的执行器。
+// NewRunExecutor 创建不带实时事件发布器的执行器，供局部装配和测试使用。
 func NewRunExecutor(store RunExecutionStore, provider RunToolProvider, engine RunExecutionEngine) *RunExecutor {
 	return NewRunExecutorWithEventPublisher(store, provider, engine, nil)
 }

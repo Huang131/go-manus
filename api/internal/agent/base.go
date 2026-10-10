@@ -281,7 +281,7 @@ func (a *BaseAgent) invokeLLMWithEmission(ctx context.Context, req *llm.LLMReque
 streamLoop:
 	for {
 		// 某些 provider 在取消后不会及时关闭响应流；不能用 range 等待其关闭，
-		// 否则 StopSession 会被上游连接生命周期拖住。
+		// 否则上层取消请求会被上游连接生命周期拖住。
 		if err := ctx.Err(); err != nil {
 			return nil, false, err
 		}

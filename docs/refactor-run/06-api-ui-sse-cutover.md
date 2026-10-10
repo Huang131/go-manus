@@ -50,19 +50,19 @@ UI 以 `run_id` 作为执行标识，Session 仅作为会话容器。会话详�
 
 发布 Run Handler/Router 和契约测试。阶段结束前旧 Session 路由仍可短暂存在，但必须调用同一 RunService，不能保留 Task 读取路径。
 
-建议提交：`feat(api): expose run lifecycle and event APIs`。
+对应提交：`feat(api): expose run lifecycle and event APIs`。
 
 ### 5B：UI 切换
 
 切换 API client、状态存储、SSE 重连、等待输入和取消交互；前端 lint、build 通过。当前 UI 已完成此检查点。
 
-建议提交：`refactor(ui): consume run lifecycle`。
+对应提交：`refactor(ui): consume run lifecycle`。
 
 ### 5C：删除旧路由（complete）
 
 已删除 Session Chat/Stop 路由、DTO 和 UI 旧 client；会话列表 `/sessions/stream` 仍保留，它只推送 Session 目录变化，不承载 Run 执行事件。因为项目未上线，没有增加 deprecated 标记或兼容版本。
 
-建议提交：`refactor(api): remove legacy session execution routes`。
+对应提交：`refactor(api): remove legacy session execution routes`。
 
 ## 完成条件
 

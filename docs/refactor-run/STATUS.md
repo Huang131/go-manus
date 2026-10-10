@@ -9,10 +9,10 @@
 | 0. 事实基线与方案校准 | complete | `0382404` | 已核对当前 Session/Task 链、配置、Engine、ToolSet，并形成可恢复的阶段方案 |
 | 1. Settings 与 Prompt | complete | `4df77fe`、`e9dcba2`、`9548b84`、`dd5c2cf`、`b0f5328` | Settings、严格校验、migration、UI 与 PromptCatalog/hash 已完成 |
 | 2. Engine 与 Context | complete | `4650cc4`、`aba7f43`、`8fd0fa6` | Outcome、ContextPolicy 与 MCP 动态调用契约已完成 |
-| 3. Run 领域与存储 | complete | `a8de838`、`f0ada6a`、`6055590`、`cb50565` | 3A 领域、3B Repository/migration、3C 纯 RunService 已完成；尚未接入生产执行路径 |
-| 4. 执行生产切换 | complete | `e281520`、`bb171f6`、本轮 Run 切换 | 4A 生命周期、waiting_input 恢复、4B 应用编排、Bootstrap 和旧 Session Chat/Stop/SSE 的 Run 薄适配已完成；生产执行不再进入 Task 链 |
+| 3. Run 领域与存储 | complete | `a8de838`、`f0ada6a`、`6055590`、`cb50565` | 3A 领域、3B Repository/migration、3C 纯 RunService 已完成；生产接线由阶段 4 完成 |
+| 4. 执行生产切换 | complete | `e281520`、`bb171f6`、`2749c5a` | 4A 生命周期、waiting_input 恢复、4B 应用编排和 Bootstrap 接线已完成；Run API 是执行入口，生产执行不再进入 Task 链 |
 | 5. API/UI/SSE | complete | `c1cefeb`、`7cdfafe`、本轮旧路由删除 | Run API、Last-Event-ID、Run 历史读取、UI 切换和旧 Session Chat/Stop 路由删除已完成；真实依赖 HTTP 验收按环境执行 |
-| 6. 遗留删除 | complete | `2bd649d`、`afcedfd`、`refactor(api): decouple model from infrastructure` | 6A、6B、6C 已完成；后续只需在真实依赖环境验收迁移 |
+| 6. 遗留删除 | complete | `2bd649d`、`afcedfd`、`2e3fa27` | 6A、6B、6C 已完成；后续只需在真实依赖环境验收迁移 |
 
 允许状态：`pending`、`in_progress`、`complete`、`blocked`。
 
@@ -24,7 +24,7 @@ SessionHandler -> RunApplicationService -> RunExecutor
               -> RunRepository + RunEventStream
 ```
 
-当前生产 Chat、Stop 和 Session SSE 已通过 Run 应用边界执行。执行事实、终态消息和实时事件只写 Run/Message 与 Run Stream，不再调用旧 Task registry 或写入 `sessions.events`。Session 仅保存会话元数据；列表接口额外返回从 runs 查询得到的 `active_run_status` 只读投影。`AgentService` 只作为工具与配置装配协作者存在。`ToolRegistry`、MCP/A2A ToolSet 引用生命周期已完成，不属于本方案待办。
+当前生产执行入口是 Run API：创建、提交输入、取消、查询和 Run SSE 均通过 Run 应用边界完成。Session SSE 只推送会话列表，不承载 Run 事件。执行事实、终态消息和实时事件只写 Run/Message 与 Run Stream，不再调用旧 Task registry 或写入 `sessions.events`。Session 仅保存会话元数据；列表接口额外返回从 runs 查询得到的 `active_run_status` 只读投影。`AgentService` 只作为工具与配置装配协作者存在。`ToolRegistry`、MCP/A2A ToolSet 引用生命周期已完成，不属于本方案待办。
 
 ## 最近验证基线
 
@@ -51,11 +51,11 @@ npm run build                                                 PASS
 npm run lint                                                  PASS（仅保留既有 warning）
 ```
 
-本环境执行 `go test ./...` 时，`internal/agent/tools`、`internal/handler` 和 `internal/sandbox` 的既有 `httptest`/回环端口测试被系统拒绝绑定端口；其余包通过。这是环境约束，不能记录为全仓测试通过。
+当前环境最新验证：`go test ./... -count=1` 全部通过。此前受限环境曾拒绝部分回环端口测试，旧记录不再作为当前门禁结论；真实 PostgreSQL/Redis/MinIO 组件验收仍需在对应依赖环境执行。
 
-## 最近完成：检查点 4A RunExecutor 生命周期与 Engine adapter
+## 历史验证：检查点 4A RunExecutor 生命周期与 Engine adapter
 
-该检查点完成时尚未接入 Bootstrap、Handler、Chat 或 SSE；后续 4B 已完成生产接线。
+该检查点完成时尚未接入 Bootstrap、Handler、Chat 或 SSE；后续 4B 已完成生产接线。以下命令保留为当时的验证记录，不代表当前门禁状态。
 
 验证结果（4A/恢复前置）：
 
@@ -85,12 +85,12 @@ go test -tags=integration ./tests -run '^TestRunRepo_FinishTerminal' -count=1
 | 3A Run、执行快照与等待恢复契约 | complete | `a8de838` |
 | 3B Run/Message Repository | complete | `f0ada6a` |
 | 3C 纯 RunService | complete | `cb50565 refactor(api): add pure run service` |
-| 4A RunExecutor 生命周期与观测，未接生产 | complete | `refactor(api): add run executor lifecycle` |
+| 4A RunExecutor 生命周期与观测 | complete | `refactor(api): add run executor lifecycle` |
 | 4A waiting_input 恢复前置 | complete | `20b622f feat(run): restore waiting input execution context` |
 | 4B 应用编排边界与依赖装配 | complete | `e281520 feat(run): add application orchestration boundary` 及 `bb171f6` Bootstrap 装配 |
 | 4B Run API/SSE 入口 | complete | `c1cefeb feat(api): expose run lifecycle and event APIs` |
-| 4B 唯一后端生产切换 | complete | 本轮 Session Chat/Stop/SSE 已改为 Run 薄适配；旧 Task 读取路径已移除 |
-| 5A Run API/SSE | complete | Run Handler、Session 兼容路由和 Last-Event-ID 契约测试已补；真实依赖测试待在 component 环境执行 |
+| 4B 唯一后端生产切换 | complete | `2749c5a` 及后续 Run API/旧路由删除提交；旧 Task 读取路径已移除 |
+| 5A Run API/SSE | complete | Run Handler、Run SSE 和 Last-Event-ID 契约测试已补；真实依赖测试待在 component 环境执行 |
 | 5B UI 切换 | complete | 本轮 `refactor(ui): consume run lifecycle`：UI 的创建、事件流、等待输入和取消均走 Run API；补充历史 Run/Message 读取 |
 | 5C 删除旧路由 | complete | 本轮 `refactor(api): remove legacy session execution routes`：删除 Session Chat/Stop handler、路由、DTO 和 UI client；Session Delete 保留取消活跃 Run 的资源清理 |
 | 6A 删除 Task 基础设施 | complete | `2bd649d` | 已删除 `RedisStreamTask`、旧 `AgentTaskRunner`、默认 Task registry、Task 专用测试及 AgentService 旧 Chat/Stop/事件入口 |
