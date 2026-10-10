@@ -1,10 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""
-@Time    : 2025/05/12 14:36
-@Author  : thezehui@gmail.com
-@File    : file.py
-"""
 import asyncio
 import glob
 import itertools

@@ -1,24 +1,15 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""
-@Time    : 2025/05/26 2:22
-@Author  : thezehui@gmail.com
-@File    : middleware.py
-"""
 import logging
 
 from fastapi import Request
 
-from app.core.config import get_settings
 from app.interfaces.service_dependencies import get_supervisor_service
 
 logger = logging.getLogger(__name__)
 
 
 async def auto_extend_timeout_middleware(request: Request, call_next):
-    """使用中间件延长每次API请求是超时销毁时间"""
-    # 1.获取系统配置与supervisor服务
-    settings = get_settings()
+    """使用中间件延长每次API请求的超时销毁时间"""
+    # 1.获取supervisor服务
     supervisor_service = get_supervisor_service()
 
     # 2.判断逻辑，仅在符合条件时延长超时销毁时间3分钟
@@ -28,11 +19,12 @@ async def auto_extend_timeout_middleware(request: Request, call_next):
         "/api/supervisor/cancel-timeout",
         "/api/supervisor/timeout-status",
     )
+    # server_timeout_minutes 带默认值、类型非 Optional，判断其是否为 None 恒为真，
+    # 是否启用自动延长由 supervisor_service.expand_enabled 决定。
     if (
-            settings.server_timeout_minutes is not None
-            and supervisor_service.timeout_active
+            supervisor_service.timeout_active
             and request.url.path.startswith("/api/")
-            and not request.url.path.startswith(ignore_paths)
+            and request.url.path not in ignore_paths
             and supervisor_service.expand_enabled
     ):
         try:

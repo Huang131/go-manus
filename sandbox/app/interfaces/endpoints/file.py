@@ -1,10 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""
-@Time    : 2025/05/10 17:18
-@Author  : thezehui@gmail.com
-@File    : file.py
-"""
 import os.path
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form

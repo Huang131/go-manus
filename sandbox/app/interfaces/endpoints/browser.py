@@ -1,10 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""
-@Time    : 2025/05/13 09:20
-@Author  : thezehui@gmail.com
-@File    : browser.py
-"""
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header
