@@ -10,13 +10,8 @@ import (
 
 const (
 	sseEventSessions = "sessions"
-	sseEventMessage  = "message"
-	sseEventTaskID   = "task_id"
 
 	sessionStreamPollInterval = 5 * time.Second
-	sessionStreamTimeout      = 30 * time.Minute
-	sessionHeartbeatInterval  = 15 * time.Second
-	sessionEventPollInterval  = 100 * time.Millisecond
 )
 
 // setSSEHeaders 统一设置 SSE 响应头，避免不同流式接口出现行为漂移。
@@ -29,7 +24,7 @@ func setSSEHeaders(c *gin.Context) {
 }
 
 // writeSSEEvent 写出带 Redis Stream 游标的 SSE 事件。
-// SSE 的 id 字段是断线续读唯一可信的游标，业务 payload 中的 event_id 仍保持 UUID 语义。
+// SSE 的 id 字段是断线续读游标；Run 事件 payload 中的 event_id 由 handler 写出时同步为该游标。
 func writeSSEEvent(c *gin.Context, eventType, streamID string, payload []byte) error {
 	var b strings.Builder
 	if streamID != "" {

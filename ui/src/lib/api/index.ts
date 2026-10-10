@@ -44,7 +44,6 @@ export type {
   SessionsData,
   CreateSessionParams,
   ChatMessage,
-  ChatParams,
   PlanStep,
   PlanEvent,
   StepEvent,

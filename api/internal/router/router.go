@@ -38,8 +38,6 @@ func SetupRoutes(engine *gin.Engine, h *Handlers) {
 			sessions.POST("/:id/delete", h.Session.Delete) // 对齐原项目
 			sessions.POST("/:id/rename", h.Session.RenameSession)
 			sessions.POST("/:id/clear-unread-message-count", h.Session.ClearUnread) // 对齐原项目
-			sessions.POST("/:id/chat", h.Session.Chat)
-			sessions.POST("/:id/stop", h.Session.Stop)
 			sessions.GET("/:id/files", h.Session.GetFiles)
 			// 对齐原项目：/sessions/:id/file (POST 读沙箱文件) 和 /sessions/:id/shell (POST 读 shell 输出)
 			sessions.POST("/:id/file", h.Session.ReadFile)

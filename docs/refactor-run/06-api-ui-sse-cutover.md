@@ -58,15 +58,15 @@ UI 以 `run_id` 作为执行标识，Session 仅作为会话容器。会话详�
 
 建议提交：`refactor(ui): consume run lifecycle`。
 
-### 5C：删除旧路由
+### 5C：删除旧路由（complete）
 
-删除 Session Chat/Stop/SSE 路由、DTO 和 UI 旧解析。因为项目未上线，不增加 deprecated 标记或兼容版本。
+已删除 Session Chat/Stop 路由、DTO 和 UI 旧 client；会话列表 `/sessions/stream` 仍保留，它只推送 Session 目录变化，不承载 Run 执行事件。因为项目未上线，没有增加 deprecated 标记或兼容版本。
 
 建议提交：`refactor(api): remove legacy session execution routes`。
 
 ## 完成条件
 
-- UI 和 API 只出现 Run 执行语义；全仓不存在旧 Session Chat/Stop/SSE 调用。
+- UI 和 API 执行入口只出现 Run 语义；全仓不存在旧 Session Chat/Stop 调用。Session 列表 SSE 仍是独立的目录订阅。
 - Last-Event-ID 的重复、丢失、过期、稳定 event ID、客户端幂等和终态重复边界有 HTTP 层真实测试。
 - input API 对 `cancelling`、非等待活跃状态、终态和重复幂等输入的 HTTP 状态码与业务错误码有契约测试。
 - Run 查询在 Redis 不可用时仍返回终态、错误、Plan 和最终消息。

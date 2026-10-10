@@ -908,9 +908,7 @@ func (a *App) initRoutes(cfg *config.Config, opts Options) {
 		runEvents = service.NewRedisRunEventStream(mq.NewRedisStreamMessageQueue(a.Redis.Client))
 		runHandler = handler.NewRunHandler(a.RunApplication, runEvents)
 	}
-	// Run 已装配时，保留旧 Session 路由作为薄适配，但不再将请求送入 Agent Task 链。
-	// 未启用 Run 的精简启动场景仍可使用会话管理及旧行为。
-	sessionHandler := handler.NewSessionHandler(a.SessionService, sandboxService, a.RunApplication, runEvents)
+	sessionHandler := handler.NewSessionHandler(a.SessionService, sandboxService, a.RunApplication)
 	fileHandler := handler.NewFileHandler(a.FileService, a.SessionService)
 	statusHandler := handler.NewStatusHandler(a.StatusService)
 	var appConfigHandler *handler.AppConfigHandler

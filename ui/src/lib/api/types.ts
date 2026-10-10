@@ -208,23 +208,8 @@ export type ChatMessage = {
   [key: string]: unknown;
 };
 
-/**
- * 聊天请求参数
- * message 为空时用于流式拉取未完成任务的事件列表
- */
-export type ChatParams = {
-  message?: string;
-  attachments?: string[];
-  event_id?: string;
-  [key: string]: unknown;
-};
-
-/**
- * 会话详情（含事件列表，与 chat 流式响应格式一致）
- */
-export type SessionDetail = Session & {
-  events?: SSEEventData[];
-};
+/** 会话详情。执行历史由 Run API 查询，Session 只作为会话容器。 */
+export type SessionDetail = Session;
 
 export type RunMessage = {
   id: string;

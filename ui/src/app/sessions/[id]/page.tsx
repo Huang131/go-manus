@@ -10,7 +10,7 @@ interface PageProps {
 
 /**
  * 任务详情页：展示会话标题、事件时间线、任务进度与输入框。
- * - 通过 getSessionDetail 获取任务详情与事件列表（若后端返回 events）
+ * - 通过 getSessionDetail 获取会话容器，执行历史由 Run API 在详情组件中加载
  * - 未完成任务通过 chat 空 body 流式拉取事件
  * - 发送消息通过 chat 带 message/attachments 流式追加事件
  * - 支持从 URL 参数读取初始消息（用于首页跳转场景）

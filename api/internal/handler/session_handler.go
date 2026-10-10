@@ -10,14 +10,12 @@ import (
 	"github.com/bytedance/sonic"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
-	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/sandbox"
 	"github.com/Huang131/go-manus/api/internal/service"
 	"github.com/Huang131/go-manus/api/pkg/logger"
 	"github.com/Huang131/go-manus/api/pkg/response"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 // SessionHandler 会话处理器
@@ -25,16 +23,14 @@ type SessionHandler struct {
 	service service.SessionService
 	sandbox sandbox.Sandbox
 	run     service.RunApplicationService
-	events  service.RunEventReader
 }
 
 // NewSessionHandler 创建会话处理器
-func NewSessionHandler(svc service.SessionService, sandbox sandbox.Sandbox, run service.RunApplicationService, events service.RunEventReader) *SessionHandler {
+func NewSessionHandler(svc service.SessionService, sandbox sandbox.Sandbox, run service.RunApplicationService) *SessionHandler {
 	return &SessionHandler{
 		service: svc,
 		sandbox: sandbox,
 		run:     run,
-		events:  events,
 	}
 }
 
@@ -168,175 +164,6 @@ func (h *SessionHandler) Stream(c *gin.Context) {
 	}
 }
 
-// chatRequest Chat 请求体
-type chatRequest struct {
-	Message     *string  `json:"message"`
-	Attachments []string `json:"attachments"`
-	// 兼容两种命名：前端 startEmptyStream 发的 event_id，HTTP 标准 SSE 的 Last-Event-ID
-	EventID string `json:"event_id"`
-	// 本次 chat 要用的模型 ID（可选）。空表示走 default。
-	// 用于"会话中途临时切换模型"，不影响其他 session 也不改 DB 的 default。
-	ModelID string `json:"model_id"`
-}
-
-// maxChatBodyBytes Chat 请求体大小上限，防止超大 body 全量读入内存
-const maxChatBodyBytes = 1 << 20 // 1MB
-
-// parseChatRequest 解析并校验 Chat 请求体。
-// Message 用 *string 区分"未传 message 键"（空流续读）与"传了空串"（参数错误）。
-func parseChatRequest(c *gin.Context) (*chatRequest, error) {
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxChatBodyBytes)
-	rawBody, err := c.GetRawData()
-	if err != nil {
-		return nil, apperr.BadRequest("读取请求体失败")
-	}
-
-	var req chatRequest
-	if len(rawBody) > 0 {
-		if err := sonic.Unmarshal(rawBody, &req); err != nil {
-			return nil, apperr.BadRequest(err.Error())
-		}
-	}
-	if req.Message != nil && strings.TrimSpace(*req.Message) == "" {
-		return nil, apperr.BadRequest("消息内容不能为空")
-	}
-	return &req, nil
-}
-
-// Chat 聊天 (SSE 流式)
-//
-// 区分两种调用语义（对齐原 mooc-manus Python 版本 agent_service.chat 的 if message 分支）：
-//  1. 发送新消息：body 含 "message" 键（非空字符串），进入 chat 流程
-//  2. 空流续读：body 不含 "message" 键，仅传 event_id 订阅当前 Run 的事件流
-func (h *SessionHandler) Chat(c *gin.Context) {
-	h.chatRun(c, c.Param("id"))
-}
-
-// chatRun 保留旧 Session Chat 的 HTTP/SSE 形状，但执行事实全部来自 Run。
-func (h *SessionHandler) chatRun(c *gin.Context, sessionID string) {
-	if h.run == nil || h.events == nil {
-		response.FromError(c, apperr.FailedPrecondition("run execution is not configured"))
-		return
-	}
-	req, err := parseChatRequest(c)
-	if err != nil {
-		response.FromError(c, err)
-		return
-	}
-	startID := strings.TrimSpace(req.EventID)
-	if startID == "" {
-		startID = strings.TrimSpace(c.GetHeader("Last-Event-ID"))
-	}
-	var runID string
-	if req.Message != nil {
-		key := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
-		if key == "" {
-			key = uuid.NewString()
-		}
-		ctx := c.Request.Context()
-		if req.ModelID != "" {
-			ctx = llm.WithModelID(ctx, req.ModelID)
-		}
-		created, createErr := h.run.Create(ctx, service.CreateApplicationRunInput{
-			SessionID: sessionID, IdempotencyKey: key, Content: *req.Message, AttachmentIDs: req.Attachments,
-		})
-		if createErr != nil {
-			response.FromError(c, createErr)
-			return
-		}
-		runID = created.Run.ID
-		setSSEHeaders(c)
-		userPayload, marshalErr := sonic.Marshal(&model.MessageEvent{Type: model.EventTypeMessage, Role: model.RoleUser, Message: *req.Message})
-		if marshalErr != nil {
-			return
-		}
-		if err := writeSSEEvent(c, string(model.EventTypeMessage), "", userPayload); err != nil {
-			return
-		}
-		taskPayload, marshalErr := sonic.Marshal(map[string]string{"task_id": runID})
-		if marshalErr != nil {
-			return
-		}
-		if err := writeSSEEvent(c, string(sseEventTaskID), "", taskPayload); err != nil {
-			return
-		}
-	} else {
-		active, lookupErr := h.run.GetActiveBySessionID(c.Request.Context(), sessionID)
-		if lookupErr != nil {
-			response.FromError(c, lookupErr)
-			return
-		}
-		setSSEHeaders(c)
-		if active == nil {
-			heartbeatCtx, heartbeatCancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), sessionStreamTimeout)
-			defer heartbeatCancel()
-			h.idleHeartbeat(c, heartbeatCtx, sessionID)
-			return
-		}
-		runID = active.ID
-	}
-	h.streamRunEvents(c, runID, startID)
-}
-
-// streamRunEvents 读取按 Run 隔离的 Redis Stream；游标语义与 RunHandler 保持一致。
-func (h *SessionHandler) streamRunEvents(c *gin.Context, runID, startID string) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), sessionStreamTimeout)
-	defer cancel()
-	if startID == "" {
-		startID = "0-0"
-	}
-	for {
-		events, err := h.events.Read(ctx, runID, startID)
-		if err != nil {
-			_ = writeSSEEvent(c, "stream_error", "", []byte(`{"message":"stream temporarily unavailable"}`))
-			return
-		}
-		for _, event := range events {
-			if event == nil {
-				continue
-			}
-			startID = event.ID
-			if err := writeSSEEvent(c, string(event.Type), event.ID, mergeEventMetadata(ctx, event)); err != nil {
-				return
-			}
-			if event.Type == model.EventTypeDone || event.Type == model.EventTypeError || event.Type == model.EventTypeWait {
-				return
-			}
-		}
-		select {
-		case <-c.Request.Context().Done():
-			return
-		case <-ctx.Done():
-			return
-		default:
-		}
-	}
-}
-
-// idleHeartbeat 空流续读但无活跃 Run：保持长连接，定期推送 SSE 心跳注释
-// 防止前端超时断连。客户端断开或流超时（eventCtx 结束）时返回。
-func (h *SessionHandler) idleHeartbeat(c *gin.Context, eventCtx context.Context, sessionID string) {
-	logger.InfoContext(c.Request.Context(), "空流续读: session 无活跃 Run，保持长连接心跳",
-		logger.String("session_id", sessionID))
-
-	heartbeat := time.NewTicker(sessionHeartbeatInterval)
-	defer heartbeat.Stop()
-
-	for {
-		select {
-		case <-c.Request.Context().Done():
-			return
-		case <-eventCtx.Done():
-			return
-		case <-heartbeat.C:
-			if _, err := c.Writer.WriteString(": heartbeat\n\n"); err != nil {
-				return
-			}
-			c.Writer.Flush()
-		}
-	}
-}
-
 // GetFiles 获取会话文件
 func (h *SessionHandler) GetFiles(c *gin.Context) {
 	id := c.Param("id")
@@ -441,27 +268,6 @@ func (h *SessionHandler) ReadShell(c *gin.Context) {
 	h.callSandbox(c, c.Param("id"), "读取 Shell 输出失败", func(ctx context.Context) (*model.ToolResult, error) {
 		return h.sandbox.ReadShellOutput(ctx, req.ShellSessionID, true)
 	})
-}
-
-// Stop 停止会话
-func (h *SessionHandler) Stop(c *gin.Context) {
-	id := c.Param("id")
-	if h.run == nil {
-		response.FromError(c, apperr.FailedPrecondition("run execution is not configured"))
-		return
-	}
-	active, err := h.run.GetActiveBySessionID(c.Request.Context(), id)
-	if err != nil {
-		response.FromError(c, err)
-		return
-	}
-	if active != nil {
-		if _, err := h.run.Cancel(c.Request.Context(), active.ID); err != nil {
-			response.FromError(c, err)
-			return
-		}
-	}
-	response.Success(c, nil)
 }
 
 // mergeEventMetadata 将 model.Event 的 Data 业务 payload 与元数据（event_id、created_at）合并

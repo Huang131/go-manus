@@ -11,7 +11,7 @@
 | 2. Engine 与 Context | complete | `4650cc4`、`aba7f43`、`8fd0fa6` | Outcome、ContextPolicy 与 MCP 动态调用契约已完成 |
 | 3. Run 领域与存储 | complete | `a8de838`、`f0ada6a`、`6055590`、`cb50565` | 3A 领域、3B Repository/migration、3C 纯 RunService 已完成；尚未接入生产执行路径 |
 | 4. 执行生产切换 | complete | `e281520`、`bb171f6`、本轮 Run 切换 | 4A 生命周期、waiting_input 恢复、4B 应用编排、Bootstrap 和旧 Session Chat/Stop/SSE 的 Run 薄适配已完成；生产执行不再进入 Task 链 |
-| 5. API/UI/SSE | in_progress | `c1cefeb`、本轮 UI Run 切换 | Run API、Last-Event-ID、Run 历史读取与 UI 切换已完成；旧路由删除和真实依赖 HTTP 验收待完成 |
+| 5. API/UI/SSE | complete | `c1cefeb`、`7cdfafe`、本轮旧路由删除 | Run API、Last-Event-ID、Run 历史读取、UI 切换和旧 Session Chat/Stop 路由删除已完成；真实依赖 HTTP 验收按环境执行 |
 | 6. 遗留删除 | pending | - | 依赖阶段 4/5 的引用扫描和回归 |
 
 允许状态：`pending`、`in_progress`、`complete`、`blocked`。
@@ -92,7 +92,7 @@ go test -tags=integration ./tests -run '^TestRunRepo_FinishTerminal' -count=1
 | 4B 唯一后端生产切换 | complete | 本轮 Session Chat/Stop/SSE 已改为 Run 薄适配；旧 Task 读取路径已移除 |
 | 5A Run API/SSE | complete | Run Handler、Session 兼容路由和 Last-Event-ID 契约测试已补；真实依赖测试待在 component 环境执行 |
 | 5B UI 切换 | complete | 本轮 `refactor(ui): consume run lifecycle`：UI 的创建、事件流、等待输入和取消均走 Run API；补充历史 Run/Message 读取 |
-| 5C 删除旧路由 | pending | `06-api-ui-sse-cutover.md` |
+| 5C 删除旧路由 | complete | 本轮 `refactor(api): remove legacy session execution routes`：删除 Session Chat/Stop handler、路由、DTO 和 UI client；Session Delete 保留取消活跃 Run 的资源清理 |
 | 6A 删除 Task 基础设施 | pending | `07-legacy-removal.md` |
 | 6B 删除 Session 执行字段 | pending | `07-legacy-removal.md` |
 | 6C 收紧 model 依赖 | pending | `07-legacy-removal.md` |
