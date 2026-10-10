@@ -1,7 +1,6 @@
 package repository
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -10,45 +9,13 @@ import (
 	"github.com/Huang131/go-manus/api/internal/model"
 )
 
-func TestMarshalSessionEventsRejectsInvalidJSON(t *testing.T) {
-	events := []model.Event{{
-		Type: model.EventTypeMessage,
-		Data: []byte(`{"message":`),
-	}}
-
-	_, err := marshalSessionEvents(events)
-	if err == nil {
-		t.Fatal("marshalSessionEvents() error = nil, want invalid JSON error")
-	}
-	if !strings.Contains(err.Error(), "encode session events") {
-		t.Fatalf("marshalSessionEvents() error = %q, want context", err)
-	}
-}
-
-func TestExtractSessionMessageProjectsCompletedAssistantMessage(t *testing.T) {
-	event := &model.Event{
-		Type: model.EventTypeMessageDone,
-		Data: []byte(`{"message_id":"message-1","content":"final answer"}`),
-	}
-
-	message, assistant := extractSessionMessage(event)
-	if message != "final answer" {
-		t.Fatalf("extractSessionMessage() message = %q, want %q", message, "final answer")
-	}
-	if !assistant {
-		t.Fatal("extractSessionMessage() assistant = false, want true")
-	}
-}
-
 // TestSessionRepository_JSONSerialization 测试 JSON 序列化
 func TestSessionRepository_JSONSerialization(t *testing.T) {
 	session := &model.Session{
 		ID:                 "test-session-8",
 		Title:              "Test Session 8",
-		Status:             model.SessionStatusPending,
 		UnreadMessageCount: 1,
 		LatestMessage:      "Hello",
-		Events:             []model.Event{},
 		CreatedAt:          time.Now(),
 		UpdatedAt:          time.Now(),
 	}

@@ -18,7 +18,6 @@ import (
 // 错误传播路径在单测中不可达，mock 的"宽容"会掩盖真实回归。
 type MockSessionRepository struct {
 	sessions   map[string]*model.Session
-	events     map[string][]model.Event
 	createErr  error
 	getErr     error
 	deleteErr  error
@@ -29,7 +28,6 @@ type MockSessionRepository struct {
 func NewMockSessionRepository() *MockSessionRepository {
 	return &MockSessionRepository{
 		sessions: make(map[string]*model.Session),
-		events:   make(map[string][]model.Event),
 	}
 }
 
@@ -47,7 +45,6 @@ func (m *MockSessionRepository) Create(_ context.Context, session *model.Session
 		return m.createErr
 	}
 	m.sessions[session.ID] = session
-	m.events[session.ID] = []model.Event{}
 	return nil
 }
 
@@ -98,17 +95,6 @@ func (m *MockSessionRepository) Delete(_ context.Context, id string) error {
 		return err
 	}
 	delete(m.sessions, id)
-	delete(m.events, id)
-	return nil
-}
-
-func (m *MockSessionRepository) AppendEvent(_ context.Context, id string, event *model.Event) error {
-	session, err := m.mustGet(id)
-	if err != nil {
-		return err
-	}
-	session.Events = append(session.Events, *event)
-	m.events[id] = session.Events
 	return nil
 }
 
@@ -127,15 +113,6 @@ func (m *MockSessionRepository) UpdateLatestMessage(_ context.Context, id string
 		return err
 	}
 	session.LatestMessage = message
-	return nil
-}
-
-func (m *MockSessionRepository) UpdateStatus(_ context.Context, id string, status model.SessionStatus) error {
-	session, err := m.mustGet(id)
-	if err != nil {
-		return err
-	}
-	session.Status = status
 	return nil
 }
 
@@ -208,12 +185,6 @@ func TestSessionService_CreateSession(t *testing.T) {
 	}
 	if session.UnreadMessageCount != 0 {
 		t.Errorf("Session UnreadMessageCount = %d, want 0", session.UnreadMessageCount)
-	}
-	if session.Status != model.SessionStatusPending {
-		t.Errorf("Session Status = %s, want pending", session.Status)
-	}
-	if len(session.Events) != 0 {
-		t.Errorf("Session Events length = %d, want 0", len(session.Events))
 	}
 }
 

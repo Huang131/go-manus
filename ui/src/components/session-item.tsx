@@ -43,7 +43,10 @@ export function SessionItem({session, isActive, onClick, onDelete, onRename}: Se
 
   const description = session.latest_message || '暂无消息'
   const dateLabel = formatRelativeDate(session.latest_message_at)
-  const isRunning = session.status === 'running' || session.status === 'waiting'
+  const isRunning = session.active_run_status === 'pending'
+    || session.active_run_status === 'running'
+    || session.active_run_status === 'waiting_input'
+    || session.active_run_status === 'cancelling'
 
   return (
     <Item
@@ -103,4 +106,3 @@ export function SessionItem({session, isActive, onClick, onDelete, onRename}: Se
     </Item>
   )
 }
-

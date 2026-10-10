@@ -12,7 +12,7 @@
 | 3. Run 领域与存储 | complete | `a8de838`、`f0ada6a`、`6055590`、`cb50565` | 3A 领域、3B Repository/migration、3C 纯 RunService 已完成；尚未接入生产执行路径 |
 | 4. 执行生产切换 | complete | `e281520`、`bb171f6`、本轮 Run 切换 | 4A 生命周期、waiting_input 恢复、4B 应用编排、Bootstrap 和旧 Session Chat/Stop/SSE 的 Run 薄适配已完成；生产执行不再进入 Task 链 |
 | 5. API/UI/SSE | complete | `c1cefeb`、`7cdfafe`、本轮旧路由删除 | Run API、Last-Event-ID、Run 历史读取、UI 切换和旧 Session Chat/Stop 路由删除已完成；真实依赖 HTTP 验收按环境执行 |
-| 6. 遗留删除 | in_progress | 本轮未提交 | 已完成旧 Task 执行基础设施与 AgentService 旧执行职责审计，正在拆除 Session 执行字段 |
+| 6. 遗留删除 | in_progress | `2bd649d`、本轮待提交 | 6A、6B 已完成；6C model 依赖收紧未开始 |
 
 允许状态：`pending`、`in_progress`、`complete`、`blocked`。
 
@@ -24,7 +24,7 @@ SessionHandler -> RunApplicationService -> RunExecutor
               -> RunRepository + RunEventStream
 ```
 
-当前生产 Chat、Stop 和 Session SSE 已通过 Run 应用边界执行；旧 Session 路由只保留 HTTP 请求形状和 `task_id` 事件字段兼容，字段值实际是 `run_id`。执行事实、终态消息和实时事件只写 Run/Message 与 Run Stream，不再调用旧 Task registry 或写入 `sessions.events`。`AgentService` 仍作为工具与配置装配协作者存在，旧 Task 执行入口尚未在阶段 6 删除。`ToolRegistry`、MCP/A2A ToolSet 引用生命周期已完成，不属于本方案待办。
+当前生产 Chat、Stop 和 Session SSE 已通过 Run 应用边界执行。执行事实、终态消息和实时事件只写 Run/Message 与 Run Stream，不再调用旧 Task registry 或写入 `sessions.events`。Session 仅保存会话元数据；列表接口额外返回从 runs 查询得到的 `active_run_status` 只读投影。`AgentService` 只作为工具与配置装配协作者存在。`ToolRegistry`、MCP/A2A ToolSet 引用生命周期已完成，不属于本方案待办。
 
 ## 最近验证基线
 
@@ -93,8 +93,8 @@ go test -tags=integration ./tests -run '^TestRunRepo_FinishTerminal' -count=1
 | 5A Run API/SSE | complete | Run Handler、Session 兼容路由和 Last-Event-ID 契约测试已补；真实依赖测试待在 component 环境执行 |
 | 5B UI 切换 | complete | 本轮 `refactor(ui): consume run lifecycle`：UI 的创建、事件流、等待输入和取消均走 Run API；补充历史 Run/Message 读取 |
 | 5C 删除旧路由 | complete | 本轮 `refactor(api): remove legacy session execution routes`：删除 Session Chat/Stop handler、路由、DTO 和 UI client；Session Delete 保留取消活跃 Run 的资源清理 |
-| 6A 删除 Task 基础设施 | in_progress | 本轮待提交 | 已删除 `RedisStreamTask`、旧 `AgentTaskRunner`、默认 Task registry、Task 专用测试及 AgentService 旧 Chat/Stop/事件入口 |
-| 6B 删除 Session 执行字段 | pending | `07-legacy-removal.md` |
+| 6A 删除 Task 基础设施 | complete | `2bd649d` | 已删除 `RedisStreamTask`、旧 `AgentTaskRunner`、默认 Task registry、Task 专用测试及 AgentService 旧 Chat/Stop/事件入口 |
+| 6B 删除 Session 执行字段 | complete | 本轮待提交 | 删除 `Session` 执行字段、旧事件/状态仓储方法、`SessionRuntime`，新增 007 migration，并改为 Run 活跃状态只读投影 |
 | 6C 收紧 model 依赖 | pending | `07-legacy-removal.md` |
 
 ## 阶段验收归属
@@ -122,6 +122,7 @@ go test -tags=integration ./tests -run '^TestRunRepo_FinishTerminal' -count=1
 - 取消先条件写入 `cancelling`，再发出 cancel signal；Engine 退出并释放 ToolSet、持久化 `cancelled` 后才注销控制句柄。Cancel 发现句柄不存在或终态写入失败时，必须通过幂等 `ReconcileCancelling` 在当前进程或启动恢复中收敛。
 - `MaxPlanSteps` 不作为伪配置加入；必须先有真实消费逻辑。
 - 阶段 6A 证据确认：旧 Task/Redis stream 执行链没有生产消费者；RunExecutor/PlannerEngineAdapter 是当前唯一生产执行入口。AgentService 仅保留工具快照和运行时配置热更新。
+- 阶段 6B 决策：Session 不再暴露或持久化执行状态；会话列表需要运行图标时读取 `runs` 的 active 状态投影，禁止新增 Session 状态回写。
 - `sessions.memories` 和 `Session.Memories` 当前不存在，不在方案中虚构。
 - ToolRegistry 三份映射、MCP/A2A retired 无界释放问题已在工具重构提交中解决，不重复规划。
 - 2C 已完成：MCP function name 在发现时建立不可变索引，名称碰撞拒绝初始化；连接、发现与协议错误返回 Go error，远端 `IsError` 保留为可交给模型处理的失败 `ToolResult`。

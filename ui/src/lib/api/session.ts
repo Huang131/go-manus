@@ -107,8 +107,7 @@ export const sessionApi = {
 
   
   /**
-   * 获取会话详情（含事件列表，与 chat 流式响应格式一致）
-   * 若后端在 GET /sessions/:id 中返回 events 字段则一并返回
+   * 获取会话容器详情；执行历史由 Run API 查询。
    */
   getSessionDetail: (sessionId: string): Promise<SessionDetail> => {
     return get<SessionDetail>(`/sessions/${sessionId}`);

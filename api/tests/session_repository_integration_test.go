@@ -23,7 +23,6 @@ func TestSessionRepo_CreateAndGetByID(t *testing.T) {
 	session := &model.Session{
 		ID:        uuid.New().String(),
 		Title:     "integration-test-session",
-		Status:    model.SessionStatusPending,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -37,7 +36,6 @@ func TestSessionRepo_CreateAndGetByID(t *testing.T) {
 	require.NotNil(t, got)
 	assert.Equal(t, session.ID, got.ID)
 	assert.Equal(t, "integration-test-session", got.Title)
-	assert.Equal(t, model.SessionStatusPending, got.Status)
 }
 
 func TestSessionRepo_GetByID_NotFoundReturnsNilNil(t *testing.T) {
@@ -45,73 +43,6 @@ func TestSessionRepo_GetByID_NotFoundReturnsNilNil(t *testing.T) {
 	got, err := repo.GetByID(context.Background(), "non-existent-id")
 	require.NoError(t, err)
 	assert.Nil(t, got)
-}
-
-func TestSessionRepo_AppendEvent_AtomicUpdate(t *testing.T) {
-	repo := testSessionRepo(t)
-	sessionID := createSessionForTest(t)
-	defer CleanupSession(t, sessionID)
-
-	event := &model.Event{
-		ID:        uuid.New().String(),
-		Type:      model.EventTypeMessage,
-		CreatedAt: time.Now(),
-		Data:      []byte(`{"content":"hello from integration test"}`),
-	}
-
-	err := repo.AppendEvent(context.Background(), sessionID, event)
-	require.NoError(t, err)
-
-	got, err := repo.GetByID(context.Background(), sessionID)
-	require.NoError(t, err)
-	require.NotEmpty(t, got.Events)
-	assert.Equal(t, model.EventTypeMessage, got.Events[0].Type)
-}
-
-func TestSessionRepo_AppendEvent_UpdatesLatestMessage(t *testing.T) {
-	repo := testSessionRepo(t)
-	sessionID := createSessionForTest(t)
-	defer CleanupSession(t, sessionID)
-
-	// AppendEvent 只从 MessageEvent 结构（message/role 字段）提取最新消息；
-	// 且仅 assistant 回复计入未读数
-	event := &model.Event{
-		ID:        uuid.New().String(),
-		Type:      model.EventTypeMessage,
-		CreatedAt: time.Now(),
-		Data:      []byte(`{"type":"message","role":"assistant","message":"latest message"}`),
-	}
-
-	err := repo.AppendEvent(context.Background(), sessionID, event)
-	require.NoError(t, err)
-
-	got, err := repo.GetByID(context.Background(), sessionID)
-	require.NoError(t, err)
-	assert.Equal(t, "latest message", got.LatestMessage)
-	assert.NotNil(t, got.LatestMessageAt)
-	assert.Equal(t, 1, got.UnreadMessageCount)
-}
-
-func TestSessionRepo_AppendEvent_UserMessageNotUnread(t *testing.T) {
-	repo := testSessionRepo(t)
-	sessionID := createSessionForTest(t)
-	defer CleanupSession(t, sessionID)
-
-	// 用户自己发送的消息更新 latest_message 但不计入未读数
-	event := &model.Event{
-		ID:        uuid.New().String(),
-		Type:      model.EventTypeMessage,
-		CreatedAt: time.Now(),
-		Data:      []byte(`{"type":"message","role":"user","message":"user question"}`),
-	}
-
-	err := repo.AppendEvent(context.Background(), sessionID, event)
-	require.NoError(t, err)
-
-	got, err := repo.GetByID(context.Background(), sessionID)
-	require.NoError(t, err)
-	assert.Equal(t, "user question", got.LatestMessage)
-	assert.Equal(t, 0, got.UnreadMessageCount)
 }
 
 func TestSessionRepo_SoftDelete(t *testing.T) {
@@ -137,7 +68,6 @@ func TestSessionRepo_List_Pagination(t *testing.T) {
 		s := &model.Session{
 			ID:        uuid.New().String(),
 			Title:     "pagination-test",
-			Status:    model.SessionStatusPending,
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
 		}
@@ -197,17 +127,4 @@ func TestSessionRepo_UpdateTitle(t *testing.T) {
 	got, err := repo.GetByID(context.Background(), sessionID)
 	require.NoError(t, err)
 	assert.Equal(t, "renamed session", got.Title)
-}
-
-func TestSessionRepo_UpdateStatus(t *testing.T) {
-	repo := testSessionRepo(t)
-	sessionID := createSessionForTest(t)
-	defer CleanupSession(t, sessionID)
-
-	err := repo.UpdateStatus(context.Background(), sessionID, model.SessionStatusRunning)
-	require.NoError(t, err)
-
-	got, err := repo.GetByID(context.Background(), sessionID)
-	require.NoError(t, err)
-	assert.Equal(t, model.SessionStatusRunning, got.Status)
 }

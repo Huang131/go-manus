@@ -4,15 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
-	"time"
-
-	"github.com/bytedance/sonic"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
 	"github.com/Huang131/go-manus/api/internal/model"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -25,13 +20,9 @@ type SessionRepository interface {
 	Update(ctx context.Context, session *model.Session) error
 	Delete(ctx context.Context, id string) error
 
-	// 事件操作
-	AppendEvent(ctx context.Context, id string, event *model.Event) error
-
 	// 原子更新
 	UpdateTitle(ctx context.Context, id string, title string) error
 	UpdateLatestMessage(ctx context.Context, id string, message string) error
-	UpdateStatus(ctx context.Context, id string, status model.SessionStatus) error
 	IncrementUnreadCount(ctx context.Context, id string) error
 	DecrementUnreadCount(ctx context.Context, id string) error
 	SetUnreadCount(ctx context.Context, id string, count int) error
@@ -55,18 +46,18 @@ func (r *PostgresSessionRepository) queryer() queryer {
 	return newQueryer(r.db, r.tx)
 }
 
-// sessionSummaryColumns 是会话摘要查询的公共列（不含 events 大字段）。
-const sessionSummaryColumns = `id, COALESCE(sandbox_id, ''), COALESCE(task_id, ''), title, unread_message_count, COALESCE(latest_message, ''),
-			latest_message_at, status, created_at, updated_at`
+// sessionSummaryColumns 是会话摘要查询的公共列，并投影当前活跃 Run 状态。
+const sessionSummaryColumns = `s.id, COALESCE(s.sandbox_id, ''), s.title, s.unread_message_count, COALESCE(s.latest_message, ''),
+			s.latest_message_at, COALESCE(active_run.status, ''), s.created_at, s.updated_at`
 
 // scanSessionSummary 扫描会话摘要行，供 GetAll / List 共用。
 func scanSessionSummary(s rowScanner) (*model.Session, error) {
 	var sess model.Session
 	var latestMessageAt sql.NullTime
 	if err := s.Scan(
-		&sess.ID, &sess.SandboxID, &sess.TaskID, &sess.Title, &sess.UnreadMessageCount,
+		&sess.ID, &sess.SandboxID, &sess.Title, &sess.UnreadMessageCount,
 		&sess.LatestMessage, &latestMessageAt,
-		&sess.Status, &sess.CreatedAt, &sess.UpdatedAt,
+		&sess.ActiveRunStatus, &sess.CreatedAt, &sess.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -92,18 +83,14 @@ func (r *PostgresSessionRepository) execSessionWrite(ctx context.Context, query 
 func (r *PostgresSessionRepository) Create(ctx context.Context, session *model.Session) error {
 	q := r.queryer()
 	query := `
-		INSERT INTO sessions (id, sandbox_id, task_id, title, unread_message_count, latest_message,
-			latest_message_at, events, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		INSERT INTO sessions (id, sandbox_id, title, unread_message_count, latest_message,
+			latest_message_at, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`
-	events, err := marshalSessionEvents(session.Events)
-	if err != nil {
-		return err
-	}
-	_, err = q.Exec(ctx, query,
-		session.ID, session.SandboxID, session.TaskID, session.Title,
+	_, err := q.Exec(ctx, query,
+		session.ID, session.SandboxID, session.Title,
 		session.UnreadMessageCount, session.LatestMessage, session.LatestMessageAt,
-		events, session.Status, session.CreatedAt, session.UpdatedAt,
+		session.CreatedAt, session.UpdatedAt,
 	)
 	return err
 }
@@ -112,17 +99,23 @@ func (r *PostgresSessionRepository) Create(ctx context.Context, session *model.S
 func (r *PostgresSessionRepository) GetByID(ctx context.Context, id string) (*model.Session, error) {
 	q := r.queryer()
 	query := `
-		SELECT id, COALESCE(sandbox_id, ''), COALESCE(task_id, ''), title, unread_message_count, COALESCE(latest_message, ''),
-			latest_message_at, events, status, created_at, updated_at
-		FROM sessions WHERE id = $1 AND deleted_at IS NULL
+		SELECT ` + sessionSummaryColumns + `
+		FROM sessions s
+		LEFT JOIN LATERAL (
+			SELECT status FROM runs
+			WHERE session_id = s.id
+				AND status IN ('pending', 'running', 'waiting_input', 'cancelling')
+			ORDER BY created_at DESC, id DESC
+			LIMIT 1
+		) active_run ON true
+		WHERE s.id = $1 AND s.deleted_at IS NULL
 	`
 	var s model.Session
-	var eventsJSON []byte
 	var latestMessageAt sql.NullTime
 	err := q.QueryRow(ctx, query, id).Scan(
-		&s.ID, &s.SandboxID, &s.TaskID, &s.Title, &s.UnreadMessageCount,
-		&s.LatestMessage, &latestMessageAt, &eventsJSON,
-		&s.Status, &s.CreatedAt, &s.UpdatedAt,
+		&s.ID, &s.SandboxID, &s.Title, &s.UnreadMessageCount,
+		&s.LatestMessage, &latestMessageAt, &s.ActiveRunStatus,
+		&s.CreatedAt, &s.UpdatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -133,9 +126,6 @@ func (r *PostgresSessionRepository) GetByID(ctx context.Context, id string) (*mo
 	if latestMessageAt.Valid {
 		s.LatestMessageAt = &latestMessageAt.Time
 	}
-	if err := sonic.Unmarshal(eventsJSON, &s.Events); err != nil {
-		return nil, err
-	}
 	return &s, nil
 }
 
@@ -145,7 +135,15 @@ func (r *PostgresSessionRepository) GetAll(ctx context.Context) ([]*model.Sessio
 	// 上限保护：GetAll 服务于 SSE 会话流推送，无界全量会在会话数增长后拖垮轮询
 	query := `
 		SELECT ` + sessionSummaryColumns + `
-		FROM sessions WHERE deleted_at IS NULL
+		FROM sessions s
+		LEFT JOIN LATERAL (
+			SELECT status FROM runs
+			WHERE session_id = s.id
+				AND status IN ('pending', 'running', 'waiting_input', 'cancelling')
+			ORDER BY created_at DESC, id DESC
+			LIMIT 1
+		) active_run ON true
+		WHERE s.deleted_at IS NULL
 		ORDER BY latest_message_at DESC NULLS LAST, created_at DESC, id DESC
 		LIMIT 500
 	`
@@ -167,7 +165,15 @@ func (r *PostgresSessionRepository) List(ctx context.Context, limit, offset int)
 
 	query := `
 		SELECT ` + sessionSummaryColumns + `
-		FROM sessions WHERE deleted_at IS NULL
+		FROM sessions s
+		LEFT JOIN LATERAL (
+			SELECT status FROM runs
+			WHERE session_id = s.id
+				AND status IN ('pending', 'running', 'waiting_input', 'cancelling')
+			ORDER BY created_at DESC, id DESC
+			LIMIT 1
+		) active_run ON true
+		WHERE s.deleted_at IS NULL
 		ORDER BY latest_message_at DESC NULLS LAST, created_at DESC, id DESC
 		LIMIT $1 OFFSET $2
 	`
@@ -186,29 +192,15 @@ func (r *PostgresSessionRepository) List(ctx context.Context, limit, offset int)
 func (r *PostgresSessionRepository) Update(ctx context.Context, session *model.Session) error {
 	query := `
 		UPDATE sessions SET
-			sandbox_id = $2, task_id = $3, title = $4, unread_message_count = $5,
-			latest_message = $6, latest_message_at = $7, events = $8,
-			status = $9, updated_at = $10
+			sandbox_id = $2, title = $3, unread_message_count = $4,
+			latest_message = $5, latest_message_at = $6, updated_at = $7
 		WHERE id = $1 AND deleted_at IS NULL
 	`
-	events, err := marshalSessionEvents(session.Events)
-	if err != nil {
-		return err
-	}
 	return r.execSessionWrite(ctx, query,
-		session.ID, session.SandboxID, session.TaskID, session.Title,
+		session.ID, session.SandboxID, session.Title,
 		session.UnreadMessageCount, session.LatestMessage, session.LatestMessageAt,
-		events, session.Status, session.UpdatedAt,
+		session.UpdatedAt,
 	)
-}
-
-// marshalSessionEvents 为持久化错误补充字段上下文，避免非法 RawMessage 静默写入。
-func marshalSessionEvents(events []model.Event) ([]byte, error) {
-	data, err := sonic.Marshal(events)
-	if err != nil {
-		return nil, fmt.Errorf("encode session events: %w", err)
-	}
-	return data, nil
 }
 
 // Delete 删除会话（软删除）
@@ -216,62 +208,6 @@ func marshalSessionEvents(events []model.Event) ([]byte, error) {
 func (r *PostgresSessionRepository) Delete(ctx context.Context, id string) error {
 	query := `UPDATE sessions SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL`
 	return r.execSessionWrite(ctx, query, id)
-}
-
-// AppendEvent 追加事件并同步最新消息
-func (r *PostgresSessionRepository) AppendEvent(ctx context.Context, id string, event *model.Event) error {
-	// 回填事件 ID 和时间戳，确保存储到数据库的事件信息完整
-	// （上游调用点只设置 Type/Data，之前导致 id 为空、created_at 为零值）
-	if event.ID == "" {
-		event.ID = uuid.New().String()
-	}
-	if event.CreatedAt.IsZero() {
-		event.CreatedAt = time.Now()
-	}
-
-	// 只有完整消息参与列表摘要投影；token delta 不落库，也不能重复计数。
-	message, isAssistantReply := extractSessionMessage(event)
-
-	unreadDelta := 0
-	if isAssistantReply {
-		unreadDelta = 1
-	}
-
-	timestamp := event.CreatedAt
-
-	// 原子追加事件 + 更新最新消息 + 仅对 assistant 回复增加未读数
-	query := `
-		UPDATE sessions SET
-			events = events || $2::jsonb,
-			latest_message = CASE WHEN $3 != '' THEN $3 ELSE latest_message END,
-			latest_message_at = CASE WHEN $3 != '' THEN $4 ELSE latest_message_at END,
-			unread_message_count = unread_message_count + $5,
-			updated_at = $4
-		WHERE id = $1 AND deleted_at IS NULL
-	`
-	return r.execSessionWrite(ctx, query, id, event.ToJSON(), message, timestamp, unreadDelta)
-}
-
-func extractSessionMessage(event *model.Event) (string, bool) {
-	if event == nil {
-		return "", false
-	}
-	switch event.Type {
-	case model.EventTypeMessage:
-		var message model.MessageEvent
-		if err := sonic.Unmarshal(event.Data, &message); err != nil {
-			return "", false
-		}
-		return message.Message, message.Role == model.RoleAssistant
-	case model.EventTypeMessageDone:
-		var message model.MessageDoneEvent
-		if err := sonic.Unmarshal(event.Data, &message); err != nil {
-			return "", false
-		}
-		return message.Content, true
-	default:
-		return "", false
-	}
 }
 
 // UpdateTitle 更新会话标题
@@ -284,12 +220,6 @@ func (r *PostgresSessionRepository) UpdateTitle(ctx context.Context, id string, 
 func (r *PostgresSessionRepository) UpdateLatestMessage(ctx context.Context, id string, message string) error {
 	query := `UPDATE sessions SET latest_message = $2, latest_message_at = NOW(), updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL`
 	return r.execSessionWrite(ctx, query, id, message)
-}
-
-// UpdateStatus 更新会话状态
-func (r *PostgresSessionRepository) UpdateStatus(ctx context.Context, id string, status model.SessionStatus) error {
-	query := `UPDATE sessions SET status = $2, updated_at = NOW() WHERE id = $1 AND deleted_at IS NULL`
-	return r.execSessionWrite(ctx, query, id, status)
 }
 
 // IncrementUnreadCount 原子增加未读数

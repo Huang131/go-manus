@@ -1,7 +1,5 @@
 package agent
 
-import "github.com/Huang131/go-manus/api/internal/model"
-
 // FlowStatus 流状态枚举
 type FlowStatus string
 
@@ -16,24 +14,3 @@ const (
 	FlowStatusFailed      FlowStatus = "failed"      // 已失败
 	FlowStatusCancelled   FlowStatus = "cancelled"   // 已取消
 )
-
-// ToSessionStatus 把流状态投影成会话状态，作为三套状态（Flow/Session/Execution）之间唯一的投影入口。
-// 终态 completed 需结合计划是否含失败步骤：有失败步骤则判 failed，否则 completed，
-// 避免业务失败在会话层被误报为完成。
-func (s FlowStatus) ToSessionStatus(plan *model.Plan) model.SessionStatus {
-	switch s {
-	case FlowStatusWaiting:
-		return model.SessionStatusWaiting
-	case FlowStatusFailed:
-		return model.SessionStatusFailed
-	case FlowStatusCancelled:
-		return model.SessionStatusCancelled
-	case FlowStatusCompleted:
-		if planHasFailedStep(plan) {
-			return model.SessionStatusFailed
-		}
-		return model.SessionStatusCompleted
-	default:
-		return model.SessionStatusRunning
-	}
-}

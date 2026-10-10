@@ -39,9 +39,6 @@ func (s *stubVNCService) ClearUnreadCount(ctx context.Context, id string) error 
 func (s *stubVNCService) GetSessionFiles(ctx context.Context, id string) ([]*model.File, error) {
 	return nil, nil
 }
-func (s *stubVNCService) AppendEvent(ctx context.Context, sessionID string, event *model.Event) error {
-	return nil
-}
 func (s *stubVNCService) GetVNCURL(ctx context.Context, sessionID string) (string, error) {
 	return s.vncURL, s.err
 }

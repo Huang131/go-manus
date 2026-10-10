@@ -73,10 +73,6 @@ func (s *sessionServiceStub) GetSessionFiles(_ context.Context, id string) ([]*m
 	return s.filesResult, s.filesErr
 }
 
-func (s *sessionServiceStub) AppendEvent(context.Context, string, *model.Event) error {
-	return nil
-}
-
 func (s *sessionServiceStub) GetVNCURL(context.Context, string) (string, error) {
 	return "ws://sandbox.local:5901", nil
 }

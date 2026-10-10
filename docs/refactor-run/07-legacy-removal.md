@@ -20,11 +20,13 @@
 
 删除依据：全仓生产代码扫描未发现旧 Task、旧 registry、旧 Chat/Stop/事件读取入口的消费者；Bootstrap、Router、RunApplicationService 和 RunExecutor 均已走 Run 领域链路。保留 Redis 的 `RunEventPublisher/RunEventStream`，因为它们仍是当前 Run SSE 的实时旁路。
 
-### Session 执行字段
+### Session 执行字段（6B）
 
-- `model.Session.TaskID`、`Status`、`Events`。
-- `sessions.task_id`、`sessions.status`、`sessions.events` 及索引和 SQL。
-- `SessionRepository.UpdateStatus`、`AppendEvent` 等旧执行方法。
+- `model.Session.TaskID`、`Status`、`Events` 已删除。
+- `sessions.task_id`、`sessions.status`、`sessions.events` 及索引和 SQL 已删除。
+- `SessionRepository.UpdateStatus`、`AppendEvent` 等旧执行方法已删除。
+- 仅供旧 Session 执行链使用的 `SessionRuntime`、事件上下文转换测试已删除。
+- 会话列表的 `active_run_status` 是从 `runs` 当前活跃记录读取的只读投影，不是 Session 执行状态写入；详情页运行状态仍由 Run API 驱动。
 - 保留 `SandboxID`、标题、未读数、最近消息、软删除和时间字段。
 
 当前源码没有 `Session.Memories` 字段，也没有 `sessions.memories` 持久化链路，不新增也不删除不存在的伪链路。`SimpleMemory` 是 Agent 运行期内存，是否保留由 Engine 使用情况决定。
@@ -35,7 +37,7 @@
 
 ## 数据库迁移
 
-新增破坏式 migration 删除旧 Session 执行列；不得新增触发器把 Run 状态写回 Session。迁移只在阶段 5 完成后执行。
+新增 `007_remove_legacy_session_execution.sql` 破坏式 migration 删除旧 Session 执行列；不得新增触发器把 Run 状态写回 Session。项目未上线，不回填历史 `sessions.events`，迁移只在阶段 5 完成后执行。
 
 ## 实施提交
 

@@ -174,7 +174,7 @@ export type Session = {
   title: string;
   latest_message: string;
   latest_message_at: string;
-  status: SessionStatus;
+  active_run_status?: RunStatus;
   unread_message_count: number;
   [key: string]: unknown;
 };
@@ -208,8 +208,8 @@ export type ChatMessage = {
   [key: string]: unknown;
 };
 
-/** 会话详情。执行历史由 Run API 查询，Session 只作为会话容器。 */
-export type SessionDetail = Session;
+/** 会话详情。status 是页面运行期投影，不是 sessions 表中的持久化字段。 */
+export type SessionDetail = Session & { status: SessionStatus };
 
 export type RunMessage = {
   id: string;

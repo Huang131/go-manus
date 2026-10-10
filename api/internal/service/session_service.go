@@ -26,10 +26,6 @@ type SessionService interface {
 	// GetSessionFiles 返回会话的文件列表，数据源统一为 files 表，单一数据源。
 	// fileRepo 未注入时返回 FailedPrecondition。
 	GetSessionFiles(ctx context.Context, id string) ([]*model.File, error)
-	// AppendEvent 追加事件。仓储层会一并回填事件 ID/时间戳、更新 latest_message，
-	// 并对 assistant 的完整回复递增 unread_message_count。
-	AppendEvent(ctx context.Context, sessionID string, event *model.Event) error
-
 	// GetVNCURL 返回会话对应的 VNC WebSocket 地址。
 	// go-manus 当前使用单一共享 sandbox 服务（区别于 mooc-manus 的 per-session Docker），
 	// 因此 VNC URL 与 session 无关；保留 sessionID 入参是为了对齐 mooc-manus 接口契约
@@ -74,8 +70,6 @@ func (s *DefaultSessionService) CreateSession(ctx context.Context) (*model.Sessi
 		UnreadMessageCount: 0,
 		LatestMessage:      "",
 		LatestMessageAt:    nil,
-		Events:             []model.Event{},
-		Status:             model.SessionStatusPending,
 		CreatedAt:          now,
 		UpdatedAt:          now,
 	}
@@ -140,11 +134,6 @@ func (s *DefaultSessionService) GetSessionFiles(ctx context.Context, id string) 
 		return nil, err
 	}
 	return files, nil
-}
-
-// AppendEvent 追加事件；ID/时间戳回填、latest_message 投影与未读数累计由仓储层完成
-func (s *DefaultSessionService) AppendEvent(ctx context.Context, sessionID string, event *model.Event) error {
-	return s.repo.AppendEvent(ctx, sessionID, event)
 }
 
 // RenameSession 重命名会话标题
