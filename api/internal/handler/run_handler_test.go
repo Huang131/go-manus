@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/service"
 	"github.com/Huang131/go-manus/api/pkg/response"
@@ -15,21 +16,29 @@ import (
 )
 
 type runHandlerAppStub struct {
-	created  service.CreateApplicationRunInput
-	gotID    string
-	cancelID string
-	result   *service.ApplicationRun
+	created          service.CreateApplicationRunInput
+	gotID            string
+	cancelID         string
+	result           *service.ApplicationRun
+	history          *service.RunHistoryPage
+	historySessionID string
+	historyLimit     int
+	historyOffset    int
+	modelID          string
+	submittedModelID string
 }
 
-func (s *runHandlerAppStub) Create(_ context.Context, input service.CreateApplicationRunInput) (*service.ApplicationRun, error) {
+func (s *runHandlerAppStub) Create(ctx context.Context, input service.CreateApplicationRunInput) (*service.ApplicationRun, error) {
 	s.created = input
+	s.modelID = llm.ModelIDFromContext(ctx)
 	if s.result != nil {
 		return s.result, nil
 	}
 	return &service.ApplicationRun{Run: &model.Run{ID: "run-1", SessionID: input.SessionID, Status: model.RunStatusRunning}}, nil
 }
 
-func (s *runHandlerAppStub) SubmitInput(context.Context, string, service.SubmitInputRequest) (*service.ApplicationRun, error) {
+func (s *runHandlerAppStub) SubmitInput(ctx context.Context, _ string, _ service.SubmitInputRequest) (*service.ApplicationRun, error) {
+	s.submittedModelID = llm.ModelIDFromContext(ctx)
 	return &service.ApplicationRun{Run: &model.Run{ID: "run-1", Status: model.RunStatusRunning}}, nil
 }
 func (s *runHandlerAppStub) Get(_ context.Context, id string) (*model.Run, error) {
@@ -38,6 +47,13 @@ func (s *runHandlerAppStub) Get(_ context.Context, id string) (*model.Run, error
 }
 func (*runHandlerAppStub) GetActiveBySessionID(context.Context, string) (*model.Run, error) {
 	return nil, nil
+}
+func (s *runHandlerAppStub) ListBySessionID(_ context.Context, sessionID string, limit, offset int) (*service.RunHistoryPage, error) {
+	s.historySessionID, s.historyLimit, s.historyOffset = sessionID, limit, offset
+	if s.history != nil {
+		return s.history, nil
+	}
+	return &service.RunHistoryPage{Items: []service.RunHistoryItem{}, Total: 0, Limit: limit, Offset: offset}, nil
 }
 func (s *runHandlerAppStub) Cancel(_ context.Context, id string) (*model.Run, error) {
 	s.cancelID = id
@@ -59,7 +75,7 @@ func TestRunHandlerCreateUsesIdempotencyHeaderAndSessionRouteParam(t *testing.T)
 	router.POST("/sessions/:sessionId/runs", NewRunHandler(app, nil).Create)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/sessions/session-1/runs", strings.NewReader(`{"message":"分析","attachments":["file-1"]}`))
+	req := httptest.NewRequest(http.MethodPost, "/sessions/session-1/runs", strings.NewReader(`{"message":"分析","attachments":["file-1"],"model_id":"model-1"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", "request-1")
 	router.ServeHTTP(w, req)
@@ -68,6 +84,7 @@ func TestRunHandlerCreateUsesIdempotencyHeaderAndSessionRouteParam(t *testing.T)
 	require.Equal(t, "session-1", app.created.SessionID)
 	require.Equal(t, "request-1", app.created.IdempotencyKey)
 	require.Equal(t, []string{"file-1"}, app.created.AttachmentIDs)
+	require.Equal(t, "model-1", app.modelID)
 
 	var responseBody response.Response
 	require.NoError(t, sonic.Unmarshal(w.Body.Bytes(), &responseBody))
@@ -93,6 +110,7 @@ func TestRunHandlerEventsPassesLastEventIDAndWritesSSEID(t *testing.T) {
 	require.Equal(t, "1710000000000-1", events.startID)
 	require.Contains(t, w.Body.String(), "id: 1710000000000-0\n")
 	require.Contains(t, w.Body.String(), "event: done\n")
+	require.Contains(t, w.Body.String(), `"event_id":"1710000000000-0"`)
 }
 
 func TestRunHandlerCancelUsesRunID(t *testing.T) {
@@ -105,4 +123,40 @@ func TestRunHandlerCancelUsesRunID(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Equal(t, "run-7", app.cancelID)
+}
+
+func TestRunHandlerSubmitInputPassesRequestedModel(t *testing.T) {
+	app := &runHandlerAppStub{}
+	router := setupRouter()
+	router.POST("/runs/:runId/input", NewRunHandler(app, nil).SubmitInput)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/runs/run-1/input", strings.NewReader(`{"idempotency_key":"reply-1","reply_to_message_id":"question-1","message":"继续","model_id":"model-1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, "model-1", app.submittedModelID)
+}
+
+func TestRunHandlerListBySessionPassesPagination(t *testing.T) {
+	app := &runHandlerAppStub{history: &service.RunHistoryPage{
+		Items: []service.RunHistoryItem{{Run: &model.Run{ID: "run-1", SessionID: "session-1"}, Messages: []*model.RunMessage{{ID: "message-1", Content: "你好"}}}},
+		Total: 1, Limit: 20, Offset: 5,
+	}}
+	router := setupRouter()
+	router.GET("/sessions/:sessionId/runs", NewRunHandler(app, nil).ListBySession)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sessions/session-1/runs?limit=20&offset=5", nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, "session-1", app.historySessionID)
+	require.Equal(t, 20, app.historyLimit)
+	require.Equal(t, 5, app.historyOffset)
+	var responseBody response.Response
+	require.NoError(t, sonic.Unmarshal(w.Body.Bytes(), &responseBody))
+	data, ok := responseBody.Data.(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, float64(1), data["total"])
 }

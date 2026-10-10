@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { sessionApi, StreamEndError } from '@/lib/api/session'
-import { normalizeEvent, normalizeEvents } from '@/lib/session-events'
-import type { SessionDetail, SSEEventData, SessionFile } from '@/lib/api/types'
+import { sessionApi } from '@/lib/api/session'
+import { runApi } from '@/lib/api/run'
+import { StreamEndError } from '@/lib/api/fetch'
+import { normalizeEvent } from '@/lib/session-events'
+import type { Run, RunHistoryPage, SessionDetail, SSEEventData, SessionFile } from '@/lib/api/types'
 
 export type UseSessionDetailResult = {
   session: SessionDetail | null
@@ -18,16 +20,13 @@ export type UseSessionDetailResult = {
   streaming: boolean
   lastSendError: Error | null
   streamingText: { messageId: string; text: string } | null
+  cancelRun: () => Promise<void>
 }
 
 /**
- * 任务详情：拉取会话详情与文件列表，管理事件列表；
- * 未完成任务会通过 chat 空 body 流式拉取事件，发送消息时通过 chat 带 body 流式追加事件。
+ * 任务详情：Session 只提供容器信息，执行生命周期和事件流全部由 Run 驱动。
  */
-export function useSessionDetail(
-  sessionId: string | null,
-  initialSkipEmptyStream?: boolean
-): UseSessionDetailResult {
+export function useSessionDetail(sessionId: string | null): UseSessionDetailResult {
   const [session, setSession] = useState<SessionDetail | null>(null)
   const [files, setFiles] = useState<SessionFile[]>([])
   const [events, setEvents] = useState<SSEEventData[]>([])
@@ -37,16 +36,32 @@ export function useSessionDetail(
   // 与 refresh 等其他来源的 error 区分开。
   const [lastSendError, setLastSendError] = useState<Error | null>(null)
   // 空流重连定时器：卸载/切会话时必须清除，否则产生孤儿 SSE 连接
-  const emptyStreamTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const runStreamTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // 流式中的 assistant 增量文本（独立于 events，避免每 token 触发 timeline 全量重算）
   const [streamingText, setStreamingText] = useState<{ messageId: string; text: string } | null>(null)
   const [streaming, setStreaming] = useState(false)
-  const [skipEmptyStream, setSkipEmptyStream] = useState(initialSkipEmptyStream || false)
-  const emptyStreamCleanupRef = useRef<(() => void) | null>(null)
-  const messageStreamCleanupRef = useRef<(() => void) | null>(null)
-  const isSendMessageRef = useRef(false)
+  const runStreamCleanupRef = useRef<(() => void) | null>(null)
+  const activeRunIdRef = useRef<string | null>(null)
+  const waitingMessageIdRef = useRef<string | null>(null)
   const lastEventIdRef = useRef<string | null>(null)
   const streamingDeltaIdsRef = useRef<Set<string>>(new Set())
+
+  const runToSessionStatus = useCallback((run: Run | null): SessionDetail['status'] => {
+    if (!run) return 'completed'
+    if (run.status === 'waiting_input') return 'waiting'
+    if (run.status === 'pending' || run.status === 'running' || run.status === 'cancelling') return 'running'
+    return 'completed'
+  }, [])
+
+  const applyRun = useCallback((run: Run | null) => {
+    if (!run) return
+    activeRunIdRef.current = run.status === 'succeeded' || run.status === 'failed' || run.status === 'cancelled' || run.status === 'interrupted'
+      ? null
+      : run.id
+    waitingMessageIdRef.current = run.status === 'waiting_input' ? (run.waiting_message_id || null) : null
+    setSession((prev) => prev ? { ...prev, status: runToSessionStatus(run) } : prev)
+    setStreaming(run.status === 'pending' || run.status === 'running')
+  }, [runToSessionStatus])
 
   const appendEvent = useCallback((ev: SSEEventData) => {
     let evToAppend = ev
@@ -155,53 +170,57 @@ export function useSessionDetail(
     return true
   }, [])
 
-  const startEmptyStream = useCallback(() => {
-    if (!sessionId) return
-    if (emptyStreamCleanupRef.current) {
-      emptyStreamCleanupRef.current()
-      emptyStreamCleanupRef.current = null
+  const startRunStream = useCallback((runId: string) => {
+    if (!sessionId || !runId) return
+    if (runStreamCleanupRef.current) {
+      runStreamCleanupRef.current()
+      runStreamCleanupRef.current = null
     }
-    emptyStreamCleanupRef.current = sessionApi.chat(
-      sessionId,
-      { event_id: lastEventIdRef.current || undefined },
+    runStreamCleanupRef.current = runApi.streamEvents(
+      runId,
+      lastEventIdRef.current || undefined,
       (ev) => {
         if (routeStreamingDelta(ev)) return
         appendEvent(ev)
         if (ev.type === 'message_done') setStreamingText(null)
+        if (ev.type === 'wait') {
+          void runApi.get(runId).then(applyRun).catch(() => undefined)
+        }
+        if (ev.type === 'done' || ev.type === 'error') {
+          setStreaming(false)
+          setStreamingText(null)
+          void runApi.get(runId).then(applyRun).catch(() => undefined)
+        }
       },
       (err) => {
         if (err.name === 'AbortError') {
           return
         }
-        // 流正常结束（服务端关闭连接），延迟重连
         if (err instanceof StreamEndError) {
-          emptyStreamCleanupRef.current = null
-          emptyStreamTimerRef.current = setTimeout(() => {
-            if (!emptyStreamCleanupRef.current && !isSendMessageRef.current) {
-              startEmptyStream()
+          runStreamCleanupRef.current = null
+          void runApi.get(runId).then((run) => {
+            applyRun(run)
+            if (run.status === 'pending' || run.status === 'running' || run.status === 'cancelling') {
+              runStreamTimerRef.current = setTimeout(() => startRunStream(runId), 500)
             }
-          }, 500)
+          }).catch(() => undefined)
           return
         }
-        emptyStreamCleanupRef.current = null
+        runStreamCleanupRef.current = null
         setError(err)
-        emptyStreamTimerRef.current = setTimeout(() => {
-          if (!emptyStreamCleanupRef.current && !isSendMessageRef.current) {
-            startEmptyStream()
-          }
-        }, 1000)
+        runStreamTimerRef.current = setTimeout(() => startRunStream(runId), 1000)
       }
     )
-  }, [sessionId, appendEvent])
+  }, [sessionId, appendEvent, applyRun, routeStreamingDelta])
 
-  const stopEmptyStream = useCallback(() => {
-    if (emptyStreamTimerRef.current) {
-      clearTimeout(emptyStreamTimerRef.current)
-      emptyStreamTimerRef.current = null
+  const stopRunStream = useCallback(() => {
+    if (runStreamTimerRef.current) {
+      clearTimeout(runStreamTimerRef.current)
+      runStreamTimerRef.current = null
     }
-    if (emptyStreamCleanupRef.current) {
-      emptyStreamCleanupRef.current()
-      emptyStreamCleanupRef.current = null
+    if (runStreamCleanupRef.current) {
+      runStreamCleanupRef.current()
+      runStreamCleanupRef.current = null
     }
   }, [])
 
@@ -220,28 +239,23 @@ export function useSessionDetail(
     if (!sessionId) return
     setError(null)
     try {
-      const [detail, fileListRaw] = await Promise.all([
+      const [detail, fileListRaw, history] = await Promise.all([
         sessionApi.getSessionDetail(sessionId),
         sessionApi.getSessionFiles(sessionId),
+        runApi.listBySession(sessionId),
       ])
-      setSession(detail)
       setFiles(normalizeFileList(fileListRaw))
-      const rawEvents = (detail as { events?: unknown }).events
-      if (rawEvents && Array.isArray(rawEvents) && rawEvents.length > 0) {
-        const normalized = normalizeEvents(rawEvents)
-        setEvents(normalized)
-        // DB 历史事件可能只有业务 UUID；只有 Redis ms-seq 才能作为 XREAD 游标。
-        const lastEvId = [...normalized]
-          .reverse()
-          .find((event) => event.streamId && /^\d+-\d+$/.test(event.streamId))?.streamId
-        if (lastEvId) lastEventIdRef.current = lastEvId
-      }
+      const historyEvents = historyToEvents(history, normalizeFileList(fileListRaw))
+      setEvents(historyEvents)
+      const active = history.items.find((item) => item.run.status === 'pending' || item.run.status === 'running' || item.run.status === 'waiting_input' || item.run.status === 'cancelling')
+      applyRun(active?.run || null)
+      setSession({ ...detail, status: runToSessionStatus(active?.run || null) })
     } catch (e) {
       setError(e instanceof Error ? e : new Error('加载失败'))
     } finally {
       setLoading(false)
     }
-  }, [sessionId, normalizeFileList])
+  }, [sessionId, normalizeFileList, applyRun, runToSessionStatus])
 
   const refreshFiles = useCallback(async () => {
     if (!sessionId) return
@@ -255,10 +269,7 @@ export function useSessionDetail(
 
   useEffect(() => {
     // 切会话：清理上一会话的消息流与状态，避免事件串台、游标串用
-    if (messageStreamCleanupRef.current) {
-      messageStreamCleanupRef.current()
-      messageStreamCleanupRef.current = null
-    }
+    stopRunStream()
     setEvents([])
     setLastSendError(null)
     setStreamingText(null)
@@ -270,133 +281,66 @@ export function useSessionDetail(
       setFiles([])
       setEvents([])
       setError(null)
-      stopEmptyStream()
+      stopRunStream()
       return
     }
     setLoading(true)
     refresh().then(() => {
-      // 由下面的 effect 根据 session 状态决定是否开空流
+      if (activeRunIdRef.current) startRunStream(activeRunIdRef.current)
     })
     return () => {
-      stopEmptyStream()
+      stopRunStream()
     }
-  }, [sessionId]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (!sessionId || !session) return
-    const status = session.status
-    const completed = status === 'completed'
-    // 如果标记了跳过空流（比如有初始消息待发送），则不启动空流
-    if (!completed && !isSendMessageRef.current && !skipEmptyStream) {
-      startEmptyStream()
-    }
-    return () => {
-      stopEmptyStream()
-    }
-  }, [sessionId, session?.status, skipEmptyStream, startEmptyStream, stopEmptyStream])
+  }, [sessionId, refresh, startRunStream, stopRunStream])
 
   // 组件卸载时清理消息流与重连定时器
   useEffect(() => {
     return () => {
-      if (emptyStreamTimerRef.current) {
-        clearTimeout(emptyStreamTimerRef.current)
-        emptyStreamTimerRef.current = null
-      }
-      if (messageStreamCleanupRef.current) {
-        messageStreamCleanupRef.current()
-        messageStreamCleanupRef.current = null
-      }
+      stopRunStream()
     }
-  }, [])
+  }, [stopRunStream])
 
   const sendMessage = useCallback(
     async (message: string, attachmentIds: string[], modelId?: string) => {
       if (!sessionId) return
-      stopEmptyStream()
-      // 清理已有的消息流连接（如 waiting 状态时用户再次发送）
-      if (messageStreamCleanupRef.current) {
-        messageStreamCleanupRef.current()
-        messageStreamCleanupRef.current = null
-      }
-      // 发送消息时，清除跳过空流的标记
-      setSkipEmptyStream(false)
-      isSendMessageRef.current = true
+      stopRunStream()
       setStreaming(true)
       setLastSendError(null)
 
-      // 立即更新状态为 running，不等待 SSE 事件
       setSession((prev) => prev ? { ...prev, status: 'running' } : null)
-
-      const onEvent = (ev: SSEEventData) => {
-        if (routeStreamingDelta(ev)) return
-        appendEvent(ev)
-        if (ev.type === 'message_done') setStreamingText(null)
-        // 错误事件：弹 toast 提示给用户，并把状态回滚到 completed
-        if (ev.type === 'error') {
-          const errorData = ev.data as { message?: string; error?: string }
-          const errMsg = errorData.message || errorData.error || '服务异常，请稍后重试'
-          toast.error(`AI 调用失败：${errMsg}`)
-          setError(new Error(errMsg))
-          setLastSendError(new Error(errMsg))
+      try {
+        const waitingRunId = activeRunIdRef.current
+        const waitingMessageId = waitingMessageIdRef.current
+        // 新 Run 的 Redis Stream 与上一轮完全独立，不能携带旧游标续读。
+        if (!waitingRunId || !waitingMessageId) {
+          lastEventIdRef.current = null
+          streamingDeltaIdsRef.current.clear()
           setStreamingText(null)
-          setSession((prev) =>
-            prev ? { ...prev, status: 'completed' } : null
-          )
         }
-        if (ev.type === 'done') {
-          setStreamingText(null)
-          setStreaming(false)
-          isSendMessageRef.current = false
-          // 清理消息流的 cleanup
-          if (messageStreamCleanupRef.current) {
-            messageStreamCleanupRef.current()
-            messageStreamCleanupRef.current = null
-          }
-          setSession((prev) => prev ? { ...prev, status: 'completed' } : null)
-          startEmptyStream()
-        }
+        const run = waitingRunId && waitingMessageId
+          ? await runApi.submitInput(waitingRunId, message, waitingMessageId, attachmentIds, modelId)
+          : await runApi.create(sessionId, message, attachmentIds, modelId)
+        activeRunIdRef.current = run.id
+        waitingMessageIdRef.current = run.waiting_message_id || null
+        await refresh()
+        startRunStream(run.id)
+      } catch (e) {
+        const sendErr = e instanceof Error ? e : new Error('Run 创建失败')
+        setError(sendErr)
+        setLastSendError(sendErr)
+        setStreaming(false)
+        toast.error(`消息发送失败：${sendErr.message}`)
+        throw sendErr
       }
-      const messageStreamCleanup = sessionApi.chat(
-        sessionId,
-        { message, attachments: attachmentIds, model_id: modelId },
-        onEvent,
-        (err) => {
-          if (err.name === 'AbortError') {
-            setStreaming(false)
-            isSendMessageRef.current = false
-            return
-          }
-          // 流正常结束（服务端关闭连接），重置状态并启动空流监听后续事件
-          if (err instanceof StreamEndError) {
-            setStreaming(false)
-            isSendMessageRef.current = false
-            if (messageStreamCleanupRef.current) {
-              messageStreamCleanupRef.current()
-              messageStreamCleanupRef.current = null
-            }
-            startEmptyStream()
-            return
-          }
-          // 实际错误
-          const sendErr = err instanceof Error ? err : new Error('流式响应异常')
-          setError(sendErr)
-          setLastSendError(sendErr)
-          toast.error(`消息发送失败：${sendErr.message}`)
-          setStreaming(false)
-          isSendMessageRef.current = false
-          // 网络断开不等于任务完成：保留当前状态，由空流重新连接并同步后端事件。
-          if (messageStreamCleanupRef.current) {
-            messageStreamCleanupRef.current()
-            messageStreamCleanupRef.current = null
-          }
-          startEmptyStream()
-        }
-      )
-      // 将消息流的 cleanup 存到独立的 ref，不与 emptyStream 混淆
-      messageStreamCleanupRef.current = messageStreamCleanup
     },
-    [sessionId, appendEvent, startEmptyStream, stopEmptyStream]
+    [sessionId, refresh, startRunStream, stopRunStream]
   )
+
+  const cancelRun = useCallback(async () => {
+    if (!activeRunIdRef.current) return
+    const run = await runApi.cancel(activeRunIdRef.current)
+    applyRun(run)
+  }, [applyRun])
 
   return {
     session,
@@ -410,5 +354,28 @@ export function useSessionDetail(
     streaming,
     lastSendError,
     streamingText,
+    cancelRun,
   }
+}
+
+function historyToEvents(history: RunHistoryPage, files: SessionFile[]): SSEEventData[] {
+  const fileMap = new Map(files.map((file) => [file.id, file]))
+  const events: SSEEventData[] = []
+  for (const item of [...history.items].reverse()) {
+    for (const message of item.messages) {
+      events.push({
+        type: 'message',
+        data: {
+          role: message.role,
+          message: message.content,
+          message_id: message.id,
+          attachments: (message.attachments || []).map((id) => {
+            const file = fileMap.get(id)
+            return { file_id: id, filename: file?.filename || id, size: file?.size || 0 }
+          }),
+        },
+      } as SSEEventData)
+    }
+  }
+  return events
 }

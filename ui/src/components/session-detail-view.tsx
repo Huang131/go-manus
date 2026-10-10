@@ -18,7 +18,6 @@ import {
 } from '@/lib/session-events'
 import type { ToolEvent, FileInfo } from '@/lib/api/types'
 import type { AttachmentFile, TimelineItem } from '@/lib/session-events'
-import { sessionApi } from '@/lib/api/session'
 import { toast } from 'sonner'
 import { ArrowDown, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -67,7 +66,8 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
     streaming,
     lastSendError,
     streamingText,
-  } = useSessionDetail(sessionId, hasInitialMessage)
+    cancelRun,
+  } = useSessionDetail(sessionId)
 
   // 模型选择状态（提升到此处持有：chat-input 只做受控展示，
   // 支持失败后从外部把选择切换为 Auto 并重发）
@@ -317,13 +317,13 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
   const handleStop = useCallback(async () => {
     if (!session) return
     try {
-      await sessionApi.stopSession(sessionId)
+      await cancelRun()
       toast.success('任务已停止')
       refresh()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '停止任务失败')
     }
-  }, [session, sessionId, refresh])
+  }, [session, cancelRun, refresh])
 
   if (loading && !session) {
     return (

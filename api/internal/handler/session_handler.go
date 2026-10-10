@@ -467,16 +467,9 @@ func (h *SessionHandler) Stop(c *gin.Context) {
 // mergeEventMetadata 将 model.Event 的 Data 业务 payload 与元数据（event_id、created_at）合并
 // 对齐原 Python 版本的 BaseEventData 平铺结构。
 //
-// Run event publisher 创建事件时已把元数据平铺进 payload 并填充 Event.ID，
-// 此处对这类事件零序列化直传；仅对旧格式/其他生产方（payload 无元数据）
-// 的事件退化为解析重组。Data 解析失败时直接返回原始 Data，保证前端不卡死。
+// Redis Stream 游标只在读取时可知，因此所有对象 payload 都在此处补入相同的 event_id。
+// 这样 SSE id 和 payload 去重键保持一致；Data 解析失败时直接返回原始 Data，保证前端不卡死。
 func mergeEventMetadata(ctx context.Context, event *model.Event) []byte {
-	// 新格式：元数据已在 payload 内（以 Event.ID 是否回填为判据）
-	if event.ID != "" && len(event.Data) > 0 {
-		return event.Data
-	}
-
-	// 兜底：payload 未携带元数据，解析重组注入
 	createdAt := event.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now()

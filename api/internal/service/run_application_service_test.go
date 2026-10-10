@@ -12,10 +12,15 @@ import (
 )
 
 type applicationRunStoreStub struct {
-	run          *model.Run
-	createInput  CreateRunInput
-	resume       *RunResume
-	submittedRun string
+	run           *model.Run
+	createInput   CreateRunInput
+	resume        *RunResume
+	submittedRun  string
+	history       []*model.Run
+	historyTotal  int
+	messages      map[string][]*model.RunMessage
+	historyLimit  int
+	historyOffset int
 }
 
 func (s *applicationRunStoreStub) Create(_ context.Context, input CreateRunInput) (*model.Run, error) {
@@ -42,8 +47,17 @@ func (s *applicationRunStoreStub) GetActiveBySessionID(_ context.Context, sessio
 	return s.run, nil
 }
 
+func (s *applicationRunStoreStub) ListBySessionID(_ context.Context, _ string, limit, offset int) ([]*model.Run, int, error) {
+	s.historyLimit, s.historyOffset = limit, offset
+	return s.history, s.historyTotal, nil
+}
+
 func (s *applicationRunStoreStub) RequestCancel(_ context.Context, _ string) (*model.Run, error) {
 	return s.run, nil
+}
+
+func (s *applicationRunStoreStub) ListMessages(_ context.Context, runID string) ([]*model.RunMessage, error) {
+	return s.messages[runID], nil
 }
 
 type applicationExecutorStub struct {

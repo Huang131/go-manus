@@ -1,12 +1,6 @@
-import { get, post, createSSEStream, parseSSEStream } from "./fetch";
+import { get, post, createSSEStream, parseSSEStream, StreamEndError } from "./fetch";
 
-/** 流正常结束（服务端关闭连接）的标记错误：上层用 instanceof 判断，不再比对消息字符串 */
-export class StreamEndError extends Error {
-  constructor() {
-    super("SSE_STREAM_END");
-    this.name = "StreamEndError";
-  }
-}
+export { StreamEndError } from "./fetch";
 import type {
   Session,
   SessionDetail,

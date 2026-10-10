@@ -18,7 +18,21 @@ type RunApplicationService interface {
 	SubmitInput(ctx context.Context, runID string, input SubmitInputRequest) (*ApplicationRun, error)
 	Get(ctx context.Context, runID string) (*model.Run, error)
 	GetActiveBySessionID(ctx context.Context, sessionID string) (*model.Run, error)
+	ListBySessionID(ctx context.Context, sessionID string, limit, offset int) (*RunHistoryPage, error)
 	Cancel(ctx context.Context, runID string) (*model.Run, error)
+}
+
+// RunHistoryItem 是 UI 恢复会话时间线所需的持久化消息视图。
+type RunHistoryItem struct {
+	Run      *model.Run          `json:"run"`
+	Messages []*model.RunMessage `json:"messages"`
+}
+
+type RunHistoryPage struct {
+	Items  []RunHistoryItem `json:"items"`
+	Total  int              `json:"total"`
+	Limit  int              `json:"limit"`
+	Offset int              `json:"offset"`
 }
 
 // CreateApplicationRunInput 是创建 Run 的 API 级输入。
@@ -40,6 +54,8 @@ type runApplicationStore interface {
 	SubmitInput(ctx context.Context, runID string, input SubmitInputRequest) (*RunResume, error)
 	Get(ctx context.Context, runID string) (*model.Run, error)
 	GetActiveBySessionID(ctx context.Context, sessionID string) (*model.Run, error)
+	ListBySessionID(ctx context.Context, sessionID string, limit, offset int) ([]*model.Run, int, error)
+	ListMessages(ctx context.Context, runID string) ([]*model.RunMessage, error)
 	RequestCancel(ctx context.Context, runID string) (*model.Run, error)
 }
 
@@ -186,6 +202,32 @@ func (s *defaultRunApplicationService) GetActiveBySessionID(ctx context.Context,
 		return nil, apperr.FailedPrecondition("run service is unavailable")
 	}
 	return s.runs.GetActiveBySessionID(ctx, sessionID)
+}
+
+// ListBySessionID 读取历史 Run 及其消息，避免 UI 继续依赖已停止写入的 Session.events。
+func (s *defaultRunApplicationService) ListBySessionID(ctx context.Context, sessionID string, limit, offset int) (*RunHistoryPage, error) {
+	if s.runs == nil {
+		return nil, apperr.FailedPrecondition("run service is unavailable")
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, apperr.BadRequest("session id is required")
+	}
+	runs, total, err := s.runs.ListBySessionID(ctx, sessionID, limit, offset)
+	if err != nil {
+		return nil, apperr.ToInternal(err)
+	}
+	page := &RunHistoryPage{Items: make([]RunHistoryItem, 0, len(runs)), Total: total, Limit: limit, Offset: offset}
+	for _, run := range runs {
+		if run == nil {
+			continue
+		}
+		messages, err := s.runs.ListMessages(ctx, run.ID)
+		if err != nil {
+			return nil, apperr.ToInternal(err)
+		}
+		page.Items = append(page.Items, RunHistoryItem{Run: run, Messages: messages})
+	}
+	return page, nil
 }
 
 func (s *defaultRunApplicationService) Cancel(ctx context.Context, runID string) (*model.Run, error) {

@@ -12,6 +12,16 @@ export type ApiResponse<T = unknown> = {
  */
 export type SessionStatus = "pending" | "running" | "waiting" | "completed";
 
+export type RunStatus =
+  | "pending"
+  | "running"
+  | "waiting_input"
+  | "cancelling"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "interrupted";
+
 /**
  * 执行状态
  */
@@ -214,6 +224,42 @@ export type ChatParams = {
  */
 export type SessionDetail = Session & {
   events?: SSEEventData[];
+};
+
+export type RunMessage = {
+  id: string;
+  session_id: string;
+  run_id: string;
+  idempotency_key?: string;
+  reply_to_message_id?: string;
+  role: "user" | "assistant";
+  content: string;
+  attachments?: string[];
+  created_at: string;
+};
+
+export type Run = {
+  id: string;
+  session_id: string;
+  status: RunStatus;
+  waiting_message_id?: string;
+  error_code?: string;
+  error_message?: string;
+  created_at: string;
+  updated_at: string;
+  [key: string]: unknown;
+};
+
+export type RunHistoryItem = {
+  run: Run;
+  messages: RunMessage[];
+};
+
+export type RunHistoryPage = {
+  items: RunHistoryItem[];
+  total: number;
+  limit: number;
+  offset: number;
 };
 
 /**

@@ -2,10 +2,12 @@ package handler
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
+	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/service"
 	"github.com/Huang131/go-manus/api/pkg/response"
@@ -26,6 +28,7 @@ func NewRunHandler(app service.RunApplicationService, events service.RunEventRea
 type createRunRequest struct {
 	Message     string   `json:"message"`
 	Attachments []string `json:"attachments,omitempty"`
+	ModelID     string   `json:"model_id,omitempty"`
 }
 
 type submitRunInputRequest struct {
@@ -33,6 +36,7 @@ type submitRunInputRequest struct {
 	ReplyToMessageID string   `json:"reply_to_message_id"`
 	Message          string   `json:"message"`
 	Attachments      []string `json:"attachments,omitempty"`
+	ModelID          string   `json:"model_id,omitempty"`
 }
 
 // Create 创建一次顶层 Run；幂等键优先读取请求头，也接受 JSON 字段。
@@ -54,7 +58,11 @@ func (h *RunHandler) Create(c *gin.Context) {
 	if key == "" {
 		key = uuid.NewString()
 	}
-	run, err := h.app.Create(c.Request.Context(), service.CreateApplicationRunInput{
+	ctx := c.Request.Context()
+	if strings.TrimSpace(req.ModelID) != "" {
+		ctx = llm.WithModelID(ctx, strings.TrimSpace(req.ModelID))
+	}
+	run, err := h.app.Create(ctx, service.CreateApplicationRunInput{
 		SessionID: c.Param("sessionId"), IdempotencyKey: key,
 		Content: req.Message, AttachmentIDs: req.Attachments,
 	})
@@ -84,7 +92,11 @@ func (h *RunHandler) SubmitInput(c *gin.Context) {
 		response.FromError(c, apperr.BadRequest("idempotency key is required"))
 		return
 	}
-	result, err := h.app.SubmitInput(c.Request.Context(), c.Param("runId"), service.SubmitInputRequest{
+	ctx := c.Request.Context()
+	if strings.TrimSpace(req.ModelID) != "" {
+		ctx = llm.WithModelID(ctx, strings.TrimSpace(req.ModelID))
+	}
+	result, err := h.app.SubmitInput(ctx, c.Param("runId"), service.SubmitInputRequest{
 		IdempotencyKey: key, ReplyToMessageID: req.ReplyToMessageID,
 		Content: req.Message, Attachments: req.Attachments,
 	})
@@ -106,6 +118,44 @@ func (h *RunHandler) Get(c *gin.Context) {
 		return
 	}
 	response.Success(c, run)
+}
+
+// ListBySession 返回会话历史 Run 和持久化消息，供刷新后的 UI 重建基础时间线。
+func (h *RunHandler) ListBySession(c *gin.Context) {
+	if h == nil || h.app == nil {
+		response.FromError(c, apperr.FailedPrecondition("run service is not configured"))
+		return
+	}
+	limit, offset, err := parseRunPage(c)
+	if err != nil {
+		response.FromError(c, err)
+		return
+	}
+	page, err := h.app.ListBySessionID(c.Request.Context(), c.Param("sessionId"), limit, offset)
+	if err != nil {
+		response.FromError(c, err)
+		return
+	}
+	response.Success(c, page)
+}
+
+func parseRunPage(c *gin.Context) (int, int, error) {
+	limit, offset := 50, 0
+	for name, target := range map[string]*int{"limit": &limit, "offset": &offset} {
+		raw := strings.TrimSpace(c.Query(name))
+		if raw == "" {
+			continue
+		}
+		value, err := strconv.Atoi(raw)
+		if err != nil || value < 0 || (name == "limit" && value == 0) {
+			return 0, 0, apperr.BadRequest("invalid run pagination")
+		}
+		*target = value
+	}
+	if limit > 100 {
+		return 0, 0, apperr.BadRequest("run limit must be at most 100")
+	}
+	return limit, offset, nil
 }
 
 func (h *RunHandler) Cancel(c *gin.Context) {

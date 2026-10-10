@@ -24,6 +24,7 @@ type RunRepository interface {
 	CreateWithInitialMessage(ctx context.Context, run *model.Run, initial *model.RunMessage) (created *model.Run, inserted bool, err error)
 	GetByID(ctx context.Context, id string) (*model.Run, error)
 	GetActiveBySessionID(ctx context.Context, sessionID string) (*model.Run, error)
+	ListBySessionID(ctx context.Context, sessionID string, limit, offset int) ([]*model.Run, int, error)
 	ListMessages(ctx context.Context, runID string) ([]*model.RunMessage, error)
 	TransitionStatus(ctx context.Context, id string, from []model.RunStatus, to model.RunStatus) (bool, error)
 	EnterWaitingInput(ctx context.Context, runID string, expectedRevision int, snapshot model.RunExecutionSnapshot, question *model.RunMessage) (bool, error)
@@ -210,6 +211,34 @@ func (r *PostgresRunRepository) GetActiveBySessionID(ctx context.Context, sessio
 		return nil, err
 	}
 	return run, nil
+}
+
+// ListBySessionID 按创建时间倒序读取会话历史 Run，并返回总数供 UI 分页。
+func (r *PostgresRunRepository) ListBySessionID(ctx context.Context, sessionID string, limit, offset int) ([]*model.Run, int, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var total int
+	if err := r.queryer().QueryRow(ctx, `SELECT COUNT(*) FROM runs WHERE session_id = $1`, sessionID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	rows, err := r.queryer().Query(ctx, `
+		SELECT `+runColumns+` FROM runs
+		WHERE session_id = $1
+		ORDER BY created_at DESC, id DESC
+		LIMIT $2 OFFSET $3
+	`, sessionID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	runs, err := collectRows(rows, scanRun)
+	if err != nil {
+		return nil, 0, err
+	}
+	return runs, total, nil
 }
 
 func (r *PostgresRunRepository) runBySessionAndIdempotencyKey(ctx context.Context, sessionID, idempotencyKey string) (*model.Run, error) {

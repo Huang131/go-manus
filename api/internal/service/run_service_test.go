@@ -68,6 +68,13 @@ func (f *fakeRunStore) GetActiveBySessionID(_ context.Context, sessionID string)
 	return f.run, nil
 }
 
+func (f *fakeRunStore) ListBySessionID(_ context.Context, sessionID string, _, _ int) ([]*model.Run, int, error) {
+	if f.run == nil || f.run.SessionID != sessionID {
+		return nil, 0, nil
+	}
+	return []*model.Run{f.run}, 1, nil
+}
+
 func (f *fakeRunStore) ListMessages(_ context.Context, _ string) ([]*model.RunMessage, error) {
 	return append([]*model.RunMessage(nil), f.messages...), nil
 }

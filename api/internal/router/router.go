@@ -58,6 +58,7 @@ func SetupRoutes(engine *gin.Engine, h *Handlers) {
 				runs.GET("/:runId/events", h.Run.Events)
 			}
 			api.POST("/sessions/:sessionId/runs", h.Run.Create)
+			api.GET("/sessions/:sessionId/runs", h.Run.ListBySession)
 		}
 
 		// 文件模块

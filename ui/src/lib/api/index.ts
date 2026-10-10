@@ -12,12 +12,14 @@ export {
   createSSEStream,
   parseSSEStream,
   ApiError,
+  StreamEndError,
 } from "./fetch";
 
 // 类型定义
 export type {
   ApiResponse,
   SessionStatus,
+  RunStatus,
   ExecutionStatus,
   ToolEventStatus,
   AgentSettings,
@@ -35,6 +37,10 @@ export type {
   FileUploadParams,
   Session,
   SessionDetail,
+  Run,
+  RunMessage,
+  RunHistoryItem,
+  RunHistoryPage,
   SessionsData,
   CreateSessionParams,
   ChatMessage,
@@ -54,4 +60,5 @@ export type {
 // 模块 API
 export { configApi } from "./config";
 export { fileApi } from "./file";
-export { sessionApi, StreamEndError } from "./session";
+export { sessionApi } from "./session";
+export { runApi } from "./run";

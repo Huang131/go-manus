@@ -1,5 +1,13 @@
 import type { ApiResponse } from "./types";
 
+/** SSE 服务端正常关闭连接的标记错误，调用方可据此安排续读。 */
+export class StreamEndError extends Error {
+  constructor() {
+    super("SSE_STREAM_END");
+    this.name = "StreamEndError";
+  }
+}
+
 /**
  * API 配置
  */
@@ -312,6 +320,7 @@ export async function createSSEStream(
     timeout = API_CONFIG.timeout,
     headers = {},
     signal: externalSignal,
+    method = "POST",
     ...fetchOptions
   } = options || {};
 
@@ -348,9 +357,9 @@ export async function createSSEStream(
   try {
     const response = await fetch(url, {
       ...fetchOptions,
-      method: "POST",
+      method,
       headers: mergedHeaders,
-      body: JSON.stringify(data),
+      ...(method === "GET" ? {} : { body: JSON.stringify(data) }),
       signal: controller.signal,
     });
 

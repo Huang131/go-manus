@@ -11,7 +11,7 @@
 | 2. Engine 与 Context | complete | `4650cc4`、`aba7f43`、`8fd0fa6` | Outcome、ContextPolicy 与 MCP 动态调用契约已完成 |
 | 3. Run 领域与存储 | complete | `a8de838`、`f0ada6a`、`6055590`、`cb50565` | 3A 领域、3B Repository/migration、3C 纯 RunService 已完成；尚未接入生产执行路径 |
 | 4. 执行生产切换 | complete | `e281520`、`bb171f6`、本轮 Run 切换 | 4A 生命周期、waiting_input 恢复、4B 应用编排、Bootstrap 和旧 Session Chat/Stop/SSE 的 Run 薄适配已完成；生产执行不再进入 Task 链 |
-| 5. API/UI/SSE | in_progress | `c1cefeb`、本轮 Run/Session HTTP 契约 | Run API、Last-Event-ID 和旧路由 Run 适配已建立；UI 切换、旧路由删除和真实依赖 HTTP 验收待完成 |
+| 5. API/UI/SSE | in_progress | `c1cefeb`、本轮 UI Run 切换 | Run API、Last-Event-ID、Run 历史读取与 UI 切换已完成；旧路由删除和真实依赖 HTTP 验收待完成 |
 | 6. 遗留删除 | pending | - | 依赖阶段 4/5 的引用扫描和回归 |
 
 允许状态：`pending`、`in_progress`、`complete`、`blocked`。
@@ -37,6 +37,21 @@ go vet ./...
 ```
 
 受限环境的回环端口失败必须单独记录，不能改写为通过。
+
+## 最近完成：检查点 5B UI 消费 Run 生命周期
+
+UI 不再调用 Session Chat 或 Stop：顶层消息请求创建 Run，`waiting_input` 回答以持久化的 `waiting_message_id` 提交给同一 Run，取消调用 Run Cancel，SSE 按 Run ID 与 `Last-Event-ID` 续读。刷新页面时 UI 从 `GET /sessions/:sessionId/runs` 读取 Run/Message 历史重建基础时间线，不再读取已经停止写入的 `sessions.events`。新 Run 会清空前一 Run 的游标；等待恢复保持同一 Run 游标，避免漏读恢复后的事件。
+
+验证结果：
+
+```text
+go test ./internal/handler -run '^TestRunHandler' -count=1   PASS
+go test ./internal/service ./internal/bootstrap -count=1     PASS
+npm run build                                                 PASS
+npm run lint                                                  PASS（仅保留既有 warning）
+```
+
+本环境执行 `go test ./...` 时，`internal/agent/tools`、`internal/handler` 和 `internal/sandbox` 的既有 `httptest`/回环端口测试被系统拒绝绑定端口；其余包通过。这是环境约束，不能记录为全仓测试通过。
 
 ## 最近完成：检查点 4A RunExecutor 生命周期与 Engine adapter
 
@@ -76,7 +91,7 @@ go test -tags=integration ./tests -run '^TestRunRepo_FinishTerminal' -count=1
 | 4B Run API/SSE 入口 | complete | `c1cefeb feat(api): expose run lifecycle and event APIs` |
 | 4B 唯一后端生产切换 | complete | 本轮 Session Chat/Stop/SSE 已改为 Run 薄适配；旧 Task 读取路径已移除 |
 | 5A Run API/SSE | complete | Run Handler、Session 兼容路由和 Last-Event-ID 契约测试已补；真实依赖测试待在 component 环境执行 |
-| 5B UI 切换 | pending | `06-api-ui-sse-cutover.md` |
+| 5B UI 切换 | complete | 本轮 `refactor(ui): consume run lifecycle`：UI 的创建、事件流、等待输入和取消均走 Run API；补充历史 Run/Message 读取 |
 | 5C 删除旧路由 | pending | `06-api-ui-sse-cutover.md` |
 | 6A 删除 Task 基础设施 | pending | `07-legacy-removal.md` |
 | 6B 删除 Session 执行字段 | pending | `07-legacy-removal.md` |

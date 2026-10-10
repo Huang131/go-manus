@@ -102,6 +102,9 @@ func (*sessionRunStub) Get(context.Context, string) (*model.Run, error) { return
 func (s *sessionRunStub) GetActiveBySessionID(context.Context, string) (*model.Run, error) {
 	return s.active, nil
 }
+func (*sessionRunStub) ListBySessionID(context.Context, string, int, int) (*service.RunHistoryPage, error) {
+	return &service.RunHistoryPage{}, nil
+}
 func (s *sessionRunStub) Cancel(_ context.Context, runID string) (*model.Run, error) {
 	s.cancelled = runID
 	return &model.Run{ID: runID, Status: model.RunStatusCancelling}, nil

@@ -4,12 +4,12 @@
 
 ## API 契约
 
-- `POST /sessions/:sessionId/runs`：携带客户端幂等键创建顶层 Run，返回 `run_id`、初始状态和必要快照。
-- `POST /runs/:runId/input`：携带消息幂等键，只对 `waiting_input` Run 提交输入并继续同一 Run。
+- `POST /sessions/:sessionId/runs`：携带客户端幂等键创建顶层 Run，返回 Run 快照；可选 `model_id` 仅作用于本次顶层执行，不改全局默认模型。
+- `POST /runs/:runId/input`：携带消息幂等键，只对 `waiting_input` Run 提交输入并继续同一 Run；可选 `model_id` 与创建请求一致，保证等待恢复不会意外退回默认模型。
 - `POST /runs/:runId/cancel`：条件迁移到 `cancelling`，重复取消返回稳定结果；`cancelled` 只在执行 goroutine 退出和 ToolSet 释放后出现。
 - `GET /runs/:runId`：查询 Run、Plan 快照、错误和最终消息。
 - `GET /runs/:runId/events`：按 Run ID 订阅 SSE。
-- `GET /sessions/:sessionId/runs`：按时间分页查询历史 Run，供会话恢复和 UI 展示。
+- `GET /sessions/:sessionId/runs`：按时间分页查询历史 Run 及其持久化消息，供刷新后的 UI 重建对话基础记录；短期工具明细仍只来自 SSE，不伪造永久事件日志。
 
 响应 DTO 与数据库 model 分离，字段和错误码在 Handler 契约测试中锁定。Handler 只负责鉴权、输入校验和协议转换，不自行拼装状态机。
 
@@ -33,7 +33,7 @@
 
 ## UI 切换
 
-UI 以 `run_id` 作为执行标识，Session 仅作为会话容器。会话详情通过消息和历史 Run 展示，不再解析 task ID、SessionStatus 或旧 Chat 响应。
+UI 以 `run_id` 作为执行标识，Session 仅作为会话容器。会话详情通过消息和历史 Run 展示，不再解析 task ID、SessionStatus 或旧 Chat 响应。创建新 Run 前必须清空上一 Run 的 Redis 游标；恢复 `waiting_input` 则保留同一 Run 的游标，并从 `waiting_message_id` 作为回答的 `reply_to_message_id`。
 
 断线恢复顺序固定为：先按 event ID 去重并落本地状态 -> 保存最后游标 -> 使用 `Last-Event-ID` 重连 -> 过期时查询 Run 快照 -> Run 非终态时重新订阅。UI 不自行推断后端状态迁移。
 
@@ -54,7 +54,7 @@ UI 以 `run_id` 作为执行标识，Session 仅作为会话容器。会话详�
 
 ### 5B：UI 切换
 
-切换 API client、状态存储、SSE 重连、等待输入和取消交互；前端测试、lint、build 通过。
+切换 API client、状态存储、SSE 重连、等待输入和取消交互；前端 lint、build 通过。当前 UI 已完成此检查点。
 
 建议提交：`refactor(ui): consume run lifecycle`。
 

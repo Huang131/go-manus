@@ -21,6 +21,7 @@ type runStore interface {
 	CreateWithInitialMessage(ctx context.Context, run *model.Run, initial *model.RunMessage) (*model.Run, bool, error)
 	GetByID(ctx context.Context, id string) (*model.Run, error)
 	GetActiveBySessionID(ctx context.Context, sessionID string) (*model.Run, error)
+	ListBySessionID(ctx context.Context, sessionID string, limit, offset int) ([]*model.Run, int, error)
 	ListMessages(ctx context.Context, runID string) ([]*model.RunMessage, error)
 	TransitionStatus(ctx context.Context, id string, from []model.RunStatus, to model.RunStatus) (bool, error)
 	EnterWaitingInput(ctx context.Context, runID string, expectedRevision int, snapshot model.RunExecutionSnapshot, question *model.RunMessage) (bool, error)
@@ -35,6 +36,8 @@ type RunService interface {
 	Create(ctx context.Context, input CreateRunInput) (*model.Run, error)
 	Get(ctx context.Context, id string) (*model.Run, error)
 	GetActiveBySessionID(ctx context.Context, sessionID string) (*model.Run, error)
+	ListBySessionID(ctx context.Context, sessionID string, limit, offset int) ([]*model.Run, int, error)
+	ListMessages(ctx context.Context, runID string) ([]*model.RunMessage, error)
 	Start(ctx context.Context, id string) (*model.Run, error)
 	EnterWaitingInput(ctx context.Context, runID string, snapshot model.RunExecutionSnapshot, question *model.RunMessage) (*model.Run, error)
 	SubmitInput(ctx context.Context, runID string, input SubmitInputRequest) (*RunResume, error)
@@ -168,6 +171,30 @@ func (s *defaultRunService) GetActiveBySessionID(ctx context.Context, sessionID 
 		return nil, normalizeRunError(err)
 	}
 	return run, nil
+}
+
+// ListBySessionID 读取会话历史 Run；分页边界由 Repository 统一执行。
+func (s *defaultRunService) ListBySessionID(ctx context.Context, sessionID string, limit, offset int) ([]*model.Run, int, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, 0, apperr.BadRequest("session id is required")
+	}
+	runs, total, err := s.store.ListBySessionID(ctx, sessionID, limit, offset)
+	if err != nil {
+		return nil, 0, normalizeRunError(err)
+	}
+	return runs, total, nil
+}
+
+// ListMessages 暴露 Run 聚合的持久化消息读取，供应用层组装 UI 历史视图。
+func (s *defaultRunService) ListMessages(ctx context.Context, runID string) ([]*model.RunMessage, error) {
+	if strings.TrimSpace(runID) == "" {
+		return nil, apperr.BadRequest("run id is required")
+	}
+	messages, err := s.store.ListMessages(ctx, runID)
+	if err != nil {
+		return nil, normalizeRunError(err)
+	}
+	return messages, nil
 }
 
 // Start 只允许 pending Run 进入 running。
