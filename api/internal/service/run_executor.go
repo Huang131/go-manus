@@ -31,6 +31,13 @@ type RunExecutionInput struct {
 	Snapshot  model.RunExecutionSnapshot
 	Messages  []llmcore.Message
 	Tools     []toolspkg.Tool
+	// EventPublisher 只承载短期实时事件；发布失败不能改变 Run 持久化结果。
+	EventPublisher RunEventPublisher
+}
+
+// RunEventPublisher 发布一次执行的实时事件。PostgreSQL 中的 Run/Message 仍是事实来源。
+type RunEventPublisher interface {
+	Publish(ctx context.Context, runID string, event model.BaseEvent) error
 }
 
 // RunExecutionResult 是 Engine adapter 返回的领域结果，不包含持久化副作用。
@@ -114,9 +121,10 @@ func (h *RunExecutionHandle) setResult(err error) {
 
 // RunExecutor 负责一次 Run 的 Engine 生命周期和 ToolSet 释放顺序。
 type RunExecutor struct {
-	store    RunExecutionStore
-	provider RunToolProvider
-	engine   RunExecutionEngine
+	store     RunExecutionStore
+	provider  RunToolProvider
+	engine    RunExecutionEngine
+	publisher RunEventPublisher
 
 	mu      sync.Mutex
 	control map[string]*runControl
@@ -129,11 +137,18 @@ type runControl struct {
 
 // NewRunExecutor 创建未接入生产路由的执行器。
 func NewRunExecutor(store RunExecutionStore, provider RunToolProvider, engine RunExecutionEngine) *RunExecutor {
+	return NewRunExecutorWithEventPublisher(store, provider, engine, nil)
+}
+
+// NewRunExecutorWithEventPublisher 创建带实时事件发布器的执行器。
+// 发布器是可选旁路；未配置时 Run 仍可独立完成持久化。
+func NewRunExecutorWithEventPublisher(store RunExecutionStore, provider RunToolProvider, engine RunExecutionEngine, publisher RunEventPublisher) *RunExecutor {
 	return &RunExecutor{
-		store:    store,
-		provider: provider,
-		engine:   engine,
-		control:  make(map[string]*runControl),
+		store:     store,
+		provider:  provider,
+		engine:    engine,
+		publisher: publisher,
+		control:   make(map[string]*runControl),
 	}
 }
 
@@ -186,7 +201,7 @@ func (e *RunExecutor) execute(ctx context.Context, cancel context.CancelFunc, ru
 	defer cancel()
 	result, err := e.executeEngine(ctx, RunExecutionInput{
 		RunID: run.ID, SessionID: run.SessionID, Settings: run.SettingsSnapshot, Snapshot: run.ExecutionSnapshot,
-		Messages: append([]llmcore.Message(nil), messages...), Tools: toolSet.Tools(),
+		Messages: append([]llmcore.Message(nil), messages...), Tools: toolSet.Tools(), EventPublisher: e.publisher,
 	})
 	// Engine 已经退出后才释放外部工具连接，避免 in-flight 调用使用已关闭资源。
 	toolSet.Release()

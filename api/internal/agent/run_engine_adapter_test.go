@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 
 	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
@@ -137,6 +138,49 @@ func TestPlannerEngineAdapterResumesWaitingPlanWithoutReplanning(t *testing.T) {
 	}
 	if countText(llm.requests[0], "我同意执行下一阶段") != 1 {
 		t.Fatalf("step request duplicated resumed user input: %#v", llm.requests[0])
+	}
+}
+
+type adapterEventPublisher struct {
+	mu     sync.Mutex
+	events []model.BaseEvent
+	err    error
+}
+
+func (p *adapterEventPublisher) Publish(_ context.Context, _ string, event model.BaseEvent) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.events = append(p.events, event)
+	return p.err
+}
+
+func (p *adapterEventPublisher) snapshot() []model.BaseEvent {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]model.BaseEvent(nil), p.events...)
+}
+
+func TestPlannerEngineAdapterPublishesFlowEventsWithoutChangingResult(t *testing.T) {
+	publisher := &adapterEventPublisher{err: context.DeadlineExceeded}
+	adapter := &PlannerEngineAdapter{LLM: &adapterLLM{responses: []*llmcore.LLMResponse{
+		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: "{\"message\":\"开始\",\"goal\":\"完成\",\"title\":\"任务\",\"language\":\"zh\",\"steps\":[{\"id\":\"step-1\",\"description\":\"执行\"}]}"}},
+		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: "{\"success\":true,\"result\":\"完成\"}"}},
+		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: "总结"}},
+	}}}
+	result, err := adapter.Execute(context.Background(), service.RunExecutionInput{
+		RunID: "run-1", SessionID: "session-1", Settings: adapterSettings(),
+		Messages:       []llmcore.Message{{Role: model.RoleUser, ContentText: "执行"}},
+		EventPublisher: publisher,
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Kind != service.RunExecutionSucceeded || result.Text != "总结" {
+		t.Fatalf("result = %+v, want successful result despite publisher error", result)
+	}
+	events := publisher.snapshot()
+	if len(events) == 0 {
+		t.Fatal("event publisher received no flow events")
 	}
 }
 

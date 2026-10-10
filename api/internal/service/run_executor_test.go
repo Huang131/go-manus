@@ -164,6 +164,30 @@ func TestRunExecutorSuccessReleasesToolsBeforePersistingTerminal(t *testing.T) {
 	}
 }
 
+type executorEventPublisherStub struct{}
+
+func (executorEventPublisherStub) Publish(context.Context, string, model.BaseEvent) error { return nil }
+
+func TestRunExecutorPassesEventPublisherToEngine(t *testing.T) {
+	engine := &executorEngineStub{result: RunExecutionResult{Kind: RunExecutionSucceeded}}
+	publisher := executorEventPublisherStub{}
+	executor := NewRunExecutorWithEventPublisher(
+		&executorStoreStub{},
+		&executorToolProviderStub{set: &executorToolSetStub{released: make(chan struct{})}},
+		engine,
+		publisher,
+	)
+
+	handle, err := executor.Start(context.Background(), "run-1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitExecutorDone(t, handle)
+	if engine.seen.EventPublisher == nil {
+		t.Fatal("engine input EventPublisher = nil")
+	}
+}
+
 func TestRunExecutorWaitingPersistsCheckpointAfterEngineExit(t *testing.T) {
 	store := &executorStoreStub{}
 	toolSet := &executorToolSetStub{released: make(chan struct{})}

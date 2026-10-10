@@ -8,6 +8,7 @@ import (
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/service"
+	"github.com/Huang131/go-manus/api/pkg/logger"
 	"github.com/google/uuid"
 )
 
@@ -39,6 +40,12 @@ func (a *PlannerEngineAdapter) Execute(ctx context.Context, input service.RunExe
 
 	var lastAssistant string
 	for event := range flow.Invoke(ctx, &TaskInput{Message: *message}) {
+		if input.EventPublisher != nil {
+			if err := input.EventPublisher.Publish(ctx, input.RunID, event); err != nil {
+				logger.WarnContext(ctx, "发布 Run 实时事件失败",
+					logger.String("run_id", input.RunID), logger.Err(err))
+			}
+		}
 		if messageEvent, ok := event.(*model.MessageEvent); ok && messageEvent.Role == model.RoleAssistant {
 			lastAssistant = messageEvent.Message
 		}
