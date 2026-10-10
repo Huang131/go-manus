@@ -9,7 +9,7 @@ import shutil
 import tempfile
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import AsyncIterator, Dict, Iterator, Optional
+from typing import AsyncIterator, Iterator
 
 from fastapi import UploadFile
 
@@ -70,7 +70,7 @@ class FileService:
         # 服务无状态，保留显式构造函数便于 FastAPI 依赖注入和后续扩展。
         super().__init__()
         # 仅串行化同一文件的写入，不影响不同文件并发处理。
-        self._write_locks: Dict[str, _WriteLockEntry] = {}
+        self._write_locks: dict[str, _WriteLockEntry] = {}
 
     @asynccontextmanager
     async def _write_lock(self, filepath: str) -> AsyncIterator[None]:
@@ -137,10 +137,10 @@ class FileService:
     async def read_file(
             cls,
             filepath: str,
-            start_line: Optional[int] = None,
-            end_line: Optional[int] = None,
+            start_line: int | None = None,
+            end_line: int | None = None,
             sudo: bool = False,
-            max_length: Optional[int] = 10000,
+            max_length: int | None = 10000,
     ) -> FileReadResult:
         """根据传递的文件路径+起始行号+权限+最大长度读取文件内容"""
         try:
@@ -204,8 +204,8 @@ class FileService:
             raise AppException(f"文件读取失败: {str(e)}")
 
     @staticmethod
-    def _collect_lines(lines: Iterator[_LineChunk], max_length: Optional[int], start_line: Optional[int],
-                       end_line: Optional[int]) -> tuple[str, bool]:
+    def _collect_lines(lines: Iterator[_LineChunk], max_length: int | None, start_line: int | None,
+                       end_line: int | None) -> tuple[str, bool]:
         """逐行收集范围内内容，任何上限命中后立即停止读取。"""
         start = start_line or 0
         parts = []
@@ -264,8 +264,8 @@ class FileService:
                 yield _LineChunk(pending)
 
     @staticmethod
-    async def _read_stream(stream, max_length: Optional[int], start_line: Optional[int],
-                           end_line: Optional[int]) -> tuple[str, bool, bool]:
+    async def _read_stream(stream, max_length: int | None, start_line: int | None,
+                           end_line: int | None) -> tuple[str, bool, bool]:
         """按固定块读取 sudo 输出，避免超长单行触发 readline 缓冲上限。"""
         if stream is None:
             return "", False, False

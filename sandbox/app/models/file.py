@@ -1,5 +1,3 @@
-from typing import Optional, List
-
 from pydantic import BaseModel, Field
 
 
@@ -13,7 +11,7 @@ class FileReadResult(BaseModel):
 class FileWriteResult(BaseModel):
     """文件写入结果"""
     filepath: str = Field(..., description="要写入的文件绝对路径")
-    bytes_written: Optional[int] = Field(default=None, description="写入文件内容的字节数")
+    bytes_written: int | None = Field(default=None, description="写入文件内容的字节数")
 
 
 class FileReplaceResult(BaseModel):
@@ -25,15 +23,15 @@ class FileReplaceResult(BaseModel):
 class FileSearchResult(BaseModel):
     """文件搜索结果"""
     filepath: str = Field(..., description="要搜索内容的文件绝对路径")
-    matches: List[str] = Field(default_factory=list, description="匹配内容列表")
-    line_numbers: List[int] = Field(default_factory=list, description="匹配的行号列表")
+    matches: list[str] = Field(default_factory=list, description="匹配内容列表")
+    line_numbers: list[int] = Field(default_factory=list, description="匹配的行号列表")
     truncated: bool = Field(default=False, description="结果是否因达到上限而截断")
 
 
 class FileFindResult(BaseModel):
     """文件查找结果"""
     dir_path: str = Field(..., description="搜索的目录绝对路径")
-    files: List[str] = Field(default_factory=list, description="检索到的文件列表")
+    files: list[str] = Field(default_factory=list, description="检索到的文件列表")
     truncated: bool = Field(default=False, description="结果是否因达到上限而截断")
 
 

@@ -8,7 +8,6 @@ import signal
 import socket
 import uuid
 import time
-from typing import Dict, Optional, List
 
 from app.interfaces.errors.exceptions import (
     BadRequestException,
@@ -33,14 +32,14 @@ SESSION_IDLE_SECONDS = 30 * 60
 
 class ShellService:
     """Shell命令服务"""
-    active_shells: Dict[str, Shell]
+    active_shells: dict[str, Shell]
 
     def __init__(self) -> None:
         self.active_shells = {}
         # 输出读取器 task 引用：必须持有引用，否则可能被事件循环 GC 中途取消
-        self.reader_tasks: Dict[str, asyncio.Task] = {}
-        self.session_locks: Dict[str, asyncio.Lock] = {}
-        self.session_last_access: Dict[str, float] = {}
+        self.reader_tasks: dict[str, asyncio.Task] = {}
+        self.session_locks: dict[str, asyncio.Lock] = {}
+        self.session_last_access: dict[str, float] = {}
 
     async def shutdown(self) -> None:
         """关闭所有会话进程和输出读取器，避免应用重启遗留子进程。"""
@@ -246,7 +245,7 @@ class ShellService:
         logger.info(f"创建一个新的Shell会话ID: {session_id}")
         return session_id
 
-    def _get_console_records_unlocked(self, session_id: str) -> List[ConsoleRecord]:
+    def _get_console_records_unlocked(self, session_id: str) -> list[ConsoleRecord]:
         """读取控制台记录的内部实现，调用方需确保会话状态不会并发变更。"""
         console_records = self.active_shells[session_id].console_records
         clean_console_records = []
@@ -291,7 +290,7 @@ class ShellService:
 
 
     @staticmethod
-    def _process_group_alive(process_group_id: Optional[int]) -> bool:
+    def _process_group_alive(process_group_id: int | None) -> bool:
         """检查进程组是否仍存在；组长退出后仍需依此清理后台派生进程。"""
         if process_group_id is None or process_group_id <= 0:
             return False
@@ -305,7 +304,7 @@ class ShellService:
         return True
 
     @staticmethod
-    def _get_process_group_id(process: asyncio.subprocess.Process) -> Optional[int]:
+    def _get_process_group_id(process: asyncio.subprocess.Process) -> int | None:
         """创建进程后立即保存进程组 ID，避免组长退出后无法定位派生进程。"""
         # _create_process 使用 start_new_session=True，子进程会以自身 PID 创建新进程组。
         # 直接记录 PID 不依赖组长仍存活，避免短命命令退出与 os.getpgid 间的竞态。
@@ -315,7 +314,7 @@ class ShellService:
     @staticmethod
     def _terminate_process_tree(
             process: asyncio.subprocess.Process,
-            process_group_id: Optional[int] = None,
+            process_group_id: int | None = None,
     ) -> None:
         """终止进程及其派生的整组子进程（start_new_session 使 bash 成为组长）。"""
         try:
@@ -339,7 +338,7 @@ class ShellService:
     @staticmethod
     def _kill_process_tree(
             process: asyncio.subprocess.Process,
-            process_group_id: Optional[int] = None,
+            process_group_id: int | None = None,
     ) -> None:
         """强制杀死整组进程。"""
         try:
@@ -359,7 +358,7 @@ class ShellService:
         except ProcessLookupError:
             pass
 
-    async def wait_process(self, session_id: str, seconds: Optional[int] = None) -> ShellWaitResult:
+    async def wait_process(self, session_id: str, seconds: int | None = None) -> ShellWaitResult:
         """等待指定会话当前进程退出，等待过程不占用会话锁。"""
         self._cleanup_stale_sessions()
         if session_id not in self.active_shells:
@@ -373,7 +372,7 @@ class ShellService:
         return await self._wait_for_process(session_id, process, seconds)
 
     async def _wait_for_process(self, session_id: str, process: asyncio.subprocess.Process,
-                                seconds: Optional[int] = None) -> ShellWaitResult:
+                                seconds: int | None = None) -> ShellWaitResult:
         """等待已捕获的进程引用，避免等待期间会话切换导致串台。"""
         # 1.判断下传递的会话是否存在
         logger.debug(f"正在Shell会话中等待进程: {session_id}, 超时: {seconds}s")
@@ -447,7 +446,7 @@ class ShellService:
     async def exec_command(
             self,
             session_id: str,
-            exec_dir: Optional[str],
+            exec_dir: str | None,
             command: str,
     ) -> ShellExecuteResult:
         """串行切换会话进程，但不在锁内等待命令完成。"""
@@ -476,7 +475,7 @@ class ShellService:
     async def _exec_command_unlocked(
             self,
             session_id: str,
-            exec_dir: Optional[str],
+            exec_dir: str | None,
             command: str,
     ) -> asyncio.subprocess.Process:
         """传递会话id+执行目录+命令在沙箱中执行后返回"""
@@ -660,7 +659,7 @@ class ShellService:
     async def _terminate_and_wait(
             self,
             process: asyncio.subprocess.Process,
-            process_group_id: Optional[int] = None,
+            process_group_id: int | None = None,
     ) -> None:
         """优雅终止进程，超时后强杀并确保 wait 完成。"""
         self._terminate_process_tree(process, process_group_id)

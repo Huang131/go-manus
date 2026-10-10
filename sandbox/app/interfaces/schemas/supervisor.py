@@ -1,8 +1,6 @@
-from typing import Optional
-
 from pydantic import BaseModel, Field
 
 
 class TimeoutRequest(BaseModel):
     """激活超时销毁请求"""
-    minutes: Optional[int] = Field(default=None, ge=1, le=7 * 24 * 60, description="分钟数")
+    minutes: int | None = Field(default=None, ge=1, le=7 * 24 * 60, description="分钟数")

@@ -1,5 +1,3 @@
-from typing import List, Optional
-
 from pydantic import BaseModel, Field
 
 
@@ -11,12 +9,12 @@ class BrowserElement(BaseModel):
     """
     index: int = Field(..., description="元素编号，用于 click/input 定位")
     tag: str = Field(..., description="标签名，如 a/button/input")
-    type: Optional[str] = Field(default=None, description="input 的 type 属性")
-    text: Optional[str] = Field(default=None, description="元素可见文本或占位提示")
-    href: Optional[str] = Field(default=None, description="链接地址")
-    value: Optional[str] = Field(default=None, description="输入框当前值")
-    checked: Optional[bool] = Field(default=None, description="是否选中")
-    disabled: Optional[bool] = Field(default=None, description="是否禁用")
+    type: str | None = Field(default=None, description="input 的 type 属性")
+    text: str | None = Field(default=None, description="元素可见文本或占位提示")
+    href: str | None = Field(default=None, description="链接地址")
+    value: str | None = Field(default=None, description="输入框当前值")
+    checked: bool | None = Field(default=None, description="是否选中")
+    disabled: bool | None = Field(default=None, description="是否禁用")
 
 
 class BrowserScrollPosition(BaseModel):
@@ -30,20 +28,20 @@ class BrowserPageResult(BaseModel):
     """页面动作通用结果：URL、标题与动作窗口内的控制台日志"""
     url: str = Field(default="", description="动作执行后的页面地址")
     title: str = Field(default="", description="页面标题")
-    warnings: List[str] = Field(default_factory=list, description="非致命告警，如导航等待超时")
-    logs: List[str] = Field(default_factory=list, description="动作执行窗口内的控制台日志")
+    warnings: list[str] = Field(default_factory=list, description="非致命告警，如导航等待超时")
+    logs: list[str] = Field(default_factory=list, description="动作执行窗口内的控制台日志")
 
 
 class BrowserSnapshotResult(BrowserPageResult):
     """页面快照结果"""
-    elements: List[BrowserElement] = Field(default_factory=list, description="可交互元素列表")
-    scroll: Optional[BrowserScrollPosition] = Field(default=None, description="滚动位置")
+    elements: list[BrowserElement] = Field(default_factory=list, description="可交互元素列表")
+    scroll: BrowserScrollPosition | None = Field(default=None, description="滚动位置")
     truncated: bool = Field(default=False, description="元素是否因数量上限被截断")
 
 
 class BrowserScrollResult(BrowserPageResult):
     """滚动结果"""
-    scroll: Optional[BrowserScrollPosition] = Field(default=None, description="滚动位置")
+    scroll: BrowserScrollPosition | None = Field(default=None, description="滚动位置")
 
 
 class BrowserScreenshotResult(BrowserPageResult):
@@ -60,11 +58,11 @@ class BrowserConsoleExecResult(BaseModel):
     """控制台执行 JavaScript 结果"""
     result: str = Field(default="null", description="执行返回值的 JSON 字符串")
     truncated: bool = Field(default=False, description="返回值是否被截断")
-    logs: List[str] = Field(default_factory=list, description="执行窗口内的控制台日志")
+    logs: list[str] = Field(default_factory=list, description="执行窗口内的控制台日志")
 
 
 class BrowserConsoleViewResult(BaseModel):
     """控制台历史日志结果"""
-    lines: List[str] = Field(default_factory=list, description="最近的日志行")
+    lines: list[str] = Field(default_factory=list, description="最近的日志行")
     total: int = Field(default=0, description="日志总行数")
     truncated: bool = Field(default=False, description="日志是否因字节上限被截断")

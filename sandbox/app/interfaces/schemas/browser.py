@@ -1,5 +1,3 @@
-from typing import Optional
-
 from pydantic import BaseModel, Field
 
 
@@ -10,10 +8,10 @@ class BrowserNavigateRequest(BaseModel):
 
 class BrowserTargetRequest(BaseModel):
     """元素定位请求结构体：编号、选择器、坐标三选一"""
-    index: Optional[int] = Field(default=None, ge=0, description="元素编号，来自 snapshot 结果")
-    selector: Optional[str] = Field(default=None, max_length=512, description="CSS 选择器")
-    x: Optional[float] = Field(default=None, description="点击/输入的 X 坐标")
-    y: Optional[float] = Field(default=None, description="点击/输入的 Y 坐标")
+    index: int | None = Field(default=None, ge=0, description="元素编号，来自 snapshot 结果")
+    selector: str | None = Field(default=None, max_length=512, description="CSS 选择器")
+    x: float | None = Field(default=None, description="点击/输入的 X 坐标")
+    y: float | None = Field(default=None, description="点击/输入的 Y 坐标")
 
 
 class BrowserInputRequest(BrowserTargetRequest):
@@ -45,4 +43,4 @@ class BrowserConsoleExecRequest(BaseModel):
 
 class BrowserConsoleViewRequest(BaseModel):
     """查看控制台日志请求结构体"""
-    max_lines: Optional[int] = Field(default=None, ge=1, le=1000, description="返回最近多少行日志")
+    max_lines: int | None = Field(default=None, ge=1, le=1000, description="返回最近多少行日志")

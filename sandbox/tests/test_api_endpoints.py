@@ -7,11 +7,7 @@ from fastapi import FastAPI
 
 from app.interfaces.errors.exception_handler import register_exception_handlers
 from app.interfaces.errors.exceptions import AppException
-from app.interfaces.service_dependencies import (
-    get_file_service,
-    get_shell_service,
-    get_supervisor_service,
-)
+from app.interfaces.service_dependencies import get_file_service, get_shell_service
 from app.main import app
 from app.models.file import FileReadResult, FileWriteResult, FileDeleteResult
 from app.models.shell import ShellExecuteResult
@@ -43,6 +39,9 @@ class FakeShellService:
 
 
 class FakeSupervisorService:
+    def should_auto_extend(self, path: str) -> bool:
+        return False
+
     async def get_timeout_status(self):
         return SupervisorTimeout(active=False)
 
@@ -55,7 +54,8 @@ class ApiEndpointTests(unittest.TestCase):
         cls.supervisor_service = FakeSupervisorService()
         app.dependency_overrides[get_file_service] = lambda: cls.file_service
         app.dependency_overrides[get_shell_service] = lambda: cls.shell_service
-        app.dependency_overrides[get_supervisor_service] = lambda: cls.supervisor_service
+        # Supervisor 单例从 app.state 解析，中间件与端点共用该实例，故此处直接替换。
+        app.state.supervisor_service = cls.supervisor_service
 
     @classmethod
     def tearDownClass(cls):
