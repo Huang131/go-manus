@@ -10,8 +10,8 @@
 | 1. Settings 与 Prompt | complete | `4df77fe`、`e9dcba2`、`9548b84`、`dd5c2cf`、`b0f5328` | Settings、严格校验、migration、UI 与 PromptCatalog/hash 已完成 |
 | 2. Engine 与 Context | complete | `4650cc4`、`aba7f43`、`8fd0fa6` | Outcome、ContextPolicy 与 MCP 动态调用契约已完成 |
 | 3. Run 领域与存储 | complete | `a8de838`、`f0ada6a`、`6055590`、`cb50565` | 3A 领域、3B Repository/migration、3C 纯 RunService 已完成；尚未接入生产执行路径 |
-| 4. 执行生产切换 | in_progress | `e281520`、`bb171f6`、本轮 Run API 入口 | 4A 生命周期、waiting_input 恢复、4B 应用编排与 Run API/SSE 入口已完成；旧 Session Chat/Stop/SSE 尚未切换 |
-| 5. API/UI/SSE | in_progress | 本轮 Run Handler/Router | Run API、Last-Event-ID 读取边界已建立；UI 切换、旧路由删除和完整 HTTP 生命周期验收待完成 |
+| 4. 执行生产切换 | complete | `e281520`、`bb171f6`、本轮 Run 切换 | 4A 生命周期、waiting_input 恢复、4B 应用编排、Bootstrap 和旧 Session Chat/Stop/SSE 的 Run 薄适配已完成；生产执行不再进入 Task 链 |
+| 5. API/UI/SSE | in_progress | `c1cefeb`、本轮 Run/Session HTTP 契约 | Run API、Last-Event-ID 和旧路由 Run 适配已建立；UI 切换、旧路由删除和真实依赖 HTTP 验收待完成 |
 | 6. 遗留删除 | pending | - | 依赖阶段 4/5 的引用扫描和回归 |
 
 允许状态：`pending`、`in_progress`、`complete`、`blocked`。
@@ -19,11 +19,12 @@
 ## 当前生产语义
 
 ```text
-SessionHandler -> AgentService -> RedisStreamTask -> AgentTaskRunner
-              -> PlannerReActFlow -> LLM + ToolSet
+SessionHandler -> RunApplicationService -> RunExecutor
+              -> PlannerEngineAdapter -> PlannerReActFlow -> LLM + ToolSet
+              -> RunRepository + RunEventStream
 ```
 
-当前生产请求仍是旧 Task 链；Run 应用服务、RunExecutor、RunRepository、附件 Loader 和 Redis 实时事件发布器已在 Bootstrap 装配，但尚未被 SessionHandler 调用，因此当前不存在 Run 生产写入。`ToolRegistry`、MCP/A2A ToolSet 引用生命周期已完成，不属于本方案待办。
+当前生产 Chat、Stop 和 Session SSE 已通过 Run 应用边界执行；旧 Session 路由只保留 HTTP 请求形状和 `task_id` 事件字段兼容，字段值实际是 `run_id`。执行事实、终态消息和实时事件只写 Run/Message 与 Run Stream，不再调用旧 Task registry 或写入 `sessions.events`。`AgentService` 仍作为工具与配置装配协作者存在，旧 Task 执行入口尚未在阶段 6 删除。`ToolRegistry`、MCP/A2A ToolSet 引用生命周期已完成，不属于本方案待办。
 
 ## 最近验证基线
 
@@ -39,7 +40,7 @@ go vet ./...
 
 ## 最近完成：检查点 4A RunExecutor 生命周期与 Engine adapter
 
-本检查点代码尚未接入 Bootstrap、Handler、Chat 或 SSE。
+该检查点完成时尚未接入 Bootstrap、Handler、Chat 或 SSE；后续 4B 已完成生产接线。
 
 验证结果（4A/恢复前置）：
 
@@ -55,7 +56,7 @@ go test -tags=integration ./tests -run '^TestRunRepo_FinishTerminal' -count=1
 
 行为契约：RunExecutor 启动后冻结 Settings、消息和 ToolSet；Engine 退出后才释放 ToolSet，再提交 waiting 或终态。工具获取失败、`nil` ToolSet、Engine panic、取消无句柄和终态持久化失败均有测试。Repository 终态、执行快照和最终助手消息使用同一事务，迟到终态受条件更新拒绝。Planner adapter 已能从快照恢复计划和当前步骤，恢复时重建持久化上下文且不重新规划，最新回答只注入一次。
 
-边界：Planner adapter 已能把持久化 `RunExecutionSnapshot` 重建为 Plan，恢复 Flow 并继续原步骤；恢复测试覆盖不重新规划、步骤摘要和用户回答单次注入。该能力仍是未接生产的前置实现，4B 仍需完成 Bootstrap、Handler、Chat、SSE 切换及取消竞争的 HTTP 验收。
+边界：Planner adapter 已能把持久化 `RunExecutionSnapshot` 重建为 Plan，恢复 Flow 并继续原步骤；恢复测试覆盖不重新规划、步骤摘要和用户回答单次注入。4B 已完成生产接线，仍需在可用 PostgreSQL/Redis 环境运行真实 HTTP 生命周期和取消竞争验收。
 
 ## 检查点
 
@@ -72,9 +73,9 @@ go test -tags=integration ./tests -run '^TestRunRepo_FinishTerminal' -count=1
 | 4A RunExecutor 生命周期与观测，未接生产 | complete | `refactor(api): add run executor lifecycle` |
 | 4A waiting_input 恢复前置 | complete | `20b622f feat(run): restore waiting input execution context` |
 | 4B 应用编排边界与依赖装配 | complete | `e281520 feat(run): add application orchestration boundary` 及 `bb171f6` Bootstrap 装配 |
-| 4B Run API/SSE 入口 | in_progress | 本轮 Run Handler/Router；旧 Session 执行路由仍未切换 |
-| 4B 唯一后端生产切换 | pending | `05-run-execution-cutover.md`；下一步把旧 Session Chat/Stop/SSE 改为 Run 薄适配 |
-| 5A Run API/SSE | in_progress | 本轮 Run Handler/Router；需补完整 HTTP 成功、等待、取消和游标边界 |
+| 4B Run API/SSE 入口 | complete | `c1cefeb feat(api): expose run lifecycle and event APIs` |
+| 4B 唯一后端生产切换 | complete | 本轮 Session Chat/Stop/SSE 已改为 Run 薄适配；旧 Task 读取路径已移除 |
+| 5A Run API/SSE | complete | Run Handler、Session 兼容路由和 Last-Event-ID 契约测试已补；真实依赖测试待在 component 环境执行 |
 | 5B UI 切换 | pending | `06-api-ui-sse-cutover.md` |
 | 5C 删除旧路由 | pending | `06-api-ui-sse-cutover.md` |
 | 6A 删除 Task 基础设施 | pending | `07-legacy-removal.md` |

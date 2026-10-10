@@ -62,7 +62,7 @@ func (h *RunHandler) Create(c *gin.Context) {
 		response.FromError(c, err)
 		return
 	}
-	response.Success(c, run)
+	response.Success(c, run.Run)
 }
 
 // SubmitInput 提交 waiting_input Run 的回答。
@@ -92,7 +92,7 @@ func (h *RunHandler) SubmitInput(c *gin.Context) {
 		response.FromError(c, err)
 		return
 	}
-	response.Success(c, result)
+	response.Success(c, result.Run)
 }
 
 func (h *RunHandler) Get(c *gin.Context) {

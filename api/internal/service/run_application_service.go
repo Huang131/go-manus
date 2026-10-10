@@ -17,6 +17,7 @@ type RunApplicationService interface {
 	Create(ctx context.Context, input CreateApplicationRunInput) (*ApplicationRun, error)
 	SubmitInput(ctx context.Context, runID string, input SubmitInputRequest) (*ApplicationRun, error)
 	Get(ctx context.Context, runID string) (*model.Run, error)
+	GetActiveBySessionID(ctx context.Context, sessionID string) (*model.Run, error)
 	Cancel(ctx context.Context, runID string) (*model.Run, error)
 }
 
@@ -38,6 +39,7 @@ type runApplicationStore interface {
 	Create(ctx context.Context, input CreateRunInput) (*model.Run, error)
 	SubmitInput(ctx context.Context, runID string, input SubmitInputRequest) (*RunResume, error)
 	Get(ctx context.Context, runID string) (*model.Run, error)
+	GetActiveBySessionID(ctx context.Context, sessionID string) (*model.Run, error)
 	RequestCancel(ctx context.Context, runID string) (*model.Run, error)
 }
 
@@ -136,7 +138,12 @@ func (s *defaultRunApplicationService) Create(ctx context.Context, input CreateA
 	if err != nil {
 		return nil, err
 	}
-	return &ApplicationRun{Run: run, Handle: handle}, nil
+	// Start 已同步写入 running；读取最新事实，避免创建响应返回过时的 pending 状态。
+	started, err := s.runs.Get(ctx, run.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &ApplicationRun{Run: started, Handle: handle}, nil
 }
 
 // SubmitInput 持久化 waiting_input 回答后重新启动同一 Run 的执行上下文。
@@ -171,6 +178,14 @@ func (s *defaultRunApplicationService) Get(ctx context.Context, runID string) (*
 		return nil, apperr.FailedPrecondition("run service is unavailable")
 	}
 	return s.runs.Get(ctx, runID)
+}
+
+// GetActiveBySessionID 查询 Session 当前唯一的活跃 Run，供临时 Session 路由适配使用。
+func (s *defaultRunApplicationService) GetActiveBySessionID(ctx context.Context, sessionID string) (*model.Run, error) {
+	if s.runs == nil {
+		return nil, apperr.FailedPrecondition("run service is unavailable")
+	}
+	return s.runs.GetActiveBySessionID(ctx, sessionID)
 }
 
 func (s *defaultRunApplicationService) Cancel(ctx context.Context, runID string) (*model.Run, error) {

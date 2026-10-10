@@ -9,6 +9,8 @@ import (
 
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/service"
+	"github.com/Huang131/go-manus/api/pkg/response"
+	"github.com/bytedance/sonic"
 	"github.com/stretchr/testify/require"
 )
 
@@ -33,6 +35,9 @@ func (s *runHandlerAppStub) SubmitInput(context.Context, string, service.SubmitI
 func (s *runHandlerAppStub) Get(_ context.Context, id string) (*model.Run, error) {
 	s.gotID = id
 	return &model.Run{ID: id, Status: model.RunStatusRunning}, nil
+}
+func (*runHandlerAppStub) GetActiveBySessionID(context.Context, string) (*model.Run, error) {
+	return nil, nil
 }
 func (s *runHandlerAppStub) Cancel(_ context.Context, id string) (*model.Run, error) {
 	s.cancelID = id
@@ -63,6 +68,14 @@ func TestRunHandlerCreateUsesIdempotencyHeaderAndSessionRouteParam(t *testing.T)
 	require.Equal(t, "session-1", app.created.SessionID)
 	require.Equal(t, "request-1", app.created.IdempotencyKey)
 	require.Equal(t, []string{"file-1"}, app.created.AttachmentIDs)
+
+	var responseBody response.Response
+	require.NoError(t, sonic.Unmarshal(w.Body.Bytes(), &responseBody))
+	data, ok := responseBody.Data.(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "run-1", data["id"])
+	_, hasHandle := data["Handle"]
+	require.False(t, hasHandle, "Run API must not expose internal execution handles")
 }
 
 func TestRunHandlerEventsPassesLastEventIDAndWritesSSEID(t *testing.T) {

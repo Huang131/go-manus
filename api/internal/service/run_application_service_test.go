@@ -35,6 +35,13 @@ func (s *applicationRunStoreStub) Get(_ context.Context, _ string) (*model.Run, 
 	return s.run, nil
 }
 
+func (s *applicationRunStoreStub) GetActiveBySessionID(_ context.Context, sessionID string) (*model.Run, error) {
+	if s.run == nil || s.run.SessionID != sessionID || !s.run.Status.IsActive() {
+		return nil, nil
+	}
+	return s.run, nil
+}
+
 func (s *applicationRunStoreStub) RequestCancel(_ context.Context, _ string) (*model.Run, error) {
 	return s.run, nil
 }

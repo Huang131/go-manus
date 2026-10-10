@@ -98,6 +98,35 @@ func TestRunRepo_CreateWithInitialMessage_EnforcesSingleActiveRun(t *testing.T) 
 	assert.Nil(t, got, "failed aggregate creation must roll back the Run row")
 }
 
+// TestRunRepoGetActiveBySessionID 守护 Session 路由的执行定位契约：
+// 活跃 Run 只由 runs.status 判定，终态 Run 不应再占用会话执行槽位。
+func TestRunRepoGetActiveBySessionID(t *testing.T) {
+	ctx := context.Background()
+	repo := testRunRepository(t)
+	sessionID := createSessionForTest(t)
+	t.Cleanup(func() { CleanupSession(t, sessionID) })
+
+	run := newRunForTest(sessionID, "active-"+uuid.NewString())
+	_, inserted, err := repo.CreateWithInitialMessage(ctx, run, initialRunMessage(run))
+	require.NoError(t, err)
+	require.True(t, inserted)
+
+	active, err := repo.GetActiveBySessionID(ctx, sessionID)
+	require.NoError(t, err)
+	require.NotNil(t, active)
+	assert.Equal(t, run.ID, active.ID)
+
+	changed, err := repo.TransitionStatus(ctx, run.ID, []model.RunStatus{model.RunStatusPending}, model.RunStatusCancelling)
+	require.NoError(t, err)
+	require.True(t, changed)
+	changed, err = repo.TransitionStatus(ctx, run.ID, []model.RunStatus{model.RunStatusCancelling}, model.RunStatusCancelled)
+	require.NoError(t, err)
+	require.True(t, changed)
+	active, err = repo.GetActiveBySessionID(ctx, sessionID)
+	require.NoError(t, err)
+	assert.Nil(t, active)
+}
+
 func TestRunRepo_CreateWithInitialMessage_ReusesOriginalAggregateForSameClientRequest(t *testing.T) {
 	ctx := context.Background()
 	repo := testRunRepository(t)

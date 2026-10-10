@@ -1,6 +1,6 @@
 # 阶段 4：Run 执行装配与唯一后端切换
 
-这是整个方案唯一的后端生产语义切换点。切换前 Run 代码不接请求；切换后所有执行事实只写 Run/Message，不再写 Session 的 task/status/events。
+这是整个方案唯一的后端生产语义切换点。切换前 Run 代码不接请求；切换后所有执行事实只写 Run/Message，不再写 Session 的 task/status/events。当前切换已完成，本文保留为实施和回滚依据。
 
 本阶段暂不发布新的公开 Run 路由。现有 Session Chat/Stop/SSE 路由可保留一个阶段，但只能作为 RunService 的薄适配，阶段 5 随 UI 切换直接删除。
 
@@ -53,9 +53,9 @@ Handler 不直接创建 `RedisStreamTask`，Engine 和 RunExecutor 都不直接�
 
 ### 4B：原子切换生产语义
 
-在一个提交中完成 bootstrap、Handler、Service 和事件读取切换。旧 Session 路由继续存在时，只解析旧请求并调用 RunService；旧 SSE 路由根据当前 Run 定位 RunEventStream，不再读取 Task registry。切换从本提交开始写入 Run/Message，不回填旧 `sessions.events`。
+在一个提交中完成 bootstrap、Handler、Service 和事件读取切换。旧 Session 路由继续存在时，只解析旧请求并调用 RunService；旧 SSE 路由根据当前 Run 定位 RunEventStream，不再读取 Task registry。切换从本提交开始写入 Run/Message，不回填旧 `sessions.events`。当前实现已满足这一边界：旧 Chat 的 `task_id` SSE 字段只作为协议兼容字段，值为 Run ID。
 
-建议提交：`refactor(api): switch execution semantics to runs`。
+实际提交：`refactor(api): switch session execution to runs`。
 
 禁止拆成“先双写验证，再删除旧写入”的两个生产提交。项目尚未上线，直接用测试和数据库约束证明切换正确。
 

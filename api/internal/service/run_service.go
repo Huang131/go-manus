@@ -20,6 +20,7 @@ import (
 type runStore interface {
 	CreateWithInitialMessage(ctx context.Context, run *model.Run, initial *model.RunMessage) (*model.Run, bool, error)
 	GetByID(ctx context.Context, id string) (*model.Run, error)
+	GetActiveBySessionID(ctx context.Context, sessionID string) (*model.Run, error)
 	ListMessages(ctx context.Context, runID string) ([]*model.RunMessage, error)
 	TransitionStatus(ctx context.Context, id string, from []model.RunStatus, to model.RunStatus) (bool, error)
 	EnterWaitingInput(ctx context.Context, runID string, expectedRevision int, snapshot model.RunExecutionSnapshot, question *model.RunMessage) (bool, error)
@@ -33,6 +34,7 @@ type runStore interface {
 type RunService interface {
 	Create(ctx context.Context, input CreateRunInput) (*model.Run, error)
 	Get(ctx context.Context, id string) (*model.Run, error)
+	GetActiveBySessionID(ctx context.Context, sessionID string) (*model.Run, error)
 	Start(ctx context.Context, id string) (*model.Run, error)
 	EnterWaitingInput(ctx context.Context, runID string, snapshot model.RunExecutionSnapshot, question *model.RunMessage) (*model.Run, error)
 	SubmitInput(ctx context.Context, runID string, input SubmitInputRequest) (*RunResume, error)
@@ -152,6 +154,18 @@ func (s *defaultRunService) Get(ctx context.Context, id string) (*model.Run, err
 	}
 	if run == nil {
 		return nil, apperr.NotFound("run not found")
+	}
+	return run, nil
+}
+
+// GetActiveBySessionID 查询会话当前活跃 Run，不把旧 Session 状态字段当作执行事实。
+func (s *defaultRunService) GetActiveBySessionID(ctx context.Context, sessionID string) (*model.Run, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, apperr.BadRequest("session id is required")
+	}
+	run, err := s.store.GetActiveBySessionID(ctx, sessionID)
+	if err != nil {
+		return nil, normalizeRunError(err)
 	}
 	return run, nil
 }

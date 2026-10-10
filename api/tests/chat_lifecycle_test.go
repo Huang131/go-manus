@@ -20,6 +20,7 @@ import (
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/mq"
+	"github.com/Huang131/go-manus/api/internal/service"
 	"github.com/bytedance/sonic"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -177,7 +178,8 @@ func readSSEEvent(t *testing.T, reader *bufio.Reader) sseEvent {
 	}
 }
 
-func appendTaskEvent(t *testing.T, queue *mq.RedisStreamMessageQueue, taskID string, eventType model.EventType, payload map[string]any) string {
+// appendRunEvent 模拟执行器发布完成前的已缓冲事件，验证 HTTP 重连只按 Run cursor 读取。
+func appendRunEvent(t *testing.T, queue *mq.RedisStreamMessageQueue, runID string, eventType model.EventType, payload map[string]any) string {
 	t.Helper()
 	data, err := sonic.Marshal(payload)
 	require.NoError(t, err)
@@ -190,9 +192,19 @@ func appendTaskEvent(t *testing.T, queue *mq.RedisStreamMessageQueue, taskID str
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	id, err := queue.Put(ctx, "task:output:"+taskID, string(wrapper))
+	id, err := queue.Put(ctx, service.RunEventStreamName(runID), string(wrapper))
 	require.NoError(t, err)
 	return id
+}
+
+func runIDFromTaskEvent(t *testing.T, event sseEvent) string {
+	t.Helper()
+	var payload struct {
+		TaskID string `json:"task_id"`
+	}
+	require.NoError(t, sonic.UnmarshalString(event.Data, &payload))
+	require.NotEmpty(t, payload.TaskID)
+	return payload.TaskID
 }
 
 func TestChatEndpoint_SuccessStreamsOrderedEvents(t *testing.T) {
@@ -215,6 +227,7 @@ func TestChatEndpoint_SuccessStreamsOrderedEvents(t *testing.T) {
 	require.GreaterOrEqual(t, len(events), 5)
 	assert.Equal(t, "message", events[0].Type)
 	assert.Equal(t, "task_id", events[1].Type)
+	runID := runIDFromTaskEvent(t, events[1])
 	assert.Equal(t, "done", events[len(events)-1].Type)
 
 	titleIndex := eventIndex(events, string(model.EventTypeTitle), 2)
@@ -238,11 +251,10 @@ func TestChatEndpoint_SuccessStreamsOrderedEvents(t *testing.T) {
 		previousStreamID = event.ID
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	session, err := app.SessionService.GetSession(ctx, sessionID)
-	require.NoError(t, err)
-	assert.Equal(t, model.SessionStatusCompleted, session.Status)
+	require.Eventually(t, func() bool {
+		run, err := app.RunApplication.Get(context.Background(), runID)
+		return err == nil && run.Status == model.RunStatusSucceeded
+	}, 5*time.Second, 10*time.Millisecond, "Run did not persist the successful terminal state")
 }
 
 // TestChatEndpoint_LastEventIDResumesWithoutDuplicatesOrGaps 守护 HTTP SSE 断线续读契约：
@@ -254,11 +266,12 @@ func TestChatEndpoint_LastEventIDResumesWithoutDuplicatesOrGaps(t *testing.T) {
 	sessionID := createSessionWithServer(t, app.Engine)
 	defer CleanupSessionWithDB(t, app.Postgres, sessionID)
 
-	taskID, err := app.AgentService.Chat(context.Background(), sessionID, &llmcore.Message{
-		Role:        model.RoleUser,
-		ContentText: "验证 SSE 断线续读",
+	created, err := app.RunApplication.Create(context.Background(), service.CreateApplicationRunInput{
+		SessionID: sessionID, IdempotencyKey: "resume-run", Content: "验证 SSE 断线续读",
 	})
 	require.NoError(t, err)
+	require.NotNil(t, created.Handle)
+	runID := created.Run.ID
 	select {
 	case <-fake.started:
 	case <-time.After(5 * time.Second):
@@ -266,7 +279,7 @@ func TestChatEndpoint_LastEventIDResumesWithoutDuplicatesOrGaps(t *testing.T) {
 	}
 
 	queue := mq.NewRedisStreamMessageQueue(app.Redis.Client)
-	beforeDisconnectID := appendTaskEvent(t, queue, taskID, model.EventTypeTitle, map[string]any{"title": "before disconnect"})
+	beforeDisconnectID := appendRunEvent(t, queue, runID, model.EventTypeTitle, map[string]any{"title": "before disconnect"})
 
 	server := httptest.NewServer(app.Engine)
 	defer server.Close()
@@ -283,8 +296,8 @@ func TestChatEndpoint_LastEventIDResumesWithoutDuplicatesOrGaps(t *testing.T) {
 	require.Equal(t, string(model.EventTypeTitle), firstEvent.Type)
 	require.NoError(t, firstResp.Body.Close())
 
-	afterDisconnectID := appendTaskEvent(t, queue, taskID, model.EventTypePlan, map[string]any{"plan": "after disconnect"})
-	doneID := appendTaskEvent(t, queue, taskID, model.EventTypeDone, map[string]any{"success": true})
+	afterDisconnectID := appendRunEvent(t, queue, runID, model.EventTypePlan, map[string]any{"plan": "after disconnect"})
+	doneID := appendRunEvent(t, queue, runID, model.EventTypeDone, map[string]any{"success": true})
 
 	resumeReq, err := http.NewRequest(http.MethodPost, chatURL, strings.NewReader(`{}`))
 	require.NoError(t, err)
@@ -305,14 +318,16 @@ func TestChatEndpoint_LastEventIDResumesWithoutDuplicatesOrGaps(t *testing.T) {
 		assert.NotEqual(t, beforeDisconnectID, event.ID, "Last-Event-ID must be exclusive")
 	}
 
-	// 任务仍由 blocking fake 持有，显式停止并等待 runner 退出，避免 t.Cleanup 关闭 Redis 后
-	// 后台收尾再尝试设置 stream retention，产生与测试契约无关的资源关闭告警。
-	require.NoError(t, app.AgentService.StopSession(context.Background(), sessionID))
+	// Run 仍由 blocking fake 持有，显式取消并等待执行器退出，避免 t.Cleanup 关闭 Redis 后
+	// 后台 goroutine 继续访问依赖。
+	_, err = app.RunApplication.Cancel(context.Background(), runID)
+	require.NoError(t, err)
 	select {
 	case <-fake.returned:
 	case <-time.After(5 * time.Second):
-		t.Fatal("fake LLM did not stop after SSE resume test")
+		t.Fatal("fake LLM did not stop after Run cancellation")
 	}
+	require.NoError(t, created.Handle.Wait(context.Background()))
 }
 
 func parseStreamID(t *testing.T, id string) (int64, int64) {
@@ -326,7 +341,7 @@ func parseStreamID(t *testing.T, id string) (int64, int64) {
 	return millis, sequence
 }
 
-func TestStopEndpoint_CancelsActiveAgentAndPreservesCancelledStatus(t *testing.T) {
+func TestStopEndpoint_CancelsActiveRunAndPersistsCancelledStatus(t *testing.T) {
 	fake := &blockingLLM{
 		started:     make(chan struct{}),
 		returned:    make(chan struct{}),
@@ -337,11 +352,12 @@ func TestStopEndpoint_CancelsActiveAgentAndPreservesCancelledStatus(t *testing.T
 	sessionID := createSessionWithServer(t, app.Engine)
 	defer CleanupSessionWithDB(t, app.Postgres, sessionID)
 
-	taskID, err := app.AgentService.Chat(context.Background(), sessionID, &llmcore.Message{
-		Role:        model.RoleUser,
-		ContentText: "请停止这个请求",
+	created, err := app.RunApplication.Create(context.Background(), service.CreateApplicationRunInput{
+		SessionID: sessionID, IdempotencyKey: "cancel-run", Content: "请停止这个请求",
 	})
 	require.NoError(t, err)
+	require.NotNil(t, created.Handle)
+	runID := created.Run.ID
 
 	select {
 	case <-fake.started:
@@ -352,12 +368,12 @@ func TestStopEndpoint_CancelsActiveAgentAndPreservesCancelledStatus(t *testing.T
 	stopResponse := postJSONWithServer(t, app.Engine, "/api/sessions/"+sessionID+"/stop", nil)
 	assertOK(t, stopResponse)
 
-	// Stop 已写入 cancelled，但故意让 LLM 暂不返回，以构造“取消先完成、runner 后收尾”的竞争顺序。
+	// Stop 先持久化 cancelling，但故意让 LLM 暂不返回，以构造“取消先完成、runner 后收尾”的竞争顺序。
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	session, err := app.SessionService.GetSession(ctx, sessionID)
+	run, err := app.RunApplication.Get(ctx, runID)
 	require.NoError(t, err)
-	assert.Equal(t, model.SessionStatusCancelled, session.Status)
+	assert.Equal(t, model.RunStatusCancelling, run.Status)
 
 	close(fake.allowReturn)
 
@@ -367,14 +383,9 @@ func TestStopEndpoint_CancelsActiveAgentAndPreservesCancelledStatus(t *testing.T
 		t.Fatal("stop did not cancel the active LLM call")
 	}
 
-	// finished 只在 runner 退出、注册表清理且流保留策略切换后成立。
-	// 通过输入流 TTL 观察这条生产生命周期边界，避免固定 Sleep 或只等待模型返回。
-	require.Eventually(t, func() bool {
-		ttl, ttlErr := app.Redis.Client.TTL(ctx, "task:input:"+taskID).Result()
-		return ttlErr == nil && ttl > 0 && ttl <= mq.CompletedStreamRetention()
-	}, 5*time.Second, 10*time.Millisecond, "task did not finish cleanup after stop")
-
-	session, err = app.SessionService.GetSession(ctx, sessionID)
+	// Handle 完成意味着 Engine 已退出，随后才可能完成 Run 的终态持久化。
+	require.NoError(t, created.Handle.Wait(ctx))
+	run, err = app.RunApplication.Get(ctx, runID)
 	require.NoError(t, err)
-	assert.Equal(t, model.SessionStatusCancelled, session.Status)
+	assert.Equal(t, model.RunStatusCancelled, run.Status)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/bytedance/sonic"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/service"
 	"github.com/Huang131/go-manus/api/pkg/response"
 )
 
@@ -81,6 +83,43 @@ func (s *sessionServiceStub) GetVNCURL(context.Context, string) (string, error) 
 	return "ws://sandbox.local:5901", nil
 }
 
+type sessionRunStub struct {
+	created   service.CreateApplicationRunInput
+	active    *model.Run
+	cancelled string
+}
+
+func (s *sessionRunStub) Create(_ context.Context, input service.CreateApplicationRunInput) (*service.ApplicationRun, error) {
+	s.created = input
+	run := &model.Run{ID: "run-1", SessionID: input.SessionID, Status: model.RunStatusRunning}
+	s.active = run
+	return &service.ApplicationRun{Run: run}, nil
+}
+func (*sessionRunStub) SubmitInput(context.Context, string, service.SubmitInputRequest) (*service.ApplicationRun, error) {
+	return nil, nil
+}
+func (*sessionRunStub) Get(context.Context, string) (*model.Run, error) { return nil, nil }
+func (s *sessionRunStub) GetActiveBySessionID(context.Context, string) (*model.Run, error) {
+	return s.active, nil
+}
+func (s *sessionRunStub) Cancel(_ context.Context, runID string) (*model.Run, error) {
+	s.cancelled = runID
+	return &model.Run{ID: runID, Status: model.RunStatusCancelling}, nil
+}
+
+type sessionRunEventsStub struct {
+	runID  string
+	start  string
+	events []*model.Event
+}
+
+func (s *sessionRunEventsStub) Read(_ context.Context, runID, startID string) ([]*model.Event, error) {
+	s.runID, s.start = runID, startID
+	events := s.events
+	s.events = nil
+	return events, nil
+}
+
 func setupRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	return gin.New()
@@ -96,7 +135,7 @@ func decodeHandlerResponse(t *testing.T, w *httptest.ResponseRecorder) response.
 func TestSessionHandler_Create(t *testing.T) {
 	svc := &sessionServiceStub{createResult: &model.Session{ID: "session-1", Title: "新对话"}}
 	router := setupRouter()
-	router.POST("/sessions", NewSessionHandler(svc, nil, nil).Create)
+	router.POST("/sessions", NewSessionHandler(svc, nil, nil, nil).Create)
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/sessions", nil))
@@ -113,7 +152,7 @@ func TestSessionHandler_Get(t *testing.T) {
 	t.Run("returns session and clears unread count", func(t *testing.T) {
 		svc := &sessionServiceStub{getResult: &model.Session{ID: "session-1", UnreadMessageCount: 5}}
 		router := setupRouter()
-		router.GET("/sessions/:id", NewSessionHandler(svc, nil, nil).Get)
+		router.GET("/sessions/:id", NewSessionHandler(svc, nil, nil, nil).Get)
 
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sessions/session-1", nil))
@@ -126,7 +165,7 @@ func TestSessionHandler_Get(t *testing.T) {
 	t.Run("maps service not found", func(t *testing.T) {
 		svc := &sessionServiceStub{getErr: apperr.NotFound("会话不存在")}
 		router := setupRouter()
-		router.GET("/sessions/:id", NewSessionHandler(svc, nil, nil).Get)
+		router.GET("/sessions/:id", NewSessionHandler(svc, nil, nil, nil).Get)
 
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sessions/missing", nil))
@@ -154,7 +193,7 @@ func TestSessionHandler_List(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			svc := &sessionServiceStub{listResult: []*model.Session{{ID: "session-1"}}, listTotal: 1}
 			router := setupRouter()
-			router.GET("/sessions", NewSessionHandler(svc, nil, nil).List)
+			router.GET("/sessions", NewSessionHandler(svc, nil, nil, nil).List)
 
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sessions"+tt.query, nil))
@@ -171,7 +210,7 @@ func TestSessionHandler_List(t *testing.T) {
 func TestSessionHandler_Delete(t *testing.T) {
 	svc := &sessionServiceStub{}
 	router := setupRouter()
-	router.POST("/sessions/:id/delete", NewSessionHandler(svc, nil, nil).Delete)
+	router.POST("/sessions/:id/delete", NewSessionHandler(svc, nil, nil, nil).Delete)
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/sessions/session-1/delete", nil))
@@ -183,7 +222,7 @@ func TestSessionHandler_Delete(t *testing.T) {
 func TestSessionHandler_ClearUnread(t *testing.T) {
 	svc := &sessionServiceStub{}
 	router := setupRouter()
-	router.POST("/sessions/:id/clear-unread", NewSessionHandler(svc, nil, nil).ClearUnread)
+	router.POST("/sessions/:id/clear-unread", NewSessionHandler(svc, nil, nil, nil).ClearUnread)
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/sessions/session-1/clear-unread", nil))
@@ -195,7 +234,7 @@ func TestSessionHandler_ClearUnread(t *testing.T) {
 func TestSessionHandler_GetFiles(t *testing.T) {
 	svc := &sessionServiceStub{filesResult: []*model.File{}}
 	router := setupRouter()
-	router.GET("/sessions/:id/files", NewSessionHandler(svc, nil, nil).GetFiles)
+	router.GET("/sessions/:id/files", NewSessionHandler(svc, nil, nil, nil).GetFiles)
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sessions/session-1/files", nil))
@@ -204,15 +243,52 @@ func TestSessionHandler_GetFiles(t *testing.T) {
 	assert.Equal(t, "session-1", svc.filesSessionID)
 }
 
-func TestNewSSEContext_PreservesRequestValuesWithoutCancellation(t *testing.T) {
-	type contextKey string
-	key := contextKey("request_id")
-	requestCtx, requestCancel := context.WithCancel(context.WithValue(context.Background(), key, "req-123"))
-	requestCancel()
+func TestSessionHandlerChatCreatesRunAndStreamsRunEvents(t *testing.T) {
+	app := &sessionRunStub{}
+	events := &sessionRunEventsStub{events: []*model.Event{{ID: "1710000000000-1", Type: model.EventTypeDone, Data: []byte(`{"success":true}`)}}}
+	router := setupRouter()
+	router.POST("/sessions/:id/chat", NewSessionHandler(&sessionServiceStub{}, nil, app, events).Chat)
+	req := httptest.NewRequest(http.MethodPost, "/sessions/session-1/chat", strings.NewReader(`{"message":"分析请求","attachments":["file-1"],"model_id":"model-1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Idempotency-Key", "request-1")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
 
-	eventCtx, cancel := newSSEContext(requestCtx)
-	defer cancel()
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, service.CreateApplicationRunInput{SessionID: "session-1", IdempotencyKey: "request-1", Content: "分析请求", AttachmentIDs: []string{"file-1"}}, app.created)
+	assert.Equal(t, "run-1", events.runID)
+	assert.Contains(t, w.Body.String(), "event: task_id\ndata: {\"task_id\":\"run-1\"}")
+	assert.Contains(t, w.Body.String(), "id: 1710000000000-1\nevent: done")
+}
 
-	assert.Equal(t, "req-123", eventCtx.Value(key))
-	assert.NoError(t, eventCtx.Err())
+func TestSessionHandlerStopCancelsActiveRunAndIsIdempotentWithoutOne(t *testing.T) {
+	app := &sessionRunStub{active: &model.Run{ID: "run-1", SessionID: "session-1", Status: model.RunStatusRunning}}
+	router := setupRouter()
+	router.POST("/sessions/:id/stop", NewSessionHandler(&sessionServiceStub{}, nil, app, &sessionRunEventsStub{}).Stop)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/sessions/session-1/stop", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "run-1", app.cancelled)
+
+	app.active = nil
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/sessions/session-1/stop", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "run-1", app.cancelled)
+}
+
+func TestSessionHandlerChatResumeUsesActiveRunAndLastEventID(t *testing.T) {
+	app := &sessionRunStub{active: &model.Run{ID: "run-7", SessionID: "session-1", Status: model.RunStatusRunning}}
+	events := &sessionRunEventsStub{events: []*model.Event{{ID: "1710000000000-2", Type: model.EventTypeDone, Data: []byte(`{"success":true}`)}}}
+	router := setupRouter()
+	router.POST("/sessions/:id/chat", NewSessionHandler(&sessionServiceStub{}, nil, app, events).Chat)
+	req := httptest.NewRequest(http.MethodPost, "/sessions/session-1/chat", strings.NewReader(`{"event_id":"1710000000000-1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Last-Event-ID", "1710000000000-0")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "run-7", events.runID)
+	assert.Equal(t, "1710000000000-1", events.start)
 }

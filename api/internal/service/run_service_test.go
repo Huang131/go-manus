@@ -11,6 +11,8 @@ import (
 	"github.com/Huang131/go-manus/api/internal/repository"
 	"github.com/Huang131/go-manus/api/internal/settings"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type fakeRunStore struct {
@@ -54,6 +56,13 @@ func TestRunServiceCreateReturnsConflictWhenSessionAlreadyActive(t *testing.T) {
 
 func (f *fakeRunStore) GetByID(_ context.Context, id string) (*model.Run, error) {
 	if f.run == nil || f.run.ID != id {
+		return nil, nil
+	}
+	return f.run, nil
+}
+
+func (f *fakeRunStore) GetActiveBySessionID(_ context.Context, sessionID string) (*model.Run, error) {
+	if f.run == nil || f.run.SessionID != sessionID || !f.run.Status.IsActive() {
 		return nil, nil
 	}
 	return f.run, nil
@@ -327,4 +336,20 @@ func TestRunServiceGetMissingRunReturnsNotFound(t *testing.T) {
 	if !ok || appErr.Kind != apperr.KindNotFound {
 		t.Fatalf("Get() error = %T %v, want not found", err, err)
 	}
+}
+
+func TestRunServiceGetActiveBySessionIDUsesRunStatus(t *testing.T) {
+	store := newFakeRunStore()
+	store.run = &model.Run{ID: "run-1", SessionID: "session-1", Status: model.RunStatusWaitingInput}
+	svc := NewRunService(store)
+
+	run, err := svc.GetActiveBySessionID(context.Background(), "session-1")
+	require.NoError(t, err)
+	require.NotNil(t, run)
+	assert.Equal(t, "run-1", run.ID)
+
+	store.run.Status = model.RunStatusSucceeded
+	run, err = svc.GetActiveBySessionID(context.Background(), "session-1")
+	require.NoError(t, err)
+	assert.Nil(t, run)
 }

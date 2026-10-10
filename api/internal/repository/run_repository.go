@@ -23,6 +23,7 @@ var ErrActiveRunExists = errors.New("session already has an active run")
 type RunRepository interface {
 	CreateWithInitialMessage(ctx context.Context, run *model.Run, initial *model.RunMessage) (created *model.Run, inserted bool, err error)
 	GetByID(ctx context.Context, id string) (*model.Run, error)
+	GetActiveBySessionID(ctx context.Context, sessionID string) (*model.Run, error)
 	ListMessages(ctx context.Context, runID string) ([]*model.RunMessage, error)
 	TransitionStatus(ctx context.Context, id string, from []model.RunStatus, to model.RunStatus) (bool, error)
 	EnterWaitingInput(ctx context.Context, runID string, expectedRevision int, snapshot model.RunExecutionSnapshot, question *model.RunMessage) (bool, error)
@@ -186,6 +187,22 @@ func validateMessage(message *model.RunMessage) error {
 // GetByID 返回 Run；未找到时返回 (nil, nil)，与 SessionRepository 保持一致。
 func (r *PostgresRunRepository) GetByID(ctx context.Context, id string) (*model.Run, error) {
 	run, err := scanRun(r.queryer().QueryRow(ctx, `SELECT `+runColumns+` FROM runs WHERE id = $1`, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return run, nil
+}
+
+// GetActiveBySessionID 返回会话当前唯一活跃 Run；无活跃 Run 时返回 nil,nil。
+func (r *PostgresRunRepository) GetActiveBySessionID(ctx context.Context, sessionID string) (*model.Run, error) {
+	run, err := scanRun(r.queryer().QueryRow(ctx, `
+		SELECT `+runColumns+` FROM runs
+		WHERE session_id = $1 AND status IN ('pending', 'running', 'waiting_input', 'cancelling')
+		ORDER BY created_at DESC, id DESC LIMIT 1
+	`, sessionID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
