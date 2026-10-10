@@ -9,8 +9,8 @@
 | 0. 事实基线与方案校准 | complete | `0382404` | 已核对当前 Session/Task 链、配置、Engine、ToolSet，并形成可恢复的阶段方案 |
 | 1. Settings 与 Prompt | complete | `4df77fe`、`e9dcba2`、`9548b84`、`dd5c2cf`、`b0f5328` | Settings、严格校验、migration、UI 与 PromptCatalog/hash 已完成 |
 | 2. Engine 与 Context | complete | `4650cc4`、`aba7f43`、`8fd0fa6` | Outcome、ContextPolicy 与 MCP 动态调用契约已完成 |
-| 3. Run 领域与存储 | complete | `a8de838`、`f0ada6a`、`6055590`、`待提交：refactor(api): add pure run service` | 3A 领域、3B Repository/migration、3C 纯 RunService 已完成；尚未接入生产执行路径 |
-| 4. 执行生产切换 | pending | - | 唯一后端生产语义切换点；Session 路由只剩薄适配 |
+| 3. Run 领域与存储 | complete | `a8de838`、`f0ada6a`、`6055590`、`cb50565` | 3A 领域、3B Repository/migration、3C 纯 RunService 已完成；尚未接入生产执行路径 |
+| 4. 执行生产切换 | in_progress | `cb50565`、`d7bb0cb` | 4A 已完成 RunExecutor、终态事务和 Planner adapter；尚未接入 Bootstrap、Handler、Chat 或 SSE |
 | 5. API/UI/SSE | pending | - | 唯一公开契约切换点；完成后删除旧路由 |
 | 6. 遗留删除 | pending | - | 依赖阶段 4/5 的引用扫描和回归 |
 
@@ -37,6 +37,25 @@ go vet ./...
 
 受限环境的回环端口失败必须单独记录，不能改写为通过。
 
+## 最近完成：检查点 4A RunExecutor 生命周期与 Engine adapter
+
+本检查点代码尚未接入 Bootstrap、Handler、Chat 或 SSE。
+
+验证结果：
+
+```text
+go test ./... -count=1                                                   PASS
+go test -race ./internal/agent/... ./internal/service ./internal/repository -count=1  PASS
+go vet ./...                                                             PASS
+git diff --check                                                         PASS
+go test -tags=integration ./tests -run '^TestRunRepo_FinishTerminal' -count=1
+  BLOCKED: 当前受限环境无法连接 localhost:15432（operation not permitted）
+```
+
+行为契约：RunExecutor 启动后冻结 Settings、消息和 ToolSet；Engine 退出后才释放 ToolSet，再提交 waiting 或终态。工具获取失败、`nil` ToolSet、Engine panic、取消无句柄和终态持久化失败均有测试。Repository 终态、执行快照和最终助手消息使用同一事务，迟到终态受条件更新拒绝。
+
+边界：Planner adapter 能转换当前 Flow 的成功、失败、取消和等待问题，但尚未把持久化 `RunExecutionSnapshot` 重新灌回 Flow；waiting_input 跨重启恢复仍由 3A 的消息重建契约覆盖。4B 接入生产前必须补齐恢复 Engine 输入边界。
+
 ## 检查点
 
 | 检查点 | 状态 | 入口 |
@@ -48,8 +67,8 @@ go vet ./...
 | 2C MCP 动态路由、初始化与错误契约 | complete | `8fd0fa6` |
 | 3A Run、执行快照与等待恢复契约 | complete | `a8de838` |
 | 3B Run/Message Repository | complete | `f0ada6a` |
-| 3C 纯 RunService | complete | `待提交：refactor(api): add pure run service` |
-| 4A RunExecutor 生命周期与观测，未接生产 | pending | `05-run-execution-cutover.md` |
+| 3C 纯 RunService | complete | `cb50565 refactor(api): add pure run service` |
+| 4A RunExecutor 生命周期与观测，未接生产 | complete | `refactor(api): add run executor lifecycle` |
 | 4B 唯一后端生产切换 | pending | `05-run-execution-cutover.md` |
 | 5A Run API/SSE | pending | `06-api-ui-sse-cutover.md` |
 | 5B UI 切换 | pending | `06-api-ui-sse-cutover.md` |
@@ -122,7 +141,7 @@ go test -tags=integration ./tests -run '^TestRunRepo_' -count=1 -v PASS
 
 ## 最近完成：检查点 3C 纯 RunService
 
-提交：待创建，建议 `refactor(api): add pure run service`。
+提交：`cb50565 refactor(api): add pure run service`。
 
 验证结果：
 
