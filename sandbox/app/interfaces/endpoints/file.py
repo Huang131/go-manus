@@ -1,4 +1,4 @@
-import os.path
+import os
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form
 from fastapi.responses import FileResponse
@@ -11,7 +11,7 @@ from app.interfaces.schemas.file import (
     FileSearchRequest,
     FileFindRequest,
     FileCheckRequest,
-    FileDeleteRequest
+    FileDeleteRequest,
 )
 from app.interfaces.service_dependencies import get_file_service
 from app.models.file import (
@@ -22,7 +22,7 @@ from app.models.file import (
     FileFindResult,
     FileUploadResult,
     FileCheckResult,
-    FileDeleteResult
+    FileDeleteResult,
 )
 from app.services.file import FileService
 
@@ -46,7 +46,6 @@ async def read_file(
         sudo=request.sudo,
         max_length=request.max_length,
     )
-
     return Response.success(
         # 截断信号只走 msg，不污染 content：content 必须与文件真实内容一致，
         # 否则模型会把标记当成文件内容，回写时污染源文件。
@@ -72,7 +71,6 @@ async def write_file(
         trailing_newline=request.trailing_newline,
         sudo=request.sudo,
     )
-
     return Response.success(
         msg="文件内容写入成功",
         data=result,
@@ -94,7 +92,6 @@ async def replace_in_file(
         new_str=request.new_str,
         sudo=request.sudo,
     )
-
     return Response.success(
         msg=f"文件内容替换完成, 已替换{result.replaced_count}处内容",
         data=result,
@@ -132,6 +129,8 @@ async def find_files(
         file_service: FileService = Depends(get_file_service),
 ) -> Response[FileFindResult]:
     """根据传递的文件夹+glob文件规则查找文件列表（glob_pattern 缺省为当前目录全部文件）"""
+    # schema 默认值已是 "*"，这里再兜一层：调用方显式传空串时，
+    # 空 glob 匹配不到任何文件，回落到 "*" 比返回空列表更符合直觉。
     result = await file_service.find_files(
         dir_path=request.dir_path,
         glob_pattern=request.glob_pattern or "*",
@@ -150,7 +149,7 @@ async def find_files(
 )
 async def upload_file(
         file: UploadFile = File(...),  # 上传的文件源
-        filepath: str = Form(None),  # 上传的文件路径
+        filepath: str | None = Form(None),  # 上传的文件路径，缺省时由 filename 推导
         file_service: FileService = Depends(get_file_service),
 ) -> Response[FileUploadResult]:
     """根据传递的文件源+路径上传文件到沙箱"""
@@ -160,10 +159,11 @@ async def upload_file(
         # multipart part 可能无 filename（filename=None），basename(None) 会 TypeError
         raw_name = file.filename or "upload.bin"
         filepath = f"/tmp/{os.path.basename(raw_name)}"
+    # 注意：显式传入的 filepath 不做任何限制，视为调用方（Go 侧 api）自主决定的路径；
+    # basename 化只覆盖"由不可信 filename 推导路径"这一条链路，沙箱本身就是隔离环境。
 
     # 2.调用服务将文件上传至沙箱
     result = await file_service.upload_file(file=file, filepath=filepath)
-
     return Response.success(
         msg="文件上传成功",
         data=result,
@@ -200,7 +200,6 @@ async def check_file_exists(
 ) -> Response[FileCheckResult]:
     """根据传递的路径判断文件是否存在"""
     result = await file_service.check_file_exists(filepath=request.filepath)
-
     return Response.success(
         msg="文件存在" if result.exists else "文件不存在",
         data=result,
@@ -221,7 +220,6 @@ async def delete_file(
         filepath=request.filepath,
         sudo=request.sudo,
     )
-
     return Response.success(
         msg="删除文件成功",
         data=result,

@@ -1,5 +1,3 @@
-from typing import List
-
 from fastapi import APIRouter, Depends
 
 from app.interfaces.schemas.base import Response
@@ -13,11 +11,11 @@ router = APIRouter(prefix="/supervisor", tags=["Supervisor模块"])
 
 @router.get(
     path="/status",
-    response_model=Response[List[ProcessInfo]]
+    response_model=Response[list[ProcessInfo]],
 )
 async def get_status(
         supervisor_service: SupervisorService = Depends(get_supervisor_service),
-) -> Response[List[ProcessInfo]]:
+) -> Response[list[ProcessInfo]]:
     """获取沙箱中所有进程服务的状态信息"""
     processes = await supervisor_service.get_all_processes()
     return Response.success(
@@ -81,10 +79,9 @@ async def activate_timeout(
 ) -> Response[SupervisorTimeout]:
     """传递分钟激活超时沙箱销毁设置，并关闭自动保活配置"""
     result = await supervisor_service.activate_timeout(request.minutes)
-    supervisor_service.disable_expand()
     return Response.success(
         msg=f"超时销毁已设置, 所有服务与沙箱将在{result.timeout_minutes}分钟后销毁",
-        data=result
+        data=result,
     )
 
 
@@ -98,9 +95,8 @@ async def extend_timeout(
 ) -> Response[SupervisorTimeout]:
     """传递指定的分钟延长超时时间并关闭自动保活"""
     result = await supervisor_service.extend_timeout(request.minutes)
-    supervisor_service.disable_expand()
     return Response.success(
-        msg=f"超时销毁时间已延长{request.minutes}分钟, 所有服务与沙箱将在{result.timeout_minutes}后销毁",
+        msg=f"超时销毁时间已延长{request.minutes}分钟, 所有服务与沙箱将在{result.timeout_minutes}分钟后销毁",
         data=result,
     )
 
@@ -115,7 +111,7 @@ async def cancel_timeout(
     """取消超时销毁配置"""
     result = await supervisor_service.cancel_timeout()
     return Response.success(
-        msg=f"超时销毁已取消" if result.status == "timeout_cancelled" else "超时销毁未激活",
+        msg="超时销毁已取消" if result.status == "timeout_cancelled" else "超时销毁未激活",
         data=result,
     )
 
@@ -129,7 +125,9 @@ async def get_timeout_status(
 ) -> Response[SupervisorTimeout]:
     """获取当前supervisor的超时状态配置"""
     result = await supervisor_service.get_timeout_status()
-    msg = "未激活超时销毁" if not result.active else f"剩余超时销毁分钟数: {result.remaining_seconds // 60}"
+    # remaining_seconds 是 float，直接 // 60 结果仍是 float（125.4 // 60 == 2.0），
+    # 先转 int 再整除才能得到整数分钟；active=False 时 remaining_seconds 为 None，走另一分支。
+    msg = "未激活超时销毁" if not result.active else f"剩余超时销毁分钟数: {int(result.remaining_seconds) // 60}"
     return Response.success(
         msg=msg,
         data=result,
