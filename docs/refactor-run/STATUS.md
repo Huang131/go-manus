@@ -95,7 +95,7 @@ go test -tags=integration ./tests -run '^TestRunRepo_FinishTerminal' -count=1
 | 5C 删除旧路由 | complete | 本轮 `refactor(api): remove legacy session execution routes`：删除 Session Chat/Stop handler、路由、DTO 和 UI client；Session Delete 保留取消活跃 Run 的资源清理 |
 | 6A 删除 Task 基础设施 | complete | `2bd649d` | 已删除 `RedisStreamTask`、旧 `AgentTaskRunner`、默认 Task registry、Task 专用测试及 AgentService 旧 Chat/Stop/事件入口 |
 | 6B 删除 Session 执行字段 | complete | `afcedfd` | 删除 `Session` 执行字段、旧事件/状态仓储方法、`SessionRuntime`，新增 007 migration，并改为 Run 活跃状态只读投影 |
-| 6C 收紧 model 依赖 | complete | `refactor(api): decouple model from infrastructure` | model 改用标准库 JSON，不再依赖 sonic/logger |
+| 6C 收紧 model 依赖 | complete | `refactor(api): decouple model from infrastructure`、本轮恢复统一 JSON 编解码 | model 沿用项目统一的 sonic 编解码，不再依赖 logger |
 
 ## 阶段验收归属
 
@@ -123,7 +123,7 @@ go test -tags=integration ./tests -run '^TestRunRepo_FinishTerminal' -count=1
 - `MaxPlanSteps` 不作为伪配置加入；必须先有真实消费逻辑。
 - 阶段 6A 证据确认：旧 Task/Redis stream 执行链没有生产消费者；RunExecutor/PlannerEngineAdapter 是当前唯一生产执行入口。AgentService 仅保留工具快照和运行时配置热更新。
 - 阶段 6B 决策：Session 不再暴露或持久化执行状态；会话列表需要运行图标时读取 `runs` 的 active 状态投影，禁止新增 Session 状态回写。
-- 阶段 6C 决策：领域模型只保留标准库和领域设置依赖；事件序列化失败不在 model 包记录日志，避免模型层反向耦合基础设施。
+- 阶段 6C 决策：领域模型沿用项目统一的 sonic 编解码，但不依赖 logger、repository 或 external；事件序列化失败不在 model 包记录日志，避免模型层反向耦合发布基础设施。
 - `sessions.memories` 和 `Session.Memories` 当前不存在，不在方案中虚构。
 - ToolRegistry 三份映射、MCP/A2A retired 无界释放问题已在工具重构提交中解决，不重复规划。
 - 2C 已完成：MCP function name 在发现时建立不可变索引，名称碰撞拒绝初始化；连接、发现与协议错误返回 Go error，远端 `IsError` 保留为可交给模型处理的失败 `ToolResult`。

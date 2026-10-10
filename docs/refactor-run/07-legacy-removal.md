@@ -33,7 +33,7 @@
 
 ### 模型包边界
 
-`model` 不依赖 `sonic`、logger、repository 或 external 实现。JSON 行为使用标准库完成，事件序列化失败只返回空串，由事件发布边界决定如何记录上下文；这是包边界收紧，不应把日志和基础设施耦合进领域模型。
+`model` 不依赖 logger、repository 或 external 实现。JSON 编解码沿用项目统一的 `sonic`，`json.RawMessage` 仍使用标准库类型；事件序列化失败只返回空串，由事件发布边界决定如何记录上下文。模型层不承担日志和事件发布职责。
 
 ## 数据库迁移
 

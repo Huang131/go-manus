@@ -3,6 +3,8 @@ package model
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/bytedance/sonic"
 )
 
 // BaseEvent 事件接口
@@ -16,11 +18,11 @@ type BaseEvent interface {
 // toJSON 统一的事件序列化入口
 // 序列化失败返回空串；事件发布边界负责记录上下文和处理失败。
 func toJSON(v any) string {
-	data, err := json.Marshal(v)
+	data, err := sonic.MarshalString(v)
 	if err != nil {
 		return ""
 	}
-	return string(data)
+	return data
 }
 
 // ExecutionStatus 执行状态
