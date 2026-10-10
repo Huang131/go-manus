@@ -1,9 +1,8 @@
 package model
 
 import (
+	"encoding/json"
 	"time"
-
-	"github.com/bytedance/sonic"
 )
 
 // Session 会话模型，对应一次用户与 Agent 的交互任务。
@@ -31,7 +30,7 @@ func unixPointer(value *time.Time) *int64 {
 // MarshalJSON 自定义 JSON 序列化
 func (s *Session) MarshalJSON() ([]byte, error) {
 	type Alias Session
-	return sonic.Marshal(&struct {
+	return json.Marshal(&struct {
 		*Alias
 		UpdatedAt       int64  `json:"updated_at"`
 		CreatedAt       int64  `json:"created_at"`

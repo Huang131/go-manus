@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-
-	"github.com/bytedance/sonic"
 )
 
 // TestEvent_Data_JSONRoundtrip 验证 Event.Data 字段在 JSON 序列化/反序列化后
@@ -13,8 +11,8 @@ import (
 //
 // 历史 Bug:
 //
-//	Event.Data 原为 []byte，被 sonic 序列化为 base64 字符串（JSON 没有 []byte 类型，
-//	标准库与 sonic 都会做 base64 编码）。改为 json.RawMessage 后，sonic 直接嵌入
+//	Event.Data 原为 []byte，被 JSON 序列化为 base64 字符串（JSON 没有 []byte 类型）。
+//	改为 json.RawMessage 后，标准库 JSON 直接嵌入
 //	原始 JSON，不再二次编码。
 func TestEvent_Data_JSONRoundtrip(t *testing.T) {
 	tests := []struct {
@@ -46,7 +44,7 @@ func TestEvent_Data_JSONRoundtrip(t *testing.T) {
 				Type: EventTypeMessage,
 				Data: json.RawMessage(tt.input),
 			}
-			out, err := sonic.Marshal(event)
+			out, err := json.Marshal(event)
 			if err != nil {
 				t.Fatalf("marshal failed: %v", err)
 			}
@@ -54,7 +52,7 @@ func TestEvent_Data_JSONRoundtrip(t *testing.T) {
 			var probe struct {
 				Data json.RawMessage `json:"data"`
 			}
-			if err := sonic.Unmarshal(out, &probe); err != nil {
+			if err := json.Unmarshal(out, &probe); err != nil {
 				t.Fatalf("unmarshal probe failed: %v", err)
 			}
 
@@ -64,7 +62,7 @@ func TestEvent_Data_JSONRoundtrip(t *testing.T) {
 			}
 
 			var back Event
-			if err := sonic.Unmarshal(out, &back); err != nil {
+			if err := json.Unmarshal(out, &back); err != nil {
 				t.Fatalf("unmarshal failed: %v", err)
 			}
 			if string(back.Data) != tt.input {
@@ -82,7 +80,7 @@ func TestEvent_Data_NotBase64(t *testing.T) {
 		Data: json.RawMessage(original),
 	}
 
-	out, err := sonic.Marshal(event)
+	out, err := json.Marshal(event)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -110,7 +108,7 @@ func TestEvent_Data_PreservesStructure(t *testing.T) {
 		Data: data,
 	}
 
-	out, err := sonic.Marshal(event)
+	out, err := json.Marshal(event)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -127,7 +125,7 @@ func TestEvent_Data_PreservesStructure(t *testing.T) {
 			Status string `json:"status"`
 		} `json:"data"`
 	}
-	if err := sonic.Unmarshal(out, &back); err != nil {
+	if err := json.Unmarshal(out, &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
@@ -145,7 +143,7 @@ func TestEvent_Data_PreservesStructure(t *testing.T) {
 // TestEvent_Data_Nil 验证 nil Data 序列化为 null。
 func TestEvent_Data_Nil(t *testing.T) {
 	event := Event{Type: EventTypeMessage}
-	out, err := sonic.Marshal(event)
+	out, err := json.Marshal(event)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}

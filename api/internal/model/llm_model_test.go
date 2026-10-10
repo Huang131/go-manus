@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-
-	"github.com/bytedance/sonic"
 )
 
 // TestRequestPolicy_Extra_JSONRoundtrip 验证 RequestPolicy.Extra 字段
@@ -13,7 +11,7 @@ import (
 //
 // 历史 Bug:
 //
-//	Extra 原为 map[string][]byte，map value 是 []byte 同样会被 sonic base64 编码。
+//	Extra 原为 map[string][]byte，map value 是 []byte 同样会被 JSON 编码为 base64。
 //	改为 map[string]json.RawMessage 后解决。
 func TestRequestPolicy_Extra_JSONRoundtrip(t *testing.T) {
 	policy := RequestPolicy{
@@ -25,7 +23,7 @@ func TestRequestPolicy_Extra_JSONRoundtrip(t *testing.T) {
 		},
 	}
 
-	out, err := sonic.Marshal(policy)
+	out, err := json.Marshal(policy)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -35,7 +33,7 @@ func TestRequestPolicy_Extra_JSONRoundtrip(t *testing.T) {
 	}
 
 	var back RequestPolicy
-	if err := sonic.Unmarshal(out, &back); err != nil {
+	if err := json.Unmarshal(out, &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
@@ -53,7 +51,7 @@ func TestRequestPolicy_Extra_JSONRoundtrip(t *testing.T) {
 // TestRequestPolicy_Extra_Omitempty 验证空 Extra 不写入 JSON。
 func TestRequestPolicy_Extra_Omitempty(t *testing.T) {
 	policy := RequestPolicy{ReasoningMode: ReasoningOff}
-	out, err := sonic.Marshal(policy)
+	out, err := json.Marshal(policy)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -71,7 +69,7 @@ func TestRequestPolicy_Extra_NestedObject(t *testing.T) {
 		},
 	}
 
-	out, err := sonic.Marshal(policy)
+	out, err := json.Marshal(policy)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -79,7 +77,7 @@ func TestRequestPolicy_Extra_NestedObject(t *testing.T) {
 	var back struct {
 		Extra map[string]json.RawMessage `json:"extra"`
 	}
-	if err := sonic.Unmarshal(out, &back); err != nil {
+	if err := json.Unmarshal(out, &back); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
@@ -91,13 +89,13 @@ func TestRequestPolicy_Extra_NestedObject(t *testing.T) {
 
 func TestLLMModelAPIKey_InputOnly(t *testing.T) {
 	var m LLMModel
-	if err := sonic.Unmarshal([]byte(`{"api_key":"secret"}`), &m); err != nil {
+	if err := json.Unmarshal([]byte(`{"api_key":"secret"}`), &m); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if m.APIKey != "secret" {
 		t.Fatalf("APIKey = %q, want secret", m.APIKey)
 	}
-	out, err := sonic.Marshal(m)
+	out, err := json.Marshal(m)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -108,7 +106,7 @@ func TestLLMModelAPIKey_InputOnly(t *testing.T) {
 
 func TestLLMModelDTOs_SeparateAPIKeyInputAndOutput(t *testing.T) {
 	var req LLMModelRequest
-	if err := sonic.Unmarshal([]byte(`{"name":"demo","api_key":"secret","provider":"openai","base_url":"https://example.com","model_name":"gpt"}`), &req); err != nil {
+	if err := json.Unmarshal([]byte(`{"name":"demo","api_key":"secret","provider":"openai","base_url":"https://example.com","model_name":"gpt"}`), &req); err != nil {
 		t.Fatalf("unmarshal request: %v", err)
 	}
 	if req.APIKey != "secret" {
@@ -120,7 +118,7 @@ func TestLLMModelDTOs_SeparateAPIKeyInputAndOutput(t *testing.T) {
 		t.Fatalf("request conversion lost fields: %+v", internal)
 	}
 
-	out, err := sonic.Marshal(NewLLMModelResponse(internal))
+	out, err := json.Marshal(NewLLMModelResponse(internal))
 	if err != nil {
 		t.Fatalf("marshal response: %v", err)
 	}
@@ -132,7 +130,7 @@ func TestLLMModelDTOs_SeparateAPIKeyInputAndOutput(t *testing.T) {
 func TestLLMModelCapabilitiesApplyDefaultsWithoutOverwritingExplicitFalse(t *testing.T) {
 	var m LLMModel
 	input := []byte(`{"capabilities":{"supports_text":false,"supports_vision":true,"max_context_tokens":100000}}`)
-	if err := sonic.Unmarshal(input, &m); err != nil {
+	if err := json.Unmarshal(input, &m); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if m.Capabilities.SupportsText {

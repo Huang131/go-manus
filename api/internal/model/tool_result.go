@@ -1,6 +1,6 @@
 package model
 
-import "github.com/bytedance/sonic"
+import "encoding/json"
 
 // ToolResult 工具执行结果的统一封装。
 // 用于解耦工具实现与事件系统，所有工具返回都统一为此格式。
@@ -87,7 +87,7 @@ func (r *ToolResult) FromSandbox(code int, msg string, data interface{}) *ToolRe
 
 // JSON 将工具结果转换为 JSON 字符串，包含 Display（供事件推送给 UI）。
 func (r *ToolResult) JSON() string {
-	data, err := sonic.Marshal(r)
+	data, err := json.Marshal(r)
 	if err != nil {
 		return `{"success": false, "message": "failed to marshal result"}`
 	}
@@ -105,7 +105,7 @@ func (r *ToolResult) LLMJSON() string {
 	}
 	clone := *r
 	clone.Display = nil
-	data, err := sonic.Marshal(&clone)
+	data, err := json.Marshal(&clone)
 	if err != nil {
 		return `{"success": false, "message": "failed to marshal result"}`
 	}

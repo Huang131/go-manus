@@ -3,10 +3,6 @@ package model
 import (
 	"encoding/json"
 	"time"
-
-	"github.com/bytedance/sonic"
-
-	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
 // BaseEvent 事件接口
@@ -18,15 +14,13 @@ type BaseEvent interface {
 }
 
 // toJSON 统一的事件序列化入口
-// 序列化失败时记录告警并返回空串
-// 避免非法 json.RawMessage 静默变成空事件污染 Redis/SSE 下游。
+// 序列化失败返回空串；事件发布边界负责记录上下文和处理失败。
 func toJSON(v any) string {
-	s, err := sonic.MarshalString(v)
+	data, err := json.Marshal(v)
 	if err != nil {
-		logger.Warn("event serialize failed", logger.Err(err))
 		return ""
 	}
-	return s
+	return string(data)
 }
 
 // ExecutionStatus 执行状态

@@ -33,7 +33,7 @@
 
 ### 模型包边界
 
-在独立检查后，把 JSON 序列化和 logger 依赖从 `model` 移到 API/存储边界；这是包边界收紧，不应与 Run 切换混在同一提交。
+`model` 不依赖 `sonic`、logger、repository 或 external 实现。JSON 行为使用标准库完成，事件序列化失败只返回空串，由事件发布边界决定如何记录上下文；这是包边界收紧，不应把日志和基础设施耦合进领域模型。
 
 ## 数据库迁移
 
@@ -43,7 +43,7 @@
 
 - `refactor(api): remove legacy task infrastructure`
 - `refactor(api): make session a conversation container`
-- `refactor(api): tighten model package boundary`
+- `refactor(api): decouple model from infrastructure`
 
 每个提交都必须编译、测试、可单独 revert；不通过复制旧 Task 临时修复编译错误。
 

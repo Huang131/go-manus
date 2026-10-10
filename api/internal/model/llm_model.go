@@ -3,8 +3,6 @@ package model
 import (
 	"encoding/json"
 	"time"
-
-	"github.com/bytedance/sonic"
 )
 
 // LLMModel LLM 模型配置条目
@@ -134,7 +132,7 @@ func (m *LLMModel) UnmarshalJSON(data []byte) error {
 		APIKey string `json:"api_key"`
 	}
 	payload.alias = (*alias)(m)
-	if err := sonic.Unmarshal(data, &payload); err != nil {
+	if err := json.Unmarshal(data, &payload); err != nil {
 		return err
 	}
 	m.APIKey = payload.APIKey
