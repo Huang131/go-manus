@@ -759,19 +759,9 @@ func (a *App) initAgent(opts Options, clients *externalClients) error {
 	// 创建 Agent 服务
 	a.AgentService = agent.NewAgentService(
 		context.Background(),
-		agent.Repositories{
-			Session:  a.repos.session,
-			File:     a.repos.file,
-			LLMModel: a.repos.llmModel,
-		},
-		agent.Capabilities{
-			LLM:          clients.llm,
-			Sandbox:      a.Sandbox,
-			Browser:      clients.browser,
-			SearchEngine: clients.search,
-			FileStorage:  a.OSS,
-			MessageQueue: clients.mq,
-		},
+		a.Sandbox,
+		clients.browser,
+		clients.search,
 		agentSettings,
 		mcpConfig,
 		a2aConfig,

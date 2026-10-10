@@ -67,7 +67,7 @@ func TestInitRunExecutionRequiresAgentAndLLM(t *testing.T) {
 func TestInitRunExecutionBuildsRunApplicationBoundary(t *testing.T) {
 	app := &App{
 		RunService:   service.NewRunService(nil),
-		AgentService: agent.NewAgentService(context.Background(), agent.Repositories{}, agent.Capabilities{}, settings.DefaultAgentSettings(), nil, nil),
+		AgentService: agent.NewAgentService(context.Background(), nil, nil, nil, settings.DefaultAgentSettings(), nil, nil),
 		repos:        repositories{},
 		AppConfigSvc: nil,
 	}

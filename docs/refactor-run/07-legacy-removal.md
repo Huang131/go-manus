@@ -11,11 +11,14 @@
 
 ## 删除清单
 
-### Agent 旧 Task 链
+### Agent 旧 Task 链（6A 已完成）
 
-- `Task`、`Stream`、`RedisStreamTask`、`defaultTaskRegistry`。
-- `taskBySession`、旧 AgentService Chat/Stop/GetTaskEvents 实现。
-- 只为旧 Task 服务的队列适配、Runner 投影和测试。
+- `Task`、`Stream`、`RedisStreamTask`、`defaultTaskRegistry` 已删除。
+- `taskBySession`、旧 AgentService Chat/Stop/GetTaskEvents 实现已删除。
+- 只为旧 Task 服务的队列适配、Runner 投影和测试已删除。
+- `AgentService` 现在只负责 ToolProvider 生命周期和 AgentSettings 热更新；RunExecutor 通过窄 `AcquireTools` 接口获取 ToolSet。
+
+删除依据：全仓生产代码扫描未发现旧 Task、旧 registry、旧 Chat/Stop/事件读取入口的消费者；Bootstrap、Router、RunApplicationService 和 RunExecutor 均已走 Run 领域链路。保留 Redis 的 `RunEventPublisher/RunEventStream`，因为它们仍是当前 Run SSE 的实时旁路。
 
 ### Session 执行字段
 

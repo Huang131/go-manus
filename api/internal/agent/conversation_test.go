@@ -3,7 +3,6 @@ package agent
 import (
 	"testing"
 
-	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/bytedance/sonic"
 )
@@ -27,27 +26,5 @@ func TestConversationMessagesRestoresPersistedUserAndAssistantMessages(t *testin
 	}
 	if got[1].Role != model.RoleAssistant || got[1].ContentText != "previous answer" {
 		t.Fatalf("assistant message = %+v", got[1])
-	}
-}
-
-func TestNewAgentTaskRunnerLoadsInitialConversation(t *testing.T) {
-	history := []llmcore.Message{
-		{Role: model.RoleUser, ContentText: "previous question"},
-		{Role: model.RoleAssistant, ContentText: "previous answer"},
-	}
-	runner := NewAgentTaskRunner(&AgentTaskRunnerConfig{
-		SessionID:       "session-1",
-		AgentSettings:   defaultAgentSettings(),
-		InitialMessages: history,
-	})
-
-	plannerMessages := runner.flow.planner.memory.GetMessages()
-	reactMessages := runner.flow.react.memory.GetMessages()
-	if len(plannerMessages) != 2 || len(reactMessages) != 2 {
-		t.Fatalf("initial history lengths planner=%d react=%d", len(plannerMessages), len(reactMessages))
-	}
-	history[0].ContentText = "mutated"
-	if plannerMessages[0].ContentText != "previous question" || reactMessages[0].ContentText != "previous question" {
-		t.Fatal("runner retained caller-owned history slice")
 	}
 }
