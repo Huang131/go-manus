@@ -5,7 +5,7 @@ import socket
 import xmlrpc.client
 import time
 from datetime import datetime, timedelta
-from typing import List, Any, Optional
+from typing import Any
 
 from app.core.config import get_settings
 from app.interfaces.errors.exceptions import BadRequestException, AppException
@@ -19,6 +19,18 @@ from app.models.supervisor import ProcessInfo, SupervisorActionResult, Superviso
 """
 
 logger = logging.getLogger(__name__)
+
+# 不触发自动保活的路径：这些端点是对超时的显式操作，不应再被中间件叠加一次延长。
+AUTO_EXTEND_EXCLUDED_PATHS = frozenset({
+    "/api/supervisor/activate-timeout",
+    "/api/supervisor/extend-timeout",
+    "/api/supervisor/cancel-timeout",
+    "/api/supervisor/timeout-status",
+})
+
+# 每次 API 请求自动续期的时长（分钟）。活动保活与显式续期的默认值共用此常量，
+# 避免"改了默认值忘了改调用点"导致行为不一致。
+AUTO_EXTEND_MINUTES = 3
 
 
 class UnixStreamHTTPConnection(http.client.HTTPConnection):
@@ -60,21 +72,20 @@ class SupervisorService:
         self.rpc_url = "/tmp/supervisor.sock"
         self._connect_rpc()
 
-        # 2.supervisor超时配置
-        settings = get_settings()
-        self.timeout_active = settings.server_timeout_minutes is not None
+        # 2.supervisor超时状态
+        # _deadline 是超时状态的唯一真源：timeout_active、shutdown_time 均由它派生，
+        # 避免"状态位"与"实际是否存在定时器"不同步。
+        self._deadline: datetime | None = None
         self.shutdown_task = None
-        self.shutdown_time = None
         self._timer_generation = 0
-        self._expand_enabled = True  # 是否自动保活(每调用一次接口就增加时间)
+        self._auto_extend = True  # 是否自动保活(每调用一次接口就增加时间)
         self._state_lock = asyncio.Lock()
         self._rpc_lock = asyncio.Lock()
 
-        # 3.检测是否配置了自动销毁
-        if settings.server_timeout_minutes is not None:
-            # 4.设置销毁时间+定时器
-            self.shutdown_time = datetime.now() + timedelta(minutes=settings.server_timeout_minutes)
-            self._setup_timer(settings.server_timeout_minutes)
+        # 3.检测是否配置了默认超时，有则预置销毁时间+定时器
+        default_minutes = get_settings().server_timeout_minutes
+        if default_minutes is not None:
+            self._arm_timer(default_minutes)
 
     def _get_state_lock(self) -> asyncio.Lock:
         """懒加载状态锁，兼容测试中通过 __new__ 构造的服务实例。"""
@@ -93,17 +104,40 @@ class SupervisorService:
         return lock
 
     @property
-    def expand_enabled(self) -> bool:
-        """只读属性，返回是否自动保活"""
-        return self._expand_enabled
+    def timeout_active(self) -> bool:
+        """是否存在生效中的销毁截止时间（派生自 _deadline，不单独存储）"""
+        return self._deadline is not None
 
-    def enable_expand(self) -> None:
-        """开启自动保活"""
-        self._expand_enabled = True
+    @property
+    def shutdown_time(self) -> datetime | None:
+        """当前销毁截止时间；未激活超时时为 None"""
+        return self._deadline
 
-    def disable_expand(self) -> None:
-        """关闭自动保活"""
-        self._expand_enabled = False
+    def should_auto_extend(self, path: str) -> bool:
+        """判断该请求是否需要自动延长销毁时间，供中间件调用。
+
+        把路径白名单与策略判断收口在此，中间件只负责调用，
+        避免白名单同时在中间件和路由表里各维护一份。
+
+        三个条件缺一不可：存在生效中的销毁计划、路径属于 /api/ 且不是对超时的
+        显式操作、保活开关未被用户关掉。timeout_active 是硬性前提——
+        cancel-timeout 会清空销毁计划，此时已无计划可延长，
+        沙箱保持存活，直到被显式重启或停止。
+        """
+        return (
+            self.timeout_active
+            and path.startswith("/api/")
+            and path not in AUTO_EXTEND_EXCLUDED_PATHS
+            and self._auto_extend
+        )
+
+    def _arm_timer(self, timeout_minutes: int) -> None:
+        """写入截止时间并调度定时器。
+
+        调用方需处于事件循环中，并自行保证状态互斥（构造期或已持有 _state_lock）。
+        """
+        self._deadline = datetime.now() + timedelta(minutes=timeout_minutes)
+        self._setup_timer(timeout_minutes)
 
     def _setup_timer(self, minutes: int) -> None:
         """传递时间(分钟)并创建定时器，在时间结束之后关闭supervisord主进程"""
@@ -123,14 +157,9 @@ class SupervisorService:
                 return
             await self.shutdown()
 
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            # SupervisorService 在 FastAPI 请求事件循环中创建；没有运行中的循环时
-            # 无法安全调度异步 RPC，保留截止时间并等待后续 activate/extend 调度。
-            logger.warning("当前没有运行中的事件循环，Supervisor 超时任务暂未调度")
-            return
-        task = loop.create_task(shutdown_after_timeout())
+        # 单例在 lifespan 中创建、其余调用都发生在请求上下文内，
+        # 因此此处必然有运行中的事件循环；没有循环属于编程错误，让其直接抛出。
+        task = asyncio.get_running_loop().create_task(shutdown_after_timeout())
         self.shutdown_task = task
 
         def on_timer_done(completed_task: asyncio.Task) -> None:
@@ -185,7 +214,7 @@ class SupervisorService:
         group = process.get("group")
         return name if group in (None, "", name) else f"{group}:{name}"
 
-    async def get_all_processes(self) -> List[ProcessInfo]:
+    async def get_all_processes(self) -> list[ProcessInfo]:
         """获取当前supervisor管理的所有进程信息"""
         try:
             processes = await self._call_rpc(self.server.supervisor.getAllProcessInfo)
@@ -259,7 +288,7 @@ class SupervisorService:
             logger.error(f"重启Supervisor子进程失败: {e}")
             raise AppException(f"重启Supervisor子进程失败: {e}")
 
-    async def activate_timeout(self, minutes: Optional[int] = None) -> SupervisorTimeout:
+    async def activate_timeout(self, minutes: int | None = None) -> SupervisorTimeout:
         """传递指定分钟，并激活定时销毁任务同时关闭自动保活"""
         # 1.获取超时分钟数
         setting = get_settings()
@@ -273,64 +302,95 @@ class SupervisorService:
             return self._activate_timeout_locked(timeout_minutes)
 
     def _activate_timeout_locked(self, timeout_minutes: int) -> SupervisorTimeout:
-        """在已持有状态锁时激活超时计时器。"""
-        self.timeout_active = True
-        self.shutdown_time = datetime.now() + timedelta(minutes=timeout_minutes)
-        self._setup_timer(timeout_minutes)
+        """在已持有状态锁时激活超时计时器，并关闭自动保活。
+
+        关保活收在锁内而不是端点层：任何调用方（HTTP 端点/内部任务）行为都一致，
+        也避免"先激活后关保活"的顺序依赖只散落在调用方。activate 仅由端点调用，
+        收在这里没有副作用；extend 与中间件的活动保活共用同一路径，
+        故那边的开关处理必须与 keep_alive 分开，详见 keep_alive。
+        """
+        self._auto_extend = False
+        self._arm_timer(timeout_minutes)
         return SupervisorTimeout(
             status="timeout_activated",
             active=True,
-            shutdown_time=self.shutdown_time.isoformat(),
+            shutdown_time=self._deadline.isoformat(),
             timeout_minutes=timeout_minutes,
-            remaining_seconds=(self.shutdown_time - datetime.now()).total_seconds(),
+            remaining_seconds=(self._deadline - datetime.now()).total_seconds(),
         )
 
-    async def extend_timeout(self, minutes: Optional[int] = 3) -> SupervisorTimeout:
-        """传递指定的时长，延长超时销毁的时间，单默认延长3分钟"""
-        # 1.获取超时分钟数
+    async def keep_alive(self) -> None:
+        """活动保活：由中间件在每次 API 请求时调用，把销毁时间顺延固定时长。
+
+        必须与 extend_timeout 分开：extend_timeout 是用户的显式操作，会关闭自动保活；
+        而本方法由请求流量反复触发，绝不能改动开关——否则第一个请求就把保活关掉，
+        之后的请求不再续期，保活退化成"只生效一次"。
+        """
+        async with self._get_state_lock():
+            # 用户已显式接管生命周期时，请求流量不得再推动销毁时间。
+            if not self._auto_extend:
+                return
+            self._extend_locked(AUTO_EXTEND_MINUTES)
+
+    async def extend_timeout(self, minutes: int | None = AUTO_EXTEND_MINUTES) -> SupervisorTimeout:
+        """显式延长超时销毁时间（用户接管生命周期，同时关闭自动保活）"""
         if minutes is None:
             raise BadRequestException("超时时间未配置, 请核实后重试")
         if minutes <= 0:
             raise BadRequestException("延长时间必须大于0分钟")
         async with self._get_state_lock():
-            # 检查必须与状态更新共用同一把锁，避免 cancel_timeout 并发清空截止时间。
-            if getattr(self, "shutdown_time", None) is None:
-                return self._activate_timeout_locked(minutes)
-            remaining = self.shutdown_time - datetime.now()
+            self._auto_extend = False
+            return self._extend_locked(minutes)
+
+    def _extend_locked(self, minutes: int) -> SupervisorTimeout:
+        """在已持有状态锁时顺延销毁时间：有生效计划则在剩余时间上叠加，否则从当前时刻起算。"""
+        if self._deadline is None:
+            # 无生效计划（如刚 cancel 过）：不能去叠加不存在的剩余时间，直接按本时长起算。
+            status = "timeout_activated"
+            timeout_minutes = minutes
+        else:
+            remaining = self._deadline - datetime.now()
+            status = "timeout_extended"
             timeout_minutes = round(max(0, remaining.total_seconds()) / 60) + minutes
-            self.timeout_active = True
-            self.shutdown_time = datetime.now() + timedelta(minutes=timeout_minutes)
-            self._setup_timer(timeout_minutes)
-            return SupervisorTimeout(
-                status="timeout_extended",
-                active=True,
-                shutdown_time=self.shutdown_time.isoformat(),
-                timeout_minutes=timeout_minutes,
-                remaining_seconds=(self.shutdown_time - datetime.now()).total_seconds(),
-            )
+        self._arm_timer(timeout_minutes)
+        return SupervisorTimeout(
+            status=status,
+            active=True,
+            shutdown_time=self._deadline.isoformat(),
+            timeout_minutes=timeout_minutes,
+            remaining_seconds=(self._deadline - datetime.now()).total_seconds(),
+        )
 
     async def cancel_timeout(self) -> SupervisorTimeout:
         """取消超时销毁设置"""
         async with self._get_state_lock():
-            if not self.timeout_active:
+            if self._deadline is None:
                 return SupervisorTimeout(status="no_timeout_active", active=False)
             self._cancel_timeout_timer()
-            self.timeout_active = False
-            self.shutdown_time = None
-            self._expand_enabled = True
+            self._deadline = None
+            # 重新打开保活开关。但销毁计划已清空，should_auto_extend 的 timeout_active
+            # 前提会挡住请求保活，于是 cancel 后沙箱进入"无销毁计划"状态，不会因流量被续期。
+            self._auto_extend = True
             return SupervisorTimeout(status="timeout_cancelled", active=False)
 
     async def get_timeout_status(self) -> SupervisorTimeout:
         """获取当前supervisor的超时状态"""
         async with self._get_state_lock():
-            if not self.timeout_active:
+            if self._deadline is None:
                 return SupervisorTimeout(active=False)
-            remaining_seconds = 0
-            if self.shutdown_time:
-                remaining = self.shutdown_time - datetime.now()
-                remaining_seconds = max(0, remaining.total_seconds())
+            remaining = self._deadline - datetime.now()
             return SupervisorTimeout(
-                active=self.timeout_active,
-                shutdown_time=self.shutdown_time.isoformat() if self.shutdown_time else None,
-                remaining_seconds=remaining_seconds
+                active=True,
+                shutdown_time=self._deadline.isoformat(),
+                remaining_seconds=max(0, remaining.total_seconds()),
             )
+
+    async def aclose(self) -> None:
+        """释放超时资源：取消待执行的销毁定时器任务。
+
+        仅取消本地 asyncio 任务，绝不调用 supervisor.shutdown()——
+        那会关闭 supervisord 主进程并拖垮整个容器。
+        """
+        async with self._get_state_lock():
+            self._cancel_timeout_timer()
+            self._deadline = None

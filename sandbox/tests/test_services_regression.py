@@ -403,14 +403,12 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         from app.services.supervisor import SupervisorService
 
         service = SupervisorService.__new__(SupervisorService)
-        service.timeout_active = True
-        service.shutdown_time = datetime.now() + timedelta(minutes=1)
+        service._deadline = datetime.now() + timedelta(minutes=1)
         service._setup_timer = lambda minutes: None
 
         class ConcurrentCancel:
             async def __aenter__(self):
-                service.timeout_active = False
-                service.shutdown_time = None
+                service._deadline = None
                 return self
 
             async def __aexit__(self, exc_type, exc, tb):
@@ -738,8 +736,7 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         from app.services.supervisor import SupervisorService
 
         service = SupervisorService.__new__(SupervisorService)
-        service.timeout_active = False
-        service.shutdown_time = None
+        service._deadline = None
         service.shutdown_task = None
         service._setup_timer = lambda minutes: None
         await asyncio.gather(
@@ -754,8 +751,7 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         from app.services.supervisor import SupervisorService
 
         service = SupervisorService.__new__(SupervisorService)
-        service.timeout_active = True
-        service.shutdown_time = datetime.now() + timedelta(minutes=1)
+        service._deadline = datetime.now() + timedelta(minutes=1)
         service.shutdown_task = MagicMock()
         shutdown_task = service.shutdown_task
         service._timer_generation = 4
@@ -794,11 +790,41 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         from app.services.supervisor import SupervisorService
 
         service = SupervisorService.__new__(SupervisorService)
-        service.timeout_active = False
-        service.shutdown_time = None
+        service._deadline = None
         service.shutdown_task = None
         with self.assertRaises(BadRequestException):
             await service.activate_timeout(0)
+
+    async def test_activate_and_cancel_timeout_toggle_auto_extend(self):
+        from app.services.supervisor import SupervisorService
+
+        service = SupervisorService.__new__(SupervisorService)
+        service._deadline = None
+        service.shutdown_task = None
+        service._auto_extend = True
+        service._setup_timer = lambda minutes: None
+
+        # 活动保活由中间件在每次请求触发，绝不能改动开关：
+        # 一旦改动，开关在首个请求后即被关掉，后续请求不再续期（保活只生效一次）。
+        service._deadline = datetime.now() + timedelta(minutes=1)
+        await service.keep_alive()
+        self.assertTrue(service._auto_extend)
+
+        # 显式设置销毁时间视为用户接管生命周期，自动保活必须让位；
+        # 该开关原先由端点层在 service 调用后手动关闭，收进 service 后此处锁定归属。
+        await service.activate_timeout(5)
+        self.assertFalse(service._auto_extend)
+        self.assertFalse(service.should_auto_extend("/api/shell/exec-command"))
+
+        # 硬截止模式下保活是空操作，不得反过来把用户设定的开关打开。
+        await service.keep_alive()
+        self.assertFalse(service._auto_extend)
+
+        # cancel 重新打开开关，但销毁计划已清空，should_auto_extend 的
+        # timeout_active 前提会挡住保活——与 init 提交的既定设计一致。
+        await service.cancel_timeout()
+        self.assertTrue(service._auto_extend)
+        self.assertFalse(service.should_auto_extend("/api/shell/exec-command"))
 
 
 if __name__ == "__main__":
