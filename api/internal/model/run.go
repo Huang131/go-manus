@@ -81,6 +81,7 @@ type WaitingCheckpoint struct {
 // RunStepSnapshot 是恢复执行所需的稳定步骤摘要，不保存运行期句柄或完整工具结果。
 type RunStepSnapshot struct {
 	ID            string        `json:"id"`
+	Description   string        `json:"description"`
 	Status        RunStepStatus `json:"status"`
 	ResultSummary string        `json:"result_summary,omitempty"`
 	ArtifactRefs  []string      `json:"artifact_refs,omitempty"`
@@ -91,6 +92,10 @@ type RunExecutionSnapshot struct {
 	SnapshotRevision  int                `json:"snapshot_revision"`
 	PlanID            string             `json:"plan_id"`
 	PlanRevision      int                `json:"plan_revision"`
+	PlanTitle         string             `json:"plan_title,omitempty"`
+	PlanGoal          string             `json:"plan_goal,omitempty"`
+	PlanLanguage      string             `json:"plan_language,omitempty"`
+	PlanMessage       string             `json:"plan_message,omitempty"`
 	CurrentStepID     string             `json:"current_step_id"`
 	Steps             []RunStepSnapshot  `json:"steps"`
 	WaitingCheckpoint *WaitingCheckpoint `json:"waiting_checkpoint,omitempty"`
@@ -149,6 +154,9 @@ func (s RunExecutionSnapshot) ValidateWaitingInput() error {
 		seenStepIDs[step.ID] = struct{}{}
 		if step.ID == s.CurrentStepID {
 			seenCurrentStep = true
+			if step.Description == "" {
+				return fmt.Errorf("current step %q requires description", step.ID)
+			}
 		}
 		if step.Status == RunStepStatusCompleted && step.ResultSummary == "" {
 			return fmt.Errorf("completed step %q requires result_summary", step.ID)

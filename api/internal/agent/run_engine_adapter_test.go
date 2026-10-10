@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
@@ -14,9 +15,13 @@ import (
 
 type adapterLLM struct {
 	responses []*llmcore.LLMResponse
+	requests  [][]llmcore.Message
+	calls     int
 }
 
-func (m *adapterLLM) Invoke(context.Context, *llm.LLMRequest) (*llmcore.LLMResponse, error) {
+func (m *adapterLLM) Invoke(_ context.Context, request *llm.LLMRequest) (*llmcore.LLMResponse, error) {
+	m.calls++
+	m.requests = append(m.requests, append([]llmcore.Message(nil), request.Messages...))
 	if len(m.responses) == 0 {
 		return &llmcore.LLMResponse{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: "{\"success\":true,\"result\":\"done\"}"}}, nil
 	}
@@ -95,4 +100,50 @@ func TestPlannerEngineAdapterMapsCancelledContext(t *testing.T) {
 	if result.Kind != service.RunExecutionCancelled {
 		t.Fatalf("result kind = %s, want cancelled", result.Kind)
 	}
+}
+
+func TestPlannerEngineAdapterResumesWaitingPlanWithoutReplanning(t *testing.T) {
+	llm := &adapterLLM{responses: []*llmcore.LLMResponse{
+		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: "{\"success\":true,\"result\":\"已确认并执行\"}"}},
+		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: "已完成"}},
+	}}
+	adapter := &PlannerEngineAdapter{LLM: llm}
+	result, err := adapter.Execute(context.Background(), service.RunExecutionInput{
+		RunID: "run-1", SessionID: "session-1", Settings: adapterSettings(),
+		Snapshot: model.RunExecutionSnapshot{
+			SnapshotRevision: 1,
+			PlanID:           "plan-1",
+			CurrentStepID:    "step-2",
+			Steps: []model.RunStepSnapshot{
+				{ID: "step-1", Description: "收集任务信息", Status: model.RunStepStatusCompleted, ResultSummary: "已收集信息"},
+				{ID: "step-2", Description: "根据用户确认继续执行", Status: model.RunStepStatusRunning},
+			},
+			WaitingCheckpoint: &model.WaitingCheckpoint{QuestionMessageID: "question-1", StepID: "step-2", ResumeMode: model.ResumeModeContinueStep},
+		},
+		Messages: []llmcore.Message{
+			{Role: model.RoleUser, ContentText: "帮我完成任务"},
+			{Role: model.RoleAssistant, ContentText: "请确认继续"},
+			{Role: model.RoleUser, ContentText: "我同意执行下一阶段"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Kind != service.RunExecutionSucceeded || result.Text != "已完成" {
+		t.Fatalf("result = %+v, want resumed success", result)
+	}
+	if llm.calls != 2 {
+		t.Fatalf("LLM calls = %d, want 2 without replanning", llm.calls)
+	}
+	if countText(llm.requests[0], "我同意执行下一阶段") != 1 {
+		t.Fatalf("step request duplicated resumed user input: %#v", llm.requests[0])
+	}
+}
+
+func countText(messages []llmcore.Message, text string) int {
+	count := 0
+	for _, message := range messages {
+		count += strings.Count(message.ContentText, text)
+	}
+	return count
 }

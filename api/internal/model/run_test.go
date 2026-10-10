@@ -57,8 +57,8 @@ func TestRunExecutionSnapshotValidateWaitingInput(t *testing.T) {
 		PlanRevision:     2,
 		CurrentStepID:    "step-2",
 		Steps: []RunStepSnapshot{
-			{ID: "step-1", Status: RunStepStatusCompleted, ResultSummary: "researched facts", ArtifactRefs: []string{"file-1"}},
-			{ID: "step-2", Status: RunStepStatusRunning},
+			{ID: "step-1", Description: "research facts", Status: RunStepStatusCompleted, ResultSummary: "researched facts", ArtifactRefs: []string{"file-1"}},
+			{ID: "step-2", Description: "continue current task", Status: RunStepStatusRunning},
 		},
 		WaitingCheckpoint: &WaitingCheckpoint{
 			QuestionMessageID: "message-q",

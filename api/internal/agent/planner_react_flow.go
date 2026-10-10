@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/Huang131/go-manus/api/internal/llm"
+	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/settings"
 	"github.com/bytedance/sonic"
@@ -79,6 +80,31 @@ func (f *PlannerReActFlow) setPlan(plan *model.Plan) {
 	f.mu.Lock()
 	f.plan = plan
 	f.mu.Unlock()
+}
+
+// RestorePlan 恢复等待输入 Run 的计划和上下文，并跳过重新规划阶段。
+// 消息来自持久化 Run/Message 聚合，Flow 只负责装入运行期 memory。
+func (f *PlannerReActFlow) RestorePlan(plan *model.Plan, messages []llmcore.Message) error {
+	if plan == nil || len(plan.Steps) == 0 {
+		return fmt.Errorf("resume plan is empty")
+	}
+	if plan.GetNextStep() == nil {
+		return fmt.Errorf("resume plan has no pending step")
+	}
+	if err := f.planner.memory.MergeMessages(messages); err != nil {
+		return fmt.Errorf("restore planner memory: %w", err)
+	}
+	// 当前用户回答会作为本轮 TaskInput 进入 ReAct；只恢复此前历史，避免重复注入。
+	reactHistory := messages
+	if len(messages) > 0 && messages[len(messages)-1].Role == model.RoleUser {
+		reactHistory = messages[:len(messages)-1]
+	}
+	if err := f.react.memory.MergeMessages(reactHistory); err != nil {
+		return fmt.Errorf("restore react memory: %w", err)
+	}
+	f.setPlan(plan)
+	f.setStatus(FlowStatusWaiting)
+	return nil
 }
 
 func (f *PlannerReActFlow) planSnapshot() *model.Plan {

@@ -154,8 +154,8 @@ func TestRunRepo_WaitAndResume_UsesSnapshotRevisionAndInputIdempotency(t *testin
 		PlanRevision:     1,
 		CurrentStepID:    "step-2",
 		Steps: []model.RunStepSnapshot{
-			{ID: "step-1", Status: model.RunStepStatusCompleted, ResultSummary: "已读取报告"},
-			{ID: "step-2", Status: model.RunStepStatusRunning},
+			{ID: "step-1", Description: "读取报告", Status: model.RunStepStatusCompleted, ResultSummary: "已读取报告"},
+			{ID: "step-2", Description: "根据确认继续执行", Status: model.RunStepStatusRunning},
 		},
 		WaitingCheckpoint: &model.WaitingCheckpoint{
 			QuestionMessageID: question.ID,
@@ -232,7 +232,7 @@ func TestRunRepo_EnterWaitingInput_RollsBackWhenQuestionBelongsToAnotherSession(
 		PlanRevision:     1,
 		CurrentStepID:    "step-1",
 		Steps: []model.RunStepSnapshot{
-			{ID: "step-1", Status: model.RunStepStatusRunning},
+			{ID: "step-1", Description: "执行并请求用户确认", Status: model.RunStepStatusRunning},
 		},
 		WaitingCheckpoint: &model.WaitingCheckpoint{
 			QuestionMessageID: question.ID,

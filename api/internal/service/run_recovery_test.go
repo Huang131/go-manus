@@ -14,8 +14,8 @@ func TestBuildResumeMessagesRebuildsStableConversation(t *testing.T) {
 		PlanRevision:     1,
 		CurrentStepID:    "step-2",
 		Steps: []model.RunStepSnapshot{
-			{ID: "step-1", Status: model.RunStepStatusCompleted, ResultSummary: "已找到三家供应商", ArtifactRefs: []string{"file-1"}},
-			{ID: "step-2", Status: model.RunStepStatusRunning},
+			{ID: "step-1", Description: "收集供应商信息", Status: model.RunStepStatusCompleted, ResultSummary: "已找到三家供应商", ArtifactRefs: []string{"file-1"}},
+			{ID: "step-2", Description: "比较供应商并等待确认", Status: model.RunStepStatusRunning},
 		},
 		WaitingCheckpoint: &model.WaitingCheckpoint{
 			QuestionMessageID: "question-1",
@@ -62,7 +62,7 @@ func TestBuildResumeMessagesRejectsBrokenWaitingPair(t *testing.T) {
 		SnapshotRevision: 1,
 		PlanID:           "plan-1",
 		CurrentStepID:    "step-1",
-		Steps:            []model.RunStepSnapshot{{ID: "step-1", Status: model.RunStepStatusRunning}},
+		Steps:            []model.RunStepSnapshot{{ID: "step-1", Description: "分析任务并请求确认", Status: model.RunStepStatusRunning}},
 		WaitingCheckpoint: &model.WaitingCheckpoint{
 			QuestionMessageID: "question-1",
 			StepID:            "step-1",

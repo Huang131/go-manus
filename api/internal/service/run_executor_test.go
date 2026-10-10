@@ -170,7 +170,7 @@ func TestRunExecutorWaitingPersistsCheckpointAfterEngineExit(t *testing.T) {
 	question := &model.RunMessage{ID: "question-1", RunID: "run-1", SessionID: "session-1", Role: model.RoleAssistant, Content: "confirm?"}
 	engine := &executorEngineStub{result: RunExecutionResult{
 		Kind:     RunExecutionWaitingInput,
-		Snapshot: model.RunExecutionSnapshot{SnapshotRevision: 1, PlanID: "plan-1", CurrentStepID: "step-1", Steps: []model.RunStepSnapshot{{ID: "step-1", Status: model.RunStepStatusRunning}}, WaitingCheckpoint: &model.WaitingCheckpoint{QuestionMessageID: question.ID, StepID: "step-1", ResumeMode: model.ResumeModeContinueStep}},
+		Snapshot: model.RunExecutionSnapshot{SnapshotRevision: 1, PlanID: "plan-1", CurrentStepID: "step-1", Steps: []model.RunStepSnapshot{{ID: "step-1", Description: "执行并请求用户确认", Status: model.RunStepStatusRunning}}, WaitingCheckpoint: &model.WaitingCheckpoint{QuestionMessageID: question.ID, StepID: "step-1", ResumeMode: model.ResumeModeContinueStep}},
 		Question: question,
 	}}
 	executor := NewRunExecutor(store, &executorToolProviderStub{set: toolSet}, engine)

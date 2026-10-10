@@ -127,7 +127,7 @@ func waitingRunFixture() (*fakeRunStore, *model.RunMessage, *model.RunMessage) {
 		SnapshotRevision: 1, WaitingMessageID: "question-1", CreatedAt: now, UpdatedAt: now,
 		ExecutionSnapshot: model.RunExecutionSnapshot{
 			SnapshotRevision: 1, PlanID: "plan-1", CurrentStepID: "step-1",
-			Steps:             []model.RunStepSnapshot{{ID: "step-1", Status: model.RunStepStatusRunning}},
+			Steps:             []model.RunStepSnapshot{{ID: "step-1", Description: "分析任务并请求确认", Status: model.RunStepStatusRunning}},
 			WaitingCheckpoint: &model.WaitingCheckpoint{QuestionMessageID: "question-1", StepID: "step-1", ResumeMode: model.ResumeModeContinueStep},
 		},
 	}
@@ -181,7 +181,7 @@ func TestRunServiceStartAndEnterWaitingInputUseCurrentRevision(t *testing.T) {
 	question := &model.RunMessage{ID: "question-1", SessionID: store.run.SessionID, RunID: store.run.ID, Role: model.RoleAssistant, Content: "请确认"}
 	snapshot := model.RunExecutionSnapshot{
 		SnapshotRevision: 1, PlanID: "plan-1", CurrentStepID: "step-1",
-		Steps:             []model.RunStepSnapshot{{ID: "step-1", Status: model.RunStepStatusRunning}},
+		Steps:             []model.RunStepSnapshot{{ID: "step-1", Description: "分析任务并请求确认", Status: model.RunStepStatusRunning}},
 		WaitingCheckpoint: &model.WaitingCheckpoint{QuestionMessageID: question.ID, StepID: "step-1", ResumeMode: model.ResumeModeContinueStep},
 	}
 	waiting, err := NewRunService(store).EnterWaitingInput(context.Background(), store.run.ID, snapshot, question)

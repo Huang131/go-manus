@@ -23,6 +23,15 @@ func (a *PlannerEngineAdapter) Execute(ctx context.Context, input service.RunExe
 		return service.RunExecutionResult{Kind: service.RunExecutionFailed, Error: fmt.Errorf("planner engine LLM is nil")}, nil
 	}
 	flow := NewPlannerReActFlow(input.SessionID, input.Settings, a.LLM, input.Tools)
+	if input.Snapshot.WaitingCheckpoint != nil {
+		plan, err := planFromSnapshot(input.Snapshot)
+		if err != nil {
+			return service.RunExecutionResult{Kind: service.RunExecutionFailed, Error: err}, nil
+		}
+		if err := flow.RestorePlan(plan, input.Messages); err != nil {
+			return service.RunExecutionResult{Kind: service.RunExecutionFailed, Error: err}, nil
+		}
+	}
 	message := lastUserMessage(input.Messages)
 	if message == nil {
 		return service.RunExecutionResult{Kind: service.RunExecutionFailed, Error: fmt.Errorf("run has no user message")}, nil
@@ -73,6 +82,10 @@ func snapshotFromPlan(plan *model.Plan, previous model.RunExecutionSnapshot) mod
 	if snapshot.PlanID == "" {
 		snapshot.PlanID = uuid.NewString()
 	}
+	snapshot.PlanTitle = plan.Title
+	snapshot.PlanGoal = plan.Goal
+	snapshot.PlanLanguage = plan.Language
+	snapshot.PlanMessage = plan.Message
 	snapshot.Steps = make([]model.RunStepSnapshot, 0, len(plan.Steps))
 	for _, step := range plan.Steps {
 		status := model.RunStepStatusPending
@@ -84,13 +97,44 @@ func snapshotFromPlan(plan *model.Plan, previous model.RunExecutionSnapshot) mod
 		case model.ExecutionStatusFailed:
 			status = model.RunStepStatusFailed
 		}
-		snapshot.Steps = append(snapshot.Steps, model.RunStepSnapshot{ID: step.ID, Status: status, ResultSummary: step.Result, ArtifactRefs: append([]string(nil), step.Attachments...)})
+		snapshot.Steps = append(snapshot.Steps, model.RunStepSnapshot{ID: step.ID, Description: step.Description, Status: status, ResultSummary: step.Result, ArtifactRefs: append([]string(nil), step.Attachments...)})
 		if !step.Done() {
 			snapshot.CurrentStepID = step.ID
 		}
 	}
 	snapshot.SnapshotRevision = previous.SnapshotRevision + 1
 	return snapshot
+}
+
+func planFromSnapshot(snapshot model.RunExecutionSnapshot) (*model.Plan, error) {
+	if err := snapshot.ValidateWaitingInput(); err != nil {
+		return nil, fmt.Errorf("restore execution snapshot: %w", err)
+	}
+	plan := &model.Plan{
+		ID: snapshot.PlanID, Title: snapshot.PlanTitle, Goal: snapshot.PlanGoal,
+		Language: snapshot.PlanLanguage, Message: snapshot.PlanMessage,
+		Status: model.ExecutionStatusRunning, Steps: make([]model.PlanStep, 0, len(snapshot.Steps)),
+	}
+	if plan.Language == "" {
+		plan.Language = "zh"
+	}
+	for _, step := range snapshot.Steps {
+		status := model.ExecutionStatusPending
+		switch step.Status {
+		case model.RunStepStatusRunning:
+			status = model.ExecutionStatusRunning
+		case model.RunStepStatusCompleted:
+			status = model.ExecutionStatusCompleted
+		case model.RunStepStatusFailed:
+			status = model.ExecutionStatusFailed
+		}
+		plan.Steps = append(plan.Steps, model.PlanStep{
+			ID: step.ID, Description: step.Description, Status: status,
+			Success: status == model.ExecutionStatusCompleted,
+			Result:  step.ResultSummary, Attachments: append([]string(nil), step.ArtifactRefs...),
+		})
+	}
+	return plan, nil
 }
 
 func waitingResult(plan *model.Plan, input service.RunExecutionInput) (service.RunExecutionResult, error) {
