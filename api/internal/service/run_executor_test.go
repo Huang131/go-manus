@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Huang131/go-manus/api/internal/agent/attachment"
 	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -122,6 +123,26 @@ func (e *executorEngineStub) Execute(_ context.Context, input RunExecutionInput)
 		panic("engine panic")
 	}
 	return e.result, e.err
+}
+
+func TestRunExecutorPassesAttachmentContextsToEngine(t *testing.T) {
+	engine := &executorEngineStub{result: RunExecutionResult{Kind: RunExecutionSucceeded}}
+	executor := NewRunExecutor(
+		&executorStoreStub{},
+		&executorToolProviderStub{set: &executorToolSetStub{released: make(chan struct{})}},
+		engine,
+	)
+	contexts := []attachment.FileContext{{Filename: "report.txt", Content: "正文"}}
+	handle, err := executor.Start(context.Background(), "run-1", nil, contexts)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := handle.Wait(context.Background()); err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	if len(engine.seen.AttachmentContexts) != 1 || engine.seen.AttachmentContexts[0].Content != "正文" {
+		t.Fatalf("Engine attachment contexts = %+v, want loaded attachment body", engine.seen.AttachmentContexts)
+	}
 }
 
 func newExecutorTestRun() *RunExecutor {

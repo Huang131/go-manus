@@ -156,7 +156,7 @@ func NewRunExecutorWithEventPublisher(store RunExecutionStore, provider RunToolP
 }
 
 // Start 原子登记控制句柄后启动 Engine；同一进程内同一 Run 不重复执行。
-func (e *RunExecutor) Start(ctx context.Context, runID string, messages []llmcore.Message) (*RunExecutionHandle, error) {
+func (e *RunExecutor) Start(ctx context.Context, runID string, messages []llmcore.Message, attachmentContexts ...[]attachment.FileContext) (*RunExecutionHandle, error) {
 	if e.store == nil || e.provider == nil || e.engine == nil {
 		return nil, errors.New("run executor dependencies are incomplete")
 	}
@@ -196,15 +196,19 @@ func (e *RunExecutor) Start(ctx context.Context, runID string, messages []llmcor
 	e.control[runID] = control
 	e.mu.Unlock()
 
-	go e.execute(ctx, cancel, run, messages, toolSet, control)
+	var contexts []attachment.FileContext
+	if len(attachmentContexts) > 0 {
+		contexts = append([]attachment.FileContext(nil), attachmentContexts[0]...)
+	}
+	go e.execute(ctx, cancel, run, messages, contexts, toolSet, control)
 	return handle, nil
 }
 
-func (e *RunExecutor) execute(ctx context.Context, cancel context.CancelFunc, run *model.Run, messages []llmcore.Message, toolSet RunToolSet, control *runControl) {
+func (e *RunExecutor) execute(ctx context.Context, cancel context.CancelFunc, run *model.Run, messages []llmcore.Message, attachmentContexts []attachment.FileContext, toolSet RunToolSet, control *runControl) {
 	defer cancel()
 	result, err := e.executeEngine(ctx, RunExecutionInput{
 		RunID: run.ID, SessionID: run.SessionID, Settings: run.SettingsSnapshot, Snapshot: run.ExecutionSnapshot,
-		Messages: append([]llmcore.Message(nil), messages...), Tools: toolSet.Tools(), EventPublisher: e.publisher,
+		Messages: append([]llmcore.Message(nil), messages...), Tools: toolSet.Tools(), AttachmentContexts: attachmentContexts, EventPublisher: e.publisher,
 	})
 	// Engine 已经退出后才释放外部工具连接，避免 in-flight 调用使用已关闭资源。
 	toolSet.Release()
