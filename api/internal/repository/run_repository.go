@@ -27,7 +27,17 @@ type RunRepository interface {
 	TransitionStatus(ctx context.Context, id string, from []model.RunStatus, to model.RunStatus) (bool, error)
 	EnterWaitingInput(ctx context.Context, runID string, expectedRevision int, snapshot model.RunExecutionSnapshot, question *model.RunMessage) (bool, error)
 	ResumeWaitingInput(ctx context.Context, runID string, expectedRevision int, answer *model.RunMessage) (bool, error)
+	FinishTerminal(ctx context.Context, runID string, terminal TerminalTransition, final *model.RunMessage) (bool, error)
 	WithTx(ctx context.Context, fn func(repo RunRepository) error) error
+}
+
+// TerminalTransition 描述一次终态收敛的完整写入内容。
+// 状态、错误信息与最终消息必须在一个事务内提交，避免出现终态无回复或回复无终态。
+type TerminalTransition struct {
+	Status       model.RunStatus
+	Snapshot     model.RunExecutionSnapshot
+	ErrorCode    string
+	ErrorMessage string
 }
 
 // PostgresRunRepository 是 RunRepository 的 PostgreSQL 实现。
@@ -396,6 +406,63 @@ func (r *PostgresRunRepository) ResumeWaitingInput(ctx context.Context, runID st
 		}
 		if err := bound.insertMessage(ctx, answer); err != nil {
 			return fmt.Errorf("insert resumed input: %w", err)
+		}
+		changed = true
+		return nil
+	})
+	return changed, err
+}
+
+// FinishTerminal 原子写入 Run 终态和可选的最终助手消息。
+// 条件更新阻止取消后的迟到成功/失败覆盖；消息插入失败会回滚状态迁移。
+func (r *PostgresRunRepository) FinishTerminal(ctx context.Context, runID string, terminal TerminalTransition, final *model.RunMessage) (bool, error) {
+	if !terminal.Status.IsTerminal() {
+		return false, fmt.Errorf("terminal status required, got %q", terminal.Status)
+	}
+	if final != nil && (final.RunID != runID || final.Role != model.RoleAssistant) {
+		return false, fmt.Errorf("final message must be an assistant message for this run")
+	}
+
+	changed := false
+	err := r.WithTx(ctx, func(repo RunRepository) error {
+		bound := repo.(*PostgresRunRepository)
+		var from []string
+		switch terminal.Status {
+		case model.RunStatusSucceeded, model.RunStatusFailed:
+			from = []string{"running"}
+		case model.RunStatusCancelled:
+			from = []string{"cancelling"}
+		case model.RunStatusInterrupted:
+			from = []string{"pending", "running"}
+		default:
+			return fmt.Errorf("unsupported terminal status %q", terminal.Status)
+		}
+		snapshotJSON, err := sonic.Marshal(terminal.Snapshot.Clone())
+		if err != nil {
+			return fmt.Errorf("encode terminal execution snapshot: %w", err)
+		}
+		var sessionID string
+		err = bound.queryer().QueryRow(ctx, `
+			UPDATE runs
+			SET status = $2, execution_snapshot = $3, snapshot_revision = $4,
+				error_code = NULLIF($5, ''), error_message = NULLIF($6, ''),
+				finished_at = CURRENT_TIMESTAMP(0), updated_at = CURRENT_TIMESTAMP(0)
+			WHERE id = $1 AND status = ANY($7::varchar[])
+			RETURNING session_id
+		`, runID, terminal.Status, snapshotJSON, terminal.Snapshot.SnapshotRevision, terminal.ErrorCode, terminal.ErrorMessage, from).Scan(&sessionID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if final != nil {
+			if final.SessionID != sessionID {
+				return fmt.Errorf("final message session does not match run session")
+			}
+			if err := bound.insertMessage(ctx, final); err != nil {
+				return fmt.Errorf("insert final message: %w", err)
+			}
 		}
 		changed = true
 		return nil

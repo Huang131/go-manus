@@ -24,6 +24,7 @@ type runStore interface {
 	TransitionStatus(ctx context.Context, id string, from []model.RunStatus, to model.RunStatus) (bool, error)
 	EnterWaitingInput(ctx context.Context, runID string, expectedRevision int, snapshot model.RunExecutionSnapshot, question *model.RunMessage) (bool, error)
 	ResumeWaitingInput(ctx context.Context, runID string, expectedRevision int, answer *model.RunMessage) (bool, error)
+	FinishTerminal(ctx context.Context, runID string, terminal repository.TerminalTransition, final *model.RunMessage) (bool, error)
 }
 
 // RunService 是 Run 聚合的唯一业务入口。
@@ -37,6 +38,8 @@ type RunService interface {
 	SubmitInput(ctx context.Context, runID string, input SubmitInputRequest) (*RunResume, error)
 	RequestCancel(ctx context.Context, id string) (*model.Run, error)
 	ReconcileCancelling(ctx context.Context, id string) (*model.Run, error)
+	SaveWaitingInput(ctx context.Context, runID string, snapshot model.RunExecutionSnapshot, question *model.RunMessage) error
+	Finish(ctx context.Context, runID string, result RunExecutionResult) error
 }
 
 // CreateRunInput 是创建一次顶层用户请求所需的冻结输入。
@@ -195,6 +198,87 @@ func (s *defaultRunService) EnterWaitingInput(ctx context.Context, runID string,
 		return nil, s.statusConflict(ctx, runID, "waiting input checkpoint is stale")
 	}
 	return s.Get(ctx, runID)
+}
+
+// SaveWaitingInput 适配 RunExecutor，并保留领域服务对等待快照的完整校验。
+func (s *defaultRunService) SaveWaitingInput(ctx context.Context, runID string, snapshot model.RunExecutionSnapshot, question *model.RunMessage) error {
+	_, err := s.EnterWaitingInput(ctx, runID, snapshot, question)
+	return err
+}
+
+// Finish 原子持久化终态、执行快照和可选的最终助手消息。
+func (s *defaultRunService) Finish(ctx context.Context, runID string, result RunExecutionResult) error {
+	run, err := s.Get(ctx, runID)
+	if err != nil {
+		return err
+	}
+	var terminal repository.TerminalTransition
+	switch result.Kind {
+	case RunExecutionSucceeded:
+		terminal = repository.TerminalTransition{Status: model.RunStatusSucceeded, Snapshot: result.Snapshot}
+	case RunExecutionFailed:
+		terminal = repository.TerminalTransition{Status: model.RunStatusFailed, Snapshot: result.Snapshot, ErrorCode: "execution_failed", ErrorMessage: errorMessage(result.Error)}
+	case RunExecutionCancelled:
+		terminal = repository.TerminalTransition{Status: model.RunStatusCancelled, Snapshot: result.Snapshot, ErrorCode: "cancelled", ErrorMessage: errorMessage(result.Error)}
+	default:
+		return apperr.BadRequest(fmt.Sprintf("unsupported terminal execution result %q", result.Kind))
+	}
+	if !run.Status.CanTransitionTo(terminal.Status) {
+		return runStatusConflict(run, "run cannot finish")
+	}
+
+	final := result.Message
+	if final == nil && result.Text != "" {
+		final = &model.RunMessage{
+			ID: uuid.NewString(), SessionID: run.SessionID, RunID: run.ID,
+			Role: model.RoleAssistant, Content: result.Text, CreatedAt: time.Now().UTC(),
+		}
+	}
+	if final != nil {
+		final = cloneRunMessage(final)
+		if final.ID == "" {
+			final.ID = uuid.NewString()
+		}
+		if final.SessionID == "" {
+			final.SessionID = run.SessionID
+		}
+		if final.RunID == "" {
+			final.RunID = run.ID
+		}
+		if final.Role == "" {
+			final.Role = model.RoleAssistant
+		}
+		if final.CreatedAt.IsZero() {
+			final.CreatedAt = time.Now().UTC()
+		}
+		if final.SessionID != run.SessionID || final.RunID != run.ID || final.Role != model.RoleAssistant {
+			return apperr.BadRequest("final message must be an assistant message for this run")
+		}
+	}
+	changed, err := s.store.FinishTerminal(ctx, runID, terminal, final)
+	if err != nil {
+		return normalizeRunError(err)
+	}
+	if !changed {
+		return s.statusConflict(ctx, runID, "run terminal transition is stale")
+	}
+	return nil
+}
+
+func cloneRunMessage(message *model.RunMessage) *model.RunMessage {
+	if message == nil {
+		return nil
+	}
+	cloned := *message
+	cloned.Attachments = append([]string(nil), message.Attachments...)
+	return &cloned
+}
+
+func errorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // SubmitInput 幂等提交回答，并返回重建后的稳定上下文。

@@ -256,3 +256,74 @@ func TestRunRepo_EnterWaitingInput_RollsBackWhenQuestionBelongsToAnotherSession(
 	require.NoError(t, err)
 	assert.Len(t, messages, 1, "failed wait transition must not persist the question message")
 }
+
+func TestRunRepo_FinishTerminal_CommitsStatusAndFinalMessageTogether(t *testing.T) {
+	ctx := context.Background()
+	repo := testRunRepository(t)
+	sessionID := createSessionForTest(t)
+	t.Cleanup(func() { CleanupSession(t, sessionID) })
+
+	run := newRunForTest(sessionID, "finish-"+uuid.NewString())
+	initial := initialRunMessage(run)
+	_, inserted, err := repo.CreateWithInitialMessage(ctx, run, initial)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	changed, err := repo.TransitionStatus(ctx, run.ID, []model.RunStatus{model.RunStatusPending}, model.RunStatusRunning)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	final := &model.RunMessage{
+		ID: uuid.NewString(), SessionID: sessionID, RunID: run.ID,
+		Role: model.RoleAssistant, Content: "执行完成", CreatedAt: time.Now().UTC(),
+	}
+	changed, err = repo.FinishTerminal(ctx, run.ID, repository.TerminalTransition{Status: model.RunStatusSucceeded}, final)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	got, err := repo.GetByID(ctx, run.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, model.RunStatusSucceeded, got.Status)
+	assert.NotNil(t, got.FinishedAt)
+
+	messages, err := repo.ListMessages(ctx, run.ID)
+	require.NoError(t, err)
+	require.Len(t, messages, 2)
+	assert.Equal(t, final.ID, messages[1].ID)
+	assert.Equal(t, final.Content, messages[1].Content)
+}
+
+func TestRunRepo_FinishTerminal_RollsBackStatusWhenFinalMessageFails(t *testing.T) {
+	ctx := context.Background()
+	repo := testRunRepository(t)
+	sessionID := createSessionForTest(t)
+	t.Cleanup(func() { CleanupSession(t, sessionID) })
+
+	run := newRunForTest(sessionID, "finish-rollback-"+uuid.NewString())
+	initial := initialRunMessage(run)
+	_, inserted, err := repo.CreateWithInitialMessage(ctx, run, initial)
+	require.NoError(t, err)
+	require.True(t, inserted)
+	changed, err := repo.TransitionStatus(ctx, run.ID, []model.RunStatus{model.RunStatusPending}, model.RunStatusRunning)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	// 复用初始消息 ID，让插入终态消息触发主键冲突；状态更新必须随事务回滚。
+	final := &model.RunMessage{
+		ID: initial.ID, SessionID: sessionID, RunID: run.ID,
+		Role: model.RoleAssistant, Content: "这条消息不能落库", CreatedAt: time.Now().UTC(),
+	}
+	changed, err = repo.FinishTerminal(ctx, run.ID, repository.TerminalTransition{Status: model.RunStatusSucceeded}, final)
+	require.Error(t, err)
+	assert.False(t, changed)
+
+	got, err := repo.GetByID(ctx, run.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, model.RunStatusRunning, got.Status)
+	assert.Nil(t, got.FinishedAt)
+
+	messages, err := repo.ListMessages(ctx, run.ID)
+	require.NoError(t, err)
+	assert.Len(t, messages, 1)
+}

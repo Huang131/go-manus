@@ -17,6 +17,7 @@ type fakeRunStore struct {
 	run             *model.Run
 	messages        []*model.RunMessage
 	transitionCalls int
+	terminal        repository.TerminalTransition
 }
 
 func (f *fakeRunStore) CreateWithInitialMessage(_ context.Context, run *model.Run, initial *model.RunMessage) (*model.Run, bool, error) {
@@ -95,6 +96,22 @@ func (f *fakeRunStore) ResumeWaitingInput(_ context.Context, runID string, expec
 	f.run.Status = model.RunStatusRunning
 	f.run.WaitingMessageID = ""
 	f.messages = append(f.messages, answer)
+	return true, nil
+}
+
+func (f *fakeRunStore) FinishTerminal(_ context.Context, runID string, terminal repository.TerminalTransition, final *model.RunMessage) (bool, error) {
+	if f.run == nil || f.run.ID != runID || !f.run.Status.CanTransitionTo(terminal.Status) {
+		return false, nil
+	}
+	f.run.Status = terminal.Status
+	f.run.ExecutionSnapshot = terminal.Snapshot.Clone()
+	f.run.SnapshotRevision = terminal.Snapshot.SnapshotRevision
+	f.run.ErrorCode = terminal.ErrorCode
+	f.run.ErrorMessage = terminal.ErrorMessage
+	f.terminal = terminal
+	if final != nil {
+		f.messages = append(f.messages, final)
+	}
 	return true, nil
 }
 
@@ -260,6 +277,46 @@ func TestRunServiceCancelAndReconcileAreIdempotent(t *testing.T) {
 	reconciled, err = svc.ReconcileCancelling(context.Background(), store.run.ID)
 	if err != nil || reconciled.Status != model.RunStatusCancelled {
 		t.Fatalf("repeated ReconcileCancelling() = %#v, %v", reconciled, err)
+	}
+}
+
+func TestRunServiceFinishPersistsTerminalMessageWithRunState(t *testing.T) {
+	store, _, _ := waitingRunFixture()
+	store.run.Status = model.RunStatusRunning
+	service := NewRunService(store)
+	snapshot := model.RunExecutionSnapshot{SnapshotRevision: 2, PlanID: "plan-1", CurrentStepID: "step-2"}
+
+	err := service.Finish(context.Background(), store.run.ID, RunExecutionResult{
+		Kind: RunExecutionSucceeded, Snapshot: snapshot, Text: "分析完成",
+	})
+	if err != nil {
+		t.Fatalf("Finish() error = %v", err)
+	}
+	if store.run.Status != model.RunStatusSucceeded || store.run.SnapshotRevision != 2 {
+		t.Fatalf("terminal run = status %s snapshot revision %d", store.run.Status, store.run.SnapshotRevision)
+	}
+	if store.terminal.Snapshot.SnapshotRevision != 2 {
+		t.Fatalf("terminal snapshot = %+v", store.terminal.Snapshot)
+	}
+	if len(store.messages) != 3 || store.messages[2].Role != model.RoleAssistant || store.messages[2].Content != "分析完成" {
+		t.Fatalf("terminal messages = %+v", store.messages)
+	}
+}
+
+func TestRunServiceFinishRejectsLateSuccessAfterCancellation(t *testing.T) {
+	store, _, _ := waitingRunFixture()
+	store.run.Status = model.RunStatusCancelling
+	service := NewRunService(store)
+
+	err := service.Finish(context.Background(), store.run.ID, RunExecutionResult{
+		Kind: RunExecutionSucceeded, Text: "迟到结果",
+	})
+	appErr, ok := err.(*apperr.Error)
+	if !ok || appErr.Kind != apperr.KindConflict {
+		t.Fatalf("Finish() error = %T %v, want conflict", err, err)
+	}
+	if store.run.Status != model.RunStatusCancelling || len(store.messages) != 2 {
+		t.Fatalf("late result changed run: status=%s messages=%d", store.run.Status, len(store.messages))
 	}
 }
 
