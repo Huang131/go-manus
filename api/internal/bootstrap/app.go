@@ -10,6 +10,7 @@ import (
 
 	"github.com/Huang131/go-manus/api/config"
 	"github.com/Huang131/go-manus/api/internal/agent"
+	"github.com/Huang131/go-manus/api/internal/agent/attachment"
 	"github.com/Huang131/go-manus/api/internal/handler"
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
 	"github.com/Huang131/go-manus/api/internal/llm"
@@ -173,6 +174,7 @@ type repositories struct {
 	llmModel  repository.LLMModelRepository  // LLM 模型仓库
 	session   repository.SessionRepository   // 会话仓库
 	file      repository.FileRepository      // 文件仓库
+	run       repository.RunRepository       // Run 聚合仓库
 }
 
 // newRepositories 根据数据库连接创建所有仓库实例。
@@ -187,6 +189,7 @@ func newRepositories(db *infrastructure.Postgres) repositories {
 		llmModel:  repository.NewLLMModelRepository(db),
 		session:   repository.NewSessionRepository(db),
 		file:      repository.NewFileRepository(db),
+		run:       repository.NewRunRepository(db),
 	}
 }
 
@@ -255,13 +258,16 @@ type App struct {
 
 	// ===== 服务层 =====
 	// 业务逻辑层，组合多个基础组件实现业务功能
-	Sandbox        *sandbox.SandboxClient   // 代码沙箱执行器
-	AgentService   *agent.AgentService      // AI Agent 核心服务
-	SessionService service.SessionService   // 会话管理服务
-	FileService    service.FileService      // 文件管理服务
-	StatusService  service.StatusService    // 状态查询服务
-	AppConfigSvc   service.AppConfigService // 应用配置服务
-	LLMModelSvc    service.LLMModelService  // LLM 模型管理服务
+	Sandbox        *sandbox.SandboxClient        // 代码沙箱执行器
+	AgentService   *agent.AgentService           // AI Agent 核心服务
+	SessionService service.SessionService        // 会话管理服务
+	FileService    service.FileService           // 文件管理服务
+	StatusService  service.StatusService         // 状态查询服务
+	AppConfigSvc   service.AppConfigService      // 应用配置服务
+	LLMModelSvc    service.LLMModelService       // LLM 模型管理服务
+	RunService     service.RunService            // Run 持久化用例服务
+	RunExecutor    *service.RunExecutor          // Run Engine 生命周期执行器
+	RunApplication service.RunApplicationService // Run 应用层编排入口
 
 	// ===== 私有成员 =====
 	repos     repositories      // 数据仓库层（不暴露给外部）
@@ -438,6 +444,7 @@ func (a *App) initServices(cfg *config.Config) {
 	a.StatusService = service.NewStatusService(a.Postgres, a.Redis, a.OSS)
 	a.AppConfigSvc = service.NewAppConfigService(a.repos.appConfig)
 	a.LLMModelSvc = service.NewLLMModelService(a.repos.llmModel)
+	a.RunService = service.NewRunService(a.repos.run)
 }
 
 // initLLM 初始化 LLM 路由器。
@@ -777,6 +784,33 @@ func (a *App) initAgent(opts Options, clients *externalClients) error {
 	return nil
 }
 
+// initRunExecution 装配 Run 的生产协作者，但暂不替换旧 SessionHandler 路由。
+// 生产切换单独进行，避免新旧执行链在同一请求中双写。
+func (a *App) initRunExecution(clients *externalClients) error {
+	if a.RunService == nil || a.AgentService == nil || clients == nil || clients.llm == nil {
+		return nil
+	}
+	var loader *attachment.Loader
+	if a.OSS != nil {
+		loader = attachment.NewLoader(a.OSS)
+	}
+	var publisher service.RunEventPublisher
+	if clients.mq != nil {
+		publisher = service.NewRedisRunEventPublisher(clients.mq)
+	}
+	a.RunExecutor = service.NewRunExecutorWithEventPublisher(
+		a.RunService,
+		service.AgentToolProviderAdapter{Provider: a.AgentService},
+		&agent.PlannerEngineAdapter{LLM: clients.llm},
+		publisher,
+	)
+	a.RunApplication = service.NewRunApplicationService(
+		a.RunService, a.RunExecutor, a.repos.session, a.repos.file,
+		a.AppConfigSvc, loader, agent.DefaultPromptCatalog().Hash(),
+	)
+	return nil
+}
+
 // initSchedulers 初始化定时任务调度器。
 //
 // 当前只包含文件清理任务：
@@ -996,6 +1030,10 @@ func BuildWithFactories(cfg *config.Config, opts Options, factories Factories) (
 
 	// 初始化 Agent 服务
 	if err := app.initAgent(opts, clients); err != nil {
+		app.Close()
+		return nil, err
+	}
+	if err := app.initRunExecution(clients); err != nil {
 		app.Close()
 		return nil, err
 	}

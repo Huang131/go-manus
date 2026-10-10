@@ -10,7 +10,7 @@
 | 1. Settings 与 Prompt | complete | `4df77fe`、`e9dcba2`、`9548b84`、`dd5c2cf`、`b0f5328` | Settings、严格校验、migration、UI 与 PromptCatalog/hash 已完成 |
 | 2. Engine 与 Context | complete | `4650cc4`、`aba7f43`、`8fd0fa6` | Outcome、ContextPolicy 与 MCP 动态调用契约已完成 |
 | 3. Run 领域与存储 | complete | `a8de838`、`f0ada6a`、`6055590`、`cb50565` | 3A 领域、3B Repository/migration、3C 纯 RunService 已完成；尚未接入生产执行路径 |
-| 4. 执行生产切换 | in_progress | `cb50565`、`d7bb0cb`、`20b622f` | 4A 生命周期与 waiting_input 恢复前置已完成；尚未接入 Bootstrap、Handler、Chat 或 SSE |
+| 4. 执行生产切换 | in_progress | `e281520`、本轮 Bootstrap 装配 | 4A 生命周期、waiting_input 恢复和 4B 应用编排边界已完成；Run 依赖已装配但尚未接入 Handler、Chat 或 SSE |
 | 5. API/UI/SSE | pending | - | 唯一公开契约切换点；完成后删除旧路由 |
 | 6. 遗留删除 | pending | - | 依赖阶段 4/5 的引用扫描和回归 |
 
@@ -23,7 +23,7 @@ SessionHandler -> AgentService -> RedisStreamTask -> AgentTaskRunner
               -> PlannerReActFlow -> LLM + ToolSet
 ```
 
-当前不存在 Run 生产写入。`ToolRegistry`、MCP/A2A ToolSet 引用生命周期已完成，不属于本方案待办。
+当前生产请求仍是旧 Task 链；Run 应用服务、RunExecutor、RunRepository、附件 Loader 和 Redis 实时事件发布器已在 Bootstrap 装配，但尚未被 SessionHandler 调用，因此当前不存在 Run 生产写入。`ToolRegistry`、MCP/A2A ToolSet 引用生命周期已完成，不属于本方案待办。
 
 ## 最近验证基线
 
@@ -71,7 +71,8 @@ go test -tags=integration ./tests -run '^TestRunRepo_FinishTerminal' -count=1
 | 3C 纯 RunService | complete | `cb50565 refactor(api): add pure run service` |
 | 4A RunExecutor 生命周期与观测，未接生产 | complete | `refactor(api): add run executor lifecycle` |
 | 4A waiting_input 恢复前置 | complete | `20b622f feat(run): restore waiting input execution context` |
-| 4B 唯一后端生产切换 | pending | `05-run-execution-cutover.md` |
+| 4B 应用编排边界与依赖装配 | complete | `e281520 feat(run): add application orchestration boundary` 及 Bootstrap 装配改动 |
+| 4B 唯一后端生产切换 | pending | `05-run-execution-cutover.md`；下一步改 SessionHandler Chat/Stop/SSE |
 | 5A Run API/SSE | pending | `06-api-ui-sse-cutover.md` |
 | 5B UI 切换 | pending | `06-api-ui-sse-cutover.md` |
 | 5C 删除旧路由 | pending | `06-api-ui-sse-cutover.md` |

@@ -15,6 +15,8 @@ import (
 	"github.com/Huang131/go-manus/api/config"
 	"github.com/Huang131/go-manus/api/internal/agent"
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
+	"github.com/Huang131/go-manus/api/internal/llm"
+	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/service"
 	"github.com/Huang131/go-manus/api/internal/settings"
@@ -51,6 +53,45 @@ func TestResolveAgentSettingsRejectsInvalidPersistedRecord(t *testing.T) {
 		t.Fatal("resolveAgentSettings() error = nil, want invalid persisted settings error")
 	}
 }
+
+func TestInitRunExecutionRequiresAgentAndLLM(t *testing.T) {
+	app := &App{RunService: service.NewRunService(nil)}
+	if err := app.initRunExecution(&externalClients{}); err != nil {
+		t.Fatalf("initRunExecution() error = %v", err)
+	}
+	if app.RunExecutor != nil || app.RunApplication != nil {
+		t.Fatal("Run execution should remain unavailable without AgentService and LLM")
+	}
+}
+
+func TestInitRunExecutionBuildsRunApplicationBoundary(t *testing.T) {
+	app := &App{
+		RunService:   service.NewRunService(nil),
+		AgentService: agent.NewAgentService(context.Background(), agent.Repositories{}, agent.Capabilities{}, settings.DefaultAgentSettings(), nil, nil),
+		repos:        repositories{},
+		AppConfigSvc: nil,
+	}
+	clients := &externalClients{llm: &runBootstrapLLMStub{}, mq: &mockMessageQueue{}}
+	if err := app.initRunExecution(clients); err != nil {
+		t.Fatalf("initRunExecution() error = %v", err)
+	}
+	if app.RunExecutor == nil || app.RunApplication == nil {
+		t.Fatalf("Run execution was not assembled: executor=%v application=%v", app.RunExecutor, app.RunApplication)
+	}
+	app.AgentService.Shutdown()
+}
+
+type runBootstrapLLMStub struct{}
+
+func (*runBootstrapLLMStub) Invoke(context.Context, *llm.LLMRequest) (*llmcore.LLMResponse, error) {
+	return nil, nil
+}
+
+func (*runBootstrapLLMStub) ModelName() string    { return "test" }
+func (*runBootstrapLLMStub) Temperature() float64 { return 0 }
+func (*runBootstrapLLMStub) MaxTokens() int       { return 0 }
+
+var _ llm.LLM = (*runBootstrapLLMStub)(nil)
 
 func TestAppCloseIsIdempotent(t *testing.T) {
 	var closeCount int

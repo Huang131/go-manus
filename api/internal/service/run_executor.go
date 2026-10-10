@@ -82,6 +82,24 @@ func (a ToolProviderAdapter) Acquire(agentSettings settings.AgentSettings) (RunT
 	return a.Provider.Acquire(agentSettings.MaxSearchResults), nil
 }
 
+// AgentToolProviderAdapter 将 AgentService 暴露的窄工具快照能力适配到 Run 边界。
+type AgentToolProviderAdapter struct {
+	Provider interface {
+		AcquireTools(settings.AgentSettings) *toolspkg.ToolSet
+	}
+}
+
+func (a AgentToolProviderAdapter) Acquire(agentSettings settings.AgentSettings) (RunToolSet, error) {
+	if a.Provider == nil {
+		return nil, errors.New("agent tool provider is nil")
+	}
+	set := a.Provider.AcquireTools(agentSettings)
+	if set == nil {
+		return nil, errors.New("agent tool provider returned nil tool set")
+	}
+	return set, nil
+}
+
 // RunExecutionStore 是 RunExecutor 需要的最小持久化边界。
 type RunExecutionStore interface {
 	Start(ctx context.Context, runID string) (*model.Run, error)

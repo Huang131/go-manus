@@ -259,6 +259,14 @@ func (s *AgentService) ReloadA2AConfig(ctx context.Context, cfg *A2AConfig) erro
 	return s.toolsProvider.ReloadA2AConfig(ctx, cfg)
 }
 
+// AcquireTools 为 Run 执行边界提供当前工具快照，不暴露旧 Task 状态。
+func (s *AgentService) AcquireTools(agentSettings settings.AgentSettings) *toolspkg.ToolSet {
+	if s == nil || s.toolsProvider == nil {
+		return nil
+	}
+	return s.toolsProvider.Acquire(agentSettings.MaxSearchResults)
+}
+
 // getOrCreateTask 获取或创建 RedisStreamTask
 // 对齐 Python: task = await RedisStreamTask.create(task_runner)
 func (s *AgentService) getOrCreateTask(ctx context.Context, session *model.Session) (*RedisStreamTask, error) {
