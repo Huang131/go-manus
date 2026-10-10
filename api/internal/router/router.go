@@ -13,6 +13,7 @@ type Handlers struct {
 	Status    *handler.StatusHandler
 	AppConfig *handler.AppConfigHandler
 	LLMModel  *handler.LLMModelHandler
+	Run       *handler.RunHandler
 }
 
 // SetupRoutes 设置所有路由
@@ -45,6 +46,18 @@ func SetupRoutes(engine *gin.Engine, h *Handlers) {
 			sessions.POST("/:id/shell", h.Session.ReadShell)
 			// VNC WebSocket 代理
 			sessions.GET("/:id/vnc", handler.VNCProxy(h.Session.Service()))
+		}
+
+		if h.Run != nil {
+			// Run 执行模块：Session 只负责归属，Run 负责一次执行生命周期。
+			runs := api.Group("/runs")
+			{
+				runs.POST("/:runId/input", h.Run.SubmitInput)
+				runs.GET("/:runId", h.Run.Get)
+				runs.POST("/:runId/cancel", h.Run.Cancel)
+				runs.GET("/:runId/events", h.Run.Events)
+			}
+			api.POST("/sessions/:sessionId/runs", h.Run.Create)
 		}
 
 		// 文件模块

@@ -129,7 +129,8 @@ func (s *defaultRunApplicationService) Create(ctx context.Context, input CreateA
 		return &ApplicationRun{Run: run}, nil
 	}
 	contexts := s.loadAttachments(ctx, files, input.Content)
-	handle, err := s.executor.Start(ctx, run.ID, []llmcore.Message{{
+	executionCtx := context.WithoutCancel(ctx)
+	handle, err := s.executor.Start(executionCtx, run.ID, []llmcore.Message{{
 		Role: model.RoleUser, ContentText: input.Content, Attachments: append([]string(nil), input.AttachmentIDs...),
 	}}, contexts)
 	if err != nil {
@@ -158,7 +159,7 @@ func (s *defaultRunApplicationService) SubmitInput(ctx context.Context, runID st
 		return &ApplicationRun{Run: resume.Run}, nil
 	}
 	contexts := s.loadAttachments(ctx, files, input.Content)
-	handle, err := s.executor.Start(ctx, runID, resume.Messages, contexts)
+	handle, err := s.executor.Start(context.WithoutCancel(ctx), runID, resume.Messages, contexts)
 	if err != nil {
 		return nil, err
 	}

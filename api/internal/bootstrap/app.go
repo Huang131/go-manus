@@ -903,6 +903,10 @@ func (a *App) initRoutes(cfg *config.Config, opts Options) {
 		sandboxService = a.Sandbox
 	}
 	sessionHandler := handler.NewSessionHandler(a.SessionService, a.AgentService, sandboxService)
+	var runHandler *handler.RunHandler
+	if a.RunApplication != nil && a.Redis != nil {
+		runHandler = handler.NewRunHandler(a.RunApplication, service.NewRedisRunEventStream(mq.NewRedisStreamMessageQueue(a.Redis.Client)))
+	}
 	fileHandler := handler.NewFileHandler(a.FileService, a.SessionService)
 	statusHandler := handler.NewStatusHandler(a.StatusService)
 	var appConfigHandler *handler.AppConfigHandler
@@ -915,7 +919,7 @@ func (a *App) initRoutes(cfg *config.Config, opts Options) {
 
 	router.SetupRoutes(engine, &router.Handlers{
 		Session: sessionHandler, File: fileHandler, Status: statusHandler,
-		AppConfig: appConfigHandler, LLMModel: llmModelHandler,
+		AppConfig: appConfigHandler, LLMModel: llmModelHandler, Run: runHandler,
 	})
 
 	a.Engine = engine
