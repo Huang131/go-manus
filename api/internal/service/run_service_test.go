@@ -218,6 +218,20 @@ func TestRunServiceStartAndEnterWaitingInputUseCurrentRevision(t *testing.T) {
 	}
 }
 
+func TestRunServiceStartIsIdempotentForRunningRun(t *testing.T) {
+	store := newFakeRunStore()
+	store.run = &model.Run{
+		ID: "run-1", SessionID: "session-1", Status: model.RunStatusRunning,
+		SettingsSnapshot: settings.DefaultAgentSettings(), PromptHash: "prompt-v1",
+	}
+
+	started, err := NewRunService(store).Start(context.Background(), store.run.ID)
+
+	require.NoError(t, err)
+	require.Equal(t, model.RunStatusRunning, started.Status)
+	require.Zero(t, store.transitionCalls, "a resumed running Run must not be transitioned again")
+}
+
 func TestRunServiceSubmitInputRebuildsContextAndResumesWaitingRun(t *testing.T) {
 	store, _, _ := waitingRunFixture()
 	svc := NewRunService(store)

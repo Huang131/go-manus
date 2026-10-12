@@ -211,10 +211,14 @@ func (s *defaultRunService) ListMessagesByRunIDs(ctx context.Context, runIDs []s
 	return messages, nil
 }
 
-// Start 只允许 pending Run 进入 running。
+// Start 负责幂等启动 Run：pending 迁移到 running，已是 running 的恢复 Run 直接复用。
 func (s *defaultRunService) Start(ctx context.Context, id string) (*model.Run, error) {
-	if _, err := s.Get(ctx, id); err != nil {
+	run, err := s.Get(ctx, id)
+	if err != nil {
 		return nil, err
+	}
+	if run.Status == model.RunStatusRunning {
+		return run, nil
 	}
 	changed, err := s.store.TransitionStatus(ctx, id, []model.RunStatus{model.RunStatusPending}, model.RunStatusRunning)
 	if err != nil {
