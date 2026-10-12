@@ -114,6 +114,19 @@ func (p *executorToolProviderStub) Acquire(_ settings.AgentSettings) (RunToolSet
 	return p.set, nil
 }
 
+// persistenceContextStore 记录终态写入收到的上下文，用于守护取消后持久化仍有时间上限的契约。
+type persistenceContextStore struct {
+	executorStoreStub
+	persistenceCtx context.Context
+	persistenceErr error
+}
+
+func (s *persistenceContextStore) Finish(ctx context.Context, runID string, result RunExecutionResult) error {
+	s.persistenceCtx = ctx
+	s.persistenceErr = ctx.Err()
+	return s.executorStoreStub.Finish(ctx, runID, result)
+}
+
 type executorEngineStub struct {
 	result RunExecutionResult
 	err    error
@@ -243,6 +256,37 @@ func TestRunExecutorSuccessReleasesToolsBeforePersistingTerminal(t *testing.T) {
 	}
 	if len(engine.seen.Messages) != 1 || engine.seen.Messages[0].ContentText != "hello" {
 		t.Fatalf("engine input messages = %+v", engine.seen.Messages)
+	}
+}
+
+func TestRunExecutorBoundsTerminalPersistenceAfterCancelledExecution(t *testing.T) {
+	store := &persistenceContextStore{}
+	executor := NewRunExecutor(
+		store,
+		&executorToolProviderStub{set: &executorToolSetStub{released: make(chan struct{})}},
+		&executorEngineStub{result: RunExecutionResult{Kind: RunExecutionSucceeded}},
+	)
+
+	parentCtx, cancelParent := context.WithCancel(context.Background())
+	cancelParent()
+	handle, err := executor.Start(parentCtx, "run-1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitExecutorDone(t, handle)
+
+	if store.persistenceCtx == nil {
+		t.Fatal("terminal persistence did not receive a context")
+	}
+	if err := store.persistenceErr; err != nil {
+		t.Fatalf("terminal persistence context err = %v, want nil during persistence", err)
+	}
+	deadline, ok := store.persistenceCtx.Deadline()
+	if !ok {
+		t.Fatal("terminal persistence context has no deadline")
+	}
+	if remaining := time.Until(deadline); remaining <= 0 || remaining > runPersistenceTimeout {
+		t.Fatalf("terminal persistence deadline remaining = %s, want within (0, %s]", remaining, runPersistenceTimeout)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"runtime/debug"
 	"sync"
+	"time"
 
 	"github.com/Huang131/go-manus/api/internal/agent/attachment"
 	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
@@ -14,6 +15,8 @@ import (
 	"github.com/Huang131/go-manus/api/internal/settings"
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
+
+const runPersistenceTimeout = 30 * time.Second
 
 // RunExecutionKind 是 Engine adapter 返回给 RunExecutor 的有限结果集合。
 type RunExecutionKind string
@@ -223,14 +226,17 @@ func (e *RunExecutor) execute(ctx context.Context, cancel context.CancelFunc, ru
 	// Engine 已经退出后才释放外部工具连接，避免 in-flight 调用使用已关闭资源。
 	toolSet.Release()
 
-	// 取消只停止 Engine；状态收尾必须继续使用可用的持久化上下文。
-	persistErr := e.persistResult(context.WithoutCancel(ctx), run, result, err)
+	// 取消只停止 Engine；状态收尾继续使用独立且有界的持久化上下文。
+	// WithoutCancel 保留“取消后仍写终态”的语义，WithTimeout 防止存储异常时执行 goroutine 无限滞留。
+	persistenceCtx, persistenceCancel := context.WithTimeout(context.WithoutCancel(ctx), runPersistenceTimeout)
+	defer persistenceCancel()
+	persistErr := e.persistResult(persistenceCtx, run, result, err)
 	if persistErr != nil {
-		e.reconcileAfterPersistenceFailure(context.WithoutCancel(ctx), run.ID)
+		e.reconcileAfterPersistenceFailure(persistenceCtx, run.ID)
 	}
 	if persistErr == nil && e.publisher != nil && isTerminalExecution(result, err) {
 		if marker, ok := e.publisher.(completedRunEventMarker); ok {
-			if markErr := marker.MarkCompleted(context.WithoutCancel(ctx), run.ID); markErr != nil {
+			if markErr := marker.MarkCompleted(persistenceCtx, run.ID); markErr != nil {
 				// 事件流只是实时旁路，TTL 失败不能回滚已提交的 Run 终态。
 				logger.Warn("完成事件流保留时间设置失败", logger.String("run_id", run.ID), logger.Err(markErr))
 			}
