@@ -19,8 +19,9 @@ var ErrActiveRunExists = errors.New("session already has an active run")
 
 // RunRecoveryStats 记录进程重启时收敛的遗留 Run 数量。
 type RunRecoveryStats struct {
-	Interrupted int
-	Cancelled   int
+	Interrupted         int
+	Cancelled           int
+	InvalidWaitingInput int
 }
 
 // RunRepository 按 Run 聚合持久化执行事实与长期消息。
@@ -404,7 +405,7 @@ func (r *PostgresRunRepository) TransitionStatus(ctx context.Context, id string,
 }
 
 // RecoverStaleRuns 收敛进程重启后不再有执行句柄的活跃 Run。
-// waiting_input 不在这里迁移：它的执行上下文由持久化快照恢复，其他活跃状态无法安全续跑。
+// waiting_input 只有在快照和等待问题消息完整时才能恢复；损坏记录会被中断，避免永久占用 Session 的 active 槽位。
 func (r *PostgresRunRepository) RecoverStaleRuns(ctx context.Context) (RunRecoveryStats, error) {
 	var stats RunRecoveryStats
 	err := r.WithTx(ctx, func(repo RunRepository) error {
@@ -436,9 +437,115 @@ func (r *PostgresRunRepository) RecoverStaleRuns(ctx context.Context) (RunRecove
 			return err
 		}
 		stats.Cancelled = int(cancelled.RowsAffected())
+
+		invalidWaiting, err := bound.recoverInvalidWaitingRuns(ctx)
+		if err != nil {
+			return err
+		}
+		stats.InvalidWaitingInput = invalidWaiting
+		stats.Interrupted += invalidWaiting
 		return nil
 	})
+	if err != nil {
+		return RunRecoveryStats{}, err
+	}
 	return stats, err
+}
+
+type persistedWaitingRun struct {
+	id               string
+	sessionID        string
+	snapshotRevision int
+	snapshotJSON     []byte
+	waitingMessageID sql.NullString
+	messageID        sql.NullString
+	messageSessionID sql.NullString
+	messageRunID     sql.NullString
+	messageRole      sql.NullString
+}
+
+// recoverInvalidWaitingRuns 将无法重建执行上下文的 waiting_input Run 收敛为 interrupted。
+// 校验在同一事务中完成，避免启动扫描期间留下一个既不可恢复又占用 active 槽位的孤儿 Run。
+func (r *PostgresRunRepository) recoverInvalidWaitingRuns(ctx context.Context) (int, error) {
+	rows, err := r.queryer().Query(ctx, `
+		SELECT r.id, r.session_id, r.snapshot_revision, r.execution_snapshot, r.waiting_message_id,
+		       m.id, m.session_id, m.run_id, m.role
+		FROM runs r
+		LEFT JOIN messages m ON m.id = r.waiting_message_id
+		WHERE r.status = 'waiting_input'
+		FOR UPDATE OF r
+	`)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	invalid := make([]string, 0)
+	for rows.Next() {
+		var run persistedWaitingRun
+		if err := rows.Scan(
+			&run.id, &run.sessionID, &run.snapshotRevision, &run.snapshotJSON, &run.waitingMessageID,
+			&run.messageID, &run.messageSessionID, &run.messageRunID, &run.messageRole,
+		); err != nil {
+			return 0, err
+		}
+		if err := validatePersistedWaitingRun(run); err != nil {
+			invalid = append(invalid, run.id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	if len(invalid) == 0 {
+		return 0, nil
+	}
+	result, err := r.queryer().Exec(ctx, `
+			UPDATE runs
+			SET status = 'interrupted',
+				error_code = 'invalid_waiting_input_snapshot',
+				error_message = 'waiting input snapshot is invalid and cannot be resumed after process restart',
+				waiting_message_id = NULL,
+				finished_at = CURRENT_TIMESTAMP(0),
+				updated_at = CURRENT_TIMESTAMP(0)
+			WHERE id = ANY($1) AND status = 'waiting_input'
+		`, invalid)
+	if err != nil {
+		return 0, err
+	}
+	return int(result.RowsAffected()), nil
+}
+
+func validatePersistedWaitingRun(run persistedWaitingRun) error {
+	if !run.waitingMessageID.Valid || run.waitingMessageID.String == "" {
+		return fmt.Errorf("waiting_message_id is required")
+	}
+	var snapshot model.RunExecutionSnapshot
+	if err := sonic.Unmarshal(run.snapshotJSON, &snapshot); err != nil {
+		return fmt.Errorf("decode execution snapshot: %w", err)
+	}
+	if err := snapshot.ValidateWaitingInput(); err != nil {
+		return err
+	}
+	if snapshot.SnapshotRevision != run.snapshotRevision {
+		return fmt.Errorf("snapshot revision %d does not match persisted revision %d", snapshot.SnapshotRevision, run.snapshotRevision)
+	}
+	if snapshot.WaitingCheckpoint.QuestionMessageID != run.waitingMessageID.String {
+		return fmt.Errorf("snapshot question does not match waiting_message_id")
+	}
+	if !run.messageID.Valid || run.messageID.String != run.waitingMessageID.String {
+		return fmt.Errorf("waiting question message is missing")
+	}
+	if !run.messageSessionID.Valid || run.messageSessionID.String != run.sessionID {
+		return fmt.Errorf("waiting question session does not match run")
+	}
+	if !run.messageRunID.Valid || run.messageRunID.String != run.id {
+		return fmt.Errorf("waiting question run does not match run")
+	}
+	if !run.messageRole.Valid || model.MessageRole(run.messageRole.String) != model.RoleAssistant {
+		return fmt.Errorf("waiting question must be an assistant message")
+	}
+	return nil
 }
 
 // EnterWaitingInput 原子持久化可恢复快照、问题消息和 waiting_input 状态。

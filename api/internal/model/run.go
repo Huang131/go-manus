@@ -51,7 +51,8 @@ func (s RunStatus) CanTransitionTo(next RunStatus) bool {
 	case RunStatusRunning:
 		return next == RunStatusWaitingInput || next == RunStatusSucceeded || next == RunStatusFailed || next == RunStatusCancelling || next == RunStatusInterrupted
 	case RunStatusWaitingInput:
-		return next == RunStatusRunning || next == RunStatusCancelling
+		// 损坏的等待快照无法恢复，只能在启动扫描时中断该 Run。
+		return next == RunStatusRunning || next == RunStatusCancelling || next == RunStatusInterrupted
 	case RunStatusCancelling:
 		return next == RunStatusCancelled
 	default:

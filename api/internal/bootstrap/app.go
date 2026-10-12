@@ -460,7 +460,8 @@ func (a *App) recoverStaleRuns() error {
 	}
 	if stats.Interrupted != 0 || stats.Cancelled != 0 {
 		logger.Warn("recovered stale runs after process restart",
-			logger.Int("interrupted", stats.Interrupted), logger.Int("cancelled", stats.Cancelled))
+			logger.Int("interrupted", stats.Interrupted), logger.Int("cancelled", stats.Cancelled),
+			logger.Int("invalid_waiting_input", stats.InvalidWaitingInput))
 	}
 	return nil
 }

@@ -193,6 +193,105 @@ func TestRunRepoRecoverStaleRunsAfterRestart(t *testing.T) {
 	assert.Equal(t, "process_restarted", got.ErrorCode)
 }
 
+// createWaitingRunForRecovery 构建真实的可恢复等待状态，损坏场景只在落库后修改持久化事实。
+func createWaitingRunForRecovery(t *testing.T, repo repository.RunRepository) (*model.Run, *model.RunMessage) {
+	t.Helper()
+	ctx := context.Background()
+	sessionID := createSessionForTest(t)
+	t.Cleanup(func() { CleanupSession(t, sessionID) })
+	run := newRunForTest(sessionID, "recover-waiting-"+uuid.NewString())
+	_, inserted, err := repo.CreateWithInitialMessage(ctx, run, initialRunMessage(run))
+	require.NoError(t, err)
+	require.True(t, inserted)
+	changed, err := repo.TransitionStatus(ctx, run.ID, []model.RunStatus{model.RunStatusPending}, model.RunStatusRunning)
+	require.NoError(t, err)
+	require.True(t, changed)
+	question := &model.RunMessage{
+		ID:        uuid.NewString(),
+		SessionID: sessionID,
+		RunID:     run.ID,
+		Role:      model.RoleAssistant,
+		Content:   "请确认继续执行",
+		CreatedAt: time.Now().UTC(),
+	}
+	snapshot := model.RunExecutionSnapshot{
+		SnapshotRevision: 1,
+		PlanID:           "plan-recovery",
+		CurrentStepID:    "step-recovery",
+		Steps: []model.RunStepSnapshot{{
+			ID:          "step-recovery",
+			Description: "等待用户确认",
+			Status:      model.RunStepStatusRunning,
+		}},
+		WaitingCheckpoint: &model.WaitingCheckpoint{
+			QuestionMessageID: question.ID,
+			StepID:            "step-recovery",
+			ResumeMode:        model.ResumeModeContinueStep,
+		},
+	}
+	changed, err = repo.EnterWaitingInput(ctx, run.ID, 0, snapshot, question)
+	require.NoError(t, err)
+	require.True(t, changed)
+	return run, question
+}
+
+// TestRunRepo_RecoverWaitingInput 保证启动恢复只中断不可恢复记录，并释放其会话执行槽位。
+func TestRunRepo_RecoverWaitingInput(t *testing.T) {
+	ctx := context.Background()
+	repo := testRunRepository(t)
+	validRun, question := createWaitingRunForRecovery(t, repo)
+	tests := []struct {
+		name string
+		sql  string
+		args []any
+	}{
+		{name: "missing snapshot", sql: `UPDATE runs SET execution_snapshot = '{}'::jsonb WHERE id = $1`},
+		{name: "invalid checkpoint type", sql: `UPDATE runs SET execution_snapshot = '{"waiting_checkpoint":42}'::jsonb WHERE id = $1`},
+		{name: "revision mismatch", sql: `UPDATE runs SET snapshot_revision = 2 WHERE id = $1`},
+		{name: "checkpoint question mismatch", sql: `UPDATE runs SET execution_snapshot = jsonb_set(execution_snapshot, '{waiting_checkpoint,question_message_id}', '"other-question"') WHERE id = $1`},
+		{name: "question wrong role", sql: `UPDATE messages SET role = 'user' WHERE id = (SELECT waiting_message_id FROM runs WHERE id = $1)`},
+		{name: "question wrong run", sql: `UPDATE messages SET run_id = $2 WHERE id = (SELECT waiting_message_id FROM runs WHERE id = $1)`, args: []any{validRun.ID}},
+		{name: "question wrong session", sql: `UPDATE messages SET session_id = $2 WHERE id = (SELECT waiting_message_id FROM runs WHERE id = $1)`, args: []any{validRun.SessionID}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			run, _ := createWaitingRunForRecovery(t, repo)
+			_, err := testDB.Pool.Exec(ctx, tt.sql, append([]any{run.ID}, tt.args...)...)
+			require.NoError(t, err)
+			stats, err := repo.RecoverStaleRuns(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, repository.RunRecoveryStats{Interrupted: 1, InvalidWaitingInput: 1}, stats)
+			var status model.RunStatus
+			var errorCode string
+			var clearedWaiting, finished bool
+			err = testDB.Pool.QueryRow(ctx, `SELECT status, error_code, waiting_message_id IS NULL, finished_at IS NOT NULL FROM runs WHERE id = $1`, run.ID).Scan(&status, &errorCode, &clearedWaiting, &finished)
+			require.NoError(t, err)
+			assert.Equal(t, model.RunStatusInterrupted, status)
+			assert.Equal(t, "invalid_waiting_input_snapshot", errorCode)
+			assert.True(t, clearedWaiting)
+			assert.True(t, finished)
+			active, err := repo.GetActiveBySessionID(ctx, run.SessionID)
+			require.NoError(t, err)
+			assert.Nil(t, active)
+			stats, err = repo.RecoverStaleRuns(ctx)
+			require.NoError(t, err)
+			assert.Equal(t, repository.RunRecoveryStats{}, stats, "recovery must be idempotent")
+		})
+	}
+	got, err := repo.GetByID(ctx, validRun.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, model.RunStatusWaitingInput, got.Status, "valid waiting snapshot must remain recoverable")
+	assert.Equal(t, question.ID, got.WaitingMessageID)
+	assert.Empty(t, got.ErrorCode)
+	assert.Nil(t, got.FinishedAt)
+	answer := &model.RunMessage{ID: uuid.NewString(), SessionID: validRun.SessionID, RunID: validRun.ID,
+		IdempotencyKey: uuid.NewString(), ReplyToMessageID: question.ID, Role: model.RoleUser, Content: "确认", CreatedAt: time.Now().UTC()}
+	changed, err := repo.ResumeWaitingInput(ctx, validRun.ID, 1, answer)
+	require.NoError(t, err)
+	require.True(t, changed, "valid waiting run must still accept input after recovery")
+}
+
 func TestRunRepo_CreateWithInitialMessage_ReusesOriginalAggregateForSameClientRequest(t *testing.T) {
 	ctx := context.Background()
 	repo := testRunRepository(t)

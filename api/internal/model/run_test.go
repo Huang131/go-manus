@@ -17,6 +17,7 @@ func TestRunStatusCanTransitionTo(t *testing.T) {
 		{name: "terminal cannot resume", from: RunStatusSucceeded, to: RunStatusRunning, want: false},
 		{name: "running cannot skip cancelling", from: RunStatusRunning, to: RunStatusCancelled, want: false},
 		{name: "waiting cannot succeed without resume", from: RunStatusWaitingInput, to: RunStatusSucceeded, want: false},
+		{name: "broken waiting is interrupted on restart", from: RunStatusWaitingInput, to: RunStatusInterrupted, want: true},
 	}
 
 	for _, tt := range tests {

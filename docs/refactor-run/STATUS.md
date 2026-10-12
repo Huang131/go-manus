@@ -30,6 +30,8 @@ SessionHandler -> RunApplicationService -> RunExecutor
 
 ## 最近验证基线
 
+维护修复：启动恢复已补齐损坏 `waiting_input` 的收敛。真实 PostgreSQL 测试覆盖空快照、JSON 字段类型错误、修订号不一致、问题 ID 不一致、问题角色/Run 归属错误，以及重复恢复幂等和合法等待记录继续提交输入。损坏记录以 `invalid_waiting_input_snapshot` 中断并清空等待引用；恢复统计中的 `Interrupted` 含这类记录，`InvalidWaitingInput` 单独统计该子集。
+
 实施新阶段前，在 `api/` 重跑：
 
 ```bash

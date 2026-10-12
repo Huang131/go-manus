@@ -63,7 +63,7 @@ Handler 不直接创建执行对象，Engine 和 RunExecutor 都不直接调用 
 
 - 创建 Run 依赖数据库 active 部分唯一索引，不采用先读后写。
 - Cancel 先通过条件更新把可取消 Run 原子迁移为 `cancelling`，再调用进程内 cancel function；迟到的 Engine 结果影响行数为 0 时停止写终态和终态消息。
-- RunExecutor 的 `runID -> cancel` 映射只是进程内控制句柄，不是业务事实；进程重启后把遗留 `pending`、`running` Run 条件迁移为 `interrupted`，把 `cancelling` 收敛为 `cancelled`；`waiting_input` 只在执行快照完整时保持可恢复。
+- RunExecutor 的 `runID -> cancel` 映射只是进程内控制句柄，不是业务事实；进程重启后把遗留 `pending`、`running` Run 条件迁移为 `interrupted`，把 `cancelling` 收敛为 `cancelled`；`waiting_input` 只在快照、修订号和等待问题消息校验通过时保持可恢复。非法等待记录迁移为 `interrupted` 并释放 active 槽位，启动日志单独记录 `invalid_waiting_input` 数量。
 - 同一个等待输入 Run 通过 `SubmitInput` 继续执行；新的顶层用户请求创建新 Run。
 - Engine goroutine 退出前不得释放其 ToolSet。取消路径的顺序固定为：Engine goroutine 退出 -> `ToolSet.Release()` -> 条件更新 `cancelling -> cancelled` -> 注销控制句柄。控制句柄必须保持注册，直到 Run 已持久化为 `waiting_input` 或终态，不能先注销再写终态。
 - Cancel 已成功落库为 `cancelling`，但发现控制句柄不存在时，必须立即调用与启动恢复共用的 `ReconcileCancelling(runID)`；不能等待下一次进程重启。该收敛操作必须幂等，只有仍处于 `cancelling` 的 Run 才能迁移为 `cancelled`。
