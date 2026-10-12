@@ -17,34 +17,33 @@ import (
 
 type appConfigServiceStub struct {
 	service.AppConfigService
-	agentSettings *settings.AgentSettings
-	updateErr     error
+	agentSettings   *settings.AgentSettings
+	updatedSettings *settings.AgentSettings
+	updateErr       error
 }
 
 func (s appConfigServiceStub) GetAgentSettings(context.Context) (*settings.AgentSettings, error) {
 	return s.agentSettings, nil
 }
 
-func (s appConfigServiceStub) UpdateAgentSettings(context.Context, *settings.AgentSettings) error {
-	return s.updateErr
-}
-
-type configReloaderStub struct {
-	agentSettings *settings.AgentSettings
-}
-
-func (r *configReloaderStub) ReloadAgentSettings(cfg settings.AgentSettings) error {
-	r.agentSettings = &cfg
+func (s *appConfigServiceStub) UpdateAgentSettings(_ context.Context, cfg *settings.AgentSettings) error {
+	if s.updateErr != nil {
+		return s.updateErr
+	}
+	copy := *cfg
+	s.updatedSettings = &copy
 	return nil
 }
+
+type configReloaderStub struct{}
 
 func (*configReloaderStub) ReloadMCPConfig(context.Context, *model.MCPConfig) error { return nil }
 func (*configReloaderStub) ReloadA2AConfig(context.Context, *agent.A2AConfig) error { return nil }
 
-func TestUpdateAgentSettingsReloadsSearchLimit(t *testing.T) {
+func TestUpdateAgentSettingsPersistsSearchLimit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	reloader := &configReloaderStub{}
-	h := NewAppConfigHandler(appConfigServiceStub{}, reloader)
+	svc := &appConfigServiceStub{}
+	h := NewAppConfigHandler(svc, &configReloaderStub{})
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPut, "/config/agent", strings.NewReader(
@@ -57,14 +56,14 @@ func TestUpdateAgentSettingsReloadsSearchLimit(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", recorder.Code)
 	}
-	if reloader.agentSettings == nil || reloader.agentSettings.MaxSearchResults != 6 {
-		t.Fatalf("reloaded settings = %+v, want max_search_results=6", reloader.agentSettings)
+	if svc.updatedSettings == nil || svc.updatedSettings.MaxSearchResults != 6 {
+		t.Fatalf("persisted settings = %+v, want max_search_results=6", svc.updatedSettings)
 	}
 }
 
 func TestGetAgentSettingsReturnsDefaultsWhenRecordIsMissing(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	h := NewAppConfigHandler(appConfigServiceStub{})
+	h := NewAppConfigHandler(&appConfigServiceStub{})
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/config/agent", nil)
@@ -84,7 +83,7 @@ func TestGetAgentSettingsReturnsDefaultsWhenRecordIsMissing(t *testing.T) {
 
 func TestUpdateAgentSettingsReturnsBadRequestForInvalidSettings(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	h := NewAppConfigHandler(appConfigServiceStub{updateErr: apperr.BadRequest("invalid settings")})
+	h := NewAppConfigHandler(&appConfigServiceStub{updateErr: apperr.BadRequest("invalid settings")})
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/config/agent", strings.NewReader(

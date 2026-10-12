@@ -19,7 +19,6 @@ type AppConfigHandler struct {
 }
 
 type configRuntimeReloader interface {
-	ReloadAgentSettings(settings.AgentSettings) error
 	ReloadMCPConfig(context.Context, *model.MCPConfig) error
 	ReloadA2AConfig(context.Context, *agent.A2AConfig) error
 }
@@ -85,15 +84,7 @@ func (h *AppConfigHandler) GetAgentSettings(c *gin.Context) {
 // UpdateAgentSettings 更新 Agent 配置。
 func (h *AppConfigHandler) UpdateAgentSettings(c *gin.Context) {
 	updateConfig(c, func(ctx context.Context, cfg *settings.AgentSettings) error {
-		if err := h.service.UpdateAgentSettings(ctx, cfg); err != nil {
-			return err
-		}
-		if h.reloader != nil {
-			if err := h.reloader.ReloadAgentSettings(*cfg); err != nil {
-				return apperr.Unavailable("Agent 运行时重载失败: " + err.Error())
-			}
-		}
-		return nil
+		return h.service.UpdateAgentSettings(ctx, cfg)
 	})
 }
 

@@ -3,7 +3,6 @@ package agent
 
 import (
 	"context"
-	"sync"
 
 	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -13,18 +12,15 @@ import (
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
-// AgentService 管理 Agent 运行时配置和工具快照。
-// Run 执行边界负责请求、状态和生命周期；本类型只保留工具提供器及配置热更新。
+// AgentService 管理 Agent 工具快照。
+// Run 执行边界负责配置快照、请求、状态和生命周期。
 type AgentService struct {
-	mu            sync.RWMutex
-	agentSettings settings.AgentSettings
 	toolsProvider *toolspkg.ToolProvider
 }
 
 // NewAgentService 创建 Agent 运行时服务。
-func NewAgentService(ctx context.Context, sandboxClient sandbox.Sandbox, browser sandbox.Browser, searchEngine search.SearchEngine, agentSettings settings.AgentSettings, mcpConfig *model.MCPConfig, a2aConfig *A2AConfig) *AgentService {
+func NewAgentService(ctx context.Context, sandboxClient sandbox.Sandbox, browser sandbox.Browser, searchEngine search.SearchEngine, mcpConfig *model.MCPConfig, a2aConfig *A2AConfig) *AgentService {
 	return &AgentService{
-		agentSettings: agentSettings,
 		toolsProvider: toolspkg.NewToolProvider(ctx, sandboxClient, browser, searchEngine, mcpConfig, a2aConfig),
 	}
 }
@@ -39,17 +35,6 @@ func (s *AgentService) Shutdown() {
 		s.toolsProvider.Cleanup()
 	}
 	logger.Info("Agent 服务已关闭")
-}
-
-// ReloadAgentSettings 原子替换后续 Run 使用的已验证配置。
-func (s *AgentService) ReloadAgentSettings(next settings.AgentSettings) error {
-	if err := next.Validate(); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	s.agentSettings = next
-	s.mu.Unlock()
-	return nil
 }
 
 // ReloadMCPConfig 重建 MCP 客户端，确保配置接口保存后立即生效。

@@ -22,7 +22,6 @@ import (
 	"github.com/Huang131/go-manus/api/internal/sandbox"
 	"github.com/Huang131/go-manus/api/internal/search"
 	"github.com/Huang131/go-manus/api/internal/service"
-	"github.com/Huang131/go-manus/api/internal/settings"
 	"github.com/Huang131/go-manus/api/pkg/logger"
 	"github.com/Huang131/go-manus/api/pkg/middleware"
 	"github.com/gin-gonic/gin"
@@ -592,18 +591,6 @@ type externalClients struct {
 	a2aConfig *agent.A2AConfig
 }
 
-// resolveAgentSettings 只在配置记录不存在时使用默认值。已存在的记录必须完整合法，
-// 避免启动时静默改写控制面语义。
-func resolveAgentSettings(persisted *settings.AgentSettings) (settings.AgentSettings, error) {
-	if persisted == nil {
-		return settings.DefaultAgentSettings(), nil
-	}
-	if err := persisted.Validate(); err != nil {
-		return settings.AgentSettings{}, fmt.Errorf("invalid persisted agent settings: %w", err)
-	}
-	return *persisted, nil
-}
-
 // initExternalClients 初始化外部客户端组件。
 //
 // 外部客户端包括：
@@ -734,18 +721,6 @@ func (a *App) initAgent(opts Options, clients *externalClients) error {
 		return ErrAgentRequiresLLM
 	}
 
-	var persisted *settings.AgentSettings
-	if a.AppConfigSvc != nil {
-		loaded, err := a.AppConfigSvc.GetAgentSettings(context.Background())
-		if err != nil {
-			return fmt.Errorf("load agent config: %w", err)
-		}
-		persisted = loaded
-	}
-	agentSettings, err := resolveAgentSettings(persisted)
-	if err != nil {
-		return err
-	}
 	mcpConfig, a2aConfig, err := loadRuntimeToolConfigs(
 		context.Background(),
 		a.AppConfigSvc,
@@ -762,7 +737,6 @@ func (a *App) initAgent(opts Options, clients *externalClients) error {
 		a.Sandbox,
 		clients.browser,
 		clients.search,
-		agentSettings,
 		mcpConfig,
 		a2aConfig,
 	)

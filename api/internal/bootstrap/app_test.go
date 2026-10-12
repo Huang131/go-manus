@@ -19,40 +19,7 @@ import (
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/service"
-	"github.com/Huang131/go-manus/api/internal/settings"
 )
-
-func TestResolveAgentSettingsUsesValidPersistedValues(t *testing.T) {
-	want := settings.AgentSettings{
-		MaxIterations:    4,
-		MaxRetries:       1,
-		MaxSearchResults: 6,
-	}
-	got, err := resolveAgentSettings(&want)
-	if err != nil {
-		t.Fatalf("resolveAgentSettings() error = %v", err)
-	}
-	if got != want {
-		t.Fatalf("resolved settings = %+v, want %+v", got, want)
-	}
-}
-
-func TestResolveAgentSettingsUsesDefaultsOnlyWhenRecordMissing(t *testing.T) {
-	want := settings.DefaultAgentSettings()
-	got, err := resolveAgentSettings(nil)
-	if err != nil {
-		t.Fatalf("resolveAgentSettings() error = %v", err)
-	}
-	if got != want {
-		t.Fatalf("resolved settings = %+v, want defaults %+v", got, want)
-	}
-}
-
-func TestResolveAgentSettingsRejectsInvalidPersistedRecord(t *testing.T) {
-	if _, err := resolveAgentSettings(&settings.AgentSettings{}); err == nil {
-		t.Fatal("resolveAgentSettings() error = nil, want invalid persisted settings error")
-	}
-}
 
 func TestInitRunExecutionRequiresAgentAndLLM(t *testing.T) {
 	app := &App{RunService: service.NewRunService(nil)}
@@ -67,7 +34,7 @@ func TestInitRunExecutionRequiresAgentAndLLM(t *testing.T) {
 func TestInitRunExecutionBuildsRunApplicationBoundary(t *testing.T) {
 	app := &App{
 		RunService:   service.NewRunService(nil),
-		AgentService: agent.NewAgentService(context.Background(), nil, nil, nil, settings.DefaultAgentSettings(), nil, nil),
+		AgentService: agent.NewAgentService(context.Background(), nil, nil, nil, nil, nil),
 		repos:        repositories{},
 		AppConfigSvc: nil,
 	}
