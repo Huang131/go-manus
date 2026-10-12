@@ -20,6 +20,11 @@ type fakeRunStore struct {
 	messages        []*model.RunMessage
 	transitionCalls int
 	terminal        repository.TerminalTransition
+	recoveryStats   repository.RunRecoveryStats
+}
+
+func (f *fakeRunStore) RecoverStaleRuns(context.Context) (repository.RunRecoveryStats, error) {
+	return f.recoveryStats, nil
 }
 
 func (f *fakeRunStore) CreateWithInitialMessage(_ context.Context, run *model.Run, initial *model.RunMessage) (*model.Run, bool, error) {
@@ -230,6 +235,15 @@ func TestRunServiceStartIsIdempotentForRunningRun(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, model.RunStatusRunning, started.Status)
 	require.Zero(t, store.transitionCalls, "a resumed running Run must not be transitioned again")
+}
+
+func TestRunServiceRecoversStaleRunsAfterRestart(t *testing.T) {
+	store := &fakeRunStore{recoveryStats: repository.RunRecoveryStats{Interrupted: 2, Cancelled: 1}}
+
+	stats, err := NewRunService(store).RecoverAfterRestart(context.Background())
+
+	require.NoError(t, err)
+	require.Equal(t, store.recoveryStats, stats)
 }
 
 func TestRunServiceSubmitInputRebuildsContextAndResumesWaitingRun(t *testing.T) {

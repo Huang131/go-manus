@@ -25,6 +25,7 @@ type runStore interface {
 	ListMessages(ctx context.Context, runID string) ([]*model.RunMessage, error)
 	ListMessagesByRunIDs(ctx context.Context, runIDs []string) (map[string][]*model.RunMessage, error)
 	TransitionStatus(ctx context.Context, id string, from []model.RunStatus, to model.RunStatus) (bool, error)
+	RecoverStaleRuns(ctx context.Context) (repository.RunRecoveryStats, error)
 	EnterWaitingInput(ctx context.Context, runID string, expectedRevision int, snapshot model.RunExecutionSnapshot, question *model.RunMessage) (bool, error)
 	ResumeWaitingInput(ctx context.Context, runID string, expectedRevision int, answer *model.RunMessage) (bool, error)
 	FinishTerminal(ctx context.Context, runID string, terminal repository.TerminalTransition, final *model.RunMessage) (bool, error)
@@ -41,6 +42,7 @@ type RunService interface {
 	ListMessages(ctx context.Context, runID string) ([]*model.RunMessage, error)
 	ListMessagesByRunIDs(ctx context.Context, runIDs []string) (map[string][]*model.RunMessage, error)
 	Start(ctx context.Context, id string) (*model.Run, error)
+	RecoverAfterRestart(ctx context.Context) (repository.RunRecoveryStats, error)
 	EnterWaitingInput(ctx context.Context, runID string, snapshot model.RunExecutionSnapshot, question *model.RunMessage) (*model.Run, error)
 	SubmitInput(ctx context.Context, runID string, input SubmitInputRequest) (*RunResume, error)
 	RequestCancel(ctx context.Context, id string) (*model.Run, error)
@@ -228,6 +230,15 @@ func (s *defaultRunService) Start(ctx context.Context, id string) (*model.Run, e
 		return nil, s.statusConflict(ctx, id, "run cannot start")
 	}
 	return s.Get(ctx, id)
+}
+
+// RecoverAfterRestart 在应用启动时收敛没有进程内执行句柄的遗留 Run。
+func (s *defaultRunService) RecoverAfterRestart(ctx context.Context) (repository.RunRecoveryStats, error) {
+	stats, err := s.store.RecoverStaleRuns(ctx)
+	if err != nil {
+		return repository.RunRecoveryStats{}, normalizeRunError(err)
+	}
+	return stats, nil
 }
 
 // EnterWaitingInput 将 running Run 原子保存为可恢复等待状态。

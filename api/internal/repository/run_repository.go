@@ -17,6 +17,12 @@ import (
 // ErrActiveRunExists 表示该 Session 已有 pending/running/waiting_input/cancelling Run。
 var ErrActiveRunExists = errors.New("session already has an active run")
 
+// RunRecoveryStats 记录进程重启时收敛的遗留 Run 数量。
+type RunRecoveryStats struct {
+	Interrupted int
+	Cancelled   int
+}
+
 // RunRepository 按 Run 聚合持久化执行事实与长期消息。
 //
 // 它只负责事务、约束和条件更新；不启动 Engine、不发布 Redis 事件，也不维护 Session 摘要。
@@ -31,6 +37,7 @@ type RunRepository interface {
 	EnterWaitingInput(ctx context.Context, runID string, expectedRevision int, snapshot model.RunExecutionSnapshot, question *model.RunMessage) (bool, error)
 	ResumeWaitingInput(ctx context.Context, runID string, expectedRevision int, answer *model.RunMessage) (bool, error)
 	FinishTerminal(ctx context.Context, runID string, terminal TerminalTransition, final *model.RunMessage) (bool, error)
+	RecoverStaleRuns(ctx context.Context) (RunRecoveryStats, error)
 	WithTx(ctx context.Context, fn func(repo RunRepository) error) error
 }
 
@@ -394,6 +401,44 @@ func (r *PostgresRunRepository) TransitionStatus(ctx context.Context, id string,
 		return false, err
 	}
 	return tag.RowsAffected() == 1, nil
+}
+
+// RecoverStaleRuns 收敛进程重启后不再有执行句柄的活跃 Run。
+// waiting_input 不在这里迁移：它的执行上下文由持久化快照恢复，其他活跃状态无法安全续跑。
+func (r *PostgresRunRepository) RecoverStaleRuns(ctx context.Context) (RunRecoveryStats, error) {
+	var stats RunRecoveryStats
+	err := r.WithTx(ctx, func(repo RunRepository) error {
+		bound := repo.(*PostgresRunRepository)
+		interrupted, err := bound.queryer().Exec(ctx, `
+			UPDATE runs
+			SET status = 'interrupted',
+				error_code = 'process_restarted',
+				error_message = 'execution interrupted by process restart',
+				finished_at = CURRENT_TIMESTAMP(0),
+				updated_at = CURRENT_TIMESTAMP(0)
+			WHERE status IN ('pending', 'running')
+		`)
+		if err != nil {
+			return err
+		}
+		stats.Interrupted = int(interrupted.RowsAffected())
+
+		cancelled, err := bound.queryer().Exec(ctx, `
+			UPDATE runs
+			SET status = 'cancelled',
+				error_code = 'process_restarted',
+				error_message = 'cancellation completed after process restart',
+				finished_at = CURRENT_TIMESTAMP(0),
+				updated_at = CURRENT_TIMESTAMP(0)
+			WHERE status = 'cancelling'
+		`)
+		if err != nil {
+			return err
+		}
+		stats.Cancelled = int(cancelled.RowsAffected())
+		return nil
+	})
+	return stats, err
 }
 
 // EnterWaitingInput 原子持久化可恢复快照、问题消息和 waiting_input 状态。

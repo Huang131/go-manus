@@ -446,6 +446,25 @@ func (a *App) initServices(cfg *config.Config) {
 	a.RunService = service.NewRunService(a.repos.run)
 }
 
+// recoverStaleRuns 在拥有真实 PostgreSQL 连接时收敛进程重启遗留的活跃 Run。
+// 测试装配的空连接只用于验证依赖关系，不能执行数据库恢复查询。
+func (a *App) recoverStaleRuns() error {
+	if a == nil || a.RunService == nil || a.Postgres == nil || a.Postgres.Pool == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	stats, err := a.RunService.RecoverAfterRestart(ctx)
+	if err != nil {
+		return fmt.Errorf("recover stale runs: %w", err)
+	}
+	if stats.Interrupted != 0 || stats.Cancelled != 0 {
+		logger.Warn("recovered stale runs after process restart",
+			logger.Int("interrupted", stats.Interrupted), logger.Int("cancelled", stats.Cancelled))
+	}
+	return nil
+}
+
 // initLLM 初始化 LLM 路由器。
 //
 // LLM 路由器（RoutedLLM）负责：
@@ -994,6 +1013,10 @@ func BuildWithFactories(cfg *config.Config, opts Options, factories Factories) (
 
 	// 初始化服务层
 	app.initServices(cfg)
+	if err := app.recoverStaleRuns(); err != nil {
+		app.Close()
+		return nil, err
+	}
 
 	// 初始化外部客户端
 	clients := app.initExternalClients(cfg, opts, factories)

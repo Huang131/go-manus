@@ -153,6 +153,46 @@ func TestRunRepoGetActiveBySessionID(t *testing.T) {
 	assert.Nil(t, active)
 }
 
+func TestRunRepoRecoverStaleRunsAfterRestart(t *testing.T) {
+	ctx := context.Background()
+	repo := testRunRepository(t)
+	sessionID := createSessionForTest(t)
+	t.Cleanup(func() { CleanupSession(t, sessionID) })
+
+	interruptedRun := newRunForTest(sessionID, "recover-interrupted-"+uuid.NewString())
+	_, inserted, err := repo.CreateWithInitialMessage(ctx, interruptedRun, initialRunMessage(interruptedRun))
+	require.NoError(t, err)
+	require.True(t, inserted)
+
+	stats, err := repo.RecoverStaleRuns(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, 1, stats.Interrupted)
+	assert.Zero(t, stats.Cancelled)
+	got, err := repo.GetByID(ctx, interruptedRun.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, model.RunStatusInterrupted, got.Status)
+	assert.Equal(t, "process_restarted", got.ErrorCode)
+
+	cancellingRun := newRunForTest(sessionID, "recover-cancelled-"+uuid.NewString())
+	_, inserted, err = repo.CreateWithInitialMessage(ctx, cancellingRun, initialRunMessage(cancellingRun))
+	require.NoError(t, err)
+	require.True(t, inserted)
+	changed, err := repo.TransitionStatus(ctx, cancellingRun.ID, []model.RunStatus{model.RunStatusPending}, model.RunStatusCancelling)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	stats, err = repo.RecoverStaleRuns(ctx)
+	require.NoError(t, err)
+	assert.Zero(t, stats.Interrupted)
+	assert.Equal(t, 1, stats.Cancelled)
+	got, err = repo.GetByID(ctx, cancellingRun.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, model.RunStatusCancelled, got.Status)
+	assert.Equal(t, "process_restarted", got.ErrorCode)
+}
+
 func TestRunRepo_CreateWithInitialMessage_ReusesOriginalAggregateForSameClientRequest(t *testing.T) {
 	ctx := context.Background()
 	repo := testRunRepository(t)
