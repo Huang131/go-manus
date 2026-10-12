@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -64,6 +65,22 @@ type runHandlerEventsStub struct {
 	startID string
 }
 
+type blockingRunHandlerEventsStub struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+// Read 用屏障模拟正在阻塞的事件读取；release 只供失败用例收尾，避免测试泄漏 goroutine。
+func (s *blockingRunHandlerEventsStub) Read(ctx context.Context, _, _ string) ([]*model.Event, error) {
+	close(s.started)
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.release:
+		return nil, context.Canceled
+	}
+}
+
 func (s *runHandlerEventsStub) Read(_ context.Context, _, startID string) ([]*model.Event, error) {
 	s.startID = startID
 	return []*model.Event{{ID: "1710000000000-0", Type: model.EventTypeDone, Data: []byte(`{"status":"done"}`)}}, nil
@@ -111,6 +128,38 @@ func TestRunHandlerEventsPassesLastEventIDAndWritesSSEID(t *testing.T) {
 	require.Contains(t, w.Body.String(), "id: 1710000000000-0\n")
 	require.Contains(t, w.Body.String(), "event: done\n")
 	require.Contains(t, w.Body.String(), `"event_id":"1710000000000-0"`)
+}
+
+// TestRunHandlerEventsStopsReadingOnDisconnect 守护 HTTP 请求取消向阻塞读取的传播，断线不报告服务故障。
+func TestRunHandlerEventsStopsReadingOnDisconnect(t *testing.T) {
+	events := &blockingRunHandlerEventsStub{started: make(chan struct{}), release: make(chan struct{})}
+	router := setupRouter()
+	router.GET("/runs/:runId/events", NewRunHandler(&runHandlerAppStub{}, events).Events)
+	ctx, cancel := context.WithCancel(context.Background())
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/runs/run-1/events", nil).WithContext(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		router.ServeHTTP(w, req)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		close(events.release)
+		<-done
+	})
+	select {
+	case <-events.started:
+	case <-time.After(time.Second):
+		t.Fatal("event reader did not start")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("HTTP disconnect did not cancel the blocking event reader")
+	}
+	require.Empty(t, w.Body.String(), "client disconnect must not emit stream_error")
 }
 
 func TestRunHandlerCancelUsesRunID(t *testing.T) {

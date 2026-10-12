@@ -35,7 +35,7 @@
 
 UI 以 `run_id` 作为执行标识，Session 仅作为会话容器。会话详情通过消息和历史 Run 展示，不再解析 task ID、SessionStatus 或旧 Chat 响应。创建新 Run 前必须清空上一 Run 的 Redis 游标；恢复 `waiting_input` 则保留同一 Run 的游标，并从 `waiting_message_id` 作为回答的 `reply_to_message_id`。
 
-断线恢复顺序固定为：先按 event ID 去重并落本地状态 -> 保存最后游标 -> 使用 `Last-Event-ID` 重连 -> 过期时查询 Run 快照 -> Run 非终态时重新订阅。UI 不自行推断后端状态迁移。
+断线恢复顺序固定为：先按 event ID 去重并落本地状态 -> 保存最后游标 -> 使用 `Last-Event-ID` 重连 -> 过期时查询 Run 快照 -> Run 非终态时重新订阅。UI 不自行推断后端状态迁移。服务端 Run SSE 的 Redis 阻塞读取必须继承 HTTP request context：客户端断线或 30 分钟请求超时静默关闭读取，不写 `stream_error`；只有非取消类 Redis/解码错误才发送该事件。
 
 ## 代码范围
 

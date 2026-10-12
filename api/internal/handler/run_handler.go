@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -183,7 +184,8 @@ func (h *RunHandler) Events(c *gin.Context) {
 		return
 	}
 	setSSEHeaders(c)
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 30*time.Minute)
+	// SSE 读取必须继承请求取消；客户端断线后 Redis 阻塞读取才能及时释放连接。
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Minute)
 	defer cancel()
 	startID := strings.TrimSpace(c.GetHeader("Last-Event-ID"))
 	if startID == "" {
@@ -192,6 +194,9 @@ func (h *RunHandler) Events(c *gin.Context) {
 	for {
 		events, err := h.events.Read(ctx, runID, startID)
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+				return
+			}
 			_ = writeSSEEvent(c, "stream_error", "", []byte(`{"message":"stream temporarily unavailable"}`))
 			return
 		}

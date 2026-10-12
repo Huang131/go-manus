@@ -32,6 +32,8 @@ SessionHandler -> RunApplicationService -> RunExecutor
 
 维护修复：启动恢复已补齐损坏 `waiting_input` 的收敛。真实 PostgreSQL 测试覆盖空快照、JSON 字段类型错误、修订号不一致、问题 ID 不一致、问题角色/Run 归属错误，以及重复恢复幂等和合法等待记录继续提交输入。损坏记录以 `invalid_waiting_input_snapshot` 中断并清空等待引用；恢复统计中的 `Interrupted` 含这类记录，`InvalidWaitingInput` 单独统计该子集。
 
+维护修复：Run SSE 阻塞读取重新继承 HTTP request context。客户端断线或 SSE 生命周期超时会及时取消 Redis 读取并静默结束；非取消类读取异常仍保留 `stream_error`。
+
 实施新阶段前，在 `api/` 重跑：
 
 ```bash
