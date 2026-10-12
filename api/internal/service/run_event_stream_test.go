@@ -69,3 +69,12 @@ func TestRedisRunEventStreamDoesNotInspectBoundsForInitialSubscription(t *testin
 	require.NoError(t, err)
 	require.Len(t, events, 1)
 }
+
+func TestRedisRunEventStreamRejectsInvalidCursor(t *testing.T) {
+	reader := NewRedisRunEventStream(&runEventStreamQueueStub{})
+
+	for _, cursor := range []string{"not-a-stream-id", "-1-0", "1--1"} {
+		_, err := reader.Read(context.Background(), "run-1", cursor)
+		require.ErrorIs(t, err, ErrInvalidRunEventCursor, cursor)
+	}
+}

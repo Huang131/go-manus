@@ -192,6 +192,10 @@ func (h *RunHandler) Events(c *gin.Context) {
 	if startID == "" {
 		startID = strings.TrimSpace(c.Query("last_event_id"))
 	}
+	if err := service.ValidateRunEventCursor(startID); err != nil {
+		response.FromError(c, apperr.BadRequest("invalid Last-Event-ID"))
+		return
+	}
 	for {
 		events, err := h.events.Read(ctx, runID, startID)
 		if err != nil {

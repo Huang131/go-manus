@@ -136,6 +136,19 @@ func TestRunHandlerEventsPassesLastEventIDAndWritesSSEID(t *testing.T) {
 	require.Contains(t, w.Body.String(), `"event_id":"1710000000000-0"`)
 }
 
+func TestRunHandlerEventsRejectsInvalidLastEventID(t *testing.T) {
+	router := setupRouter()
+	router.GET("/runs/:runId/events", NewRunHandler(&runHandlerAppStub{}, &runHandlerEventsStub{}).Events)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/runs/run-1/events", nil)
+	req.Header.Set("Last-Event-ID", "invalid")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusBadRequest, w.Code)
+	require.NotContains(t, w.Body.String(), "event: stream_error")
+}
+
 func TestRunHandlerEventsReportsExpiredCursor(t *testing.T) {
 	router := setupRouter()
 	router.GET("/runs/:runId/events", NewRunHandler(&runHandlerAppStub{}, &expiredRunHandlerEventsStub{}).Events)

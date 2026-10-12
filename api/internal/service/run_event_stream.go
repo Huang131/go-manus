@@ -22,6 +22,21 @@ type RunEventReader interface {
 // Redis 事件不是最终事实，客户端收到该错误后必须查询 Run 快照并按当前状态重新订阅。
 var ErrRunEventStreamExpired = errors.New("run event stream expired")
 
+// ErrInvalidRunEventCursor 表示 Last-Event-ID 不是合法的 Redis Stream ID。
+var ErrInvalidRunEventCursor = errors.New("invalid run event cursor")
+
+// ValidateRunEventCursor 校验 SSE 续读游标；空值表示初次订阅。
+func ValidateRunEventCursor(cursor string) error {
+	cursor = strings.TrimSpace(cursor)
+	if cursor == "" {
+		return nil
+	}
+	if _, _, ok := parseStreamID(cursor); !ok {
+		return ErrInvalidRunEventCursor
+	}
+	return nil
+}
+
 type redisRunEventStream struct {
 	queue mq.TaskMessageQueue
 }
@@ -38,7 +53,11 @@ func (s *redisRunEventStream) Read(ctx context.Context, runID, startID string) (
 	if runID == "" {
 		return nil, fmt.Errorf("run id is required")
 	}
-	hasCursor := strings.TrimSpace(startID) != ""
+	startID = strings.TrimSpace(startID)
+	hasCursor := startID != ""
+	if err := ValidateRunEventCursor(startID); err != nil {
+		return nil, err
+	}
 	if startID == "" {
 		startID = "0-0"
 	}
@@ -91,6 +110,9 @@ func parseStreamID(value string) (int64, int64, bool) {
 	}
 	sequence, err := strconv.ParseInt(parts[1], 10, 64)
 	if err != nil {
+		return 0, 0, false
+	}
+	if millis < 0 || sequence < 0 {
 		return 0, 0, false
 	}
 	return millis, sequence, true
