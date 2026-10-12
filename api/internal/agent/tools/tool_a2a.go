@@ -247,10 +247,3 @@ func (t *A2ATool) Cleanup() error {
 
 	return nil
 }
-
-// GetManager 获取 A2A 客户端管理器（用于测试）
-func (t *A2ATool) GetManager() *a2a.A2AClientManager {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-	return t.manager
-}

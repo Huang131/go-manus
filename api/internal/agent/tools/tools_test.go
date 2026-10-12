@@ -457,8 +457,13 @@ func TestA2ATool_InitializeSkipsDuplicateAgentNames(t *testing.T) {
 		t.Errorf("duplicate server hits = %d, want 0 (duplicate config should be skipped)", got)
 	}
 
-	if n := len(tool.GetManager().GetAgentCards()); n != 1 {
-		t.Errorf("GetAgentCards() count = %d, want 1", n)
+	result, err := tool.Invoke(context.Background(), map[string]interface{}{"action": A2AActionListAgents})
+	if err != nil {
+		t.Fatalf("list_agents after duplicate initialization: %v", err)
+	}
+	agents, ok := result.Data.(map[string]interface{})["agents"].([]map[string]interface{})
+	if !ok || len(agents) != 1 {
+		t.Fatalf("list_agents result = %#v, want one agent", result.Data)
 	}
 }
 

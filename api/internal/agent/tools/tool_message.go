@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"strings"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -157,9 +156,4 @@ func (t *MessageTool) invokeMessageAskUser(params map[string]interface{}) (*mode
 		"attachments":           attachments,
 		"suggest_user_takeover": suggestTakeover,
 	}), nil
-}
-
-// HasTool 检查是否包含指定工具
-func (t *MessageTool) HasTool(toolName string) bool {
-	return strings.HasPrefix(toolName, MessageFunctionPrefix)
 }
