@@ -168,7 +168,7 @@ func (s RunExecutionSnapshot) ValidateWaitingInput() error {
 	return nil
 }
 
-// Run 是一次用户执行请求的持久化领域事实。存储实现将在下一检查点接入。
+// Run 是一次用户执行请求的持久化领域事实。
 type Run struct {
 	ID                string                 `json:"id"`
 	SessionID         string                 `json:"session_id"`

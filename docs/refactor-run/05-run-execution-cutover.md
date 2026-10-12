@@ -40,7 +40,7 @@ Handler 不直接创建执行对象，Engine 和 RunExecutor 都不直接调用 
 
 本检查点的 adapter 负责把持久化的 `RunExecutionSnapshot` 重建为 `model.Plan`，灌回 `PlannerReActFlow` 并从原 `current_step_id` 继续执行；恢复时复用持久化消息重建运行期 memory，最新用户回答只作为当前 `TaskInput` 注入一次。行为测试已证明恢复不重新规划、已完成步骤摘要和当前步骤描述可用。
 
-4A 还要求：工具集合获取返回错误或 `nil` 时，已进入 `running` 的 Run 必须立即执行 `RequestCancel -> ReconcileCancelling`；终态持久化失败时保留控制句柄，允许后续 reconciliation 收敛，不能报告执行已完成。
+4A 还要求：工具集合获取返回错误或 `nil` 时，已进入 `running` 的 Run 必须立即执行 `RequestCancel -> ReconcileCancelling`；执行结果持久化失败时，Executor 必须在返回句柄错误前主动尝试收敛已有 `cancelling` 状态，并对仍活跃的 Run 执行 `RequestCancel -> ReconcileCancelling`，不能留下没有进程句柄的 active Run。
 
 当前实现与验证：
 
@@ -67,7 +67,7 @@ Handler 不直接创建执行对象，Engine 和 RunExecutor 都不直接调用 
 - 同一个等待输入 Run 通过 `SubmitInput` 继续执行；新的顶层用户请求创建新 Run。
 - Engine goroutine 退出前不得释放其 ToolSet。取消路径的顺序固定为：Engine goroutine 退出 -> `ToolSet.Release()` -> 条件更新 `cancelling -> cancelled` -> 注销控制句柄。控制句柄必须保持注册，直到 Run 已持久化为 `waiting_input` 或终态，不能先注销再写终态。
 - Cancel 已成功落库为 `cancelling`，但发现控制句柄不存在时，必须立即调用与启动恢复共用的 `ReconcileCancelling(runID)`；不能等待下一次进程重启。该收敛操作必须幂等，只有仍处于 `cancelling` 的 Run 才能迁移为 `cancelled`。
-- 终态持久化失败时不得假装取消完成或提前注销句柄。Run 保持 `cancelling`，记录结构化错误和 reconciliation 指标，并由当前进程的有限重试/后台 reconciliation 或下次启动恢复继续收敛。进程被强制终止时不承诺 defer 执行，数据库中的 `cancelling` 才是恢复依据。
+- 持久化失败时不得假装执行成功。Engine 已退出后控制句柄可以注销，但必须先尝试 `ReconcileCancelling`；若 Run 仍处于活跃状态，则执行 `RequestCancel -> ReconcileCancelling`。数据库暂时不可用时保留原始句柄错误，遗留 `cancelling` 由下次启动恢复收敛。
 - 进入 `waiting_input` 表示本次 Engine 调用已经退出并释放 ToolSet；用户回答后重新 Acquire 新 ToolSet，不能跨等待长期持有外部连接。
 - Cancel API 在 `cancelling` 落库并发出 cancel signal 后即可返回“取消处理中”；客户端通过 Run 查询或 SSE 观察最终 `cancelled`。服务关闭必须等待 Engine goroutine 收敛后再关闭依赖。
 
@@ -77,7 +77,7 @@ Handler 不直接创建执行对象，Engine 和 RunExecutor 都不直接调用 
 - Cancel 发生在 Engine 返回后、终态持久化前：`cancelling` 阻止迟到的成功/失败覆盖。
 - Cancel 落库后控制句柄已不存在：请求线程立即执行 `ReconcileCancelling`，最终收敛为 `cancelled`。
 - `cancelling -> cancelled` 条件更新影响零行：读取当前状态并按幂等结果处理，不覆盖其他终态。
-- 终态写入暂时失败：Run 保持 `cancelling`，句柄与资源状态可诊断，reconciliation 恢复后完成收敛。
+- 终态或 waiting_input 写入暂时失败：当前进程主动执行 reconciliation；数据库不可用时保留 active 状态，下一次启动恢复必须继续收敛。
 - 重复 Cancel：返回同一稳定语义，不重复发送取消信号、终态消息或终态事件。
 
 ## 可观测性

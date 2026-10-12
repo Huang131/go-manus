@@ -14,7 +14,7 @@
 | 5. API/UI/SSE | complete | `c1cefeb`、`7cdfafe`、本轮 Run API 测试对齐 | Run API、Last-Event-ID、Run 历史读取、UI 切换和旧 Session Chat/Stop 路由删除已完成；完整真实依赖 HTTP 验收已通过 |
 | 6. 遗留删除 | complete | `2bd649d`、`afcedfd`、`2e3fa27` | 6A、6B、6C 已完成；Run 切换后的 migration、存储与 HTTP 生命周期已在真实依赖环境验收 |
 
-阶段完成后的维护修复：`5afb9de`（移除 Settings 镜像）、`62cd6e6`（终态持久化失败时保留控制句柄）、`e3bed19`（批量加载历史消息）、`9e12be5`（完成事件流短期保留）、`22a7563`（同步 Graphify 0.10 工作流）。这些提交不改变 Run/Session 阶段状态，只收紧已完成架构的运行可靠性和维护入口。
+阶段完成后的维护修复：`5afb9de`（移除 Settings 镜像）、`e3bed19`（批量加载历史消息）、`9e12be5`（完成事件流短期保留）、`22a7563`（同步 Graphify 0.10 工作流）、`e464338`（执行结果持久化失败主动收敛）、`24dad2a`（启动恢复遗留 Run）、`40ac6c9`（活跃 Run 阻止 Session 删除）。这些提交不改变 Run/Session 阶段状态，只收紧已完成架构的运行可靠性和维护入口。
 
 允许状态：`pending`、`in_progress`、`complete`、`blocked`。
 
@@ -133,7 +133,7 @@ GOCACHE=/private/tmp/go-manus-gocache make test-integration  PASS
 - 一次客户端提交只使用一个幂等键；创建 Run 与初始消息共享该键，后续输入在 Run 内去重。
 - 阶段 4 不回填 `sessions.events` 或旧 Task 历史，从切换点开始写 Run/Message。
 - Run input 只接受 `waiting_input`；`cancelling`、其他活跃状态和终态分别返回稳定的 409 业务错误，重复幂等输入返回原结果。
-- 取消先条件写入 `cancelling`，再发出 cancel signal；Engine 退出并释放 ToolSet、持久化 `cancelled` 后才注销控制句柄。Cancel 发现句柄不存在或终态写入失败时，必须通过幂等 `ReconcileCancelling` 在当前进程或启动恢复中收敛。
+- 取消先条件写入 `cancelling`，再发出 cancel signal；Engine 退出并释放 ToolSet、持久化 `cancelled` 后才注销控制句柄。Cancel 发现句柄不存在或结果持久化失败时，当前进程先通过幂等 `ReconcileCancelling` 收敛；数据库不可用时由启动恢复继续处理。
 - `MaxPlanSteps` 不作为伪配置加入；必须先有真实消费逻辑。
 - 阶段 6A 证据确认：旧 Task/Redis stream 执行链没有生产消费者；RunExecutor/PlannerEngineAdapter 是当前唯一生产执行入口。AgentService 仅保留工具快照和运行时配置热更新。
 - 阶段 6B 决策：Session 不再暴露或持久化执行状态；会话列表需要运行图标时读取 `runs` 的 active 状态投影，禁止新增 Session 状态回写。
