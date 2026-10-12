@@ -65,6 +65,12 @@ type runHandlerEventsStub struct {
 	startID string
 }
 
+type expiredRunHandlerEventsStub struct{}
+
+func (*expiredRunHandlerEventsStub) Read(context.Context, string, string) ([]*model.Event, error) {
+	return nil, service.ErrRunEventStreamExpired
+}
+
 type blockingRunHandlerEventsStub struct {
 	started chan struct{}
 	release chan struct{}
@@ -128,6 +134,21 @@ func TestRunHandlerEventsPassesLastEventIDAndWritesSSEID(t *testing.T) {
 	require.Contains(t, w.Body.String(), "id: 1710000000000-0\n")
 	require.Contains(t, w.Body.String(), "event: done\n")
 	require.Contains(t, w.Body.String(), `"event_id":"1710000000000-0"`)
+}
+
+func TestRunHandlerEventsReportsExpiredCursor(t *testing.T) {
+	router := setupRouter()
+	router.GET("/runs/:runId/events", NewRunHandler(&runHandlerAppStub{}, &expiredRunHandlerEventsStub{}).Events)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/runs/run-1/events", nil)
+	req.Header.Set("Last-Event-ID", "100-0")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, w.Body.String(), "event: event_stream_expired\n")
+	require.Contains(t, w.Body.String(), `"code":"event_stream_expired"`)
+	require.Contains(t, w.Body.String(), `"run_id":"run-1"`)
 }
 
 // TestRunHandlerEventsStopsReadingOnDisconnect 守护 HTTP 请求取消向阻塞读取的传播，断线不报告服务故障。

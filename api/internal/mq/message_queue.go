@@ -22,6 +22,20 @@ type StreamMessage struct {
 	Data interface{}
 }
 
+// StreamBounds 描述 Redis Stream 当前保留窗口的首尾游标。
+// 空流以 Exists=false 表示；这与普通的 Size=0 查询不同，调用方可以据此判断游标是否已经过期。
+type StreamBounds struct {
+	Exists  bool
+	FirstID string
+	LastID  string
+}
+
+// StreamBoundsQueue 是消息队列的可选游标边界能力。
+// 保持为可选接口，避免把 Redis 专有的保留窗口语义强加给所有队列实现。
+type StreamBoundsQueue interface {
+	GetStreamBounds(ctx context.Context, streamName string) (StreamBounds, error)
+}
+
 // BatchMessageQueue 是可选的批量读取能力。
 // MessageQueue 保持最小接口，内存 mock 或其他实现可继续按单条读取工作。
 type BatchMessageQueue interface {

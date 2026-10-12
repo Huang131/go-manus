@@ -14,7 +14,7 @@
 | 5. API/UI/SSE | complete | `c1cefeb`、`7cdfafe`、本轮 Run API 测试对齐 | Run API、Last-Event-ID、Run 历史读取、UI 切换和旧 Session Chat/Stop 路由删除已完成；完整真实依赖 HTTP 验收已通过 |
 | 6. 遗留删除 | complete | `2bd649d`、`afcedfd`、`2e3fa27` | 6A、6B、6C 已完成；Run 切换后的 migration、存储与 HTTP 生命周期已在真实依赖环境验收 |
 
-阶段完成后的维护修复：`5afb9de`（移除 Settings 镜像）、`e3bed19`（批量加载历史消息）、`9e12be5`（完成事件流短期保留）、`22a7563`（同步 Graphify 0.10 工作流）、`e464338`（执行结果持久化失败主动收敛）、`24dad2a`（启动恢复遗留 Run）、`40ac6c9`（活跃 Run 阻止 Session 删除）。这些提交不改变 Run/Session 阶段状态，只收紧已完成架构的运行可靠性和维护入口。
+阶段完成后的维护修复：`5afb9de`（移除 Settings 镜像）、`e3bed19`（批量加载历史消息）、`9e12be5`（完成事件流短期保留）、`22a7563`（同步 Graphify 0.10 工作流）、`e464338`（执行结果持久化失败主动收敛）、`24dad2a`（启动恢复遗留 Run）、`40ac6c9`（活跃 Run 阻止 Session 删除）。这些提交不改变 Run/Session 阶段状态，只收紧已完成架构的运行可靠性和维护入口。当前 SSE 过期游标边界已由真实 Redis 组件测试和 HTTP 集成测试覆盖。
 
 允许状态：`pending`、`in_progress`、`complete`、`blocked`。
 
@@ -32,7 +32,7 @@ SessionHandler -> RunApplicationService -> RunExecutor
 
 维护修复：启动恢复已补齐损坏 `waiting_input` 的收敛。真实 PostgreSQL 测试覆盖空快照、JSON 字段类型错误、修订号不一致、问题 ID 不一致、空问题正文、问题角色/Run 归属错误，以及重复恢复幂等和合法等待记录继续提交输入。损坏记录以 `invalid_waiting_input_snapshot` 中断并清空等待引用；恢复统计中的 `Interrupted` 含这类记录，`InvalidWaitingInput` 单独统计该子集。
 
-维护修复：Run SSE 阻塞读取重新继承 HTTP request context。客户端断线或 SSE 生命周期超时会及时取消 Redis 读取并静默结束；非取消类读取异常仍保留 `stream_error`。
+维护修复：Run SSE 阻塞读取重新继承 HTTP request context。客户端断线或 SSE 生命周期超时会及时取消 Redis 读取并静默结束；非取消类读取异常仍保留 `stream_error`。Redis Stream 读取器现在检查携带 `Last-Event-ID` 的游标是否早于当前保留窗口；Stream 已删除或游标早于首条保留事件时发送 `event_stream_expired`，客户端必须读取 PostgreSQL Run 快照后再决定是否重新订阅。初次订阅不因尚未产生事件而误报过期。
 
 实施新阶段前，在 `api/` 重跑：
 

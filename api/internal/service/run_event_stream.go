@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/mq"
@@ -14,6 +17,10 @@ import (
 type RunEventReader interface {
 	Read(ctx context.Context, runID, startID string) ([]*model.Event, error)
 }
+
+// ErrRunEventStreamExpired 表示 Last-Event-ID 已早于 Redis 当前保留窗口。
+// Redis 事件不是最终事实，客户端收到该错误后必须查询 Run 快照并按当前状态重新订阅。
+var ErrRunEventStreamExpired = errors.New("run event stream expired")
 
 type redisRunEventStream struct {
 	queue mq.TaskMessageQueue
@@ -31,10 +38,22 @@ func (s *redisRunEventStream) Read(ctx context.Context, runID, startID string) (
 	if runID == "" {
 		return nil, fmt.Errorf("run id is required")
 	}
+	hasCursor := strings.TrimSpace(startID) != ""
 	if startID == "" {
 		startID = "0-0"
 	}
 	stream := RunEventStreamName(runID)
+	if hasCursor {
+		if boundsQueue, ok := s.queue.(mq.StreamBoundsQueue); ok {
+			bounds, err := boundsQueue.GetStreamBounds(ctx, stream)
+			if err != nil {
+				return nil, fmt.Errorf("inspect run event stream: %w", err)
+			}
+			if !bounds.Exists || streamIDLess(startID, bounds.FirstID) {
+				return nil, ErrRunEventStreamExpired
+			}
+		}
+	}
 	if batch, ok := s.queue.(mq.BatchMessageQueue); ok {
 		messages, err := batch.GetBlockingBatch(ctx, stream, startID, 100, mq.DefaultBlockTimeout)
 		if err != nil {
@@ -50,6 +69,31 @@ func (s *redisRunEventStream) Read(ctx context.Context, runID, startID string) (
 		return nil, nil
 	}
 	return decodeRunEvents([]mq.StreamMessage{{ID: id, Data: raw}})
+}
+
+func streamIDLess(left, right string) bool {
+	leftMillis, leftSequence, leftOK := parseStreamID(left)
+	rightMillis, rightSequence, rightOK := parseStreamID(right)
+	if !leftOK || !rightOK {
+		return false
+	}
+	return leftMillis < rightMillis || (leftMillis == rightMillis && leftSequence < rightSequence)
+}
+
+func parseStreamID(value string) (int64, int64, bool) {
+	parts := strings.SplitN(value, "-", 2)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	millis, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	sequence, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return 0, 0, false
+	}
+	return millis, sequence, true
 }
 
 func decodeRunEvents(messages []mq.StreamMessage) ([]*model.Event, error) {

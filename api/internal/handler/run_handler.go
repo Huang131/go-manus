@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -195,6 +196,11 @@ func (h *RunHandler) Events(c *gin.Context) {
 		events, err := h.events.Read(ctx, runID, startID)
 		if err != nil {
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+				return
+			}
+			if errors.Is(err, service.ErrRunEventStreamExpired) {
+				payload := []byte(fmt.Sprintf(`{"code":"event_stream_expired","run_id":%q}`, runID))
+				_ = writeSSEEvent(c, "event_stream_expired", "", payload)
 				return
 			}
 			_ = writeSSEEvent(c, "stream_error", "", []byte(`{"message":"stream temporarily unavailable"}`))

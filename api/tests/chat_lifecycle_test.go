@@ -337,6 +337,57 @@ func TestRunEventsEndpoint_LastEventIDResumesWithoutDuplicatesOrGaps(t *testing.
 	require.NoError(t, created.Handle.Wait(context.Background()))
 }
 
+// TestRunEventsEndpoint_ExpiredCursorReturnsRecoverySignal 验证 Redis 裁剪旧事件后，HTTP SSE 明确要求客户端读取 Run 快照。
+func TestRunEventsEndpoint_ExpiredCursorReturnsRecoverySignal(t *testing.T) {
+	fake := &blockingLLM{started: make(chan struct{}), returned: make(chan struct{})}
+	app := newChatTestApp(t, fake)
+
+	sessionID := createSessionWithServer(t, app.Engine)
+	defer CleanupSessionWithDB(t, app.Postgres, sessionID)
+	created, err := app.RunApplication.Create(context.Background(), service.CreateApplicationRunInput{
+		SessionID: sessionID, IdempotencyKey: "expired-cursor-run", Content: "验证过期事件游标",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, created.Handle)
+	select {
+	case <-fake.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("fake LLM did not start")
+	}
+
+	queue := mq.NewRedisStreamMessageQueue(app.Redis.Client)
+	oldID := appendRunEvent(t, queue, created.Run.ID, model.EventTypeTitle, map[string]any{"title": "old"})
+	keptID := appendRunEvent(t, queue, created.Run.ID, model.EventTypePlan, map[string]any{"plan": "kept"})
+	_, err = app.Redis.Client.XTrimMinID(context.Background(), service.RunEventStreamName(created.Run.ID), keptID).Result()
+	require.NoError(t, err)
+
+	server := httptest.NewServer(app.Engine)
+	defer server.Close()
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/api/runs/"+created.Run.ID+"/events", nil)
+	require.NoError(t, err)
+	req.Header.Set("Last-Event-ID", oldID)
+	resp, err := server.Client().Do(req)
+	require.NoError(t, err)
+	body, readErr := io.ReadAll(resp.Body)
+	closeErr := resp.Body.Close()
+	require.NoError(t, readErr)
+	require.NoError(t, closeErr)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	require.Contains(t, string(body), "event: event_stream_expired\n")
+	require.Contains(t, string(body), `"code":"event_stream_expired"`)
+	require.Contains(t, string(body), `"run_id":"`+created.Run.ID+`"`)
+	require.NotContains(t, string(body), "event: stream_error\n")
+
+	_, err = app.RunApplication.Cancel(context.Background(), created.Run.ID)
+	require.NoError(t, err)
+	select {
+	case <-fake.returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("fake LLM did not stop after Run cancellation")
+	}
+	require.NoError(t, created.Handle.Wait(context.Background()))
+}
+
 func parseStreamID(t *testing.T, id string) (int64, int64) {
 	t.Helper()
 	parts := strings.SplitN(id, "-", 2)

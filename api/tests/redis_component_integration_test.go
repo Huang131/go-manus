@@ -71,6 +71,28 @@ func TestRedisComponent_BatchReadUsesExclusiveCursor(t *testing.T) {
 	assert.Equal(t, float64(2), second[0].Data.(map[string]any)["index"])
 }
 
+func TestRedisComponent_StreamBoundsTracksRetentionWindow(t *testing.T) {
+	queue, stream := testRedisQueue(t)
+	ctx, cancel := NewTestContext()
+	defer cancel()
+
+	firstID, err := queue.Put(ctx, stream, map[string]any{"index": 1})
+	require.NoError(t, err)
+	lastID, err := queue.Put(ctx, stream, map[string]any{"index": 2})
+	require.NoError(t, err)
+
+	client := testApp.Redis.Client
+	_, err = client.XTrimMinID(ctx, stream, lastID).Result()
+	require.NoError(t, err)
+
+	bounds, err := queue.GetStreamBounds(ctx, stream)
+	require.NoError(t, err)
+	assert.True(t, bounds.Exists)
+	assert.Equal(t, lastID, bounds.FirstID)
+	assert.Equal(t, lastID, bounds.LastID)
+	assert.NotEqual(t, firstID, bounds.FirstID)
+}
+
 func TestRedisComponent_GetBlockingHonorsCancellation(t *testing.T) {
 	queue, stream := testRedisQueue(t)
 	ctx, cancel := context.WithCancel(context.Background())

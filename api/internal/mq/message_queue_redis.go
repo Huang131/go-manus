@@ -239,3 +239,26 @@ func (q *RedisStreamMessageQueue) Size(ctx context.Context, streamName string) (
 	}
 	return size, nil
 }
+
+// GetStreamBounds 返回 Stream 当前保留窗口的首尾游标。
+// XRange 在 key 不存在时返回空结果，因此不存在与已过期的判断由上层结合 Last-Event-ID 完成。
+func (q *RedisStreamMessageQueue) GetStreamBounds(ctx context.Context, streamName string) (StreamBounds, error) {
+	if q == nil || q.client == nil {
+		return StreamBounds{}, fmt.Errorf("message queue client is nil")
+	}
+	first, err := q.client.XRangeN(ctx, streamName, "-", "+", 1).Result()
+	if err != nil {
+		return StreamBounds{}, fmt.Errorf("get stream first message: %w", err)
+	}
+	if len(first) == 0 {
+		return StreamBounds{}, nil
+	}
+	last, err := q.client.XRevRangeN(ctx, streamName, "+", "-", 1).Result()
+	if err != nil {
+		return StreamBounds{}, fmt.Errorf("get stream last message: %w", err)
+	}
+	if len(last) == 0 {
+		return StreamBounds{}, nil
+	}
+	return StreamBounds{Exists: true, FirstID: first[0].ID, LastID: last[0].ID}, nil
+}
