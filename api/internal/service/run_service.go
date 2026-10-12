@@ -260,6 +260,9 @@ func (s *defaultRunService) EnterWaitingInput(ctx context.Context, runID string,
 		question.RunID != run.ID || question.SessionID != run.SessionID || question.Role != model.RoleAssistant {
 		return nil, apperr.BadRequest("waiting question must belong to this run and match the snapshot")
 	}
+	if strings.TrimSpace(question.Content) == "" {
+		return nil, apperr.BadRequest("waiting question content is required")
+	}
 	changed, err := s.store.EnterWaitingInput(ctx, runID, run.SnapshotRevision, snapshot, question)
 	if err != nil {
 		return nil, normalizeRunError(err)

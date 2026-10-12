@@ -80,3 +80,19 @@ func TestBuildResumeMessagesRejectsBrokenWaitingPair(t *testing.T) {
 		t.Fatal("BuildResumeMessages() error = nil, want broken reply-to pair error")
 	}
 }
+
+func TestBuildResumeMessagesRejectsBlankWaitingQuestion(t *testing.T) {
+	snapshot := model.RunExecutionSnapshot{
+		SnapshotRevision: 1, PlanID: "plan-1", CurrentStepID: "step-1",
+		Steps:             []model.RunStepSnapshot{{ID: "step-1", Description: "等待确认", Status: model.RunStepStatusRunning}},
+		WaitingCheckpoint: &model.WaitingCheckpoint{QuestionMessageID: "question-1", StepID: "step-1", ResumeMode: model.ResumeModeContinueStep},
+	}
+	_, err := BuildResumeMessages(
+		model.RunMessage{Role: model.RoleUser, Content: "任务"}, snapshot,
+		model.RunMessage{ID: "question-1", Role: model.RoleAssistant, Content: "   "},
+		model.RunMessage{Role: model.RoleUser, ReplyToMessageID: "question-1", Content: "确认"},
+	)
+	if err == nil {
+		t.Fatal("BuildResumeMessages() error = nil, want blank waiting question error")
+	}
+}

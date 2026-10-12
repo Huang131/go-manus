@@ -50,7 +50,7 @@ cancelling -> cancelled
 ## 状态与重启语义
 
 - 服务重启时，`pending`、`running` 没有持久化队列可接管，统一条件迁移为 `interrupted`。
-- `waiting_input` 不持有执行 goroutine 或旧 ToolSet。启动恢复在事务内锁定等待记录，验证快照结构、快照与行的修订号、检查点问题 ID，以及问题消息的 Run/Session 归属和助手角色。合法记录保持可恢复；非法记录条件迁移为 `interrupted`，清空 `waiting_message_id`，记录 `invalid_waiting_input_snapshot`。原快照与消息保留用于排查。
+- `waiting_input` 不持有执行 goroutine 或旧 ToolSet。启动恢复在事务内锁定等待记录，验证快照结构、快照与行的修订号、检查点问题 ID，以及问题消息的 Run/Session 归属、助手角色和非空正文。合法记录保持可恢复；非法记录条件迁移为 `interrupted`，清空 `waiting_message_id`，记录 `invalid_waiting_input_snapshot`。原快照与消息保留用于排查。
 - 同一 Session 最多存在一个 `pending`、`running`、`waiting_input` 或 `cancelling` Run。
 - 取消只允许从前三个可取消状态进入 `cancelling`；该状态阻止新的输入和 Engine 终态写入。执行 goroutine 退出并释放 `ToolSet` 后才进入 `cancelled`。
 - 服务重启时不存在存活 goroutine，遗留 `cancelling` 可直接条件收敛为 `cancelled`。

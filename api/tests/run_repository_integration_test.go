@@ -250,6 +250,7 @@ func TestRunRepo_RecoverWaitingInput(t *testing.T) {
 		{name: "revision mismatch", sql: `UPDATE runs SET snapshot_revision = 2 WHERE id = $1`},
 		{name: "checkpoint question mismatch", sql: `UPDATE runs SET execution_snapshot = jsonb_set(execution_snapshot, '{waiting_checkpoint,question_message_id}', '"other-question"') WHERE id = $1`},
 		{name: "question wrong role", sql: `UPDATE messages SET role = 'user' WHERE id = (SELECT waiting_message_id FROM runs WHERE id = $1)`},
+		{name: "question blank content", sql: `UPDATE messages SET content = '   ' WHERE id = (SELECT waiting_message_id FROM runs WHERE id = $1)`},
 		{name: "question wrong run", sql: `UPDATE messages SET run_id = $2 WHERE id = (SELECT waiting_message_id FROM runs WHERE id = $1)`, args: []any{validRun.ID}},
 		{name: "question wrong session", sql: `UPDATE messages SET session_id = $2 WHERE id = (SELECT waiting_message_id FROM runs WHERE id = $1)`, args: []any{validRun.SessionID}},
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/Huang131/go-manus/api/internal/infrastructure"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -463,6 +464,7 @@ type persistedWaitingRun struct {
 	messageSessionID sql.NullString
 	messageRunID     sql.NullString
 	messageRole      sql.NullString
+	messageContent   sql.NullString
 }
 
 // recoverInvalidWaitingRuns 将无法重建执行上下文的 waiting_input Run 收敛为 interrupted。
@@ -470,7 +472,7 @@ type persistedWaitingRun struct {
 func (r *PostgresRunRepository) recoverInvalidWaitingRuns(ctx context.Context) (int, error) {
 	rows, err := r.queryer().Query(ctx, `
 		SELECT r.id, r.session_id, r.snapshot_revision, r.execution_snapshot, r.waiting_message_id,
-		       m.id, m.session_id, m.run_id, m.role
+		       m.id, m.session_id, m.run_id, m.role, m.content
 		FROM runs r
 		LEFT JOIN messages m ON m.id = r.waiting_message_id
 		WHERE r.status = 'waiting_input'
@@ -486,7 +488,7 @@ func (r *PostgresRunRepository) recoverInvalidWaitingRuns(ctx context.Context) (
 		var run persistedWaitingRun
 		if err := rows.Scan(
 			&run.id, &run.sessionID, &run.snapshotRevision, &run.snapshotJSON, &run.waitingMessageID,
-			&run.messageID, &run.messageSessionID, &run.messageRunID, &run.messageRole,
+			&run.messageID, &run.messageSessionID, &run.messageRunID, &run.messageRole, &run.messageContent,
 		); err != nil {
 			return 0, err
 		}
@@ -546,6 +548,9 @@ func validatePersistedWaitingRun(run persistedWaitingRun) error {
 	if !run.messageRole.Valid || model.MessageRole(run.messageRole.String) != model.RoleAssistant {
 		return fmt.Errorf("waiting question must be an assistant message")
 	}
+	if !run.messageContent.Valid || strings.TrimSpace(run.messageContent.String) == "" {
+		return fmt.Errorf("waiting question content is required")
+	}
 	return nil
 }
 
@@ -562,6 +567,9 @@ func (r *PostgresRunRepository) EnterWaitingInput(ctx context.Context, runID str
 	}
 	if question.RunID != runID || question.Role != model.RoleAssistant || question.ID != snapshot.WaitingCheckpoint.QuestionMessageID {
 		return false, fmt.Errorf("waiting question must be the snapshot assistant question for this run")
+	}
+	if strings.TrimSpace(question.Content) == "" {
+		return false, fmt.Errorf("waiting question content is required")
 	}
 
 	changed := false

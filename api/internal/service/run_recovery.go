@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
@@ -22,6 +23,9 @@ func BuildResumeMessages(initialInput model.RunMessage, snapshot model.RunExecut
 	}
 	if question.Role != model.RoleAssistant {
 		return nil, fmt.Errorf("waiting question role must be assistant")
+	}
+	if strings.TrimSpace(question.Content) == "" {
+		return nil, fmt.Errorf("waiting question content is required")
 	}
 	if answer.Role != model.RoleUser {
 		return nil, fmt.Errorf("waiting answer role must be user")
