@@ -189,6 +189,19 @@ type executorEventPublisherStub struct{}
 
 func (executorEventPublisherStub) Publish(context.Context, string, model.BaseEvent) error { return nil }
 
+type executorRetentionPublisherStub struct {
+	marked chan string
+}
+
+func (p *executorRetentionPublisherStub) Publish(context.Context, string, model.BaseEvent) error {
+	return nil
+}
+
+func (p *executorRetentionPublisherStub) MarkCompleted(_ context.Context, runID string) error {
+	p.marked <- runID
+	return nil
+}
+
 func TestRunExecutorPassesEventPublisherToEngine(t *testing.T) {
 	engine := &executorEngineStub{result: RunExecutionResult{Kind: RunExecutionSucceeded}}
 	publisher := executorEventPublisherStub{}
@@ -206,6 +219,38 @@ func TestRunExecutorPassesEventPublisherToEngine(t *testing.T) {
 	waitExecutorDone(t, handle)
 	if engine.seen.EventPublisher == nil {
 		t.Fatal("engine input EventPublisher = nil")
+	}
+}
+
+func TestRunExecutorMarksOnlyTerminalStreamsCompleted(t *testing.T) {
+	tests := []struct {
+		name       string
+		result     RunExecutionResult
+		wantMarked bool
+	}{
+		{name: "terminal", result: RunExecutionResult{Kind: RunExecutionSucceeded}, wantMarked: true},
+		{name: "waiting input", result: RunExecutionResult{Kind: RunExecutionWaitingInput, Question: &model.RunMessage{ID: "question-1", RunID: "run-1", SessionID: "session-1", Role: model.RoleAssistant, Content: "confirm"}, Snapshot: model.RunExecutionSnapshot{SnapshotRevision: 1, PlanID: "plan-1", CurrentStepID: "step-1", Steps: []model.RunStepSnapshot{{ID: "step-1", Status: model.RunStepStatusRunning}}, WaitingCheckpoint: &model.WaitingCheckpoint{QuestionMessageID: "question-1", StepID: "step-1", ResumeMode: model.ResumeModeContinueStep}}}, wantMarked: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			publisher := &executorRetentionPublisherStub{marked: make(chan string, 1)}
+			executor := NewRunExecutorWithEventPublisher(&executorStoreStub{}, &executorToolProviderStub{set: &executorToolSetStub{released: make(chan struct{})}}, &executorEngineStub{result: tt.result}, publisher)
+			handle, err := executor.Start(context.Background(), "run-1", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			waitExecutorDone(t, handle)
+			select {
+			case runID := <-publisher.marked:
+				if !tt.wantMarked || runID != "run-1" {
+					t.Fatalf("marked run id = %q, want marked=%v", runID, tt.wantMarked)
+				}
+			default:
+				if tt.wantMarked {
+					t.Fatal("terminal stream was not marked completed")
+				}
+			}
+		})
 	}
 }
 

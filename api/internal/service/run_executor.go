@@ -12,6 +12,7 @@ import (
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/settings"
+	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
 // RunExecutionKind 是 Engine adapter 返回给 RunExecutor 的有限结果集合。
@@ -43,6 +44,10 @@ type RunEventPublisher interface {
 	Publish(ctx context.Context, runID string, event model.BaseEvent) error
 }
 
+type completedRunEventMarker interface {
+	MarkCompleted(ctx context.Context, runID string) error
+}
+
 // RunExecutionResult 是 Engine adapter 返回的领域结果，不包含持久化副作用。
 type RunExecutionResult struct {
 	Kind     RunExecutionKind
@@ -67,19 +72,6 @@ type RunToolSet interface {
 // RunToolProvider 为 RunExecutor 提供冻结的工具集合。
 type RunToolProvider interface {
 	Acquire(settings.AgentSettings) (RunToolSet, error)
-}
-
-// ToolProviderAdapter 将已有 ToolProvider 适配到 RunExecutor 边界。
-// 该适配器只在生产切换检查点接入，4A 本身不改变现有 Chat 路径。
-type ToolProviderAdapter struct {
-	Provider *toolspkg.ToolProvider
-}
-
-func (a ToolProviderAdapter) Acquire(agentSettings settings.AgentSettings) (RunToolSet, error) {
-	if a.Provider == nil {
-		return nil, errors.New("tool provider is nil")
-	}
-	return a.Provider.Acquire(agentSettings.MaxSearchResults), nil
 }
 
 // AgentToolProviderAdapter 将 AgentService 暴露的窄工具快照能力适配到 Run 边界。
@@ -233,10 +225,30 @@ func (e *RunExecutor) execute(ctx context.Context, cancel context.CancelFunc, ru
 
 	// 取消只停止 Engine；状态收尾必须继续使用可用的持久化上下文。
 	persistErr := e.persistResult(context.WithoutCancel(ctx), run, result, err)
+	if persistErr == nil && e.publisher != nil && isTerminalExecution(result, err) {
+		if marker, ok := e.publisher.(completedRunEventMarker); ok {
+			if markErr := marker.MarkCompleted(context.WithoutCancel(ctx), run.ID); markErr != nil {
+				// 事件流只是实时旁路，TTL 失败不能回滚已提交的 Run 终态。
+				logger.Warn("完成事件流保留时间设置失败", logger.String("run_id", run.ID), logger.Err(markErr))
+			}
+		}
+	}
 	// Engine 和 ToolSet 已退出，控制句柄不能因持久化失败滞留在进程内。
 	// 先删除再通知 Wait，保证后续 Cancel 立即走数据库 reconciliation。
 	e.removeControl(run.ID, control)
 	control.handle.setResult(persistErr)
+}
+
+func isTerminalExecution(result RunExecutionResult, engineErr error) bool {
+	if engineErr != nil {
+		return true
+	}
+	switch result.Kind {
+	case RunExecutionSucceeded, RunExecutionFailed, RunExecutionCancelled:
+		return true
+	default:
+		return false
+	}
 }
 
 func (e *RunExecutor) executeEngine(ctx context.Context, input RunExecutionInput) (result RunExecutionResult, err error) {

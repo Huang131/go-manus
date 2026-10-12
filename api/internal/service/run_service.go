@@ -23,6 +23,7 @@ type runStore interface {
 	GetActiveBySessionID(ctx context.Context, sessionID string) (*model.Run, error)
 	ListBySessionID(ctx context.Context, sessionID string, limit, offset int) ([]*model.Run, int, error)
 	ListMessages(ctx context.Context, runID string) ([]*model.RunMessage, error)
+	ListMessagesByRunIDs(ctx context.Context, runIDs []string) (map[string][]*model.RunMessage, error)
 	TransitionStatus(ctx context.Context, id string, from []model.RunStatus, to model.RunStatus) (bool, error)
 	EnterWaitingInput(ctx context.Context, runID string, expectedRevision int, snapshot model.RunExecutionSnapshot, question *model.RunMessage) (bool, error)
 	ResumeWaitingInput(ctx context.Context, runID string, expectedRevision int, answer *model.RunMessage) (bool, error)
@@ -38,6 +39,7 @@ type RunService interface {
 	GetActiveBySessionID(ctx context.Context, sessionID string) (*model.Run, error)
 	ListBySessionID(ctx context.Context, sessionID string, limit, offset int) ([]*model.Run, int, error)
 	ListMessages(ctx context.Context, runID string) ([]*model.RunMessage, error)
+	ListMessagesByRunIDs(ctx context.Context, runIDs []string) (map[string][]*model.RunMessage, error)
 	Start(ctx context.Context, id string) (*model.Run, error)
 	EnterWaitingInput(ctx context.Context, runID string, snapshot model.RunExecutionSnapshot, question *model.RunMessage) (*model.Run, error)
 	SubmitInput(ctx context.Context, runID string, input SubmitInputRequest) (*RunResume, error)
@@ -191,6 +193,18 @@ func (s *defaultRunService) ListMessages(ctx context.Context, runID string) ([]*
 		return nil, apperr.BadRequest("run id is required")
 	}
 	messages, err := s.store.ListMessages(ctx, runID)
+	if err != nil {
+		return nil, normalizeRunError(err)
+	}
+	return messages, nil
+}
+
+// ListMessagesByRunIDs 批量读取历史消息，供应用层组装分页视图。
+func (s *defaultRunService) ListMessagesByRunIDs(ctx context.Context, runIDs []string) (map[string][]*model.RunMessage, error) {
+	if len(runIDs) == 0 {
+		return map[string][]*model.RunMessage{}, nil
+	}
+	messages, err := s.store.ListMessagesByRunIDs(ctx, runIDs)
 	if err != nil {
 		return nil, normalizeRunError(err)
 	}

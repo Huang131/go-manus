@@ -54,3 +54,18 @@ func (p *RedisRunEventPublisher) Publish(ctx context.Context, runID string, even
 	}
 	return nil
 }
+
+// MarkCompleted 缩短终态 Run 的事件流保留时间，保留断线续读窗口。
+// waiting_input 不调用此方法，避免用户停留期间事件过早过期。
+func (p *RedisRunEventPublisher) MarkCompleted(ctx context.Context, runID string) error {
+	if p == nil || p.queue == nil {
+		return errors.New("run event publisher queue is nil")
+	}
+	if strings.TrimSpace(runID) == "" {
+		return errors.New("run event publisher run id is empty")
+	}
+	if err := p.queue.SetRetention(ctx, RunEventStreamName(runID), mq.CompletedStreamRetention()); err != nil {
+		return fmt.Errorf("mark completed run event stream: %w", err)
+	}
+	return nil
+}
