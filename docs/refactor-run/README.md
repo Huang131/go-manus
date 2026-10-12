@@ -2,7 +2,7 @@
 
 本目录记录 Run/Session 重构的实施决策与完成依据。当前生产语义是 `Session -> RunApplicationService -> RunExecutor -> PlannerEngineAdapter`：Session 只保存会话元数据，Run/Message 是执行事实来源，Redis Stream 只承担 Run 的短期实时事件与 SSE 续读。
 
-阶段 1–6 均已完成。剩余工作不是继续扩展 Run 架构，而是在可连接 PostgreSQL、Redis 和 MinIO 的环境执行真实依赖集成验收；详见 [STATUS.md](./STATUS.md)。
+阶段 1–6 均已完成，且已在独立 PostgreSQL、Redis、MinIO 环境完成完整集成验收。后续维护应遵循现有 Run 契约，不再恢复旧 Session Chat/Stop 或 Task 执行链；详见 [STATUS.md](./STATUS.md)。
 
 事实基线见 [00-current-review-2026-10.md](./00-current-review-2026-10.md)，实施状态见 [STATUS.md](./STATUS.md)。`docs/重构.md` 只作为历史提案，不作为实施依据。
 

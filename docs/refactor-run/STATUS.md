@@ -11,8 +11,8 @@
 | 2. Engine 与 Context | complete | `4650cc4`、`aba7f43`、`8fd0fa6` | Outcome、ContextPolicy 与 MCP 动态调用契约已完成 |
 | 3. Run 领域与存储 | complete | `a8de838`、`f0ada6a`、`6055590`、`cb50565` | 3A 领域、3B Repository/migration、3C 纯 RunService 已完成；生产接线由阶段 4 完成 |
 | 4. 执行生产切换 | complete | `e281520`、`bb171f6`、`2749c5a` | 4A 生命周期、waiting_input 恢复、4B 应用编排和 Bootstrap 接线已完成；Run API 是执行入口，生产执行不再进入 Task 链 |
-| 5. API/UI/SSE | complete | `c1cefeb`、`7cdfafe`、本轮旧路由删除 | Run API、Last-Event-ID、Run 历史读取、UI 切换和旧 Session Chat/Stop 路由删除已完成；真实依赖 HTTP 验收按环境执行 |
-| 6. 遗留删除 | complete | `2bd649d`、`afcedfd`、`2e3fa27` | 6A、6B、6C 已完成；后续只需在真实依赖环境验收迁移 |
+| 5. API/UI/SSE | complete | `c1cefeb`、`7cdfafe`、本轮 Run API 测试对齐 | Run API、Last-Event-ID、Run 历史读取、UI 切换和旧 Session Chat/Stop 路由删除已完成；完整真实依赖 HTTP 验收已通过 |
+| 6. 遗留删除 | complete | `2bd649d`、`afcedfd`、`2e3fa27` | 6A、6B、6C 已完成；Run 切换后的 migration、存储与 HTTP 生命周期已在真实依赖环境验收 |
 
 允许状态：`pending`、`in_progress`、`complete`、`blocked`。
 
@@ -51,7 +51,7 @@ npm run build                                                 PASS
 npm run lint                                                  PASS（仅保留既有 warning）
 ```
 
-当前环境最新验证：`go test ./... -count=1` 全部通过。此前受限环境曾拒绝部分回环端口测试，旧记录不再作为当前门禁结论；真实 PostgreSQL/Redis/MinIO 组件验收仍需在对应依赖环境执行。
+当前环境最近一次真实依赖验收：`GOCACHE=/private/tmp/go-manus-gocache make test-integration` 通过。该门禁会独立启动 PostgreSQL、Redis、MinIO，执行 migration 与 `go test -tags=integration ./tests/...`，最后清理容器、网络和数据卷。
 
 ## 历史验证：检查点 4A RunExecutor 生命周期与 Engine adapter
 
@@ -71,7 +71,7 @@ go test -tags=integration ./tests -run '^TestRunRepo_FinishTerminal' -count=1
 
 行为契约：RunExecutor 启动后冻结 Settings、消息和 ToolSet；Engine 退出后才释放 ToolSet，再提交 waiting 或终态。工具获取失败、`nil` ToolSet、Engine panic、取消无句柄和终态持久化失败均有测试。Repository 终态、执行快照和最终助手消息使用同一事务，迟到终态受条件更新拒绝。Planner adapter 已能从快照恢复计划和当前步骤，恢复时重建持久化上下文且不重新规划，最新回答只注入一次。
 
-边界：Planner adapter 已能把持久化 `RunExecutionSnapshot` 重建为 Plan，恢复 Flow 并继续原步骤；恢复测试覆盖不重新规划、步骤摘要和用户回答单次注入。4B 已完成生产接线，仍需在可用 PostgreSQL/Redis 环境运行真实 HTTP 生命周期和取消竞争验收。
+边界：Planner adapter 已能把持久化 `RunExecutionSnapshot` 重建为 Plan，恢复 Flow 并继续原步骤；恢复测试覆盖不重新规划、步骤摘要和用户回答单次注入。4B 已完成生产接线；Run 创建、取消、SSE 顺序及断线续读已在真实 PostgreSQL/Redis/MinIO 环境验收。
 
 ## 检查点
 
@@ -90,7 +90,7 @@ go test -tags=integration ./tests -run '^TestRunRepo_FinishTerminal' -count=1
 | 4B 应用编排边界与依赖装配 | complete | `e281520 feat(run): add application orchestration boundary` 及 `bb171f6` Bootstrap 装配 |
 | 4B Run API/SSE 入口 | complete | `c1cefeb feat(api): expose run lifecycle and event APIs` |
 | 4B 唯一后端生产切换 | complete | `2749c5a` 及后续 Run API/旧路由删除提交；旧 Task 读取路径已移除 |
-| 5A Run API/SSE | complete | Run Handler、Run SSE 和 Last-Event-ID 契约测试已补；真实依赖测试待在 component 环境执行 |
+| 5A Run API/SSE | complete | Run Handler、Run SSE 和 Last-Event-ID 契约测试已补；完整 `make test-integration` 已验证真实依赖环境下的创建、取消、事件顺序和断线续读 |
 | 5B UI 切换 | complete | 本轮 `refactor(ui): consume run lifecycle`：UI 的创建、事件流、等待输入和取消均走 Run API；补充历史 Run/Message 读取 |
 | 5C 删除旧路由 | complete | 本轮 `refactor(api): remove legacy session execution routes`：删除 Session Chat/Stop handler、路由、DTO 和 UI client；Session Delete 保留取消活跃 Run 的资源清理 |
 | 6A 删除 Task 基础设施 | complete | `2bd649d` | 已删除 `RedisStreamTask`、旧 `AgentTaskRunner`、默认 Task registry、Task 专用测试及 AgentService 旧 Chat/Stop/事件入口 |
@@ -107,6 +107,18 @@ go test -tags=integration ./tests -run '^TestRunRepo_FinishTerminal' -count=1
 | 所有生产执行只写 Run/Message，取消收敛后 ToolSet 必然释放 | 4 |
 | Run API、Last-Event-ID、UI 只消费 Run 语义 | 5 |
 | 旧 Task、Session 执行字段和旧路由物理删除 | 6 |
+
+## 最近完成：Run API HTTP 生命周期真实依赖验收
+
+本轮修正 Gin 同一路由层级中 `:id` 与 `:sessionId` 的通配符冲突，Session 子资源统一使用 `:id`。旧 Chat/Stop 生命周期测试已迁移为 Run API：创建 Run 后通过 Run SSE 读取事件，取消直接调用 Run Cancel，断线续读使用 `Last-Event-ID` 独占游标。
+
+验证结果：
+
+```text
+GOCACHE=/private/tmp/go-manus-gocache make test-integration  PASS
+```
+
+该门禁在独立 PostgreSQL、Redis、MinIO 环境执行全部 `integration` 测试；其中 Run 生命周期测试覆盖成功事件顺序、SSE 断线续读无重复/无缺口，以及取消从 `cancelling` 收敛到 `cancelled`。
 
 ## 决策记录
 
