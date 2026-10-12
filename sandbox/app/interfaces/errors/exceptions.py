@@ -4,6 +4,18 @@ from typing import Any
 from fastapi import status
 
 
+def log_level_for(status_code: int, expected: bool = False) -> int:
+    """按状态码与"是否预期失败"决定日志级别，异常与 handler 共用同一规则。
+
+    4xx 属预期业务失败（如 wait-process 轮询超时被高频触发），
+    以及显式标记 expected 的异常（如 503 繁忙背压）降为 WARNING，
+    避免 api 侧 1.5s 一次的 shell 输出轮询刷出 ERROR 日志洪水。
+    """
+    if 400 <= status_code < 500 or expected:
+        return logging.WARNING
+    return logging.ERROR
+
+
 class AppException(Exception):
     """应用基础异常。
 
@@ -28,15 +40,8 @@ class AppException(Exception):
 
     @property
     def log_level(self) -> int:
-        """日志级别由异常自身语义决定，handler 只负责按此级别出口。
-
-        4xx 属预期业务失败（如 wait-process 轮询超时被高频触发），
-        以及显式标记 expected 的异常（如 503 繁忙背压）降为 WARNING，
-        避免 api 侧 1.5s 一次的 shell 输出轮询刷出 ERROR 日志洪水。
-        """
-        if 400 <= self.status_code < 500 or self.expected:
-            return logging.WARNING
-        return logging.ERROR
+        """日志级别由异常自身语义决定，handler 只负责按此级别出口。"""
+        return log_level_for(self.status_code, self.expected)
 
 
 class BusyException(AppException):
