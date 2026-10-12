@@ -18,9 +18,9 @@
 ## 已知限制
 
 - Planner 依赖模型结构化输出；模型不遵守 JSON 契约时应返回明确错误并保留可诊断信息。
-- Run/Session 重构仍处于方案阶段；当前生产语义仍是 Session/RedisStreamTask。
+- Run/Session 重构的核心生产链路已接入：Run/Message 是持久化事实，RunExecutor 负责 Engine 生命周期，Session 仅保留会话容器语义。后续只继续补充恢复、观测和边界测试，不再按旧 Session/RedisStreamTask 方案扩展新功能。
 - 历史 review 中的性能数字、接口示例和 TODO 不代表当前实现，修改前必须以代码和测试为准。
-- 仓库不再提交 Graphify 图谱快照；clone 后需在仓库根目录执行一次 `graphify update .` 才能使用图谱查询（见 `docs/CODE_INTELLIGENCE.md`）。
+- 仓库不再提交 Graphify 图谱快照；clone 后需在仓库根目录执行一次 `graphify update --no-description .` 才能使用图谱查询（见 `docs/CODE_INTELLIGENCE.md`）。当前 Graphify CLI 按 0.10.1 验证。
 
 ## 已修复问题
 

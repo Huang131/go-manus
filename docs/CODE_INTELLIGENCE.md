@@ -77,9 +77,16 @@ npx gitnexus analyze
 
 ```bash
 graphify --help
+graphify --version  # 当前项目按 0.10.1 验证
 ```
 
-如果未安装，按照 Graphify 官方安装方式安装。项目不把 Graphify 状态目录（`.graphify/`）或任何图谱产物提交到仓库。
+如果要让 Codex 使用项目级 Graphify skill，在仓库根目录执行：
+
+```bash
+graphify install --project --platform codex
+```
+
+该命令会更新 `.agents/skills/graphify/`、`AGENTS.md` 和 `.codex/hooks.json`。这些是团队共享的开发规则，可以提交；项目不提交 Graphify 状态目录（`.graphify/`）或任何图谱产物。
 
 ## Clone 后的首次使用
 
@@ -87,14 +94,14 @@ graphify --help
 
 ```bash
 # 生成 Graphify 知识图谱（写入本机 .graphify/）
-graphify update .
+graphify update --no-description .
 
 # 创建本机 GitNexus 索引
 npx gitnexus analyze
 npx gitnexus status
 ```
 
-生成后即可用 `graphify query` / `path` / `explain` 查询；需要 HTML 视图时执行 `graphify export html --out .graphify/graph.html`。没有配置 LLM API key 时，`graphify update .` 会跳过节点描述生成，可加 `--no-description` 显式静默该提示。
+生成后即可用 `graphify query` / `path` / `explain` 查询；需要 HTML 视图时执行 `graphify export html --out .graphify/graph.html`。没有配置 LLM API key 时，使用 `--no-description` 可跳过描述阶段。
 
 ## 日常更新
 
@@ -102,14 +109,14 @@ npx gitnexus status
 
 ```bash
 # 增量更新 Graphify 知识图谱
-graphify update .
+graphify update --no-description .
 
 # 更新本机 GitNexus 索引
 npx gitnexus analyze
 npx gitnexus status
 ```
 
-两者都只写本机目录（`.graphify/`、`.gitnexus/`），**不产生需要提交的文件**。如果 `graphify check-update` 提示图谱落后于 `HEAD`，重跑一次 `graphify update .` 即可。
+两者都只写本机目录（`.graphify/`、`.gitnexus/`），**不产生需要提交的文件**。如果 `graphify check-update` 提示图谱落后于 `HEAD`，重跑一次 `graphify update --no-description .` 即可。若新图节点数因代码删除而减少，Graphify 会拒绝覆盖旧图，此时确认变更后使用 `graphify update --force --no-description .`。
 
 ## 查询示例
 
@@ -167,9 +174,20 @@ git diff --check
 重新生成一次即可：
 
 ```bash
-graphify update .
+graphify update --no-description .
 graphify check-update
 ```
+
+### `graphify-out/` 与 `.graphify/` 如何处理
+
+`.graphify/` 是 0.10.1 的当前运行态；根目录 `graphify-out/` 是旧版本遗留状态，`api/graphify-out/` 是曾在子目录运行 Graphify 产生的重复产物。不要在 `api/` 等子目录单独运行 Graphify。迁移前先执行：
+
+```bash
+graphify migrate-state --dry-run
+graphify state prune
+```
+
+确认 `.graphify/graph.json` 已可用后，再按迁移预览处理旧目录；这些目录均已被 `.gitignore` 忽略，不应直接加入提交。
 
 ### GitNexus 显示仓库未索引
 
