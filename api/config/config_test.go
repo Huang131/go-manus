@@ -36,6 +36,16 @@ func TestValidate_RequiredFields(t *testing.T) {
 			mutate:  func(c *Config) { c.Sandbox.HTTPTimeout = -1 },
 			wantSub: "Sandbox.HTTPTimeout",
 		},
+		{
+			name:    "negative file cleanup batch size",
+			mutate:  func(c *Config) { c.FileCleanup.BatchSize = -1 },
+			wantSub: "FileCleanup.BatchSize",
+		},
+		{
+			name:    "negative file cleanup interval",
+			mutate:  func(c *Config) { c.FileCleanup.Interval = -1 },
+			wantSub: "FileCleanup.Interval",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

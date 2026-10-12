@@ -176,9 +176,9 @@ type A2AAgent struct {
 // - session.deleted_at IS NOT NULL：关联的会话已被软删除
 // 不会清理关联活跃会话的文件，保证"会话文件与会话同寿命"
 type FileCleanupConfig struct {
-	ExpiresAfter string `mapstructure:"expires_after"` // 文件过期时间，如 "24h", "7d"
-	BatchSize    int    `mapstructure:"batch_size"`    // 每批清理的文件数量
-	Interval     int    `mapstructure:"interval"`      // 清理间隔（秒）
+	ExpiresAfter string `mapstructure:"expires_after"`              // 文件过期时间，如 "24h", "7d"
+	BatchSize    int    `mapstructure:"batch_size" validate:"gt=0"` // 每批清理的文件数量
+	Interval     int    `mapstructure:"interval" validate:"gt=0"`   // 清理间隔（秒）
 }
 
 // LoadWithValidation 从指定路径加载并验证配置。
@@ -254,8 +254,10 @@ var validate = validator.New(validator.WithRequiredStructEnabled())
 // 规则集中在各字段的 `validate:"..."` 标签中；新增字段时只需追加 tag 即可，
 // 不必再修改 if 链，便于审计与单元测试。
 //
-// 同时补充各字段的默认值。
+// 先补充默认值，再校验范围；未配置的零值应使用默认值，显式非法值则必须启动前失败。
 func (c *Config) Validate() error {
+	c.applyDefaults()
+
 	if err := validate.Struct(c); err != nil {
 		// 把 validator.ValidationErrors 转成运维友好描述，便于 CLI 排错。
 		if ve, ok := err.(validator.ValidationErrors); ok {
@@ -267,10 +269,6 @@ func (c *Config) Validate() error {
 		}
 		return fmt.Errorf("config validation failed: %w", err)
 	}
-
-	// 补充默认值
-	c.applyDefaults()
-
 	return nil
 }
 
