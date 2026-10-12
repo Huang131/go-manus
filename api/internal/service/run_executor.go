@@ -149,9 +149,10 @@ type RunExecutor struct {
 }
 
 type runControl struct {
-	handle    *RunExecutionHandle
-	cancel    context.CancelFunc
-	admission sync.Mutex
+	handle          *RunExecutionHandle
+	cancel          context.CancelFunc
+	admission       sync.Mutex
+	cancelPersisted bool
 }
 
 // NewRunExecutor 创建不带实时事件发布器的执行器，供局部装配和测试使用。
@@ -229,9 +230,10 @@ func (e *RunExecutor) Start(ctx context.Context, runID string, messages []llmcor
 	control.admission.Lock()
 	defer control.admission.Unlock()
 	if ctx.Err() != nil {
+		cancelPersisted := control.cancelPersisted
 		e.mu.Unlock()
 		toolSet.Release()
-		e.reconcileCancelledStart(ctx, runID, control)
+		e.reconcileCancelledStart(ctx, runID, control, !cancelPersisted)
 		return handle, nil
 	}
 	e.mu.Unlock()
@@ -253,13 +255,22 @@ func (e *RunExecutor) abortStart(ctx context.Context, runID string, control *run
 	}
 }
 
-func (e *RunExecutor) reconcileCancelledStart(ctx context.Context, runID string, control *runControl) {
+func (e *RunExecutor) reconcileCancelledStart(ctx context.Context, runID string, control *runControl, requestCancel bool) {
 	e.removeControl(runID, control)
 	control.cancel()
 	reconcileCtx, reconcileCancel := e.newPersistenceContext(ctx)
 	defer reconcileCancel()
+	if requestCancel {
+		if _, err := e.store.RequestCancel(reconcileCtx, runID); err != nil {
+			logger.Warn("Run 在启动前被取消后无法请求取消", logger.String("run_id", runID), logger.Err(err))
+			control.handle.setResult(err)
+			return
+		}
+	}
 	if _, err := e.store.ReconcileCancelling(reconcileCtx, runID); err != nil {
 		logger.Warn("Run 在启动前被取消后无法收敛", logger.String("run_id", runID), logger.Err(err))
+		control.handle.setResult(err)
+		return
 	}
 	control.handle.setResult(nil)
 }
@@ -396,6 +407,7 @@ func (e *RunExecutor) Cancel(ctx context.Context, runID string) (*model.Run, err
 	if err != nil {
 		return nil, fmt.Errorf("request run cancel: %w", err)
 	}
+	control.cancelPersisted = true
 	if handleEnded(control.handle) {
 		return e.store.ReconcileCancelling(ctx, runID)
 	}

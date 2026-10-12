@@ -138,6 +138,17 @@ func (s *cancelBarrierStore) RequestCancel(ctx context.Context, runID string) (*
 	return s.executorStoreStub.RequestCancel(ctx, runID)
 }
 
+type strictStartCancellationStore struct {
+	executorStoreStub
+}
+
+func (s *strictStartCancellationStore) ReconcileCancelling(ctx context.Context, runID string) (*model.Run, error) {
+	if s.status != model.RunStatusCancelling {
+		return nil, errors.New("run is not cancelling")
+	}
+	return s.executorStoreStub.ReconcileCancelling(ctx, runID)
+}
+
 // persistenceContextStore 记录终态写入收到的上下文，用于守护取消后持久化仍有时间上限的契约。
 type persistenceContextStore struct {
 	executorStoreStub
@@ -498,6 +509,53 @@ func TestRunExecutorDoesNotAdmitEngineWhileCancellationIsPersisting(t *testing.T
 	waitExecutorDone(t, result.handle)
 	if engine.seen.RunID != "" {
 		t.Fatalf("Engine started while cancellation was persisting: %+v", engine.seen)
+	}
+	if store.status != model.RunStatusCancelled {
+		t.Fatalf("Run status = %s, want cancelled", store.status)
+	}
+}
+
+func TestRunExecutorParentCancellationDuringToolAcquisitionReconcilesRun(t *testing.T) {
+	store := &strictStartCancellationStore{}
+	toolSet := &executorToolSetStub{released: make(chan struct{})}
+	provider := &blockingToolProvider{
+		set: toolSet, started: make(chan struct{}), release: make(chan struct{}),
+	}
+	engine := &executorEngineStub{result: RunExecutionResult{Kind: RunExecutionSucceeded}}
+	executor := NewRunExecutor(store, provider, engine)
+	parentCtx, cancelParent := context.WithCancel(context.Background())
+
+	startResult := make(chan struct {
+		handle *RunExecutionHandle
+		err    error
+	}, 1)
+	go func() {
+		handle, err := executor.Start(parentCtx, "run-1", nil)
+		startResult <- struct {
+			handle *RunExecutionHandle
+			err    error
+		}{handle: handle, err: err}
+	}()
+	select {
+	case <-provider.started:
+	case <-time.After(time.Second):
+		t.Fatal("tool acquisition did not start")
+	}
+	cancelParent()
+	close(provider.release)
+
+	result := <-startResult
+	if result.err != nil {
+		t.Fatalf("Start() error = %v", result.err)
+	}
+	waitExecutorDone(t, result.handle)
+	if engine.seen.RunID != "" {
+		t.Fatalf("Engine started after parent cancellation: %+v", engine.seen)
+	}
+	select {
+	case <-toolSet.released:
+	default:
+		t.Fatal("tool set was not released after parent cancellation")
 	}
 	if store.status != model.RunStatusCancelled {
 		t.Fatalf("Run status = %s, want cancelled", store.status)
