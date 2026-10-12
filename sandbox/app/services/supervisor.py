@@ -189,8 +189,8 @@ class SupervisorService:
                 transport=UnixStreamTransport(self.rpc_url, timeout=8),
             )
         except Exception as e:
-            logger.error(f"连接Supervisor服务失败: {str(e)}")
-            raise BadRequestException(f"连接Supervisor服务失败: {str(e)}")
+            # 连不上 supervisor 属基础设施故障（非客户端请求错误），归 5xx
+            raise AppException(f"连接Supervisor服务失败: {str(e)}")
 
     async def _call_rpc(self, method, *args) -> Any:
         """根据传递的方法+参数调用rpc方法"""
@@ -198,8 +198,8 @@ class SupervisorService:
             async with self._get_rpc_lock():
                 return await asyncio.to_thread(method, *args)
         except Exception as e:
-            logger.error(f"RPC方法调用失败: {str(e)}")
-            raise BadRequestException(f"RPC方法调用失败: {str(e)}")
+            # RPC 调用失败属基础设施故障（非客户端请求错误），归 5xx
+            raise AppException(f"RPC方法调用失败: {str(e)}")
 
     @staticmethod
     def _namespec(process: dict) -> str:
@@ -220,7 +220,6 @@ class SupervisorService:
             processes = await self._call_rpc(self.server.supervisor.getAllProcessInfo)
             return [ProcessInfo(**process) for process in processes]
         except Exception as e:
-            logger.error(f"获取进程信息失败: {str(e)}")
             raise AppException(f"获取进程信息失败: {str(e)}")
 
     async def stop_all_processes(self) -> SupervisorActionResult:
@@ -243,7 +242,6 @@ class SupervisorService:
                     stopped.append(name)
             return SupervisorActionResult(status="stopped", result={"stopped": stopped})
         except Exception as e:
-            logger.error(f"停止supervisor所有进程服务失败: {str(e)}")
             raise AppException(f"停止supervisor所有进程服务失败: {str(e)}")
 
     async def shutdown(self) -> SupervisorActionResult:
@@ -252,7 +250,6 @@ class SupervisorService:
             shutdown_result = await self._call_rpc(self.server.supervisor.shutdown)
             return SupervisorActionResult(status="shutdown", shutdown_result=shutdown_result)
         except Exception as e:
-            logger.error(f"关闭supervisord服务失败: {str(e)}")
             raise AppException(f"关闭supervisord服务失败: {str(e)}")
 
     async def restart(self) -> SupervisorActionResult:
@@ -285,7 +282,6 @@ class SupervisorService:
                 )
             return SupervisorActionResult(status="restarted", stop_result=stopped, start_result=started)
         except Exception as e:
-            logger.error(f"重启Supervisor子进程失败: {e}")
             raise AppException(f"重启Supervisor子进程失败: {e}")
 
     async def activate_timeout(self, minutes: int | None = None) -> SupervisorTimeout:

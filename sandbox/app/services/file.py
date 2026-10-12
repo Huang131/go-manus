@@ -1,7 +1,6 @@
 import asyncio
 import glob
 import itertools
-import logging
 import os.path
 import re
 import stat
@@ -28,8 +27,6 @@ from app.models.file import (
     FileCheckResult,
     FileDeleteResult
 )
-
-logger = logging.getLogger(__name__)
 
 MAX_SEARCH_MATCHES = 10_000
 MAX_FIND_FILES = 10_000
@@ -154,7 +151,6 @@ class FileService:
             cls._validate_read_limit()
             # 1.检测在当前权限下能否获取该文件
             if not os.path.isfile(filepath) and not sudo:
-                logger.error(f"要读取的文件不存在或无权限: {filepath}")
                 raise NotFoundException(f"要读取的文件不存在或无权限: {filepath}")
 
             # 2.ubuntu系统下统一使用utf-8编码
@@ -411,7 +407,6 @@ class FileService:
                     os.unlink(temp_path)
                 except FileNotFoundError:
                     pass
-            logger.error(f"文件内容写入失败: {str(e)}")
             if isinstance(e, BadRequestException):
                 raise
             raise AppException(f"文件内容写入失败: {str(e)}")
@@ -629,7 +624,6 @@ class FileService:
                     os.unlink(temp_path)
                 except FileNotFoundError:
                     pass
-            logger.error(f"上传文件到沙箱出错: {str(e)}")
             if isinstance(e, BadRequestException):
                 raise
             raise AppException(f"上传文件到沙箱出错: {str(e)}")
@@ -677,7 +671,6 @@ class FileService:
                     await asyncio.to_thread(os.remove, filepath)
                 return FileDeleteResult(filepath=filepath, deleted=True)
         except Exception as e:
-            logger.error(f"删除文件{filepath}失败: {str(e)}")
             if isinstance(e, (BadRequestException, NotFoundException)):
                 raise
             raise AppException(f"删除文件{filepath}失败: {str(e)}")

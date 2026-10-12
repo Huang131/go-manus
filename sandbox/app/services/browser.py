@@ -6,7 +6,12 @@ import time
 import uuid
 from typing import Any
 
-from app.interfaces.errors.exceptions import AppException, BadRequestException, BusyException
+from app.interfaces.errors.exceptions import (
+    AppException,
+    BadRequestException,
+    BusyException,
+    TimeoutException,
+)
 from app.models.browser import (
     BrowserConsoleExecResult,
     BrowserConsoleViewResult,
@@ -41,7 +46,6 @@ BUSY_RETRY_AFTER_SECONDS = 3
 # 环境类失败（CDP 连不上、依赖缺失）返回 503，业务动作失败返回 400，
 # 便于上层把两类错误分开处理（环境失败上报服务异常，动作失败回灌模型自行修正）
 ENV_ERROR_STATUS = 503
-TIMEOUT_ERROR_STATUS = 504
 
 
 class BrowserService:
@@ -218,11 +222,7 @@ class BrowserService:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         except asyncio.TimeoutError:
             await self._terminate(process)
-            logger.error(f"浏览器动作超时: op={op}, timeout={timeout}s")
-            raise AppException(
-                f"浏览器动作 {op} 执行超时（{timeout}秒），页面可能仍在加载",
-                status_code=TIMEOUT_ERROR_STATUS,
-            )
+            raise TimeoutException(f"浏览器动作 {op} 执行超时（{timeout}秒），页面可能仍在加载")
 
         return self._parse_result(op, stdout, stderr)
 
@@ -233,22 +233,23 @@ class BrowserService:
         lines = [line for line in stdout.decode("utf-8", errors="replace").splitlines() if line.strip()]
         if not lines:
             detail = stderr_text or "无输出"
-            logger.error(f"浏览器动作无输出: op={op}, detail={detail}")
             raise AppException(f"浏览器动作 {op} 未返回结果: {detail}", status_code=ENV_ERROR_STATUS)
 
         try:
             result = json.loads(lines[-1])
         except json.JSONDecodeError:
-            logger.error(f"浏览器动作输出无法解析: op={op}, output={lines[-1][:500]}")
+            # 原始输出不进响应体，单独落一条 WARNING 供服务端排查（截断 500 字符）
+            logger.warning("浏览器动作 %s 的原始输出无法解析为 JSON: %s", op, lines[-1][:500])
             raise AppException(
-                f"浏览器动作 {op} 返回了非法结果，请检查沙箱浏览器环境",
+                f"浏览器动作 {op} 返回了非法结果（无法解析为 JSON），请检查沙箱浏览器环境",
                 status_code=ENV_ERROR_STATUS,
             )
 
         if not isinstance(result, dict) or "ok" not in result:
-            logger.error(f"浏览器动作结果结构异常: op={op}, result={str(result)[:500]}")
+            # 同上：异常消息只回失败模式，原始结构走日志通道
+            logger.warning("浏览器动作 %s 的原始结果结构异常: %s", op, str(result)[:500])
             raise AppException(
-                f"浏览器动作 {op} 返回了非法结果，请检查沙箱浏览器环境",
+                f"浏览器动作 {op} 返回了非法结果（结果结构异常），请检查沙箱浏览器环境",
                 status_code=ENV_ERROR_STATUS,
             )
 
@@ -259,8 +260,7 @@ class BrowserService:
         if result.get("kind") == "action":
             # 元素找不到、参数缺失属于业务动作失败：回 400 让模型按最新快照自行修正
             raise BadRequestException(message)
-        logger.error(f"浏览器动作环境失败: op={op}, error={message}")
-        raise AppException(message, status_code=ENV_ERROR_STATUS)
+        raise AppException(f"浏览器动作 {op} 环境失败: {message}", status_code=ENV_ERROR_STATUS)
 
     @staticmethod
     async def _terminate(process: asyncio.subprocess.Process) -> None:

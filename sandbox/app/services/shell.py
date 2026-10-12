@@ -396,14 +396,10 @@ class ShellService:
             logger.info(f"进程已完成, 返回代码为: {process.returncode}")
             return ShellWaitResult(returncode=process.returncode)
         except asyncio.TimeoutError:
-            # 记录日志并抛出BadRequest异常
-            logger.warning(f"Shell会话进程等待超时: {seconds}s")
             raise BadRequestException(f"Shell会话进程等待超时: {seconds}s")
         except (BadRequestException, NotFoundException):
             raise
         except Exception as e:
-            # 记录日志并抛出AppException
-            logger.error(f"Shell会话进程等待过程出错: {str(e)}")
             raise AppException(f"Shell会话进程等待过程出错: {str(e)}")
 
     async def read_shell_output(self, session_id: str, console: bool = False) -> ShellReadResult:
@@ -420,7 +416,6 @@ class ShellService:
         logger.debug(f"查看Shell会话内容: {session_id}")
         self._cleanup_stale_sessions()
         if session_id not in self.active_shells:
-            logger.error(f"Shell会话不存在: {session_id}")
             raise NotFoundException(f"Shell会话不存在: {session_id}")
 
         # 2.获取会话
@@ -486,7 +481,6 @@ class ShellService:
         if not exec_dir or exec_dir == "":
             exec_dir = os.path.expanduser("~")
         if exec_dir and not os.path.isdir(exec_dir):
-            logger.error(f"执行目录不存在或不是目录: {exec_dir}")
             raise BadRequestException(f"执行目录不存在或不是目录: {exec_dir}")
 
         try:
@@ -543,8 +537,7 @@ class ShellService:
         except (BadRequestException, NotFoundException):
             raise
         except Exception as e:
-            # 19.执行过程中出现异常并记录日志后返回自定义异常
-            logger.error(f"命令执行失败: {str(e)}", exc_info=True)
+            # 19.执行过程中出现异常，包装为自定义异常返回
             raise AppException(
                 msg=f"命令执行失败: {str(e)}",
                 data={"session_id": session_id, "command": command}
@@ -574,7 +567,6 @@ class ShellService:
         logger.debug(f"写入Shell会话中的子进程: {session_id}, 是否按下回车键: {press_enter}")
         self._cleanup_stale_sessions()
         if session_id not in self.active_shells:
-            logger.error(f"Shell会话不存在: {session_id}")
             raise NotFoundException(f"Shell会话不存在: {session_id}")
 
         # 2.获取会话和子进程
@@ -585,7 +577,6 @@ class ShellService:
         try:
             # 3.检查子进程是否结束
             if process.returncode is not None:
-                logger.error(f"子进程已结束, 无法写入输入: {session_id}")
                 raise BadRequestException("子进程已结束, 无法写入输入")
 
             # 4.ubuntu系统统一使用utf-8与\n
@@ -617,13 +608,11 @@ class ShellService:
             return ShellWriteResult(status="success")
         except UnicodeError as e:
             # 10.捕获编码异常
-            logger.error(f"编码错误: {str(e)}")
             raise AppException(f"编码错误: {str(e)}")
         except (BadRequestException, NotFoundException):
             raise
         except Exception as e:
             # 11.捕获通用异常
-            logger.error(f"向子进程写入数据出错: {str(e)}")
             raise AppException(f"向子进程写入数据出错: {str(e)}")
 
     async def kill_process(self, session_id: str) -> ShellKillResult:
@@ -646,7 +635,6 @@ class ShellService:
                 await self._terminate_and_wait(process, process_group_id)
             result = ShellKillResult(status=status, returncode=process.returncode)
         except Exception as e:
-            logger.error(f"关闭进程失败: {str(e)}", exc_info=True)
             raise AppException(f"关闭进程失败: {str(e)}")
 
         # 进程可能已被同一会话的新命令替换，只有身份仍一致时才能清理 reader。
