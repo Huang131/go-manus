@@ -141,6 +141,8 @@ type RunExecutor struct {
 	provider  RunToolProvider
 	engine    RunExecutionEngine
 	publisher RunEventPublisher
+	// persistenceTimeout 限制每次独立持久化或收敛尝试的最长时间。
+	persistenceTimeout time.Duration
 
 	mu      sync.Mutex
 	control map[string]*runControl
@@ -160,11 +162,12 @@ func NewRunExecutor(store RunExecutionStore, provider RunToolProvider, engine Ru
 // 发布器是可选旁路；未配置时 Run 仍可独立完成持久化。
 func NewRunExecutorWithEventPublisher(store RunExecutionStore, provider RunToolProvider, engine RunExecutionEngine, publisher RunEventPublisher) *RunExecutor {
 	return &RunExecutor{
-		store:     store,
-		provider:  provider,
-		engine:    engine,
-		publisher: publisher,
-		control:   make(map[string]*runControl),
+		store:              store,
+		provider:           provider,
+		engine:             engine,
+		publisher:          publisher,
+		persistenceTimeout: runPersistenceTimeout,
+		control:            make(map[string]*runControl),
 	}
 }
 
@@ -228,11 +231,14 @@ func (e *RunExecutor) execute(ctx context.Context, cancel context.CancelFunc, ru
 
 	// 取消只停止 Engine；状态收尾继续使用独立且有界的持久化上下文。
 	// WithoutCancel 保留“取消后仍写终态”的语义，WithTimeout 防止存储异常时执行 goroutine 无限滞留。
-	persistenceCtx, persistenceCancel := context.WithTimeout(context.WithoutCancel(ctx), runPersistenceTimeout)
+	persistenceCtx, persistenceCancel := e.newPersistenceContext(ctx)
 	defer persistenceCancel()
 	persistErr := e.persistResult(persistenceCtx, run, result, err)
 	if persistErr != nil {
-		e.reconcileAfterPersistenceFailure(persistenceCtx, run.ID)
+		persistenceCancel()
+		reconcileCtx, reconcileCancel := e.newPersistenceContext(ctx)
+		e.reconcileAfterPersistenceFailure(reconcileCtx, run.ID)
+		reconcileCancel()
 	}
 	if persistErr == nil && e.publisher != nil && isTerminalExecution(result, err) {
 		if marker, ok := e.publisher.(completedRunEventMarker); ok {
@@ -246,6 +252,14 @@ func (e *RunExecutor) execute(ctx context.Context, cancel context.CancelFunc, ru
 	// 先删除再通知 Wait，保证后续 Cancel 立即走数据库 reconciliation。
 	e.removeControl(run.ID, control)
 	control.handle.setResult(persistErr)
+}
+
+func (e *RunExecutor) newPersistenceContext(parent context.Context) (context.Context, context.CancelFunc) {
+	timeout := e.persistenceTimeout
+	if timeout <= 0 {
+		timeout = runPersistenceTimeout
+	}
+	return context.WithTimeout(context.WithoutCancel(parent), timeout)
 }
 
 // reconcileAfterPersistenceFailure 避免结果写入失败后留下没有进程句柄的活跃 Run。

@@ -127,6 +127,34 @@ func (s *persistenceContextStore) Finish(ctx context.Context, runID string, resu
 	return s.executorStoreStub.Finish(ctx, runID, result)
 }
 
+type persistenceTimeoutStore struct {
+	executorStoreStub
+	finishCtx     context.Context
+	finishErr     error
+	requestErr    error
+	reconcileErrs []error
+}
+
+func (s *persistenceTimeoutStore) Finish(ctx context.Context, _ string, _ RunExecutionResult) error {
+	s.finishCtx = ctx
+	<-ctx.Done()
+	s.finishErr = ctx.Err()
+	return ctx.Err()
+}
+
+func (s *persistenceTimeoutStore) RequestCancel(ctx context.Context, runID string) (*model.Run, error) {
+	s.requestErr = ctx.Err()
+	return s.executorStoreStub.RequestCancel(ctx, runID)
+}
+
+func (s *persistenceTimeoutStore) ReconcileCancelling(ctx context.Context, runID string) (*model.Run, error) {
+	s.reconcileErrs = append(s.reconcileErrs, ctx.Err())
+	if len(s.reconcileErrs) == 1 {
+		return nil, errors.New("run is not cancelling")
+	}
+	return s.executorStoreStub.ReconcileCancelling(ctx, runID)
+}
+
 type executorEngineStub struct {
 	result RunExecutionResult
 	err    error
@@ -287,6 +315,33 @@ func TestRunExecutorBoundsTerminalPersistenceAfterCancelledExecution(t *testing.
 	}
 	if remaining := time.Until(deadline); remaining <= 0 || remaining > runPersistenceTimeout {
 		t.Fatalf("terminal persistence deadline remaining = %s, want within (0, %s]", remaining, runPersistenceTimeout)
+	}
+}
+
+func TestRunExecutorUsesFreshContextToReconcilePersistenceTimeout(t *testing.T) {
+	store := &persistenceTimeoutStore{}
+	executor := NewRunExecutor(
+		store,
+		&executorToolProviderStub{set: &executorToolSetStub{released: make(chan struct{})}},
+		&executorEngineStub{result: RunExecutionResult{Kind: RunExecutionSucceeded}},
+	)
+	executor.persistenceTimeout = 5 * time.Millisecond
+
+	handle, err := executor.Start(context.Background(), "run-1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handle.Wait(context.Background()); err == nil {
+		t.Fatal("Wait() error = nil, want persistence timeout")
+	}
+	if store.finishCtx == nil || store.finishErr == nil {
+		t.Fatal("terminal persistence did not reach its timeout")
+	}
+	if store.requestErr != nil {
+		t.Fatalf("request cancellation context err = %v, want nil", store.requestErr)
+	}
+	if len(store.reconcileErrs) != 2 || store.reconcileErrs[1] != nil {
+		t.Fatalf("reconciliation context errors = %v, want a fresh active context", store.reconcileErrs)
 	}
 }
 
