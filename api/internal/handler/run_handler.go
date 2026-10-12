@@ -63,7 +63,7 @@ func (h *RunHandler) Create(c *gin.Context) {
 		ctx = llm.WithModelID(ctx, strings.TrimSpace(req.ModelID))
 	}
 	run, err := h.app.Create(ctx, service.CreateApplicationRunInput{
-		SessionID: c.Param("sessionId"), IdempotencyKey: key,
+		SessionID: c.Param("id"), IdempotencyKey: key,
 		Content: req.Message, AttachmentIDs: req.Attachments,
 	})
 	if err != nil {
@@ -131,7 +131,7 @@ func (h *RunHandler) ListBySession(c *gin.Context) {
 		response.FromError(c, err)
 		return
 	}
-	page, err := h.app.ListBySessionID(c.Request.Context(), c.Param("sessionId"), limit, offset)
+	page, err := h.app.ListBySessionID(c.Request.Context(), c.Param("id"), limit, offset)
 	if err != nil {
 		response.FromError(c, err)
 		return

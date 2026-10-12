@@ -21,6 +21,7 @@ import (
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/mq"
 	"github.com/Huang131/go-manus/api/internal/service"
+	"github.com/Huang131/go-manus/api/pkg/response"
 	"github.com/bytedance/sonic"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -32,7 +33,7 @@ type scriptedLLM struct {
 	responses []string
 }
 
-// blockingLLM 让一次模型调用停在流式阶段，供 HTTP stop 取消契约测试使用。
+// blockingLLM 让一次模型调用停在流式阶段，供 Run 取消契约测试使用。
 type blockingLLM struct {
 	started     chan struct{}
 	returned    chan struct{}
@@ -183,31 +184,33 @@ func appendRunEvent(t *testing.T, queue *mq.RedisStreamMessageQueue, runID strin
 	t.Helper()
 	data, err := sonic.Marshal(payload)
 	require.NoError(t, err)
-	wrapper, err := sonic.Marshal(&model.Event{
+	event := model.Event{
 		Type:      eventType,
 		CreatedAt: time.Now(),
 		Data:      data,
-	})
-	require.NoError(t, err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	id, err := queue.Put(ctx, service.RunEventStreamName(runID), string(wrapper))
+	// 与 RedisRunEventPublisher 保持一致：队列接收事件结构体，由队列统一编码。
+	id, err := queue.Put(ctx, service.RunEventStreamName(runID), event)
 	require.NoError(t, err)
 	return id
 }
 
-func runIDFromTaskEvent(t *testing.T, event sseEvent) string {
+func runIDFromCreateResponse(t *testing.T, body []byte) string {
 	t.Helper()
-	var payload struct {
-		TaskID string `json:"task_id"`
-	}
-	require.NoError(t, sonic.UnmarshalString(event.Data, &payload))
-	require.NotEmpty(t, payload.TaskID)
-	return payload.TaskID
+	var envelope response.Response
+	require.NoError(t, sonic.Unmarshal(body, &envelope))
+	payload, ok := envelope.Data.(map[string]any)
+	require.True(t, ok)
+	runID, ok := payload["id"].(string)
+	require.True(t, ok)
+	require.NotEmpty(t, runID)
+	return runID
 }
 
-func TestChatEndpoint_SuccessStreamsOrderedEvents(t *testing.T) {
+func TestRunEndpoint_SuccessStreamsOrderedEvents(t *testing.T) {
 	fake := &scriptedLLM{responses: []string{
 		`{"message":"已制定计划","goal":"回答测试请求","title":"测试计划","language":"zh","steps":[{"id":"s1","description":"生成答案"}]}`,
 		`{"success":true,"result":"步骤完成","attachments":[]}`,
@@ -219,20 +222,26 @@ func TestChatEndpoint_SuccessStreamsOrderedEvents(t *testing.T) {
 	sessionID := createSessionWithServer(t, app.Engine)
 	defer CleanupSessionWithDB(t, app.Postgres, sessionID)
 
-	w := postJSONWithServer(t, app.Engine, "/api/sessions/"+sessionID+"/chat", map[string]any{"message": "请回答测试请求"})
+	w := postJSONWithServer(t, app.Engine, "/api/sessions/"+sessionID+"/runs", map[string]any{"message": "请回答测试请求"})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	assert.Equal(t, "text/event-stream", w.Header().Get("Content-Type"))
+	runID := runIDFromCreateResponse(t, w.Body.Bytes())
 
-	events := parseSSEEvents(t, w.Body.String())
-	require.GreaterOrEqual(t, len(events), 5)
-	assert.Equal(t, "message", events[0].Type)
-	assert.Equal(t, "task_id", events[1].Type)
-	runID := runIDFromTaskEvent(t, events[1])
+	server := httptest.NewServer(app.Engine)
+	defer server.Close()
+	eventResp, err := server.Client().Get(server.URL + "/api/runs/" + runID + "/events")
+	require.NoError(t, err)
+	defer eventResp.Body.Close()
+	require.Equal(t, http.StatusOK, eventResp.StatusCode)
+	assert.Contains(t, eventResp.Header.Get("Content-Type"), "text/event-stream")
+	eventBody, err := io.ReadAll(eventResp.Body)
+	require.NoError(t, err)
+	events := parseSSEEvents(t, string(eventBody))
+	require.GreaterOrEqual(t, len(events), 4)
 	assert.Equal(t, "done", events[len(events)-1].Type)
 
-	titleIndex := eventIndex(events, string(model.EventTypeTitle), 2)
-	planIndex := eventIndex(events, string(model.EventTypePlan), 2)
-	stepIndex := eventIndex(events, string(model.EventTypeStep), 2)
+	titleIndex := eventIndex(events, string(model.EventTypeTitle), 0)
+	planIndex := eventIndex(events, string(model.EventTypePlan), 0)
+	stepIndex := eventIndex(events, string(model.EventTypeStep), 0)
 	require.GreaterOrEqual(t, titleIndex, 0)
 	require.GreaterOrEqual(t, planIndex, 0)
 	require.GreaterOrEqual(t, stepIndex, 0)
@@ -240,7 +249,7 @@ func TestChatEndpoint_SuccessStreamsOrderedEvents(t *testing.T) {
 	assert.Less(t, planIndex, stepIndex)
 
 	var previousStreamID string
-	for _, event := range events[2:] {
+	for _, event := range events {
 		require.Regexp(t, `^[0-9]+-[0-9]+$`, event.ID, "task event %q should carry Redis cursor", event.Type)
 		if previousStreamID != "" {
 			previousMillis, previousSequence := parseStreamID(t, previousStreamID)
@@ -257,9 +266,9 @@ func TestChatEndpoint_SuccessStreamsOrderedEvents(t *testing.T) {
 	}, 5*time.Second, 10*time.Millisecond, "Run did not persist the successful terminal state")
 }
 
-// TestChatEndpoint_LastEventIDResumesWithoutDuplicatesOrGaps 守护 HTTP SSE 断线续读契约：
+// TestRunEventsEndpoint_LastEventIDResumesWithoutDuplicatesOrGaps 守护 HTTP SSE 断线续读契约：
 // Last-Event-ID 是 exclusive Redis cursor，重连后只返回严格位于该游标之后的事件。
-func TestChatEndpoint_LastEventIDResumesWithoutDuplicatesOrGaps(t *testing.T) {
+func TestRunEventsEndpoint_LastEventIDResumesWithoutDuplicatesOrGaps(t *testing.T) {
 	fake := &blockingLLM{started: make(chan struct{}), returned: make(chan struct{})}
 	app := newChatTestApp(t, fake)
 
@@ -283,11 +292,10 @@ func TestChatEndpoint_LastEventIDResumesWithoutDuplicatesOrGaps(t *testing.T) {
 
 	server := httptest.NewServer(app.Engine)
 	defer server.Close()
-	chatURL := server.URL + "/api/sessions/" + sessionID + "/chat"
+	eventsURL := server.URL + "/api/runs/" + runID + "/events"
 
-	firstReq, err := http.NewRequest(http.MethodPost, chatURL, strings.NewReader(`{}`))
+	firstReq, err := http.NewRequest(http.MethodGet, eventsURL, nil)
 	require.NoError(t, err)
-	firstReq.Header.Set("Content-Type", "application/json")
 	firstResp, err := server.Client().Do(firstReq)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, firstResp.StatusCode)
@@ -299,9 +307,8 @@ func TestChatEndpoint_LastEventIDResumesWithoutDuplicatesOrGaps(t *testing.T) {
 	afterDisconnectID := appendRunEvent(t, queue, runID, model.EventTypePlan, map[string]any{"plan": "after disconnect"})
 	doneID := appendRunEvent(t, queue, runID, model.EventTypeDone, map[string]any{"success": true})
 
-	resumeReq, err := http.NewRequest(http.MethodPost, chatURL, strings.NewReader(`{}`))
+	resumeReq, err := http.NewRequest(http.MethodGet, eventsURL, nil)
 	require.NoError(t, err)
-	resumeReq.Header.Set("Content-Type", "application/json")
 	resumeReq.Header.Set("Last-Event-ID", beforeDisconnectID)
 	resumeResp, err := server.Client().Do(resumeReq)
 	require.NoError(t, err)
@@ -341,7 +348,7 @@ func parseStreamID(t *testing.T, id string) (int64, int64) {
 	return millis, sequence
 }
 
-func TestStopEndpoint_CancelsActiveRunAndPersistsCancelledStatus(t *testing.T) {
+func TestRunCancelEndpoint_CancelsActiveRunAndPersistsCancelledStatus(t *testing.T) {
 	fake := &blockingLLM{
 		started:     make(chan struct{}),
 		returned:    make(chan struct{}),
@@ -365,10 +372,10 @@ func TestStopEndpoint_CancelsActiveRunAndPersistsCancelledStatus(t *testing.T) {
 		t.Fatal("fake LLM did not start")
 	}
 
-	stopResponse := postJSONWithServer(t, app.Engine, "/api/sessions/"+sessionID+"/stop", nil)
+	stopResponse := postJSONWithServer(t, app.Engine, "/api/runs/"+runID+"/cancel", nil)
 	assertOK(t, stopResponse)
 
-	// Stop 先持久化 cancelling，但故意让 LLM 暂不返回，以构造“取消先完成、runner 后收尾”的竞争顺序。
+	// Cancel 先持久化 cancelling，但故意让 LLM 暂不返回，以构造“取消先完成、runner 后收尾”的竞争顺序。
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	run, err := app.RunApplication.Get(ctx, runID)

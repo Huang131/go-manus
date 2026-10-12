@@ -72,7 +72,7 @@ func (s *runHandlerEventsStub) Read(_ context.Context, _, startID string) ([]*mo
 func TestRunHandlerCreateUsesIdempotencyHeaderAndSessionRouteParam(t *testing.T) {
 	app := &runHandlerAppStub{}
 	router := setupRouter()
-	router.POST("/sessions/:sessionId/runs", NewRunHandler(app, nil).Create)
+	router.POST("/sessions/:id/runs", NewRunHandler(app, nil).Create)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/sessions/session-1/runs", strings.NewReader(`{"message":"分析","attachments":["file-1"],"model_id":"model-1"}`))
@@ -145,7 +145,7 @@ func TestRunHandlerListBySessionPassesPagination(t *testing.T) {
 		Total: 1, Limit: 20, Offset: 5,
 	}}
 	router := setupRouter()
-	router.GET("/sessions/:sessionId/runs", NewRunHandler(app, nil).ListBySession)
+	router.GET("/sessions/:id/runs", NewRunHandler(app, nil).ListBySession)
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sessions/session-1/runs?limit=20&offset=5", nil))

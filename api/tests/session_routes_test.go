@@ -22,30 +22,6 @@ func TestHealthEndpoint(t *testing.T) {
 	assert.Equal(t, 0, resp.Code)
 }
 
-// TestChatEndpoint_AgentNotConfigured 验证 agent 未启用时 /chat 返回 412。
-// 这守护了路由 → handler → 依赖检查 → 错误映射的完整链路。
-func TestChatEndpoint_AgentNotConfigured(t *testing.T) {
-	sessionID := createSessionForTest(t)
-	defer CleanupSession(t, sessionID)
-
-	w := postJSON(t, "/api/sessions/"+sessionID+"/chat", map[string]any{
-		"message": "hello",
-	})
-
-	assertStatus(t, w, http.StatusPreconditionFailed)
-	assertError(t, w, http.StatusPreconditionFailed)
-}
-
-// TestChatEndpoint_BadRequest 验证 /chat 对无效请求体返回 400。
-func TestChatEndpoint_BadRequest(t *testing.T) {
-	sessionID := createSessionForTest(t)
-	defer CleanupSession(t, sessionID)
-
-	// 发送空 body（无 message 字段），应返回 412（因为 agent 检查先于参数解析）
-	w := postJSON(t, "/api/sessions/"+sessionID+"/chat", map[string]any{})
-	assertStatus(t, w, http.StatusPreconditionFailed)
-}
-
 // TestReadFileEndpoint_SandboxNotConfigured 验证沙箱未启用时 /file 返回 412。
 func TestReadFileEndpoint_SandboxNotConfigured(t *testing.T) {
 	sessionID := createSessionForTest(t)

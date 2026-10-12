@@ -55,8 +55,10 @@ func SetupRoutes(engine *gin.Engine, h *Handlers) {
 				runs.POST("/:runId/cancel", h.Run.Cancel)
 				runs.GET("/:runId/events", h.Run.Events)
 			}
-			api.POST("/sessions/:sessionId/runs", h.Run.Create)
-			api.GET("/sessions/:sessionId/runs", h.Run.ListBySession)
+			// Session 子资源统一使用 :id，避免 Gin 将同一路径层级的
+			// :id 与 :sessionId 识别为相互冲突的通配符。
+			api.POST("/sessions/:id/runs", h.Run.Create)
+			api.GET("/sessions/:id/runs", h.Run.ListBySession)
 		}
 
 		// 文件模块
