@@ -233,9 +233,9 @@ func (e *RunExecutor) execute(ctx context.Context, cancel context.CancelFunc, ru
 
 	// 取消只停止 Engine；状态收尾必须继续使用可用的持久化上下文。
 	persistErr := e.persistResult(context.WithoutCancel(ctx), run, result, err)
-	if persistErr == nil {
-		e.removeControl(run.ID, control)
-	}
+	// Engine 和 ToolSet 已退出，控制句柄不能因持久化失败滞留在进程内。
+	// 先删除再通知 Wait，保证后续 Cancel 立即走数据库 reconciliation。
+	e.removeControl(run.ID, control)
 	control.handle.setResult(persistErr)
 }
 

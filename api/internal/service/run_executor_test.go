@@ -299,7 +299,7 @@ func TestRunExecutorNilToolSetReconcilesStartedRun(t *testing.T) {
 	}
 }
 
-func TestRunExecutorKeepsHandleWhenTerminalPersistenceFails(t *testing.T) {
+func TestRunExecutorRemovesControlWhenTerminalPersistenceFails(t *testing.T) {
 	store := &executorStoreStub{finishErr: errors.New("database unavailable")}
 	executor := NewRunExecutor(store, &executorToolProviderStub{set: &executorToolSetStub{released: make(chan struct{})}}, &executorEngineStub{result: RunExecutionResult{Kind: RunExecutionSucceeded}})
 
@@ -311,6 +311,15 @@ func TestRunExecutorKeepsHandleWhenTerminalPersistenceFails(t *testing.T) {
 	case <-handle.Done():
 	case <-time.After(time.Second):
 		t.Fatal("executor did not finish")
+	}
+	if err := handle.Wait(context.Background()); err == nil {
+		t.Fatal("Wait() error = nil, want terminal persistence error")
+	}
+	executor.mu.Lock()
+	_, found := executor.control["run-1"]
+	executor.mu.Unlock()
+	if found {
+		t.Fatal("execution control remains after terminal persistence failure")
 	}
 
 	if _, err := executor.Cancel(context.Background(), "run-1"); err != nil {
