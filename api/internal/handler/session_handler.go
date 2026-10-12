@@ -93,10 +93,17 @@ func (h *SessionHandler) Delete(c *gin.Context) {
 	// 先请求取消活跃 Run，避免软删会话后仍继续消耗 LLM 和沙箱资源。
 	if h.run != nil {
 		if active, err := h.run.GetActiveBySessionID(c.Request.Context(), id); err != nil {
-			logger.Warn("删除会话前查询活跃 Run 失败（继续删除）", logger.String("session_id", id), logger.Err(err))
+			response.FromError(c, err)
+			return
 		} else if active != nil {
-			if _, cancelErr := h.run.Cancel(c.Request.Context(), active.ID); cancelErr != nil {
-				logger.Warn("删除会话前停止活跃 Run 失败（继续删除）", logger.String("session_id", id), logger.Err(cancelErr))
+			cancelled, cancelErr := h.run.Cancel(c.Request.Context(), active.ID)
+			if cancelErr != nil {
+				response.FromError(c, cancelErr)
+				return
+			}
+			if cancelled != nil && cancelled.Status.IsActive() {
+				response.FromError(c, apperr.Conflict("session has an active run"))
+				return
 			}
 		}
 	}

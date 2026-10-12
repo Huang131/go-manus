@@ -13,6 +13,7 @@ import (
 
 	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/service"
 	"github.com/Huang131/go-manus/api/pkg/response"
 )
 
@@ -34,6 +35,29 @@ type sessionServiceStub struct {
 	deletedID      string
 	clearedID      string
 	filesSessionID string
+}
+
+type sessionRunStub struct {
+	active       *model.Run
+	cancelResult *model.Run
+	cancelErr    error
+}
+
+func (*sessionRunStub) Create(context.Context, service.CreateApplicationRunInput) (*service.ApplicationRun, error) {
+	return nil, nil
+}
+func (*sessionRunStub) SubmitInput(context.Context, string, service.SubmitInputRequest) (*service.ApplicationRun, error) {
+	return nil, nil
+}
+func (*sessionRunStub) Get(context.Context, string) (*model.Run, error) { return nil, nil }
+func (s *sessionRunStub) GetActiveBySessionID(context.Context, string) (*model.Run, error) {
+	return s.active, nil
+}
+func (*sessionRunStub) ListBySessionID(context.Context, string, int, int) (*service.RunHistoryPage, error) {
+	return nil, nil
+}
+func (s *sessionRunStub) Cancel(context.Context, string) (*model.Run, error) {
+	return s.cancelResult, s.cancelErr
 }
 
 func (s *sessionServiceStub) CreateSession(context.Context) (*model.Session, error) {
@@ -174,6 +198,38 @@ func TestSessionHandler_Delete(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "session-1", svc.deletedID)
+}
+
+func TestSessionHandlerDeleteStopsWhenRunCancellationFails(t *testing.T) {
+	svc := &sessionServiceStub{}
+	run := &sessionRunStub{
+		active:    &model.Run{ID: "run-1", Status: model.RunStatusRunning},
+		cancelErr: apperr.Unavailable("run cancellation unavailable"),
+	}
+	router := setupRouter()
+	router.POST("/sessions/:id/delete", NewSessionHandler(svc, nil, run).Delete)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/sessions/session-1/delete", nil))
+
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	assert.Empty(t, svc.deletedID)
+}
+
+func TestSessionHandlerDeleteRejectsWhileRunIsCancelling(t *testing.T) {
+	svc := &sessionServiceStub{}
+	run := &sessionRunStub{
+		active:       &model.Run{ID: "run-1", Status: model.RunStatusRunning},
+		cancelResult: &model.Run{ID: "run-1", Status: model.RunStatusCancelling},
+	}
+	router := setupRouter()
+	router.POST("/sessions/:id/delete", NewSessionHandler(svc, nil, run).Delete)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/sessions/session-1/delete", nil))
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	assert.Empty(t, svc.deletedID)
 }
 
 func TestSessionHandler_ClearUnread(t *testing.T) {
