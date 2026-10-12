@@ -79,6 +79,18 @@ func (f *fakeRunStore) ListMessages(_ context.Context, _ string) ([]*model.RunMe
 	return append([]*model.RunMessage(nil), f.messages...), nil
 }
 
+func (f *fakeRunStore) ListMessagesByRunIDs(_ context.Context, runIDs []string) (map[string][]*model.RunMessage, error) {
+	result := make(map[string][]*model.RunMessage, len(runIDs))
+	for _, runID := range runIDs {
+		for _, message := range f.messages {
+			if message.RunID == runID {
+				result[runID] = append(result[runID], message)
+			}
+		}
+	}
+	return result, nil
+}
+
 func (f *fakeRunStore) TransitionStatus(_ context.Context, id string, from []model.RunStatus, to model.RunStatus) (bool, error) {
 	f.transitionCalls++
 	if f.run == nil || f.run.ID != id {

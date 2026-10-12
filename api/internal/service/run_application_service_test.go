@@ -19,6 +19,8 @@ type applicationRunStoreStub struct {
 	history       []*model.Run
 	historyTotal  int
 	messages      map[string][]*model.RunMessage
+	batchCalls    int
+	singleCalls   int
 	historyLimit  int
 	historyOffset int
 }
@@ -57,7 +59,17 @@ func (s *applicationRunStoreStub) RequestCancel(_ context.Context, _ string) (*m
 }
 
 func (s *applicationRunStoreStub) ListMessages(_ context.Context, runID string) ([]*model.RunMessage, error) {
+	s.singleCalls++
 	return s.messages[runID], nil
+}
+
+func (s *applicationRunStoreStub) ListMessagesByRunIDs(_ context.Context, runIDs []string) (map[string][]*model.RunMessage, error) {
+	s.batchCalls++
+	result := make(map[string][]*model.RunMessage, len(runIDs))
+	for _, runID := range runIDs {
+		result[runID] = append([]*model.RunMessage(nil), s.messages[runID]...)
+	}
+	return result, nil
 }
 
 type applicationExecutorStub struct {
@@ -186,5 +198,33 @@ func TestRunApplicationServiceSubmitInputRestartsWithOwnedAttachmentContext(t *t
 	}
 	if result.Handle == nil || executor.startedRun != "run-1" || len(executor.contexts) != 1 || executor.contexts[0].Content != "补充正文" {
 		t.Fatalf("SubmitInput() did not restart with attachment context: %+v", executor)
+	}
+}
+
+func TestRunApplicationServiceListHistoryBatchesMessages(t *testing.T) {
+	first := &model.Run{ID: "run-1", SessionID: "session-1"}
+	second := &model.Run{ID: "run-2", SessionID: "session-1"}
+	store := &applicationRunStoreStub{
+		history:      []*model.Run{first, nil, second},
+		historyTotal: 2,
+		messages: map[string][]*model.RunMessage{
+			"run-1": {{RunID: "run-1", Content: "first"}},
+			"run-2": {{RunID: "run-2", Content: "second"}},
+		},
+	}
+	svc := NewRunApplicationService(store, &applicationExecutorStub{}, nil, nil, nil, nil, "prompt-hash")
+
+	page, err := svc.ListBySessionID(context.Background(), "session-1", 20, 5)
+	if err != nil {
+		t.Fatalf("ListBySessionID() error = %v", err)
+	}
+	if store.batchCalls != 1 || store.singleCalls != 0 {
+		t.Fatalf("message reads = batch:%d single:%d, want batch:1 single:0", store.batchCalls, store.singleCalls)
+	}
+	if len(page.Items) != 2 || page.Items[0].Messages[0].Content != "first" || page.Items[1].Messages[0].Content != "second" {
+		t.Fatalf("history page = %+v, want messages grouped by run", page)
+	}
+	if page.Total != 2 || page.Limit != 20 || page.Offset != 5 {
+		t.Fatalf("pagination = %+v, want total=2 limit=20 offset=5", page)
 	}
 }

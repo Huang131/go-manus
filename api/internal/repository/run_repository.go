@@ -26,6 +26,7 @@ type RunRepository interface {
 	GetActiveBySessionID(ctx context.Context, sessionID string) (*model.Run, error)
 	ListBySessionID(ctx context.Context, sessionID string, limit, offset int) ([]*model.Run, int, error)
 	ListMessages(ctx context.Context, runID string) ([]*model.RunMessage, error)
+	ListMessagesByRunIDs(ctx context.Context, runIDs []string) (map[string][]*model.RunMessage, error)
 	TransitionStatus(ctx context.Context, id string, from []model.RunStatus, to model.RunStatus) (bool, error)
 	EnterWaitingInput(ctx context.Context, runID string, expectedRevision int, snapshot model.RunExecutionSnapshot, question *model.RunMessage) (bool, error)
 	ResumeWaitingInput(ctx context.Context, runID string, expectedRevision int, answer *model.RunMessage) (bool, error)
@@ -304,6 +305,45 @@ func (r *PostgresRunRepository) ListMessages(ctx context.Context, runID string) 
 		return nil, err
 	}
 	return collectRows(rows, scanRunMessage)
+}
+
+// ListMessagesByRunIDs 一次读取多个 Run 的消息，供会话历史分页避免 N+1 查询。
+// 返回结果会为每个有效 Run ID 初始化空切片，调用方无需区分“无消息”和“未查询”。
+func (r *PostgresRunRepository) ListMessagesByRunIDs(ctx context.Context, runIDs []string) (map[string][]*model.RunMessage, error) {
+	messagesByRunID := make(map[string][]*model.RunMessage, len(runIDs))
+	ids := make([]string, 0, len(runIDs))
+	seen := make(map[string]struct{}, len(runIDs))
+	for _, runID := range runIDs {
+		if runID == "" {
+			continue
+		}
+		if _, exists := seen[runID]; exists {
+			continue
+		}
+		seen[runID] = struct{}{}
+		ids = append(ids, runID)
+		messagesByRunID[runID] = []*model.RunMessage{}
+	}
+	if len(ids) == 0 {
+		return messagesByRunID, nil
+	}
+	rows, err := r.queryer().Query(ctx, `
+		SELECT `+runMessageColumns+`
+		FROM messages
+		WHERE run_id = ANY($1)
+		ORDER BY run_id ASC, created_at ASC, id ASC
+	`, ids)
+	if err != nil {
+		return nil, err
+	}
+	messages, err := collectRows(rows, scanRunMessage)
+	if err != nil {
+		return nil, err
+	}
+	for _, message := range messages {
+		messagesByRunID[message.RunID] = append(messagesByRunID[message.RunID], message)
+	}
+	return messagesByRunID, nil
 }
 
 func scanRunMessage(s rowScanner) (*model.RunMessage, error) {

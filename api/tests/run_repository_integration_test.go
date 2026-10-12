@@ -78,6 +78,32 @@ func TestRunRepo_CreateWithInitialMessage_PersistsOneAggregate(t *testing.T) {
 	assert.Equal(t, initial.Attachments, messages[0].Attachments)
 }
 
+func TestRunRepo_ListMessagesByRunIDs_GroupsMessages(t *testing.T) {
+	ctx := context.Background()
+	repo := testRunRepository(t)
+	firstSessionID := createSessionForTest(t)
+	secondSessionID := createSessionForTest(t)
+	t.Cleanup(func() { CleanupSession(t, firstSessionID) })
+	t.Cleanup(func() { CleanupSession(t, secondSessionID) })
+
+	first := newRunForTest(firstSessionID, "batch-first-"+uuid.NewString())
+	second := newRunForTest(secondSessionID, "batch-second-"+uuid.NewString())
+	_, inserted, err := repo.CreateWithInitialMessage(ctx, first, initialRunMessage(first))
+	require.NoError(t, err)
+	require.True(t, inserted)
+	_, inserted, err = repo.CreateWithInitialMessage(ctx, second, initialRunMessage(second))
+	require.NoError(t, err)
+	require.True(t, inserted)
+
+	messagesByRunID, err := repo.ListMessagesByRunIDs(ctx, []string{second.ID, "", first.ID, second.ID})
+	require.NoError(t, err)
+	require.Len(t, messagesByRunID, 2)
+	require.Len(t, messagesByRunID[first.ID], 1)
+	require.Len(t, messagesByRunID[second.ID], 1)
+	assert.Equal(t, first.ID, messagesByRunID[first.ID][0].RunID)
+	assert.Equal(t, second.ID, messagesByRunID[second.ID][0].RunID)
+}
+
 func TestRunRepo_CreateWithInitialMessage_EnforcesSingleActiveRun(t *testing.T) {
 	ctx := context.Background()
 	repo := testRunRepository(t)

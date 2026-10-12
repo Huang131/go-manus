@@ -56,6 +56,7 @@ type runApplicationStore interface {
 	GetActiveBySessionID(ctx context.Context, sessionID string) (*model.Run, error)
 	ListBySessionID(ctx context.Context, sessionID string, limit, offset int) ([]*model.Run, int, error)
 	ListMessages(ctx context.Context, runID string) ([]*model.RunMessage, error)
+	ListMessagesByRunIDs(ctx context.Context, runIDs []string) (map[string][]*model.RunMessage, error)
 	RequestCancel(ctx context.Context, runID string) (*model.Run, error)
 }
 
@@ -216,16 +217,22 @@ func (s *defaultRunApplicationService) ListBySessionID(ctx context.Context, sess
 	if err != nil {
 		return nil, apperr.ToInternal(err)
 	}
+	runIDs := make([]string, 0, len(runs))
+	for _, run := range runs {
+		if run != nil {
+			runIDs = append(runIDs, run.ID)
+		}
+	}
+	messagesByRunID, err := s.runs.ListMessagesByRunIDs(ctx, runIDs)
+	if err != nil {
+		return nil, apperr.ToInternal(err)
+	}
 	page := &RunHistoryPage{Items: make([]RunHistoryItem, 0, len(runs)), Total: total, Limit: limit, Offset: offset}
 	for _, run := range runs {
 		if run == nil {
 			continue
 		}
-		messages, err := s.runs.ListMessages(ctx, run.ID)
-		if err != nil {
-			return nil, apperr.ToInternal(err)
-		}
-		page.Items = append(page.Items, RunHistoryItem{Run: run, Messages: messages})
+		page.Items = append(page.Items, RunHistoryItem{Run: run, Messages: messagesByRunID[run.ID]})
 	}
 	return page, nil
 }
