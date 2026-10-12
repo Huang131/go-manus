@@ -2,13 +2,22 @@ import asyncio
 import json
 import unittest
 from typing import Any
+from unittest import mock
 
 from fastapi import FastAPI
 
 from app.interfaces.errors.exception_handler import register_exception_handlers
 from app.interfaces.errors.exceptions import AppException
-from app.interfaces.service_dependencies import get_file_service, get_shell_service
-from app.main import app
+from app.interfaces.service_dependencies import (
+    BROWSER_STATE_KEY,
+    SHELL_STATE_KEY,
+    SUPERVISOR_STATE_KEY,
+    get_browser_service,
+    get_file_service,
+    get_shell_service,
+    get_supervisor_service,
+)
+from app.main import app, lifespan
 from app.models.file import FileReadResult, FileWriteResult, FileDeleteResult
 from app.models.shell import ShellExecuteResult
 from app.models.supervisor import ProcessInfo, SupervisorTimeout
@@ -55,7 +64,7 @@ class ApiEndpointTests(unittest.TestCase):
         app.dependency_overrides[get_file_service] = lambda: cls.file_service
         app.dependency_overrides[get_shell_service] = lambda: cls.shell_service
         # Supervisor 单例从 app.state 解析，中间件与端点共用该实例，故此处直接替换。
-        app.state.supervisor_service = cls.supervisor_service
+        setattr(app.state, SUPERVISOR_STATE_KEY, cls.supervisor_service)
 
     @classmethod
     def tearDownClass(cls):
@@ -142,6 +151,57 @@ class ApiEndpointTests(unittest.TestCase):
         response = asyncio.run(handler(request, AppException("failed", data={"request_id": "r1"})))
 
         self.assertEqual(json.loads(response.body)["data"], {"request_id": "r1"})
+
+
+class LifespanWiringTests(unittest.TestCase):
+    """显式验证 main.lifespan → setup_services → shutdown_services 的生命周期链。
+
+    用 mock 替换三个状态型服务，避免依赖真实 supervisord 套接字与子进程，
+    只校验：构造/回收确实发生、且挂到 app.state 的实例能被 provider 解析到。
+    """
+
+    def test_lifespan_constructs_and_reclaims_stateful_services(self):
+        events: list[str] = []
+
+        class FakeShell:
+            def __init__(self):
+                events.append("shell:init")
+
+            async def shutdown(self):
+                events.append("shell:shutdown")
+
+        class FakeBrowser:
+            def __init__(self):
+                events.append("browser:init")
+
+        class FakeSupervisor:
+            def __init__(self):
+                events.append("supervisor:init")
+
+            async def aclose(self):
+                events.append("supervisor:aclose")
+
+        # 隔离出一个只挂 lifespan 的空应用，避免污染其他用例共享的 app 状态
+        test_app = FastAPI(lifespan=lifespan)
+        request = type("Request", (), {"app": test_app})()
+
+        async def scenario():
+            with mock.patch("app.interfaces.service_dependencies.SupervisorService", FakeSupervisor), \
+                    mock.patch("app.interfaces.service_dependencies.ShellService", FakeShell), \
+                    mock.patch("app.interfaces.service_dependencies.BrowserService", FakeBrowser):
+                async with test_app.router.lifespan_context(test_app):
+                    # 启动阶段：setup_services 构造并挂载，provider 从 state 解析到同一实例
+                    self.assertEqual(events, ["supervisor:init", "shell:init", "browser:init"])
+                    self.assertIs(get_supervisor_service(request), getattr(test_app.state, SUPERVISOR_STATE_KEY))
+                    self.assertIs(get_shell_service(request), getattr(test_app.state, SHELL_STATE_KEY))
+                    self.assertIs(get_browser_service(request), getattr(test_app.state, BROWSER_STATE_KEY))
+                # 关闭阶段：shutdown_services 回收的正是启动时挂载的那一批实例
+                self.assertEqual(
+                    events,
+                    ["supervisor:init", "shell:init", "browser:init", "shell:shutdown", "supervisor:aclose"],
+                )
+
+        asyncio.run(scenario())
 
 
 if __name__ == "__main__":

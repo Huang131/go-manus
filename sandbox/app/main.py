@@ -9,8 +9,7 @@ from app.core.config import get_settings
 from app.core.middleware import auto_extend_timeout_middleware
 from app.interfaces.endpoints.routes import router
 from app.interfaces.errors.exception_handler import register_exception_handlers
-from app.interfaces.service_dependencies import get_shell_service
-from app.services.supervisor import SupervisorService
+from app.interfaces.service_dependencies import setup_services, shutdown_services
 
 # 控制台处理器的唯一标识，用于 setup_logging 的幂等判断。
 CONSOLE_HANDLER_NAME = "sandbox-console"
@@ -55,18 +54,16 @@ async def lifespan(app: FastAPI):
     """FastAPI生命周期上下文管理器"""
     # yield 之前：应用启动阶段，此时还未开始接收请求
     logger.info("Manus沙箱正在初始化")
-    # 在生命周期内构造单例：既有运行中的事件循环（可安全调度超时任务），
-    # 也让中间件与端点共用同一实例，测试可通过 app.state 替换。
-    app.state.supervisor_service = SupervisorService()
+    # 状态型服务单例统一在 lifespan 内构造并挂到 app.state（见 setup_services），
+    # 既有运行中的事件循环（可安全调度超时任务），也让中间件与端点共用同一实例。
+    setup_services(app)
 
     try:
         # yield 是分界线：在此把控制权交回 FastAPI，之后才开始接收请求
         yield
     finally:
         # yield 之后：应用关闭阶段，finally 保证异常退出时也会回收资源
-        await get_shell_service().shutdown()
-        # 取消待执行的超时销毁任务（只取消本地任务，不会关闭 supervisord）
-        await app.state.supervisor_service.aclose()
+        await shutdown_services(app)
         logger.info("Manus沙箱关闭成功")
 
 
