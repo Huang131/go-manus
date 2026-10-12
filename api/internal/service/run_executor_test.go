@@ -114,6 +114,18 @@ func (p *executorToolProviderStub) Acquire(_ settings.AgentSettings) (RunToolSet
 	return p.set, nil
 }
 
+type blockingToolProvider struct {
+	set     *executorToolSetStub
+	started chan struct{}
+	release chan struct{}
+}
+
+func (p *blockingToolProvider) Acquire(settings.AgentSettings) (RunToolSet, error) {
+	close(p.started)
+	<-p.release
+	return p.set, nil
+}
+
 // persistenceContextStore 记录终态写入收到的上下文，用于守护取消后持久化仍有时间上限的契约。
 type persistenceContextStore struct {
 	executorStoreStub
@@ -156,10 +168,13 @@ func (s *persistenceTimeoutStore) ReconcileCancelling(ctx context.Context, runID
 }
 
 type executorEngineStub struct {
-	result RunExecutionResult
-	err    error
-	panic  bool
-	seen   RunExecutionInput
+	result        RunExecutionResult
+	err           error
+	panic         bool
+	seen          RunExecutionInput
+	started       chan struct{}
+	waitForCancel bool
+	startedOnce   sync.Once
 }
 
 type cancellationRaceStore struct {
@@ -219,8 +234,14 @@ func (s *cancellationRaceStore) snapshot() (model.RunStatus, []string) {
 	return s.status, append([]string(nil), s.events...)
 }
 
-func (e *executorEngineStub) Execute(_ context.Context, input RunExecutionInput) (RunExecutionResult, error) {
+func (e *executorEngineStub) Execute(ctx context.Context, input RunExecutionInput) (RunExecutionResult, error) {
 	e.seen = input
+	if e.started != nil {
+		e.startedOnce.Do(func() { close(e.started) })
+	}
+	if e.waitForCancel {
+		<-ctx.Done()
+	}
 	if e.panic {
 		panic("engine panic")
 	}
@@ -289,18 +310,28 @@ func TestRunExecutorSuccessReleasesToolsBeforePersistingTerminal(t *testing.T) {
 
 func TestRunExecutorBoundsTerminalPersistenceAfterCancelledExecution(t *testing.T) {
 	store := &persistenceContextStore{}
+	parentCtx, cancelParent := context.WithCancel(context.Background())
+	defer cancelParent()
+	engine := &executorEngineStub{
+		result:  RunExecutionResult{Kind: RunExecutionSucceeded},
+		started: make(chan struct{}), waitForCancel: true,
+	}
 	executor := NewRunExecutor(
 		store,
 		&executorToolProviderStub{set: &executorToolSetStub{released: make(chan struct{})}},
-		&executorEngineStub{result: RunExecutionResult{Kind: RunExecutionSucceeded}},
+		engine,
 	)
 
-	parentCtx, cancelParent := context.WithCancel(context.Background())
-	cancelParent()
 	handle, err := executor.Start(parentCtx, "run-1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	select {
+	case <-engine.started:
+	case <-time.After(time.Second):
+		t.Fatal("Engine did not start")
+	}
+	cancelParent()
 	waitExecutorDone(t, handle)
 
 	if store.persistenceCtx == nil {
@@ -342,6 +373,66 @@ func TestRunExecutorUsesFreshContextToReconcilePersistenceTimeout(t *testing.T) 
 	}
 	if len(store.reconcileErrs) != 2 || store.reconcileErrs[1] != nil {
 		t.Fatalf("reconciliation context errors = %v, want a fresh active context", store.reconcileErrs)
+	}
+}
+
+func TestRunExecutorCancelDuringToolAcquisitionDoesNotStartEngine(t *testing.T) {
+	store := &executorStoreStub{}
+	toolSet := &executorToolSetStub{released: make(chan struct{})}
+	provider := &blockingToolProvider{
+		set: toolSet, started: make(chan struct{}), release: make(chan struct{}),
+	}
+	engine := &executorEngineStub{result: RunExecutionResult{Kind: RunExecutionSucceeded}}
+	executor := NewRunExecutor(store, provider, engine)
+
+	startResult := make(chan struct {
+		handle *RunExecutionHandle
+		err    error
+	}, 1)
+	go func() {
+		handle, err := executor.Start(context.Background(), "run-1", nil)
+		startResult <- struct {
+			handle *RunExecutionHandle
+			err    error
+		}{handle: handle, err: err}
+	}()
+
+	select {
+	case <-provider.started:
+	case <-time.After(time.Second):
+		t.Fatal("tool acquisition did not start")
+	}
+	if _, err := executor.Cancel(context.Background(), "run-1"); err != nil {
+		t.Fatalf("Cancel() error = %v", err)
+	}
+	close(provider.release)
+
+	var result struct {
+		handle *RunExecutionHandle
+		err    error
+	}
+	select {
+	case result = <-startResult:
+	case <-time.After(time.Second):
+		t.Fatal("Start() did not return")
+	}
+	if result.err != nil {
+		t.Fatalf("Start() error = %v, want cancelled start to return a handle", result.err)
+	}
+	if result.handle == nil {
+		t.Fatal("Start() handle = nil")
+	}
+	waitExecutorDone(t, result.handle)
+	if engine.seen.RunID != "" {
+		t.Fatalf("Engine started for cancelled Run: %+v", engine.seen)
+	}
+	select {
+	case <-toolSet.released:
+	default:
+		t.Fatal("tool set was not released after cancelled acquisition")
+	}
+	if store.status != model.RunStatusCancelled {
+		t.Fatalf("Run status = %s, want cancelled", store.status)
 	}
 }
 

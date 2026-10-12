@@ -171,34 +171,11 @@ func NewRunExecutorWithEventPublisher(store RunExecutionStore, provider RunToolP
 	}
 }
 
-// Start 原子登记控制句柄后启动 Engine；同一进程内同一 Run 不重复执行。
+// Start 先登记控制句柄，再启动 Run；同一进程内同一 Run 不重复执行。
 func (e *RunExecutor) Start(ctx context.Context, runID string, messages []llmcore.Message, attachmentContexts ...[]attachment.FileContext) (*RunExecutionHandle, error) {
 	if e.store == nil || e.provider == nil || e.engine == nil {
 		return nil, errors.New("run executor dependencies are incomplete")
 	}
-	run, err := e.store.Start(ctx, runID)
-	if err != nil {
-		return nil, fmt.Errorf("start run: %w", err)
-	}
-	if run == nil {
-		return nil, errors.New("start run returned nil run")
-	}
-	toolSet, err := e.provider.Acquire(run.SettingsSnapshot)
-	if err != nil {
-		// Run 已经进入 running，工具无法装配时必须立即收敛，不能遗留 active Run。
-		if _, cancelErr := e.Cancel(ctx, runID); cancelErr != nil {
-			return nil, fmt.Errorf("acquire run tools: %w; reconcile cancellation: %v", err, cancelErr)
-		}
-		return nil, fmt.Errorf("acquire run tools: %w", err)
-	}
-	if toolSet == nil {
-		err := errors.New("acquire run tools returned nil tool set")
-		if _, cancelErr := e.Cancel(ctx, runID); cancelErr != nil {
-			return nil, fmt.Errorf("%w; reconcile cancellation: %v", err, cancelErr)
-		}
-		return nil, err
-	}
-
 	ctx, cancel := context.WithCancel(ctx)
 	handle := &RunExecutionHandle{done: make(chan struct{})}
 	control := &runControl{handle: handle, cancel: cancel}
@@ -206,18 +183,82 @@ func (e *RunExecutor) Start(ctx context.Context, runID string, messages []llmcor
 	if _, exists := e.control[runID]; exists {
 		e.mu.Unlock()
 		cancel()
-		toolSet.Release()
 		return nil, fmt.Errorf("run %q already has an execution handle", runID)
 	}
 	e.control[runID] = control
 	e.mu.Unlock()
 
+	run, err := e.store.Start(ctx, runID)
+	if err != nil {
+		e.removeControl(runID, control)
+		cancel()
+		return nil, fmt.Errorf("start run: %w", err)
+	}
+	if run == nil {
+		e.removeControl(runID, control)
+		cancel()
+		return nil, errors.New("start run returned nil run")
+	}
+	toolSet, err := e.provider.Acquire(run.SettingsSnapshot)
+	if err != nil {
+		// Run 已经进入 running，工具无法装配时必须立即收敛，不能遗留 active Run。
+		e.abortStart(ctx, runID, control)
+		return nil, fmt.Errorf("acquire run tools: %w", err)
+	}
+	if toolSet == nil {
+		err := errors.New("acquire run tools returned nil tool set")
+		e.abortStart(ctx, runID, control)
+		return nil, err
+	}
 	var contexts []attachment.FileContext
 	if len(attachmentContexts) > 0 {
 		contexts = append([]attachment.FileContext(nil), attachmentContexts[0]...)
 	}
+
+	// 句柄在工具装配期间已可被 Cancel 观察；持锁完成最后检查和 Engine 入场，
+	// 防止 Cancel 在检查与启动之间插入。
+	e.mu.Lock()
+	current := e.control[runID]
+	if current != control {
+		e.mu.Unlock()
+		toolSet.Release()
+		cancel()
+		return nil, fmt.Errorf("run %q execution handle was replaced", runID)
+	}
+	if ctx.Err() != nil {
+		e.mu.Unlock()
+		toolSet.Release()
+		e.reconcileCancelledStart(ctx, runID, control)
+		return handle, nil
+	}
 	go e.execute(ctx, cancel, run, messages, contexts, toolSet, control)
+	e.mu.Unlock()
 	return handle, nil
+}
+
+func (e *RunExecutor) abortStart(ctx context.Context, runID string, control *runControl) {
+	e.removeControl(runID, control)
+	control.cancel()
+	reconcileCtx, reconcileCancel := e.newPersistenceContext(ctx)
+	defer reconcileCancel()
+	if _, err := e.store.RequestCancel(reconcileCtx, runID); err != nil {
+		logger.Warn("Run 启动失败后无法请求取消", logger.String("run_id", runID), logger.Err(err))
+		return
+	}
+	if _, err := e.store.ReconcileCancelling(reconcileCtx, runID); err != nil {
+		logger.Warn("Run 启动失败后无法收敛取消", logger.String("run_id", runID), logger.Err(err))
+	}
+}
+
+func (e *RunExecutor) reconcileCancelledStart(ctx context.Context, runID string, control *runControl) {
+	e.removeControl(runID, control)
+	control.cancel()
+	reconcileCtx, reconcileCancel := e.newPersistenceContext(ctx)
+	defer reconcileCancel()
+	if _, err := e.store.ReconcileCancelling(reconcileCtx, runID); err != nil {
+		logger.Warn("Run 在启动前被取消后无法收敛", logger.String("run_id", runID), logger.Err(err))
+	}
+	control.handle.setResult(nil)
 }
 
 func (e *RunExecutor) execute(ctx context.Context, cancel context.CancelFunc, run *model.Run, messages []llmcore.Message, attachmentContexts []attachment.FileContext, toolSet RunToolSet, control *runControl) {
