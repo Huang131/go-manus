@@ -1,6 +1,6 @@
 # Run/Session 重构实施状态
 
-本文件是跨会话恢复入口。状态只反映当前代码，不把目标设计写成已完成。
+本文件是跨会话恢复入口。阶段 1-6 已完成；状态只反映当前代码，不把目标设计写成已完成。阶段文档保留为实施记录和后续维护契约。
 
 ## 当前状态
 
@@ -13,6 +13,8 @@
 | 4. 执行生产切换 | complete | `e281520`、`bb171f6`、`2749c5a` | 4A 生命周期、waiting_input 恢复、4B 应用编排和 Bootstrap 接线已完成；Run API 是执行入口，生产执行不再进入 Task 链 |
 | 5. API/UI/SSE | complete | `c1cefeb`、`7cdfafe`、本轮 Run API 测试对齐 | Run API、Last-Event-ID、Run 历史读取、UI 切换和旧 Session Chat/Stop 路由删除已完成；完整真实依赖 HTTP 验收已通过 |
 | 6. 遗留删除 | complete | `2bd649d`、`afcedfd`、`2e3fa27` | 6A、6B、6C 已完成；Run 切换后的 migration、存储与 HTTP 生命周期已在真实依赖环境验收 |
+
+阶段完成后的维护修复：`5afb9de`（移除 Settings 镜像）、`62cd6e6`（终态持久化失败时保留控制句柄）、`e3bed19`（批量加载历史消息）、`9e12be5`（完成事件流短期保留）、`22a7563`（同步 Graphify 0.10 工作流）。这些提交不改变 Run/Session 阶段状态，只收紧已完成架构的运行可靠性和维护入口。
 
 允许状态：`pending`、`in_progress`、`complete`、`blocked`。
 

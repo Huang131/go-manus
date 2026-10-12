@@ -14,4 +14,4 @@
 
 `archive/` 保存历史 review、阶段性设计、旧对比报告和一次性排查记录。归档文档只用于追溯，不作为当前实现依据。
 
-`refactor-run/` 是尚未完成的 Run/Session 重构实施方案。它描述未来目标，真实进度以 [`refactor-run/STATUS.md`](./refactor-run/STATUS.md) 为准，不能用其中的目标模型解释当前生产代码。`重构.md` 是更早的原始提案，仅用于追溯。
+`refactor-run/` 是已完成的 Run/Session 重构实施记录、契约和后续维护边界。当前生产语义以 [`refactor-run/STATUS.md`](./refactor-run/STATUS.md) 及 `ARCHITECTURE.md` 为准；其中阶段文档保留实施时的检查点和回滚依据。`重构.md` 是更早的原始提案，仅用于追溯，不是当前设计基线。

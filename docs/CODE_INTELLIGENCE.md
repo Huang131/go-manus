@@ -80,6 +80,21 @@ graphify --help
 graphify --version  # 当前项目按 0.10.1 验证
 ```
 
+本项目统一按 Graphify `0.10.1` 使用。当前机器的 `/usr/local/bin/graphify` 已指向 npm 安装的 CLI；不要再用旧的 Python `graphifyy` 包覆盖该入口。安装或升级后应同时确认：
+
+```bash
+which -a graphify
+/usr/local/bin/graphify --version
+graphify --version
+```
+
+如果开发工具的 Graphify skill 版本落后，使用当前 CLI 刷新对应平台；不要执行会把 CLI 降级的旧版安装脚本：
+
+```bash
+graphify install --platform codex
+graphify install --platform trae-cn
+```
+
 如果要让 Codex 使用项目级 Graphify skill，在仓库根目录执行：
 
 ```bash
