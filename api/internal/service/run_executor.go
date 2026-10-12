@@ -149,8 +149,9 @@ type RunExecutor struct {
 }
 
 type runControl struct {
-	handle *RunExecutionHandle
-	cancel context.CancelFunc
+	handle    *RunExecutionHandle
+	cancel    context.CancelFunc
+	admission sync.Mutex
 }
 
 // NewRunExecutor 创建不带实时事件发布器的执行器，供局部装配和测试使用。
@@ -215,8 +216,8 @@ func (e *RunExecutor) Start(ctx context.Context, runID string, messages []llmcor
 		contexts = append([]attachment.FileContext(nil), attachmentContexts[0]...)
 	}
 
-	// 句柄在工具装配期间已可被 Cancel 观察；持锁完成最后检查和 Engine 入场，
-	// 防止 Cancel 在检查与启动之间插入。
+	// 句柄在工具装配期间已可被 Cancel 观察；持有 admission 完成最后检查和
+	// Engine 入场，防止取消已落库但 context 尚未取消时插入执行。
 	e.mu.Lock()
 	current := e.control[runID]
 	if current != control {
@@ -225,14 +226,16 @@ func (e *RunExecutor) Start(ctx context.Context, runID string, messages []llmcor
 		cancel()
 		return nil, fmt.Errorf("run %q execution handle was replaced", runID)
 	}
+	control.admission.Lock()
+	defer control.admission.Unlock()
 	if ctx.Err() != nil {
 		e.mu.Unlock()
 		toolSet.Release()
 		e.reconcileCancelledStart(ctx, runID, control)
 		return handle, nil
 	}
-	go e.execute(ctx, cancel, run, messages, contexts, toolSet, control)
 	e.mu.Unlock()
+	go e.execute(ctx, cancel, run, messages, contexts, toolSet, control)
 	return handle, nil
 }
 
@@ -378,14 +381,22 @@ func (e *RunExecutor) persistResult(ctx context.Context, run *model.Run, result 
 
 // Cancel 先持久化 cancelling，再通知句柄；句柄缺失或已退出时立即 reconciliation。
 func (e *RunExecutor) Cancel(ctx context.Context, runID string) (*model.Run, error) {
+	e.mu.Lock()
+	control := e.control[runID]
+	e.mu.Unlock()
+	if control == nil {
+		if _, err := e.store.RequestCancel(ctx, runID); err != nil {
+			return nil, fmt.Errorf("request run cancel: %w", err)
+		}
+		return e.store.ReconcileCancelling(ctx, runID)
+	}
+	control.admission.Lock()
+	defer control.admission.Unlock()
 	run, err := e.store.RequestCancel(ctx, runID)
 	if err != nil {
 		return nil, fmt.Errorf("request run cancel: %w", err)
 	}
-	e.mu.Lock()
-	control := e.control[runID]
-	e.mu.Unlock()
-	if control == nil || handleEnded(control.handle) {
+	if handleEnded(control.handle) {
 		return e.store.ReconcileCancelling(ctx, runID)
 	}
 	control.cancel()

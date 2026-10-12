@@ -126,6 +126,18 @@ func (p *blockingToolProvider) Acquire(settings.AgentSettings) (RunToolSet, erro
 	return p.set, nil
 }
 
+type cancelBarrierStore struct {
+	executorStoreStub
+	requestStarted chan struct{}
+	releaseRequest chan struct{}
+}
+
+func (s *cancelBarrierStore) RequestCancel(ctx context.Context, runID string) (*model.Run, error) {
+	close(s.requestStarted)
+	<-s.releaseRequest
+	return s.executorStoreStub.RequestCancel(ctx, runID)
+}
+
 // persistenceContextStore 记录终态写入收到的上下文，用于守护取消后持久化仍有时间上限的契约。
 type persistenceContextStore struct {
 	executorStoreStub
@@ -430,6 +442,62 @@ func TestRunExecutorCancelDuringToolAcquisitionDoesNotStartEngine(t *testing.T) 
 	case <-toolSet.released:
 	default:
 		t.Fatal("tool set was not released after cancelled acquisition")
+	}
+	if store.status != model.RunStatusCancelled {
+		t.Fatalf("Run status = %s, want cancelled", store.status)
+	}
+}
+
+func TestRunExecutorDoesNotAdmitEngineWhileCancellationIsPersisting(t *testing.T) {
+	store := &cancelBarrierStore{
+		requestStarted: make(chan struct{}), releaseRequest: make(chan struct{}),
+	}
+	toolSet := &executorToolSetStub{released: make(chan struct{})}
+	provider := &blockingToolProvider{
+		set: toolSet, started: make(chan struct{}), release: make(chan struct{}),
+	}
+	engine := &executorEngineStub{result: RunExecutionResult{Kind: RunExecutionSucceeded}}
+	executor := NewRunExecutor(store, provider, engine)
+
+	startResult := make(chan struct {
+		handle *RunExecutionHandle
+		err    error
+	}, 1)
+	go func() {
+		handle, err := executor.Start(context.Background(), "run-1", nil)
+		startResult <- struct {
+			handle *RunExecutionHandle
+			err    error
+		}{handle: handle, err: err}
+	}()
+	select {
+	case <-provider.started:
+	case <-time.After(time.Second):
+		t.Fatal("tool acquisition did not start")
+	}
+
+	cancelResult := make(chan error, 1)
+	go func() {
+		_, err := executor.Cancel(context.Background(), "run-1")
+		cancelResult <- err
+	}()
+	select {
+	case <-store.requestStarted:
+	case <-time.After(time.Second):
+		t.Fatal("cancel request did not reach persistence")
+	}
+	close(provider.release)
+	close(store.releaseRequest)
+	if err := <-cancelResult; err != nil {
+		t.Fatalf("Cancel() error = %v", err)
+	}
+	result := <-startResult
+	if result.err != nil {
+		t.Fatalf("Start() error = %v", result.err)
+	}
+	waitExecutorDone(t, result.handle)
+	if engine.seen.RunID != "" {
+		t.Fatalf("Engine started while cancellation was persisting: %+v", engine.seen)
 	}
 	if store.status != model.RunStatusCancelled {
 		t.Fatalf("Run status = %s, want cancelled", store.status)
