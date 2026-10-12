@@ -292,6 +292,39 @@ func TestRunRepo_RecoverWaitingInput(t *testing.T) {
 	require.True(t, changed, "valid waiting run must still accept input after recovery")
 }
 
+func TestRunRepo_CancelWaitingInputClearsWaitingMessage(t *testing.T) {
+	ctx := context.Background()
+	repo := testRunRepository(t)
+	run, question := createWaitingRunForRecovery(t, repo)
+
+	changed, err := repo.TransitionStatus(ctx, run.ID, []model.RunStatus{model.RunStatusWaitingInput}, model.RunStatusCancelling)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	got, err := repo.GetByID(ctx, run.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, model.RunStatusCancelling, got.Status)
+	assert.Empty(t, got.WaitingMessageID)
+	messages, err := repo.ListMessages(ctx, run.ID)
+	require.NoError(t, err)
+	require.Len(t, messages, 2, "cancellation must retain the conversation")
+	assert.Equal(t, question.ID, messages[1].ID)
+	assert.Equal(t, question.Content, messages[1].Content)
+
+	changed, err = repo.TransitionStatus(ctx, run.ID, []model.RunStatus{model.RunStatusCancelling}, model.RunStatusCancelled)
+	require.NoError(t, err)
+	require.True(t, changed)
+	got, err = repo.GetByID(ctx, run.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, model.RunStatusCancelled, got.Status)
+	assert.NotNil(t, got.FinishedAt)
+	active, err := repo.GetActiveBySessionID(ctx, run.SessionID)
+	require.NoError(t, err)
+	assert.Nil(t, active)
+}
+
 func TestRunRepo_CreateWithInitialMessage_ReusesOriginalAggregateForSameClientRequest(t *testing.T) {
 	ctx := context.Background()
 	repo := testRunRepository(t)

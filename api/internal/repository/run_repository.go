@@ -393,6 +393,7 @@ func (r *PostgresRunRepository) TransitionStatus(ctx context.Context, id string,
 	tag, err := r.queryer().Exec(ctx, `
 		UPDATE runs
 		SET status = $3::varchar,
+			waiting_message_id = CASE WHEN $3::varchar = 'waiting_input' THEN waiting_message_id ELSE NULL END,
 			started_at = CASE WHEN $3::varchar = 'running' AND started_at IS NULL THEN CURRENT_TIMESTAMP(0) ELSE started_at END,
 			finished_at = CASE WHEN $3::varchar IN ('succeeded', 'failed', 'cancelled', 'interrupted') THEN CURRENT_TIMESTAMP(0) ELSE finished_at END,
 			updated_at = CURRENT_TIMESTAMP(0)
