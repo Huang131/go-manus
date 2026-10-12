@@ -225,6 +225,9 @@ func (e *RunExecutor) execute(ctx context.Context, cancel context.CancelFunc, ru
 
 	// 取消只停止 Engine；状态收尾必须继续使用可用的持久化上下文。
 	persistErr := e.persistResult(context.WithoutCancel(ctx), run, result, err)
+	if persistErr != nil {
+		e.reconcileAfterPersistenceFailure(context.WithoutCancel(ctx), run.ID)
+	}
 	if persistErr == nil && e.publisher != nil && isTerminalExecution(result, err) {
 		if marker, ok := e.publisher.(completedRunEventMarker); ok {
 			if markErr := marker.MarkCompleted(context.WithoutCancel(ctx), run.ID); markErr != nil {
@@ -237,6 +240,21 @@ func (e *RunExecutor) execute(ctx context.Context, cancel context.CancelFunc, ru
 	// 先删除再通知 Wait，保证后续 Cancel 立即走数据库 reconciliation。
 	e.removeControl(run.ID, control)
 	control.handle.setResult(persistErr)
+}
+
+// reconcileAfterPersistenceFailure 避免结果写入失败后留下没有进程句柄的活跃 Run。
+// 先处理已经进入 cancelling 的竞争窗口；仍处于活跃状态时再请求取消并收敛。
+func (e *RunExecutor) reconcileAfterPersistenceFailure(ctx context.Context, runID string) {
+	if _, err := e.store.ReconcileCancelling(ctx, runID); err == nil {
+		return
+	}
+	if _, err := e.store.RequestCancel(ctx, runID); err != nil {
+		logger.Warn("执行结果持久化失败后无法请求取消 Run", logger.String("run_id", runID), logger.Err(err))
+		return
+	}
+	if _, err := e.store.ReconcileCancelling(ctx, runID); err != nil {
+		logger.Warn("执行结果持久化失败后无法收敛 Run", logger.String("run_id", runID), logger.Err(err))
+	}
 }
 
 func isTerminalExecution(result RunExecutionResult, engineErr error) bool {

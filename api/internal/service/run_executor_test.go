@@ -16,11 +16,12 @@ import (
 )
 
 type executorStoreStub struct {
-	mu        sync.Mutex
-	status    model.RunStatus
-	steps     []string
-	finishErr error
-	finished  chan struct{}
+	mu         sync.Mutex
+	status     model.RunStatus
+	steps      []string
+	finishErr  error
+	waitingErr error
+	finished   chan struct{}
 }
 
 func (s *executorStoreStub) Start(_ context.Context, _ string) (*model.Run, error) {
@@ -33,6 +34,9 @@ func (s *executorStoreStub) Start(_ context.Context, _ string) (*model.Run, erro
 
 func (s *executorStoreStub) SaveWaitingInput(_ context.Context, _ string, _ model.RunExecutionSnapshot, _ *model.RunMessage) error {
 	s.record("waiting")
+	if s.waitingErr != nil {
+		return s.waitingErr
+	}
 	s.status = model.RunStatusWaitingInput
 	return nil
 }
@@ -115,6 +119,63 @@ type executorEngineStub struct {
 	err    error
 	panic  bool
 	seen   RunExecutionInput
+}
+
+type cancellationRaceStore struct {
+	mu            sync.Mutex
+	status        model.RunStatus
+	events        []string
+	finishStarted chan struct{}
+	releaseFinish chan struct{}
+}
+
+func (s *cancellationRaceStore) Start(context.Context, string) (*model.Run, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, "start")
+	s.status = model.RunStatusRunning
+	return &model.Run{ID: "run-1", SessionID: "session-1", Status: s.status}, nil
+}
+
+func (s *cancellationRaceStore) SaveWaitingInput(context.Context, string, model.RunExecutionSnapshot, *model.RunMessage) error {
+	return nil
+}
+
+func (s *cancellationRaceStore) Finish(_ context.Context, _ string, result RunExecutionResult) error {
+	s.mu.Lock()
+	s.events = append(s.events, "finish:"+string(result.Kind))
+	s.mu.Unlock()
+	close(s.finishStarted)
+	<-s.releaseFinish
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.status == model.RunStatusCancelling {
+		return errors.New("run cannot finish after cancellation")
+	}
+	s.status = runStatusForResult(result.Kind)
+	return nil
+}
+
+func (s *cancellationRaceStore) RequestCancel(context.Context, string) (*model.Run, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, "request_cancel")
+	s.status = model.RunStatusCancelling
+	return &model.Run{ID: "run-1", Status: s.status}, nil
+}
+
+func (s *cancellationRaceStore) ReconcileCancelling(context.Context, string) (*model.Run, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, "reconcile")
+	s.status = model.RunStatusCancelled
+	return &model.Run{ID: "run-1", Status: s.status}, nil
+}
+
+func (s *cancellationRaceStore) snapshot() (model.RunStatus, []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.status, append([]string(nil), s.events...)
 }
 
 func (e *executorEngineStub) Execute(_ context.Context, input RunExecutionInput) (RunExecutionResult, error) {
@@ -279,6 +340,32 @@ func TestRunExecutorWaitingPersistsCheckpointAfterEngineExit(t *testing.T) {
 	}
 }
 
+func TestRunExecutorReconcilesWaitingPersistenceFailure(t *testing.T) {
+	store := &executorStoreStub{waitingErr: errors.New("database unavailable")}
+	question := &model.RunMessage{ID: "question-1", RunID: "run-1", SessionID: "session-1", Role: model.RoleAssistant, Content: "confirm?"}
+	engine := &executorEngineStub{result: RunExecutionResult{
+		Kind:     RunExecutionWaitingInput,
+		Snapshot: model.RunExecutionSnapshot{SnapshotRevision: 1, PlanID: "plan-1", CurrentStepID: "step-1", Steps: []model.RunStepSnapshot{{ID: "step-1", Description: "执行并请求用户确认", Status: model.RunStepStatusRunning}}, WaitingCheckpoint: &model.WaitingCheckpoint{QuestionMessageID: question.ID, StepID: "step-1", ResumeMode: model.ResumeModeContinueStep}},
+		Question: question,
+	}}
+	executor := NewRunExecutor(store, &executorToolProviderStub{set: &executorToolSetStub{released: make(chan struct{})}}, engine)
+
+	handle, err := executor.Start(context.Background(), "run-1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := handle.Wait(context.Background()); err == nil {
+		t.Fatal("Wait() error = nil, want waiting persistence error")
+	}
+
+	if store.status != model.RunStatusCancelled {
+		t.Fatalf("status = %s, want cancelled after waiting persistence failure", store.status)
+	}
+	if got, want := store.events(), []string{"start", "waiting", "reconcile"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("store events = %v, want %v", got, want)
+	}
+}
+
 func TestRunExecutorPanicBecomesFailedAndReleasesTools(t *testing.T) {
 	store := &executorStoreStub{}
 	toolSet := &executorToolSetStub{released: make(chan struct{})}
@@ -308,6 +395,39 @@ func TestRunExecutorCancelWithoutHandleReconcilesImmediately(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got, want := store.events(), []string{"request_cancel", "reconcile"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("store events = %v, want %v", got, want)
+	}
+}
+
+func TestRunExecutorReconcilesCancellationAfterLateEngineResult(t *testing.T) {
+	store := &cancellationRaceStore{finishStarted: make(chan struct{}), releaseFinish: make(chan struct{})}
+	engine := &executorEngineStub{result: RunExecutionResult{Kind: RunExecutionSucceeded}}
+	executor := NewRunExecutor(store, &executorToolProviderStub{set: &executorToolSetStub{released: make(chan struct{})}}, engine)
+
+	handle, err := executor.Start(context.Background(), "run-1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-store.finishStarted:
+	case <-time.After(time.Second):
+		t.Fatal("terminal persistence did not start")
+	}
+	if _, err := executor.Cancel(context.Background(), "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	close(store.releaseFinish)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := handle.Wait(ctx); err == nil {
+		t.Fatal("Wait() error = nil, want late terminal persistence error")
+	}
+	status, events := store.snapshot()
+	if status != model.RunStatusCancelled {
+		t.Fatalf("status = %s, want cancelled", status)
+	}
+	if got, want := events, []string{"start", "finish:succeeded", "request_cancel", "reconcile"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("store events = %v, want %v", got, want)
 	}
 }
@@ -366,12 +486,11 @@ func TestRunExecutorRemovesControlWhenTerminalPersistenceFails(t *testing.T) {
 	if found {
 		t.Fatal("execution control remains after terminal persistence failure")
 	}
-
-	if _, err := executor.Cancel(context.Background(), "run-1"); err != nil {
-		t.Fatal(err)
+	if store.status != model.RunStatusCancelled {
+		t.Fatalf("status = %s, want cancelled after persistence failure", store.status)
 	}
 	events := store.events()
-	if !reflect.DeepEqual(events, []string{"start", "finish:succeeded", "request_cancel", "reconcile"}) {
+	if !reflect.DeepEqual(events, []string{"start", "finish:succeeded", "reconcile"}) {
 		t.Fatalf("store events = %v", events)
 	}
 }
