@@ -47,6 +47,19 @@ func (f *conflictingRunStore) CreateWithInitialMessage(_ context.Context, _ *mod
 	return nil, false, repository.ErrActiveRunExists
 }
 
+type startRefreshErrorStore struct {
+	fakeRunStore
+	getCalls int
+}
+
+func (f *startRefreshErrorStore) GetByID(_ context.Context, id string) (*model.Run, error) {
+	f.getCalls++
+	if f.getCalls > 1 {
+		return nil, errors.New("refresh started run failed")
+	}
+	return f.fakeRunStore.GetByID(context.Background(), id)
+}
+
 func TestRunServiceCreateReturnsConflictWhenSessionAlreadyActive(t *testing.T) {
 	svc := NewRunService(&conflictingRunStore{})
 	_, err := svc.Create(context.Background(), CreateRunInput{
@@ -235,6 +248,22 @@ func TestRunServiceStartIsIdempotentForRunningRun(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, model.RunStatusRunning, started.Status)
 	require.Zero(t, store.transitionCalls, "a resumed running Run must not be transitioned again")
+}
+
+func TestRunServiceStartReturnsRunningRunWhenRefreshFailsAfterTransition(t *testing.T) {
+	store := &startRefreshErrorStore{fakeRunStore: fakeRunStore{run: &model.Run{
+		ID: "run-1", SessionID: "session-1", Status: model.RunStatusPending,
+		SettingsSnapshot: settings.DefaultAgentSettings(), PromptHash: "prompt-v1",
+	}}}
+
+	run, err := NewRunService(store).Start(context.Background(), store.run.ID)
+
+	if err == nil {
+		t.Fatal("Start() error = nil, want refresh error")
+	}
+	if run == nil || run.Status != model.RunStatusRunning {
+		t.Fatalf("Start() run = %#v, want running partial result", run)
+	}
 }
 
 func TestRunServiceRecoversStaleRunsAfterRestart(t *testing.T) {

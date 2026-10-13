@@ -229,7 +229,15 @@ func (s *defaultRunService) Start(ctx context.Context, id string) (*model.Run, e
 	if !changed {
 		return nil, s.statusConflict(ctx, id, "run cannot start")
 	}
-	return s.Get(ctx, id)
+	started := *run
+	started.Status = model.RunStatusRunning
+	refreshed, err := s.Get(ctx, id)
+	if err != nil {
+		// 状态迁移已经成功；保留部分结果供上层执行器触发取消补偿，
+		// 避免刷新失败把已占用 active 槽位的 Run 伪装成未启动。
+		return &started, err
+	}
+	return refreshed, nil
 }
 
 // RecoverAfterRestart 在应用启动时收敛没有进程内执行句柄的遗留 Run。
