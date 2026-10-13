@@ -247,8 +247,12 @@ func (e *RunExecutor) abortStart(ctx context.Context, runID string, control *run
 	reconcileCtx, reconcileCancel := e.newPersistenceContext(ctx)
 	defer reconcileCancel()
 	if _, err := e.store.RequestCancel(reconcileCtx, runID); err != nil {
-		logger.Warn("Run 启动失败后无法请求取消", logger.String("run_id", runID), logger.Err(err))
-		return
+		// RequestCancel 是幂等状态迁移；启动补偿不能因一次瞬时存储故障
+		// 放弃收敛，否则进程内已无句柄的 Run 会永久占用 active 槽位。
+		if _, retryErr := e.store.RequestCancel(reconcileCtx, runID); retryErr != nil {
+			logger.Warn("Run 启动失败后无法请求取消", logger.String("run_id", runID), logger.Err(retryErr))
+			return
+		}
 	}
 	if _, err := e.store.ReconcileCancelling(reconcileCtx, runID); err != nil {
 		logger.Warn("Run 启动失败后无法收敛取消", logger.String("run_id", runID), logger.Err(err))

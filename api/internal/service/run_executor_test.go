@@ -149,6 +149,30 @@ func (s *strictStartCancellationStore) ReconcileCancelling(ctx context.Context, 
 	return s.executorStoreStub.ReconcileCancelling(ctx, runID)
 }
 
+// retryStartCancellationStore 模拟启动已置为 running 后，首次取消写入遇到瞬时存储故障。
+type retryStartCancellationStore struct {
+	executorStoreStub
+	requestAttempts int
+}
+
+func (s *retryStartCancellationStore) Start(ctx context.Context, runID string) (*model.Run, error) {
+	run, err := s.executorStoreStub.Start(ctx, runID)
+	if err == nil {
+		s.status = model.RunStatusRunning
+	}
+	return run, err
+}
+
+func (s *retryStartCancellationStore) RequestCancel(ctx context.Context, runID string) (*model.Run, error) {
+	s.requestAttempts++
+	s.record("request_cancel")
+	if s.requestAttempts == 1 {
+		return nil, errors.New("temporary write failure")
+	}
+	s.status = model.RunStatusCancelling
+	return &model.Run{ID: runID, Status: model.RunStatusCancelling}, nil
+}
+
 // persistenceContextStore 记录终态写入收到的上下文，用于守护取消后持久化仍有时间上限的契约。
 type persistenceContextStore struct {
 	executorStoreStub
@@ -760,6 +784,26 @@ func TestRunExecutorToolAcquisitionFailureReconcilesStartedRun(t *testing.T) {
 		t.Fatal("Start() error = nil, want tool acquisition error")
 	}
 	if got, want := store.events(), []string{"start", "request_cancel", "reconcile"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("store events = %v, want %v", got, want)
+	}
+}
+
+func TestRunExecutorRetriesStartCompensationAfterTransientCancelFailure(t *testing.T) {
+	store := &retryStartCancellationStore{}
+	executor := NewRunExecutor(
+		store,
+		&executorToolProviderStub{err: errors.New("mcp unavailable")},
+		&executorEngineStub{},
+	)
+
+	if _, err := executor.Start(context.Background(), "run-1", nil); err == nil {
+		t.Fatal("Start() error = nil, want tool acquisition error")
+	}
+
+	if store.status != model.RunStatusCancelled {
+		t.Fatalf("Run status = %s, want cancelled after compensation retry", store.status)
+	}
+	if got, want := store.events(), []string{"start", "request_cancel", "request_cancel", "reconcile"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("store events = %v, want %v", got, want)
 	}
 }
