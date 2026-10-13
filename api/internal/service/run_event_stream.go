@@ -68,7 +68,7 @@ func (s *redisRunEventStream) Read(ctx context.Context, runID, startID string) (
 			if err != nil {
 				return nil, fmt.Errorf("inspect run event stream: %w", err)
 			}
-			if !bounds.Exists || streamIDLess(startID, bounds.FirstID) {
+			if !bounds.Exists || streamIDLess(startID, bounds.FirstID) || streamIDLess(bounds.LastID, startID) {
 				return nil, ErrRunEventStreamExpired
 			}
 		}

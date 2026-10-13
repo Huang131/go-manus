@@ -46,6 +46,17 @@ func TestRedisRunEventStreamReturnsExpiredForCursorBeforeRetentionWindow(t *test
 	require.ErrorIs(t, err, ErrRunEventStreamExpired)
 }
 
+func TestRedisRunEventStreamReturnsExpiredForCursorAfterStreamTail(t *testing.T) {
+	queue := &runEventStreamQueueStub{bounds: mq.StreamBounds{
+		Exists: true, FirstID: "200-0", LastID: "201-0",
+	}}
+	reader := NewRedisRunEventStream(queue)
+
+	_, err := reader.Read(context.Background(), "run-1", "201-1")
+
+	require.ErrorIs(t, err, ErrRunEventStreamExpired)
+}
+
 func TestRedisRunEventStreamKeepsCursorAtRetentionBoundary(t *testing.T) {
 	queue := &runEventStreamQueueStub{
 		bounds: mq.StreamBounds{Exists: true, FirstID: "200-0", LastID: "201-0"},
