@@ -73,6 +73,19 @@ func (f *resumeNoRefreshStore) GetByID(_ context.Context, id string) (*model.Run
 	return f.fakeRunStore.GetByID(context.Background(), id)
 }
 
+type transitionNoRefreshStore struct {
+	fakeRunStore
+	getCalls int
+}
+
+func (f *transitionNoRefreshStore) GetByID(_ context.Context, id string) (*model.Run, error) {
+	f.getCalls++
+	if f.getCalls > 1 {
+		return nil, errors.New("unexpected refresh after transition")
+	}
+	return f.fakeRunStore.GetByID(context.Background(), id)
+}
+
 func TestRunServiceCreateReturnsConflictWhenSessionAlreadyActive(t *testing.T) {
 	svc := NewRunService(&conflictingRunStore{})
 	_, err := svc.Create(context.Background(), CreateRunInput{
@@ -397,6 +410,31 @@ func TestRunServiceCancelAndReconcileAreIdempotent(t *testing.T) {
 	if err != nil || reconciled.Status != model.RunStatusCancelled {
 		t.Fatalf("repeated ReconcileCancelling() = %#v, %v", reconciled, err)
 	}
+}
+
+func TestRunServiceRequestCancelReturnsCommittedStateWithoutRefresh(t *testing.T) {
+	base, _, _ := waitingRunFixture()
+	store := &transitionNoRefreshStore{fakeRunStore: *base}
+
+	run, err := NewRunService(store).RequestCancel(context.Background(), "run-1")
+
+	require.NoError(t, err)
+	require.NotNil(t, run)
+	require.Equal(t, model.RunStatusCancelling, run.Status)
+	require.Equal(t, 1, store.getCalls)
+}
+
+func TestRunServiceReconcileCancellingReturnsCommittedStateWithoutRefresh(t *testing.T) {
+	base, _, _ := waitingRunFixture()
+	base.run.Status = model.RunStatusCancelling
+	store := &transitionNoRefreshStore{fakeRunStore: *base}
+
+	run, err := NewRunService(store).ReconcileCancelling(context.Background(), "run-1")
+
+	require.NoError(t, err)
+	require.NotNil(t, run)
+	require.Equal(t, model.RunStatusCancelled, run.Status)
+	require.Equal(t, 1, store.getCalls)
 }
 
 func TestRunServiceFinishPersistsTerminalMessageWithRunState(t *testing.T) {

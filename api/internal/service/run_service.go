@@ -473,7 +473,8 @@ func findResumeMessages(messages []*model.RunMessage, questionID string) (*model
 
 // RequestCancel 将可取消状态先迁移为 cancelling；4A 才负责通知进程内执行句柄。
 func (s *defaultRunService) RequestCancel(ctx context.Context, id string) (*model.Run, error) {
-	if _, err := s.Get(ctx, id); err != nil {
+	run, err := s.Get(ctx, id)
+	if err != nil {
 		return nil, err
 	}
 	changed, err := s.store.TransitionStatus(ctx, id, []model.RunStatus{
@@ -483,7 +484,11 @@ func (s *defaultRunService) RequestCancel(ctx context.Context, id string) (*mode
 		return nil, normalizeRunError(err)
 	}
 	if changed {
-		return s.Get(ctx, id)
+		// 条件更新已提交 cancelling；额外刷新失败不能阻止执行器通知本地句柄取消。
+		cancelling := *run
+		cancelling.Status = model.RunStatusCancelling
+		cancelling.ExecutionSnapshot = run.ExecutionSnapshot.Clone()
+		return &cancelling, nil
 	}
 	current, err := s.Get(ctx, id)
 	if err != nil {
@@ -521,7 +526,11 @@ func (s *defaultRunService) ReconcileCancelling(ctx context.Context, id string) 
 		}
 		return nil, runStatusConflict(current, "cancelling reconciliation lost the state race")
 	}
-	return s.Get(ctx, id)
+	// 条件更新已提交 cancelled；避免将成功收敛误报为一次刷新读取失败。
+	cancelled := *run
+	cancelled.Status = model.RunStatusCancelled
+	cancelled.ExecutionSnapshot = run.ExecutionSnapshot.Clone()
+	return &cancelled, nil
 }
 
 func (s *defaultRunService) statusConflict(ctx context.Context, id, message string) error {
