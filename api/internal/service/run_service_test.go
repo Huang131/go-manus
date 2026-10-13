@@ -76,7 +76,11 @@ func (f *fakeRunStore) GetByID(_ context.Context, id string) (*model.Run, error)
 	if f.run == nil || f.run.ID != id {
 		return nil, nil
 	}
-	return f.run, nil
+	// PostgreSQL Repository 会在每次查询时重建 Run；返回副本避免测试因共享指针
+	// 掩盖“持久化后仍返回旧快照”的问题。
+	cloned := *f.run
+	cloned.ExecutionSnapshot = f.run.ExecutionSnapshot.Clone()
+	return &cloned, nil
 }
 
 func (f *fakeRunStore) GetActiveBySessionID(_ context.Context, sessionID string) (*model.Run, error) {
