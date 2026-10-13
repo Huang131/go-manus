@@ -192,8 +192,14 @@ func (e *RunExecutor) Start(ctx context.Context, runID string, messages []llmcor
 
 	run, err := e.store.Start(ctx, runID)
 	if err != nil {
-		e.removeControl(runID, control)
-		cancel()
+		// 非 nil Run 表示状态迁移已经完成，只是启动调用未能返回最新事实；
+		// 此时必须走与工具装配失败相同的补偿，否则会留下没有执行句柄的 active Run。
+		if run != nil {
+			e.abortStart(ctx, runID, control)
+		} else {
+			e.removeControl(runID, control)
+			cancel()
+		}
 		return nil, fmt.Errorf("start run: %w", err)
 	}
 	if run == nil {

@@ -173,6 +173,19 @@ func (s *retryStartCancellationStore) RequestCancel(ctx context.Context, runID s
 	return &model.Run{ID: runID, Status: model.RunStatusCancelling}, nil
 }
 
+// startErrorAfterTransitionStore 模拟状态迁移已成功，但读取最新 Run 时返回错误。
+type startErrorAfterTransitionStore struct {
+	strictStartCancellationStore
+}
+
+func (s *startErrorAfterTransitionStore) Start(ctx context.Context, runID string) (*model.Run, error) {
+	run, err := s.executorStoreStub.Start(ctx, runID)
+	if err != nil {
+		return run, err
+	}
+	return run, errors.New("refresh started run failed")
+}
+
 // persistenceContextStore 记录终态写入收到的上下文，用于守护取消后持久化仍有时间上限的契约。
 type persistenceContextStore struct {
 	executorStoreStub
@@ -847,6 +860,25 @@ func TestRunExecutorRetriesStartCompensationAfterTransientCancelFailure(t *testi
 		t.Fatalf("Run status = %s, want cancelled after compensation retry", store.status)
 	}
 	if got, want := store.events(), []string{"start", "request_cancel", "request_cancel", "reconcile"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("store events = %v, want %v", got, want)
+	}
+}
+
+func TestRunExecutorReconcilesRunWhenStartReportsPostTransitionError(t *testing.T) {
+	store := &startErrorAfterTransitionStore{}
+	executor := NewRunExecutor(
+		store,
+		&executorToolProviderStub{set: &executorToolSetStub{released: make(chan struct{})}},
+		&executorEngineStub{},
+	)
+
+	if _, err := executor.Start(context.Background(), "run-1", nil); err == nil {
+		t.Fatal("Start() error = nil, want post-transition store error")
+	}
+	if store.status != model.RunStatusCancelled {
+		t.Fatalf("Run status = %s, want cancelled after start compensation", store.status)
+	}
+	if got, want := store.events(), []string{"start", "request_cancel", "reconcile"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("store events = %v, want %v", got, want)
 	}
 }
