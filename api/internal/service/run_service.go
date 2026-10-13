@@ -416,11 +416,13 @@ func (s *defaultRunService) SubmitInput(ctx context.Context, runID string, input
 	if !changed {
 		return nil, s.statusConflict(ctx, runID, "waiting input revision is stale")
 	}
-	resumed, err := s.Get(ctx, runID)
-	if err != nil {
-		return nil, err
-	}
-	return &RunResume{Run: resumed, Messages: contextMessages, StartExecution: true}, nil
+	// ResumeWaitingInput 已在同一事务内将 waiting_input 变为 running；再次查询
+	// 只会引入一个“提交成功但刷新失败”的孤儿运行窗口，迁移结果本身已足够构造响应。
+	resumed := *run
+	resumed.Status = model.RunStatusRunning
+	resumed.WaitingMessageID = ""
+	resumed.ExecutionSnapshot = run.ExecutionSnapshot.Clone()
+	return &RunResume{Run: &resumed, Messages: contextMessages, StartExecution: true}, nil
 }
 
 func findMessageByIdempotency(messages []*model.RunMessage, key string) *model.RunMessage {

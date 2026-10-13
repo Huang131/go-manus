@@ -60,6 +60,19 @@ func (f *startRefreshErrorStore) GetByID(_ context.Context, id string) (*model.R
 	return f.fakeRunStore.GetByID(context.Background(), id)
 }
 
+type resumeNoRefreshStore struct {
+	fakeRunStore
+	getCalls int
+}
+
+func (f *resumeNoRefreshStore) GetByID(_ context.Context, id string) (*model.Run, error) {
+	f.getCalls++
+	if f.getCalls > 1 {
+		return nil, errors.New("unexpected refresh after resume")
+	}
+	return f.fakeRunStore.GetByID(context.Background(), id)
+}
+
 func TestRunServiceCreateReturnsConflictWhenSessionAlreadyActive(t *testing.T) {
 	svc := NewRunService(&conflictingRunStore{})
 	_, err := svc.Create(context.Background(), CreateRunInput{
@@ -297,6 +310,23 @@ func TestRunServiceSubmitInputRebuildsContextAndResumesWaitingRun(t *testing.T) 
 	if result.Messages[2].Attachments[0] != "answer-file" {
 		t.Fatalf("answer attachments = %#v", result.Messages[2].Attachments)
 	}
+}
+
+func TestRunServiceSubmitInputReturnsCommittedRunningStateWithoutRefresh(t *testing.T) {
+	base, _, _ := waitingRunFixture()
+	store := &resumeNoRefreshStore{fakeRunStore: *base}
+	result, err := NewRunService(store).SubmitInput(context.Background(), "run-1", SubmitInputRequest{
+		IdempotencyKey: "answer-1", ReplyToMessageID: "question-1", Content: "继续执行",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.Run)
+	require.Equal(t, model.RunStatusRunning, result.Run.Status)
+	require.Empty(t, result.Run.WaitingMessageID)
+	require.True(t, result.StartExecution)
+	require.Len(t, store.messages, 3)
+	require.Equal(t, 1, store.getCalls)
 }
 
 func TestRunServiceSubmitInputIsIdempotentAfterFirstResume(t *testing.T) {
