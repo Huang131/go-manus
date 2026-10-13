@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/Huang131/go-manus/api/internal/agent/attachment"
@@ -23,6 +24,7 @@ type applicationRunStoreStub struct {
 	singleCalls   int
 	historyLimit  int
 	historyOffset int
+	getErr        error
 }
 
 func (s *applicationRunStoreStub) Create(_ context.Context, input CreateRunInput) (*model.Run, error) {
@@ -39,6 +41,9 @@ func (s *applicationRunStoreStub) SubmitInput(_ context.Context, runID string, _
 }
 
 func (s *applicationRunStoreStub) Get(_ context.Context, _ string) (*model.Run, error) {
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
 	return s.run, nil
 }
 
@@ -192,6 +197,29 @@ func TestRunApplicationServiceCreateFreezesSettingsLoadsOwnedAttachmentsAndStart
 	}
 	if len(loader.seenFiles) != 1 || loader.seenFiles[0].ID != "file-1" || loader.seenMessage != "分析报告" {
 		t.Fatalf("loader input = files=%+v message=%q", loader.seenFiles, loader.seenMessage)
+	}
+}
+
+func TestRunApplicationServiceCreateReturnsStartedRunWithoutRefresh(t *testing.T) {
+	store := &applicationRunStoreStub{getErr: errors.New("refresh created run failed")}
+	executor := &applicationExecutorStub{}
+	service := NewRunApplicationService(
+		store, executor, sessionLookupStub{session: &model.Session{ID: "session-1"}},
+		nil, settingsSourceStub{}, nil, "prompt-hash",
+	)
+
+	result, err := service.Create(context.Background(), CreateApplicationRunInput{
+		SessionID: "session-1", IdempotencyKey: "request-1", Content: "分析报告",
+	})
+
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if result == nil || result.Handle == nil || result.Run == nil || result.Run.Status != model.RunStatusRunning {
+		t.Fatalf("Create() = %#v, want a started run", result)
+	}
+	if executor.startCalls != 1 {
+		t.Fatalf("executor start calls = %d, want 1", executor.startCalls)
 	}
 }
 

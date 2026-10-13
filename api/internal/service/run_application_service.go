@@ -155,12 +155,12 @@ func (s *defaultRunApplicationService) Create(ctx context.Context, input CreateA
 	if err != nil {
 		return nil, err
 	}
-	// Start 已同步写入 running；读取最新事实，避免创建响应返回过时的 pending 状态。
-	started, err := s.runs.Get(ctx, run.ID)
-	if err != nil {
-		return nil, err
-	}
-	return &ApplicationRun{Run: started, Handle: handle}, nil
+	// Start 成功即表示执行器已同步完成 pending -> running；再次读取只会让
+	// 已启动的请求因刷新失败误报失败，返回确定的状态迁移结果即可。
+	started := *run
+	started.Status = model.RunStatusRunning
+	started.ExecutionSnapshot = run.ExecutionSnapshot.Clone()
+	return &ApplicationRun{Run: &started, Handle: handle}, nil
 }
 
 // SubmitInput 持久化 waiting_input 回答后重新启动同一 Run 的执行上下文。
