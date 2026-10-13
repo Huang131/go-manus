@@ -47,6 +47,13 @@ func (s *applicationRunStoreStub) Get(_ context.Context, _ string) (*model.Run, 
 	return s.run, nil
 }
 
+func (s *applicationRunStoreStub) FindBySessionAndIdempotencyKey(_ context.Context, sessionID, idempotencyKey string) (*model.Run, error) {
+	if s.run == nil || s.run.SessionID != sessionID || s.run.IdempotencyKey != idempotencyKey {
+		return nil, nil
+	}
+	return s.run, nil
+}
+
 func (s *applicationRunStoreStub) GetActiveBySessionID(_ context.Context, sessionID string) (*model.Run, error) {
 	if s.run == nil || s.run.SessionID != sessionID || !s.run.Status.IsActive() {
 		return nil, nil
@@ -151,9 +158,15 @@ func TestRunApplicationServiceSubmitInputRetryDoesNotRevalidateDeletedAttachment
 	}
 }
 
-type settingsSourceStub struct{ value *settings.AgentSettings }
+type settingsSourceStub struct {
+	value *settings.AgentSettings
+	err   error
+}
 
 func (s settingsSourceStub) GetAgentSettings(context.Context) (*settings.AgentSettings, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
 	return s.value, nil
 }
 
@@ -220,6 +233,45 @@ func TestRunApplicationServiceCreateReturnsStartedRunWithoutRefresh(t *testing.T
 	}
 	if executor.startCalls != 1 {
 		t.Fatalf("executor start calls = %d, want 1", executor.startCalls)
+	}
+}
+
+func TestRunApplicationServiceCreateRetryDoesNotRevalidateDeletedAttachments(t *testing.T) {
+	store := newFakeRunStore()
+	executor := &applicationExecutorStub{}
+	settingsSource := &settingsSourceStub{}
+	files := fileLookupStub{files: map[string]*model.File{
+		"file-1": {ID: "file-1", SessionID: "session-1", Filename: "report.txt"},
+	}}
+	service := NewRunApplicationService(
+		NewRunService(store), executor, sessionLookupStub{session: &model.Session{ID: "session-1"}},
+		&files, settingsSource, nil, "prompt-hash",
+	)
+	input := CreateApplicationRunInput{
+		SessionID: "session-1", IdempotencyKey: "request-1", Content: "分析报告", AttachmentIDs: []string{"file-1"},
+	}
+	if _, err := service.Create(context.Background(), input); err != nil {
+		t.Fatalf("first Create() error = %v", err)
+	}
+	// 真实执行器已经将 Run 迁移到 running；这里显式模拟该持久化事实。
+	store.run.Status = model.RunStatusRunning
+	files.files = nil
+	settingsSource.err = errors.New("current settings are unavailable")
+
+	result, err := service.Create(context.Background(), input)
+
+	if err != nil {
+		t.Fatalf("idempotent Create() error = %v", err)
+	}
+	if result == nil || result.Handle != nil || result.Run == nil || result.Run.Status != model.RunStatusRunning {
+		t.Fatalf("idempotent Create() = %#v, want existing running run", result)
+	}
+	if executor.startCalls != 1 || len(store.messages) != 1 {
+		t.Fatalf("idempotent retry changed execution/message count: starts=%d messages=%d", executor.startCalls, len(store.messages))
+	}
+	input.Content = "不同请求"
+	if _, err := service.Create(context.Background(), input); err == nil {
+		t.Fatal("Create() accepted different content with the same idempotency key")
 	}
 }
 

@@ -20,6 +20,7 @@ import (
 type runStore interface {
 	CreateWithInitialMessage(ctx context.Context, run *model.Run, initial *model.RunMessage) (*model.Run, bool, error)
 	GetByID(ctx context.Context, id string) (*model.Run, error)
+	FindBySessionAndIdempotencyKey(ctx context.Context, sessionID, idempotencyKey string) (*model.Run, error)
 	GetActiveBySessionID(ctx context.Context, sessionID string) (*model.Run, error)
 	ListBySessionID(ctx context.Context, sessionID string, limit, offset int) ([]*model.Run, int, error)
 	ListMessages(ctx context.Context, runID string) ([]*model.RunMessage, error)
@@ -37,6 +38,7 @@ type runStore interface {
 type RunService interface {
 	Create(ctx context.Context, input CreateRunInput) (*model.Run, error)
 	Get(ctx context.Context, id string) (*model.Run, error)
+	FindBySessionAndIdempotencyKey(ctx context.Context, sessionID, idempotencyKey string) (*model.Run, error)
 	GetActiveBySessionID(ctx context.Context, sessionID string) (*model.Run, error)
 	ListBySessionID(ctx context.Context, sessionID string, limit, offset int) ([]*model.Run, int, error)
 	ListMessages(ctx context.Context, runID string) ([]*model.RunMessage, error)
@@ -161,6 +163,18 @@ func (s *defaultRunService) Get(ctx context.Context, id string) (*model.Run, err
 	}
 	if run == nil {
 		return nil, apperr.NotFound("run not found")
+	}
+	return run, nil
+}
+
+// FindBySessionAndIdempotencyKey 查找客户端创建请求已持久化的 Run；未找到时返回 nil。
+func (s *defaultRunService) FindBySessionAndIdempotencyKey(ctx context.Context, sessionID, idempotencyKey string) (*model.Run, error) {
+	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(idempotencyKey) == "" {
+		return nil, apperr.BadRequest("session id and idempotency key are required")
+	}
+	run, err := s.store.FindBySessionAndIdempotencyKey(ctx, sessionID, idempotencyKey)
+	if err != nil {
+		return nil, normalizeRunError(err)
 	}
 	return run, nil
 }

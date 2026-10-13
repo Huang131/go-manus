@@ -347,6 +347,10 @@ func TestRunRepo_CreateWithInitialMessage_ReusesOriginalAggregateForSameClientRe
 	require.NoError(t, err)
 	assert.False(t, inserted)
 	assert.Equal(t, first.ID, created.ID)
+	found, err := repo.FindBySessionAndIdempotencyKey(ctx, sessionID, first.IdempotencyKey)
+	require.NoError(t, err)
+	require.NotNil(t, found)
+	assert.Equal(t, first.ID, found.ID)
 
 	messages, err := repo.ListMessages(ctx, first.ID)
 	require.NoError(t, err)

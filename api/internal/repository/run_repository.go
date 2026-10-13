@@ -31,6 +31,7 @@ type RunRecoveryStats struct {
 type RunRepository interface {
 	CreateWithInitialMessage(ctx context.Context, run *model.Run, initial *model.RunMessage) (created *model.Run, inserted bool, err error)
 	GetByID(ctx context.Context, id string) (*model.Run, error)
+	FindBySessionAndIdempotencyKey(ctx context.Context, sessionID, idempotencyKey string) (*model.Run, error)
 	GetActiveBySessionID(ctx context.Context, sessionID string) (*model.Run, error)
 	ListBySessionID(ctx context.Context, sessionID string, limit, offset int) ([]*model.Run, int, error)
 	ListMessages(ctx context.Context, runID string) ([]*model.RunMessage, error)
@@ -101,7 +102,7 @@ func (r *PostgresRunRepository) CreateWithInitialMessage(ctx context.Context, ru
 		return nil, false, err
 	}
 
-	existing, lookupErr := r.runBySessionAndIdempotencyKey(ctx, run.SessionID, run.IdempotencyKey)
+	existing, lookupErr := r.FindBySessionAndIdempotencyKey(ctx, run.SessionID, run.IdempotencyKey)
 	if lookupErr != nil {
 		return nil, false, lookupErr
 	}
@@ -251,7 +252,8 @@ func (r *PostgresRunRepository) ListBySessionID(ctx context.Context, sessionID s
 	return runs, total, nil
 }
 
-func (r *PostgresRunRepository) runBySessionAndIdempotencyKey(ctx context.Context, sessionID, idempotencyKey string) (*model.Run, error) {
+// FindBySessionAndIdempotencyKey 返回同一客户端创建请求已持久化的 Run；未找到时返回 nil。
+func (r *PostgresRunRepository) FindBySessionAndIdempotencyKey(ctx context.Context, sessionID, idempotencyKey string) (*model.Run, error) {
 	run, err := scanRun(r.queryer().QueryRow(ctx, `
 		SELECT `+runColumns+`
 		FROM runs

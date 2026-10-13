@@ -53,6 +53,7 @@ type runApplicationStore interface {
 	Create(ctx context.Context, input CreateRunInput) (*model.Run, error)
 	SubmitInput(ctx context.Context, runID string, input SubmitInputRequest) (*RunResume, error)
 	Get(ctx context.Context, runID string) (*model.Run, error)
+	FindBySessionAndIdempotencyKey(ctx context.Context, sessionID, idempotencyKey string) (*model.Run, error)
 	GetActiveBySessionID(ctx context.Context, sessionID string) (*model.Run, error)
 	ListBySessionID(ctx context.Context, sessionID string, limit, offset int) ([]*model.Run, int, error)
 	ListMessages(ctx context.Context, runID string) ([]*model.RunMessage, error)
@@ -122,23 +123,38 @@ func (s *defaultRunApplicationService) Create(ctx context.Context, input CreateA
 	if session == nil {
 		return nil, apperr.NotFound("session not found")
 	}
-	files, err := s.resolveFiles(ctx, input.SessionID, input.AttachmentIDs)
-	if err != nil {
-		return nil, err
-	}
-	settingsSnapshot, err := s.loadSettings(ctx)
-	if err != nil {
-		return nil, err
-	}
 	if s.runs == nil || s.executor == nil {
 		return nil, apperr.FailedPrecondition("run execution is unavailable")
 	}
-	if s.promptHash == "" {
+	existing, err := s.findExistingCreateRun(ctx, input.SessionID, input.IdempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	var files []model.File
+	var settingsSnapshot settings.AgentSettings
+	promptHash := s.promptHash
+	if existing != nil {
+		settingsSnapshot = existing.SettingsSnapshot
+		promptHash = existing.PromptHash
+	}
+	if existing == nil || existing.Status == model.RunStatusPending {
+		files, err = s.resolveFiles(ctx, input.SessionID, input.AttachmentIDs)
+		if err != nil {
+			return nil, err
+		}
+		if existing == nil {
+			settingsSnapshot, err = s.loadSettings(ctx)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	if strings.TrimSpace(promptHash) == "" {
 		return nil, apperr.FailedPrecondition("prompt catalog is unavailable")
 	}
 	run, err := s.runs.Create(ctx, CreateRunInput{
 		SessionID: input.SessionID, IdempotencyKey: input.IdempotencyKey,
-		SettingsSnapshot: settingsSnapshot, PromptHash: s.promptHash,
+		SettingsSnapshot: settingsSnapshot, PromptHash: promptHash,
 		Content: input.Content, Attachments: append([]string(nil), input.AttachmentIDs...),
 	})
 	if err != nil {
@@ -213,6 +229,17 @@ func (s *defaultRunApplicationService) inputAlreadyApplied(ctx context.Context, 
 		}
 	}
 	return false, nil
+}
+
+func (s *defaultRunApplicationService) findExistingCreateRun(ctx context.Context, sessionID, idempotencyKey string) (*model.Run, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return nil, nil
+	}
+	run, err := s.runs.FindBySessionAndIdempotencyKey(ctx, sessionID, idempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	return run, nil
 }
 
 func (s *defaultRunApplicationService) Get(ctx context.Context, runID string) (*model.Run, error) {

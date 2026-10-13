@@ -122,6 +122,13 @@ func (f *fakeRunStore) GetByID(_ context.Context, id string) (*model.Run, error)
 	return &cloned, nil
 }
 
+func (f *fakeRunStore) FindBySessionAndIdempotencyKey(_ context.Context, sessionID, idempotencyKey string) (*model.Run, error) {
+	if f.run == nil || f.run.SessionID != sessionID || f.run.IdempotencyKey != idempotencyKey {
+		return nil, nil
+	}
+	return f.GetByID(context.Background(), f.run.ID)
+}
+
 func (f *fakeRunStore) GetActiveBySessionID(_ context.Context, sessionID string) (*model.Run, error) {
 	if f.run == nil || f.run.SessionID != sessionID || !f.run.Status.IsActive() {
 		return nil, nil
