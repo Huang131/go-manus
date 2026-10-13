@@ -15,6 +15,8 @@ type applicationRunStoreStub struct {
 	run           *model.Run
 	createInput   CreateRunInput
 	resume        *RunResume
+	resumeRetry   *RunResume
+	resumeCalls   int
 	submittedRun  string
 	history       []*model.Run
 	historyTotal  int
@@ -33,8 +35,15 @@ func (s *applicationRunStoreStub) Create(_ context.Context, input CreateRunInput
 	return s.run, nil
 }
 
-func (s *applicationRunStoreStub) SubmitInput(_ context.Context, runID string, _ SubmitInputRequest) (*RunResume, error) {
+func (s *applicationRunStoreStub) SubmitInput(_ context.Context, runID string, input SubmitInputRequest) (*RunResume, error) {
 	s.submittedRun = runID
+	s.resumeCalls++
+	if s.resumeCalls == 1 {
+		s.messages = map[string][]*model.RunMessage{runID: {{RunID: runID, SessionID: "session-1", Role: model.RoleUser, IdempotencyKey: input.IdempotencyKey, ReplyToMessageID: input.ReplyToMessageID, Content: input.Content, Attachments: append([]string(nil), input.Attachments...)}}}
+	}
+	if s.resumeCalls > 1 && s.resumeRetry != nil {
+		return s.resumeRetry, nil
+	}
 	return s.resume, nil
 }
 
@@ -109,6 +118,40 @@ func (s fileLookupStub) GetBySessionAndID(_ context.Context, sessionID, id strin
 		return nil, nil
 	}
 	return file, nil
+}
+
+func TestRunApplicationServiceSubmitInputRetryDoesNotRevalidateDeletedAttachments(t *testing.T) {
+	store := &applicationRunStoreStub{
+		run: &model.Run{ID: "run-1", SessionID: "session-1", Status: model.RunStatusWaitingInput},
+		resume: &RunResume{
+			Run:            &model.Run{ID: "run-1", SessionID: "session-1", Status: model.RunStatusRunning},
+			Messages:       []llmcore.Message{{Role: model.RoleUser, ContentText: "补充信息"}},
+			StartExecution: true,
+		},
+		resumeRetry: &RunResume{
+			Run:            &model.Run{ID: "run-1", SessionID: "session-1", Status: model.RunStatusRunning},
+			AlreadyApplied: true,
+		},
+	}
+	files := fileLookupStub{files: map[string]*model.File{
+		"file-1": {ID: "file-1", SessionID: "session-1", Filename: "extra.txt"},
+	}}
+	service := NewRunApplicationService(
+		store, &applicationExecutorStub{}, sessionLookupStub{session: &model.Session{ID: "session-1"}},
+		&files, settingsSourceStub{}, &attachmentLoaderStub{}, "prompt-hash",
+	)
+	input := SubmitInputRequest{IdempotencyKey: "reply-1", ReplyToMessageID: "question-1", Content: "补充信息", Attachments: []string{"file-1"}}
+	if _, err := service.SubmitInput(context.Background(), "run-1", input); err != nil {
+		t.Fatalf("first SubmitInput() error = %v", err)
+	}
+	files.files = nil
+	result, err := service.SubmitInput(context.Background(), "run-1", input)
+	if err != nil {
+		t.Fatalf("idempotent SubmitInput() error = %v", err)
+	}
+	if result.Handle != nil || !result.Run.Status.IsActive() {
+		t.Fatalf("idempotent SubmitInput() = %+v, want no second execution", result)
+	}
 }
 
 type settingsSourceStub struct{ value *settings.AgentSettings }

@@ -168,9 +168,18 @@ func (s *defaultRunApplicationService) SubmitInput(ctx context.Context, runID st
 	if s.runs == nil || s.executor == nil {
 		return nil, apperr.FailedPrecondition("run execution is unavailable")
 	}
-	files, err := s.resolveFilesForRun(ctx, runID, input.Attachments)
+	// 已持久化的回答是幂等重试：附件可能已过期或被清理，不能阻塞返回已应用结果。
+	// RunService 仍会校验消息内容和回复目标，避免同一键绑定不同请求。
+	applied, err := s.inputAlreadyApplied(ctx, runID, input.IdempotencyKey)
 	if err != nil {
 		return nil, err
+	}
+	var files []model.File
+	if !applied {
+		files, err = s.resolveFilesForRun(ctx, runID, input.Attachments)
+		if err != nil {
+			return nil, err
+		}
 	}
 	resume, err := s.runs.SubmitInput(ctx, runID, input)
 	if err != nil {
@@ -188,6 +197,22 @@ func (s *defaultRunApplicationService) SubmitInput(ctx context.Context, runID st
 		return nil, err
 	}
 	return &ApplicationRun{Run: resume.Run, Handle: handle}, nil
+}
+
+func (s *defaultRunApplicationService) inputAlreadyApplied(ctx context.Context, runID, idempotencyKey string) (bool, error) {
+	if strings.TrimSpace(idempotencyKey) == "" {
+		return false, nil
+	}
+	messages, err := s.runs.ListMessages(ctx, runID)
+	if err != nil {
+		return false, apperr.ToInternal(err)
+	}
+	for _, message := range messages {
+		if message != nil && message.IdempotencyKey == idempotencyKey {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *defaultRunApplicationService) Get(ctx context.Context, runID string) (*model.Run, error) {
