@@ -256,7 +256,7 @@ func (e *RunExecutor) abortStart(ctx context.Context, runID string, control *run
 		logger.Warn("Run 启动失败后无法请求取消", logger.String("run_id", runID), logger.Err(err))
 		return
 	}
-	if _, err := e.store.ReconcileCancelling(reconcileCtx, runID); err != nil {
+	if err := e.reconcileCancellation(reconcileCtx, runID); err != nil {
 		logger.Warn("Run 启动失败后无法收敛取消", logger.String("run_id", runID), logger.Err(err))
 	}
 }
@@ -268,6 +268,16 @@ func (e *RunExecutor) requestStartCancellation(ctx context.Context, runID string
 	// RequestCancel 是幂等状态迁移；启动补偿不能因一次瞬时存储故障
 	// 放弃收敛，否则进程内已无句柄的 Run 会永久占用 active 槽位。
 	_, err := e.store.RequestCancel(ctx, runID)
+	return err
+}
+
+// reconcileCancellation 以有限重试收敛已提交的 cancelling 状态。
+// 进程内句柄已释放时不能将一次瞬时存储失败留给后续重启处理，否则会长期占用 active Run 槽位。
+func (e *RunExecutor) reconcileCancellation(ctx context.Context, runID string) error {
+	if _, err := e.store.ReconcileCancelling(ctx, runID); err == nil {
+		return nil
+	}
+	_, err := e.store.ReconcileCancelling(ctx, runID)
 	return err
 }
 
@@ -283,7 +293,7 @@ func (e *RunExecutor) reconcileCancelledStart(ctx context.Context, runID string,
 			return
 		}
 	}
-	if _, err := e.store.ReconcileCancelling(reconcileCtx, runID); err != nil {
+	if err := e.reconcileCancellation(reconcileCtx, runID); err != nil {
 		logger.Warn("Run 在启动前被取消后无法收敛", logger.String("run_id", runID), logger.Err(err))
 		control.handle.setResult(err)
 		return
@@ -336,14 +346,14 @@ func (e *RunExecutor) newPersistenceContext(parent context.Context) (context.Con
 // reconcileAfterPersistenceFailure 避免结果写入失败后留下没有进程句柄的活跃 Run。
 // 先处理已经进入 cancelling 的竞争窗口；仍处于活跃状态时再请求取消并收敛。
 func (e *RunExecutor) reconcileAfterPersistenceFailure(ctx context.Context, runID string) {
-	if _, err := e.store.ReconcileCancelling(ctx, runID); err == nil {
+	if err := e.reconcileCancellation(ctx, runID); err == nil {
 		return
 	}
 	if _, err := e.store.RequestCancel(ctx, runID); err != nil {
 		logger.Warn("执行结果持久化失败后无法请求取消 Run", logger.String("run_id", runID), logger.Err(err))
 		return
 	}
-	if _, err := e.store.ReconcileCancelling(ctx, runID); err != nil {
+	if err := e.reconcileCancellation(ctx, runID); err != nil {
 		logger.Warn("执行结果持久化失败后无法收敛 Run", logger.String("run_id", runID), logger.Err(err))
 	}
 }

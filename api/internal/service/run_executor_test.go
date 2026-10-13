@@ -173,6 +173,23 @@ func (s *retryStartCancellationStore) RequestCancel(ctx context.Context, runID s
 	return &model.Run{ID: runID, Status: model.RunStatusCancelling}, nil
 }
 
+// retryStartReconciliationStore 模拟启动补偿已持久化 cancelling，
+// 但首次收敛 cancelled 时遇到瞬时存储错误。
+type retryStartReconciliationStore struct {
+	executorStoreStub
+	reconcileAttempts int
+}
+
+func (s *retryStartReconciliationStore) ReconcileCancelling(ctx context.Context, runID string) (*model.Run, error) {
+	s.reconcileAttempts++
+	s.record("reconcile")
+	if s.reconcileAttempts == 1 {
+		return nil, errors.New("temporary reconciliation failure")
+	}
+	s.status = model.RunStatusCancelled
+	return &model.Run{ID: runID, Status: model.RunStatusCancelled}, nil
+}
+
 // startErrorAfterTransitionStore 模拟状态迁移已成功，但读取最新 Run 时返回错误。
 type startErrorAfterTransitionStore struct {
 	strictStartCancellationStore
@@ -860,6 +877,26 @@ func TestRunExecutorRetriesStartCompensationAfterTransientCancelFailure(t *testi
 		t.Fatalf("Run status = %s, want cancelled after compensation retry", store.status)
 	}
 	if got, want := store.events(), []string{"start", "request_cancel", "request_cancel", "reconcile"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("store events = %v, want %v", got, want)
+	}
+}
+
+func TestRunExecutorRetriesStartCompensationAfterTransientReconciliationFailure(t *testing.T) {
+	store := &retryStartReconciliationStore{}
+	executor := NewRunExecutor(
+		store,
+		&executorToolProviderStub{err: errors.New("mcp unavailable")},
+		&executorEngineStub{},
+	)
+
+	if _, err := executor.Start(context.Background(), "run-1", nil); err == nil {
+		t.Fatal("Start() error = nil, want tool acquisition error")
+	}
+
+	if store.status != model.RunStatusCancelled {
+		t.Fatalf("Run status = %s, want cancelled after reconciliation retry", store.status)
+	}
+	if got, want := store.events(), []string{"start", "request_cancel", "reconcile", "reconcile"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("store events = %v, want %v", got, want)
 	}
 }
