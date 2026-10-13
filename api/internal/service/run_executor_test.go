@@ -586,6 +586,49 @@ func TestRunExecutorParentCancellationDuringToolAcquisitionReconcilesRun(t *test
 	}
 }
 
+func TestRunExecutorRetriesParentCancellationCompensation(t *testing.T) {
+	store := &retryStartCancellationStore{}
+	toolSet := &executorToolSetStub{released: make(chan struct{})}
+	provider := &blockingToolProvider{
+		set: toolSet, started: make(chan struct{}), release: make(chan struct{}),
+	}
+	engine := &executorEngineStub{result: RunExecutionResult{Kind: RunExecutionSucceeded}}
+	executor := NewRunExecutor(store, provider, engine)
+	parentCtx, cancelParent := context.WithCancel(context.Background())
+	defer cancelParent()
+
+	startResult := make(chan struct {
+		handle *RunExecutionHandle
+		err    error
+	}, 1)
+	go func() {
+		handle, err := executor.Start(parentCtx, "run-1", nil)
+		startResult <- struct {
+			handle *RunExecutionHandle
+			err    error
+		}{handle: handle, err: err}
+	}()
+	select {
+	case <-provider.started:
+	case <-time.After(time.Second):
+		t.Fatal("tool acquisition did not start")
+	}
+	cancelParent()
+	close(provider.release)
+
+	result := <-startResult
+	if result.err != nil {
+		t.Fatalf("Start() error = %v, want reconciled cancellation", result.err)
+	}
+	waitExecutorDone(t, result.handle)
+	if store.status != model.RunStatusCancelled {
+		t.Fatalf("Run status = %s, want cancelled after compensation retry", store.status)
+	}
+	if got, want := store.events(), []string{"start", "request_cancel", "request_cancel", "reconcile"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("store events = %v, want %v", got, want)
+	}
+}
+
 type executorEventPublisherStub struct{}
 
 func (executorEventPublisherStub) Publish(context.Context, string, model.BaseEvent) error { return nil }

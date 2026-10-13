@@ -246,17 +246,23 @@ func (e *RunExecutor) abortStart(ctx context.Context, runID string, control *run
 	control.cancel()
 	reconcileCtx, reconcileCancel := e.newPersistenceContext(ctx)
 	defer reconcileCancel()
-	if _, err := e.store.RequestCancel(reconcileCtx, runID); err != nil {
-		// RequestCancel 是幂等状态迁移；启动补偿不能因一次瞬时存储故障
-		// 放弃收敛，否则进程内已无句柄的 Run 会永久占用 active 槽位。
-		if _, retryErr := e.store.RequestCancel(reconcileCtx, runID); retryErr != nil {
-			logger.Warn("Run 启动失败后无法请求取消", logger.String("run_id", runID), logger.Err(retryErr))
-			return
-		}
+	if err := e.requestStartCancellation(reconcileCtx, runID); err != nil {
+		logger.Warn("Run 启动失败后无法请求取消", logger.String("run_id", runID), logger.Err(err))
+		return
 	}
 	if _, err := e.store.ReconcileCancelling(reconcileCtx, runID); err != nil {
 		logger.Warn("Run 启动失败后无法收敛取消", logger.String("run_id", runID), logger.Err(err))
 	}
+}
+
+func (e *RunExecutor) requestStartCancellation(ctx context.Context, runID string) error {
+	if _, err := e.store.RequestCancel(ctx, runID); err == nil {
+		return nil
+	}
+	// RequestCancel 是幂等状态迁移；启动补偿不能因一次瞬时存储故障
+	// 放弃收敛，否则进程内已无句柄的 Run 会永久占用 active 槽位。
+	_, err := e.store.RequestCancel(ctx, runID)
+	return err
 }
 
 func (e *RunExecutor) reconcileCancelledStart(ctx context.Context, runID string, control *runControl, requestCancel bool) {
@@ -265,7 +271,7 @@ func (e *RunExecutor) reconcileCancelledStart(ctx context.Context, runID string,
 	reconcileCtx, reconcileCancel := e.newPersistenceContext(ctx)
 	defer reconcileCancel()
 	if requestCancel {
-		if _, err := e.store.RequestCancel(reconcileCtx, runID); err != nil {
+		if err := e.requestStartCancellation(reconcileCtx, runID); err != nil {
 			logger.Warn("Run 在启动前被取消后无法请求取消", logger.String("run_id", runID), logger.Err(err))
 			control.handle.setResult(err)
 			return
