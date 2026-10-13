@@ -278,7 +278,14 @@ func (s *defaultRunService) EnterWaitingInput(ctx context.Context, runID string,
 	if !changed {
 		return nil, s.statusConflict(ctx, runID, "waiting input checkpoint is stale")
 	}
-	return s.Get(ctx, runID)
+	// EnterWaitingInput 已原子写入快照和问题消息；刷新失败不能让执行器把
+	// 已提交的可恢复检查点误判为持久化失败并取消 Run。
+	waiting := *run
+	waiting.Status = model.RunStatusWaitingInput
+	waiting.ExecutionSnapshot = snapshot.Clone()
+	waiting.SnapshotRevision = snapshot.SnapshotRevision
+	waiting.WaitingMessageID = question.ID
+	return &waiting, nil
 }
 
 // SaveWaitingInput 适配 RunExecutor，并保留领域服务对等待快照的完整校验。

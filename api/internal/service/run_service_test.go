@@ -86,6 +86,19 @@ func (f *transitionNoRefreshStore) GetByID(_ context.Context, id string) (*model
 	return f.fakeRunStore.GetByID(context.Background(), id)
 }
 
+type waitingNoRefreshStore struct {
+	fakeRunStore
+	getCalls int
+}
+
+func (f *waitingNoRefreshStore) GetByID(_ context.Context, id string) (*model.Run, error) {
+	f.getCalls++
+	if f.getCalls > 1 {
+		return nil, errors.New("unexpected refresh after waiting transition")
+	}
+	return f.fakeRunStore.GetByID(context.Background(), id)
+}
+
 func TestRunServiceCreateReturnsConflictWhenSessionAlreadyActive(t *testing.T) {
 	svc := NewRunService(&conflictingRunStore{})
 	_, err := svc.Create(context.Background(), CreateRunInput{
@@ -264,6 +277,31 @@ func TestRunServiceStartAndEnterWaitingInputUseCurrentRevision(t *testing.T) {
 	if err != nil || waiting.Status != model.RunStatusWaitingInput || waiting.WaitingMessageID != question.ID {
 		t.Fatalf("EnterWaitingInput() = %#v, %v", waiting, err)
 	}
+}
+
+func TestRunServiceEnterWaitingInputReturnsCommittedStateWithoutRefresh(t *testing.T) {
+	base := newFakeRunStore()
+	now := time.Now().UTC()
+	base.run = &model.Run{
+		ID: "run-1", SessionID: "session-1", Status: model.RunStatusRunning,
+		SettingsSnapshot: settings.DefaultAgentSettings(), PromptHash: "prompt-v1",
+		SnapshotRevision: 0, CreatedAt: now, UpdatedAt: now,
+	}
+	question := &model.RunMessage{ID: "question-1", SessionID: "session-1", RunID: "run-1", Role: model.RoleAssistant, Content: "请确认"}
+	snapshot := model.RunExecutionSnapshot{
+		SnapshotRevision: 1, PlanID: "plan-1", CurrentStepID: "step-1",
+		Steps:             []model.RunStepSnapshot{{ID: "step-1", Description: "等待确认", Status: model.RunStepStatusRunning}},
+		WaitingCheckpoint: &model.WaitingCheckpoint{QuestionMessageID: question.ID, StepID: "step-1", ResumeMode: model.ResumeModeContinueStep},
+	}
+	store := &waitingNoRefreshStore{fakeRunStore: *base}
+
+	run, err := NewRunService(store).EnterWaitingInput(context.Background(), "run-1", snapshot, question)
+
+	require.NoError(t, err)
+	require.NotNil(t, run)
+	require.Equal(t, model.RunStatusWaitingInput, run.Status)
+	require.Equal(t, question.ID, run.WaitingMessageID)
+	require.Equal(t, 1, store.getCalls)
 }
 
 func TestRunServiceStartIsIdempotentForRunningRun(t *testing.T) {
