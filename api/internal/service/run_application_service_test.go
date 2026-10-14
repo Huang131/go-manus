@@ -321,6 +321,38 @@ func TestRunApplicationServiceCreateRetryDoesNotRevalidateDeletedAttachments(t *
 	}
 }
 
+func TestRunApplicationServiceCreateRechecksIdempotencyAfterAttachmentExpires(t *testing.T) {
+	store := &applicationRunStoreStub{}
+	input := CreateApplicationRunInput{
+		SessionID: "session-1", IdempotencyKey: "request-1", Content: "分析报告", AttachmentIDs: []string{"file-1"},
+	}
+	files := fileLookupHookStub{lookup: func() {
+		// 模拟另一个相同请求在首次幂等查找和附件读取之间创建并启动 Run，
+		// 然后附件被清理的竞态窗口。
+		store.run = &model.Run{
+			ID: "run-1", SessionID: input.SessionID, IdempotencyKey: input.IdempotencyKey,
+			Status: model.RunStatusRunning, SettingsSnapshot: settings.DefaultAgentSettings(), PromptHash: "prompt-hash",
+		}
+	}}
+	executor := &applicationExecutorStub{}
+	service := NewRunApplicationService(
+		store, executor, sessionLookupStub{session: &model.Session{ID: input.SessionID}},
+		files, settingsSourceStub{}, nil, "prompt-hash",
+	)
+
+	result, err := service.Create(context.Background(), input)
+
+	if err != nil {
+		t.Fatalf("Create() error = %v, want idempotent result after attachment expiry", err)
+	}
+	if result == nil || result.Handle != nil || result.Run == nil || result.Run.Status != model.RunStatusRunning {
+		t.Fatalf("Create() = %#v, want existing started run without a second execution", result)
+	}
+	if executor.startCalls != 0 {
+		t.Fatalf("Create() started existing run again: %d calls", executor.startCalls)
+	}
+}
+
 func TestRunApplicationServiceCreateRejectsAttachmentOutsideSession(t *testing.T) {
 	service := NewRunApplicationService(
 		&applicationRunStoreStub{}, &applicationExecutorStub{}, sessionLookupStub{session: &model.Session{ID: "session-1"}},

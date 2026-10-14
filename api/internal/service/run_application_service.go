@@ -140,7 +140,25 @@ func (s *defaultRunApplicationService) Create(ctx context.Context, input CreateA
 	if existing == nil || existing.Status == model.RunStatusPending {
 		files, err = s.resolveFiles(ctx, input.SessionID, input.AttachmentIDs)
 		if err != nil {
-			return nil, err
+			// 首次幂等查找与附件读取之间，另一个相同请求可能已完成
+			// 创建和启动，随后附件被清理。只对已启动的既有 Run 回退到
+			// 领域层复核，pending Run 仍必须持有有效附件才能开始执行。
+			existingAfterFailure, checkErr := s.findExistingCreateRun(ctx, input.SessionID, input.IdempotencyKey)
+			if checkErr != nil {
+				return nil, checkErr
+			}
+			if existingAfterFailure == nil || existingAfterFailure.Status == model.RunStatusPending {
+				return nil, err
+			}
+			verified, createErr := s.runs.Create(ctx, CreateRunInput{
+				SessionID: input.SessionID, IdempotencyKey: input.IdempotencyKey,
+				SettingsSnapshot: existingAfterFailure.SettingsSnapshot, PromptHash: existingAfterFailure.PromptHash,
+				Content: input.Content, Attachments: append([]string(nil), input.AttachmentIDs...),
+			})
+			if createErr != nil {
+				return nil, createErr
+			}
+			return &ApplicationRun{Run: verified}, nil
 		}
 		if existing == nil {
 			settingsSnapshot, err = s.loadSettings(ctx)
