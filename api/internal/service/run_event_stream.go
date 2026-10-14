@@ -38,11 +38,11 @@ func ValidateRunEventCursor(cursor string) error {
 }
 
 type redisRunEventStream struct {
-	queue mq.TaskMessageQueue
+	queue mq.StreamReader
 }
 
 // NewRedisRunEventStream 创建按 Run 隔离的 Redis Stream 读取器。
-func NewRedisRunEventStream(queue mq.TaskMessageQueue) RunEventReader {
+func NewRedisRunEventStream(queue mq.StreamReader) RunEventReader {
 	return &redisRunEventStream{queue: queue}
 }
 

@@ -606,7 +606,7 @@ type externalClients struct {
 	llm       llm.LLM
 	browser   sandbox.Browser
 	search    search.SearchEngine
-	mq        mq.TaskMessageQueue
+	mq        mq.MessageQueue
 	mcpConfig *model.MCPConfig
 	a2aConfig *agent.A2AConfig
 }

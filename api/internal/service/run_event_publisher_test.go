@@ -20,16 +20,10 @@ func (q *runEventQueueStub) Put(_ context.Context, stream string, value interfac
 	q.stream, q.value = stream, value
 	return "1-0", nil
 }
-func (*runEventQueueStub) GetBlocking(context.Context, string, string, ...time.Duration) (string, interface{}, error) {
-	return "", nil, nil
-}
-func (*runEventQueueStub) Clear(context.Context, string) error { return nil }
 func (q *runEventQueueStub) SetRetention(_ context.Context, stream string, retention time.Duration) error {
 	q.retentionStream, q.retention = stream, retention
 	return nil
 }
-func (*runEventQueueStub) IsEmpty(context.Context, string) (bool, error) { return true, nil }
-func (*runEventQueueStub) Size(context.Context, string) (int64, error)   { return 0, nil }
 
 func TestRedisRunEventPublisherPublishesRunEnvelope(t *testing.T) {
 	queue := &runEventQueueStub{}

@@ -21,11 +21,11 @@ func RunEventStreamName(runID string) string {
 // RedisRunEventPublisher 将 Flow 事件写入按 Run 隔离的 Redis Stream。
 // Redis 只提供实时事件和断线续读窗口，Run/Message 终态仍由 PostgreSQL 保存。
 type RedisRunEventPublisher struct {
-	queue mq.TaskMessageQueue
+	queue mq.MessageQueue
 }
 
 // NewRedisRunEventPublisher 创建 Redis Run 事件发布器。
-func NewRedisRunEventPublisher(queue mq.TaskMessageQueue) *RedisRunEventPublisher {
+func NewRedisRunEventPublisher(queue mq.MessageQueue) *RedisRunEventPublisher {
 	return &RedisRunEventPublisher{queue: queue}
 }
 

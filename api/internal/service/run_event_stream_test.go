@@ -14,19 +14,8 @@ type runEventStreamQueueStub struct {
 	batch  []mq.StreamMessage
 }
 
-func (q *runEventStreamQueueStub) Put(context.Context, string, interface{}) (string, error) {
-	return "1-0", nil
-}
 func (q *runEventStreamQueueStub) GetBlocking(context.Context, string, string, ...time.Duration) (string, interface{}, error) {
 	return "", nil, nil
-}
-func (q *runEventStreamQueueStub) Clear(context.Context, string) error { return nil }
-func (q *runEventStreamQueueStub) SetRetention(context.Context, string, time.Duration) error {
-	return nil
-}
-func (q *runEventStreamQueueStub) IsEmpty(context.Context, string) (bool, error) { return false, nil }
-func (q *runEventStreamQueueStub) Size(context.Context, string) (int64, error) {
-	return int64(len(q.batch)), nil
 }
 func (q *runEventStreamQueueStub) GetStreamBounds(context.Context, string) (mq.StreamBounds, error) {
 	return q.bounds, nil

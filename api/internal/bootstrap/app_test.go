@@ -347,20 +347,8 @@ type mockMessageQueue struct{}
 func (m *mockMessageQueue) Put(ctx context.Context, streamName string, message interface{}) (string, error) {
 	return "", nil
 }
-func (m *mockMessageQueue) GetBlocking(ctx context.Context, streamName string, startID string, timeout ...time.Duration) (string, interface{}, error) {
-	return "", nil, nil
-}
-func (m *mockMessageQueue) Clear(ctx context.Context, streamName string) error {
-	return nil
-}
 func (m *mockMessageQueue) SetRetention(ctx context.Context, streamName string, retention time.Duration) error {
 	return nil
-}
-func (m *mockMessageQueue) IsEmpty(ctx context.Context, streamName string) (bool, error) {
-	return true, nil
-}
-func (m *mockMessageQueue) Size(ctx context.Context, streamName string) (int64, error) {
-	return 0, nil
 }
 
 func TestBuildTestModeWithRoutesHealthEndpoint(t *testing.T) {
