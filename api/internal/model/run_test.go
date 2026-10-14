@@ -78,6 +78,8 @@ func TestRunExecutionSnapshotValidateWaitingInput(t *testing.T) {
 		{name: "missing current step", mutate: func(snapshot *RunExecutionSnapshot) { snapshot.CurrentStepID = "" }},
 		{name: "checkpoint references other step", mutate: func(snapshot *RunExecutionSnapshot) { snapshot.WaitingCheckpoint.StepID = "step-1" }},
 		{name: "completed step loses summary", mutate: func(snapshot *RunExecutionSnapshot) { snapshot.Steps[0].ResultSummary = "" }},
+		{name: "current step is not running", mutate: func(snapshot *RunExecutionSnapshot) { snapshot.Steps[1].Status = RunStepStatusPending }},
+		{name: "unknown step status", mutate: func(snapshot *RunExecutionSnapshot) { snapshot.Steps[1].Status = "paused" }},
 		{name: "unsupported resume mode", mutate: func(snapshot *RunExecutionSnapshot) { snapshot.WaitingCheckpoint.ResumeMode = "restart_plan" }},
 	}
 

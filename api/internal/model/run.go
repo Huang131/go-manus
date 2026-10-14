@@ -143,19 +143,31 @@ func (s RunExecutionSnapshot) ValidateWaitingInput() error {
 	}
 
 	seenCurrentStep := false
+	firstIncompleteStepID := ""
 	seenStepIDs := make(map[string]struct{}, len(s.Steps))
 	for _, step := range s.Steps {
 		if step.ID == "" {
 			return fmt.Errorf("step id is required")
 		}
+		switch step.Status {
+		case RunStepStatusPending, RunStepStatusRunning, RunStepStatusCompleted, RunStepStatusFailed:
+		default:
+			return fmt.Errorf("unsupported step status %q", step.Status)
+		}
 		if _, exists := seenStepIDs[step.ID]; exists {
 			return fmt.Errorf("duplicate step id %q", step.ID)
 		}
 		seenStepIDs[step.ID] = struct{}{}
+		if firstIncompleteStepID == "" && step.Status != RunStepStatusCompleted && step.Status != RunStepStatusFailed {
+			firstIncompleteStepID = step.ID
+		}
 		if step.ID == s.CurrentStepID {
 			seenCurrentStep = true
 			if step.Description == "" {
 				return fmt.Errorf("current step %q requires description", step.ID)
+			}
+			if step.Status != RunStepStatusRunning {
+				return fmt.Errorf("current waiting step %q must be running", step.ID)
 			}
 		}
 		if step.Status == RunStepStatusCompleted && step.ResultSummary == "" {
@@ -164,6 +176,9 @@ func (s RunExecutionSnapshot) ValidateWaitingInput() error {
 	}
 	if !seenCurrentStep {
 		return fmt.Errorf("current step %q is absent from snapshot", s.CurrentStepID)
+	}
+	if firstIncompleteStepID != s.CurrentStepID {
+		return fmt.Errorf("current step %q is not the first incomplete step %q", s.CurrentStepID, firstIncompleteStepID)
 	}
 	return nil
 }
