@@ -142,6 +142,18 @@ type strictStartCancellationStore struct {
 	executorStoreStub
 }
 
+type blockingStartStore struct {
+	executorStoreStub
+	started chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingStartStore) Start(ctx context.Context, runID string) (*model.Run, error) {
+	close(s.started)
+	<-s.release
+	return s.executorStoreStub.Start(ctx, runID)
+}
+
 func (s *strictStartCancellationStore) ReconcileCancelling(ctx context.Context, runID string) (*model.Run, error) {
 	if s.status != model.RunStatusCancelling {
 		return nil, errors.New("run is not cancelling")
@@ -342,6 +354,48 @@ func TestRunExecutorPassesAttachmentContextsToEngine(t *testing.T) {
 	}
 	if len(engine.seen.AttachmentContexts) != 1 || engine.seen.AttachmentContexts[0].Content != "正文" {
 		t.Fatalf("Engine attachment contexts = %+v, want loaded attachment body", engine.seen.AttachmentContexts)
+	}
+}
+
+func TestRunExecutorDuplicateStartReusesInFlightHandle(t *testing.T) {
+	store := &blockingStartStore{started: make(chan struct{}), release: make(chan struct{})}
+	executor := NewRunExecutor(store, &executorToolProviderStub{set: &executorToolSetStub{released: make(chan struct{})}}, &executorEngineStub{result: RunExecutionResult{Kind: RunExecutionSucceeded}})
+
+	firstResult := make(chan struct {
+		handle *RunExecutionHandle
+		err    error
+	}, 1)
+	go func() {
+		handle, err := executor.Start(context.Background(), "run-1", nil)
+		firstResult <- struct {
+			handle *RunExecutionHandle
+			err    error
+		}{handle: handle, err: err}
+	}()
+	select {
+	case <-store.started:
+	case <-time.After(time.Second):
+		t.Fatal("first Start() did not reach persistence")
+	}
+
+	second, err := executor.Start(context.Background(), "run-1", nil)
+	if err != nil {
+		t.Fatalf("duplicate Start() error = %v, want shared handle", err)
+	}
+	if second == nil {
+		t.Fatal("duplicate Start() handle = nil")
+	}
+	close(store.release)
+	first := <-firstResult
+	if first.err != nil {
+		t.Fatalf("first Start() error = %v", first.err)
+	}
+	if first.handle != second {
+		t.Fatal("duplicate Start() did not return the in-flight handle")
+	}
+	waitExecutorDone(t, second)
+	if got, want := store.events(), []string{"start", "finish:succeeded"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("store events = %v, want %v", got, want)
 	}
 }
 

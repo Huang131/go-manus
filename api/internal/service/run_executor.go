@@ -178,15 +178,16 @@ func (e *RunExecutor) Start(ctx context.Context, runID string, messages []llmcor
 	if e.store == nil || e.provider == nil || e.engine == nil {
 		return nil, errors.New("run executor dependencies are incomplete")
 	}
+	e.mu.Lock()
+	if existing, exists := e.control[runID]; exists {
+		e.mu.Unlock()
+		// 同一 Run 的创建/恢复请求可能因客户端重试并发到达；首个执行负责
+		// 状态迁移和工具装配，后续请求复用其句柄并观察同一个结果。
+		return existing.handle, nil
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	handle := &RunExecutionHandle{done: make(chan struct{})}
 	control := &runControl{handle: handle, cancel: cancel}
-	e.mu.Lock()
-	if _, exists := e.control[runID]; exists {
-		e.mu.Unlock()
-		cancel()
-		return nil, fmt.Errorf("run %q already has an execution handle", runID)
-	}
 	e.control[runID] = control
 	e.mu.Unlock()
 
