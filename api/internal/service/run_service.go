@@ -28,7 +28,7 @@ type runStore interface {
 	TransitionStatus(ctx context.Context, id string, from []model.RunStatus, to model.RunStatus) (bool, error)
 	RecoverStaleRuns(ctx context.Context) (repository.RunRecoveryStats, error)
 	EnterWaitingInput(ctx context.Context, runID string, expectedRevision int, snapshot model.RunExecutionSnapshot, question *model.RunMessage) (bool, error)
-	ResumeWaitingInput(ctx context.Context, runID string, expectedRevision int, answer *model.RunMessage) (bool, error)
+	ResumeWaitingInput(ctx context.Context, runID string, expectedRevision int, answer *model.RunMessage) (repository.ResumeWaitingInputResult, error)
 	FinishTerminal(ctx context.Context, runID string, terminal repository.TerminalTransition, final *model.RunMessage) (bool, error)
 }
 
@@ -430,11 +430,11 @@ func (s *defaultRunService) SubmitInput(ctx context.Context, runID string, input
 	if err != nil {
 		return nil, apperr.FailedPrecondition(fmt.Sprintf("cannot rebuild run context: %v", err))
 	}
-	changed, err := s.store.ResumeWaitingInput(ctx, runID, run.SnapshotRevision, answer)
+	resumeResult, err := s.store.ResumeWaitingInput(ctx, runID, run.SnapshotRevision, answer)
 	if err != nil {
 		return nil, normalizeRunError(err)
 	}
-	if !changed {
+	if resumeResult == repository.ResumeWaitingInputNoChange {
 		return nil, s.statusConflict(ctx, runID, "waiting input revision is stale")
 	}
 	// ResumeWaitingInput 已在同一事务内将 waiting_input 变为 running；再次查询
@@ -443,6 +443,9 @@ func (s *defaultRunService) SubmitInput(ctx context.Context, runID string, input
 	resumed.Status = model.RunStatusRunning
 	resumed.WaitingMessageID = ""
 	resumed.ExecutionSnapshot = run.ExecutionSnapshot.Clone()
+	if resumeResult == repository.ResumeWaitingInputAlreadyApplied {
+		return &RunResume{Run: &resumed, AlreadyApplied: true}, nil
+	}
 	return &RunResume{Run: &resumed, Messages: contextMessages, StartExecution: true}, nil
 }
 

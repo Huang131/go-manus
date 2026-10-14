@@ -99,6 +99,21 @@ func (f *waitingNoRefreshStore) GetByID(_ context.Context, id string) (*model.Ru
 	return f.fakeRunStore.GetByID(context.Background(), id)
 }
 
+// staleInputRetryStore 模拟读取消息后，另一个相同幂等请求已在事务内写入回答的竞态。
+type staleInputRetryStore struct {
+	fakeRunStore
+}
+
+func (f *staleInputRetryStore) ResumeWaitingInput(_ context.Context, runID string, expectedRevision int, answer *model.RunMessage) (repository.ResumeWaitingInputResult, error) {
+	if f.run == nil || f.run.ID != runID || f.run.SnapshotRevision != expectedRevision {
+		return repository.ResumeWaitingInputNoChange, nil
+	}
+	f.run.Status = model.RunStatusRunning
+	f.run.WaitingMessageID = ""
+	f.messages = append(f.messages, answer)
+	return repository.ResumeWaitingInputAlreadyApplied, nil
+}
+
 func TestRunServiceCreateReturnsConflictWhenSessionAlreadyActive(t *testing.T) {
 	svc := NewRunService(&conflictingRunStore{})
 	_, err := svc.Create(context.Background(), CreateRunInput{
@@ -185,14 +200,14 @@ func (f *fakeRunStore) EnterWaitingInput(_ context.Context, runID string, expect
 	return true, nil
 }
 
-func (f *fakeRunStore) ResumeWaitingInput(_ context.Context, runID string, expectedRevision int, answer *model.RunMessage) (bool, error) {
+func (f *fakeRunStore) ResumeWaitingInput(_ context.Context, runID string, expectedRevision int, answer *model.RunMessage) (repository.ResumeWaitingInputResult, error) {
 	if f.run == nil || f.run.ID != runID || f.run.Status != model.RunStatusWaitingInput || f.run.SnapshotRevision != expectedRevision {
-		return false, nil
+		return repository.ResumeWaitingInputNoChange, nil
 	}
 	f.run.Status = model.RunStatusRunning
 	f.run.WaitingMessageID = ""
 	f.messages = append(f.messages, answer)
-	return true, nil
+	return repository.ResumeWaitingInputResumed, nil
 }
 
 func (f *fakeRunStore) FinishTerminal(_ context.Context, runID string, terminal repository.TerminalTransition, final *model.RunMessage) (bool, error) {
@@ -405,6 +420,21 @@ func TestRunServiceSubmitInputIsIdempotentAfterFirstResume(t *testing.T) {
 	if len(second.Messages) != 0 || !first.StartExecution {
 		t.Fatalf("duplicate input should not start a second execution: first=%#v second=%#v", first, second)
 	}
+}
+
+func TestRunServiceSubmitInputDoesNotRestartWhenTransactionFindsSameAnswer(t *testing.T) {
+	base, _, _ := waitingRunFixture()
+	store := &staleInputRetryStore{fakeRunStore: *base}
+	svc := NewRunService(store)
+
+	result, err := svc.SubmitInput(context.Background(), "run-1", SubmitInputRequest{
+		IdempotencyKey: "answer-1", ReplyToMessageID: "question-1", Content: "继续执行",
+	})
+
+	require.NoError(t, err)
+	require.True(t, result.AlreadyApplied)
+	require.False(t, result.StartExecution)
+	require.Empty(t, result.Messages)
 }
 
 func TestRunServiceSubmitInputRejectsInvalidSnapshotBeforeMutation(t *testing.T) {

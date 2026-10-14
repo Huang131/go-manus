@@ -25,6 +25,18 @@ type RunRecoveryStats struct {
 	InvalidWaitingInput int
 }
 
+// ResumeWaitingInputResult 区分本次恢复、幂等重复和未发生状态迁移。
+//
+// 仅 ResumeWaitingInputResumed 可以触发新的执行协程；AlreadyApplied 说明
+// 相同回答已由并发请求持久化，调用方只能返回已应用结果。
+type ResumeWaitingInputResult uint8
+
+const (
+	ResumeWaitingInputNoChange ResumeWaitingInputResult = iota
+	ResumeWaitingInputResumed
+	ResumeWaitingInputAlreadyApplied
+)
+
 // RunRepository 按 Run 聚合持久化执行事实与长期消息。
 //
 // 它只负责事务、约束和条件更新；不启动 Engine、不发布 Redis 事件，也不维护 Session 摘要。
@@ -38,7 +50,7 @@ type RunRepository interface {
 	ListMessagesByRunIDs(ctx context.Context, runIDs []string) (map[string][]*model.RunMessage, error)
 	TransitionStatus(ctx context.Context, id string, from []model.RunStatus, to model.RunStatus) (bool, error)
 	EnterWaitingInput(ctx context.Context, runID string, expectedRevision int, snapshot model.RunExecutionSnapshot, question *model.RunMessage) (bool, error)
-	ResumeWaitingInput(ctx context.Context, runID string, expectedRevision int, answer *model.RunMessage) (bool, error)
+	ResumeWaitingInput(ctx context.Context, runID string, expectedRevision int, answer *model.RunMessage) (ResumeWaitingInputResult, error)
 	FinishTerminal(ctx context.Context, runID string, terminal TerminalTransition, final *model.RunMessage) (bool, error)
 	RecoverStaleRuns(ctx context.Context) (RunRecoveryStats, error)
 	WithTx(ctx context.Context, fn func(repo RunRepository) error) error
@@ -607,16 +619,16 @@ func (r *PostgresRunRepository) EnterWaitingInput(ctx context.Context, runID str
 }
 
 // ResumeWaitingInput 原子写入用户回答并从 waiting_input 返回 running。
-// 对相同 Run 幂等键的重试返回成功，不重复写入消息。
-func (r *PostgresRunRepository) ResumeWaitingInput(ctx context.Context, runID string, expectedRevision int, answer *model.RunMessage) (bool, error) {
+// 对相同 Run 幂等键的重试返回 AlreadyApplied，不重复写入消息或重启执行。
+func (r *PostgresRunRepository) ResumeWaitingInput(ctx context.Context, runID string, expectedRevision int, answer *model.RunMessage) (ResumeWaitingInputResult, error) {
 	if err := validateMessage(answer); err != nil {
-		return false, err
+		return ResumeWaitingInputNoChange, err
 	}
 	if answer.RunID != runID || answer.Role != model.RoleUser || answer.IdempotencyKey == "" || answer.ReplyToMessageID == "" {
-		return false, fmt.Errorf("resumed input must be an idempotent user reply for this run")
+		return ResumeWaitingInputNoChange, fmt.Errorf("resumed input must be an idempotent user reply for this run")
 	}
 
-	changed := false
+	result := ResumeWaitingInputNoChange
 	err := r.WithTx(ctx, func(repo RunRepository) error {
 		bound := repo.(*PostgresRunRepository)
 		existing, err := bound.messageByIdempotencyKey(ctx, runID, answer.IdempotencyKey)
@@ -632,7 +644,7 @@ func (r *PostgresRunRepository) ResumeWaitingInput(ctx context.Context, runID st
 				return err
 			}
 			if run != nil && run.Status == model.RunStatusRunning && run.SnapshotRevision == expectedRevision {
-				changed = true
+				result = ResumeWaitingInputAlreadyApplied
 			}
 			return nil
 		}
@@ -656,10 +668,10 @@ func (r *PostgresRunRepository) ResumeWaitingInput(ctx context.Context, runID st
 		if err := bound.insertMessage(ctx, answer); err != nil {
 			return fmt.Errorf("insert resumed input: %w", err)
 		}
-		changed = true
+		result = ResumeWaitingInputResumed
 		return nil
 	})
-	return changed, err
+	return result, err
 }
 
 // FinishTerminal 原子写入 Run 终态和可选的最终助手消息。

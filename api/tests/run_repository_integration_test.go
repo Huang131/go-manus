@@ -288,9 +288,9 @@ func TestRunRepo_RecoverWaitingInput(t *testing.T) {
 	assert.Nil(t, got.FinishedAt)
 	answer := &model.RunMessage{ID: uuid.NewString(), SessionID: validRun.SessionID, RunID: validRun.ID,
 		IdempotencyKey: uuid.NewString(), ReplyToMessageID: question.ID, Role: model.RoleUser, Content: "确认", CreatedAt: time.Now().UTC()}
-	changed, err := repo.ResumeWaitingInput(ctx, validRun.ID, 1, answer)
+	resumeResult, err := repo.ResumeWaitingInput(ctx, validRun.ID, 1, answer)
 	require.NoError(t, err)
-	require.True(t, changed, "valid waiting run must still accept input after recovery")
+	require.Equal(t, repository.ResumeWaitingInputResumed, resumeResult, "valid waiting run must still accept input after recovery")
 }
 
 func TestRunRepo_CancelWaitingInputClearsWaitingMessage(t *testing.T) {
@@ -414,13 +414,13 @@ func TestRunRepo_WaitAndResume_UsesSnapshotRevisionAndInputIdempotency(t *testin
 		Content:          "继续全部范围",
 		CreatedAt:        time.Now().UTC(),
 	}
-	changed, err = repo.ResumeWaitingInput(ctx, run.ID, 1, answer)
+	resumeResult, err := repo.ResumeWaitingInput(ctx, run.ID, 1, answer)
 	require.NoError(t, err)
-	require.True(t, changed)
+	require.Equal(t, repository.ResumeWaitingInputResumed, resumeResult)
 
-	changed, err = repo.ResumeWaitingInput(ctx, run.ID, 1, answer)
+	resumeResult, err = repo.ResumeWaitingInput(ctx, run.ID, 1, answer)
 	require.NoError(t, err)
-	assert.True(t, changed, "same client input must be idempotent")
+	assert.Equal(t, repository.ResumeWaitingInputAlreadyApplied, resumeResult, "same client input must be idempotent")
 
 	got, err := repo.GetByID(ctx, run.ID)
 	require.NoError(t, err)
