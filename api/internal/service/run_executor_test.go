@@ -812,6 +812,22 @@ func TestRunExecutorCancelWithoutHandleReconcilesImmediately(t *testing.T) {
 	}
 }
 
+func TestRunExecutorCancelWithoutHandleRetriesTransientReconciliationFailure(t *testing.T) {
+	store := &retryStartReconciliationStore{}
+	executor := NewRunExecutor(store, &executorToolProviderStub{set: &executorToolSetStub{released: make(chan struct{})}}, &executorEngineStub{})
+
+	run, err := executor.Cancel(context.Background(), "run-1")
+	if err != nil {
+		t.Fatalf("Cancel() error = %v", err)
+	}
+	if run == nil || run.Status != model.RunStatusCancelled {
+		t.Fatalf("Cancel() run = %#v, want cancelled", run)
+	}
+	if got, want := store.events(), []string{"request_cancel", "reconcile", "reconcile"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("store events = %v, want %v", got, want)
+	}
+}
+
 func TestRunExecutorReconcilesCancellationAfterLateEngineResult(t *testing.T) {
 	store := &cancellationRaceStore{finishStarted: make(chan struct{}), releaseFinish: make(chan struct{})}
 	engine := &executorEngineStub{result: RunExecutionResult{Kind: RunExecutionSucceeded}}

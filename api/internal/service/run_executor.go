@@ -256,7 +256,7 @@ func (e *RunExecutor) abortStart(ctx context.Context, runID string, control *run
 		logger.Warn("Run 启动失败后无法请求取消", logger.String("run_id", runID), logger.Err(err))
 		return
 	}
-	if err := e.reconcileCancellation(reconcileCtx, runID); err != nil {
+	if _, err := e.reconcileCancellation(reconcileCtx, runID); err != nil {
 		logger.Warn("Run 启动失败后无法收敛取消", logger.String("run_id", runID), logger.Err(err))
 	}
 }
@@ -273,12 +273,11 @@ func (e *RunExecutor) requestStartCancellation(ctx context.Context, runID string
 
 // reconcileCancellation 以有限重试收敛已提交的 cancelling 状态。
 // 进程内句柄已释放时不能将一次瞬时存储失败留给后续重启处理，否则会长期占用 active Run 槽位。
-func (e *RunExecutor) reconcileCancellation(ctx context.Context, runID string) error {
-	if _, err := e.store.ReconcileCancelling(ctx, runID); err == nil {
-		return nil
+func (e *RunExecutor) reconcileCancellation(ctx context.Context, runID string) (*model.Run, error) {
+	if run, err := e.store.ReconcileCancelling(ctx, runID); err == nil {
+		return run, nil
 	}
-	_, err := e.store.ReconcileCancelling(ctx, runID)
-	return err
+	return e.store.ReconcileCancelling(ctx, runID)
 }
 
 func (e *RunExecutor) reconcileCancelledStart(ctx context.Context, runID string, control *runControl, requestCancel bool) {
@@ -293,7 +292,7 @@ func (e *RunExecutor) reconcileCancelledStart(ctx context.Context, runID string,
 			return
 		}
 	}
-	if err := e.reconcileCancellation(reconcileCtx, runID); err != nil {
+	if _, err := e.reconcileCancellation(reconcileCtx, runID); err != nil {
 		logger.Warn("Run 在启动前被取消后无法收敛", logger.String("run_id", runID), logger.Err(err))
 		control.handle.setResult(err)
 		return
@@ -346,14 +345,14 @@ func (e *RunExecutor) newPersistenceContext(parent context.Context) (context.Con
 // reconcileAfterPersistenceFailure 避免结果写入失败后留下没有进程句柄的活跃 Run。
 // 先处理已经进入 cancelling 的竞争窗口；仍处于活跃状态时再请求取消并收敛。
 func (e *RunExecutor) reconcileAfterPersistenceFailure(ctx context.Context, runID string) {
-	if err := e.reconcileCancellation(ctx, runID); err == nil {
+	if _, err := e.reconcileCancellation(ctx, runID); err == nil {
 		return
 	}
 	if _, err := e.store.RequestCancel(ctx, runID); err != nil {
 		logger.Warn("执行结果持久化失败后无法请求取消 Run", logger.String("run_id", runID), logger.Err(err))
 		return
 	}
-	if err := e.reconcileCancellation(ctx, runID); err != nil {
+	if _, err := e.reconcileCancellation(ctx, runID); err != nil {
 		logger.Warn("执行结果持久化失败后无法收敛 Run", logger.String("run_id", runID), logger.Err(err))
 	}
 }
@@ -425,7 +424,7 @@ func (e *RunExecutor) Cancel(ctx context.Context, runID string) (*model.Run, err
 		if _, err := e.store.RequestCancel(ctx, runID); err != nil {
 			return nil, fmt.Errorf("request run cancel: %w", err)
 		}
-		return e.store.ReconcileCancelling(ctx, runID)
+		return e.reconcileCancellation(ctx, runID)
 	}
 	control.admission.Lock()
 	defer control.admission.Unlock()
@@ -435,7 +434,7 @@ func (e *RunExecutor) Cancel(ctx context.Context, runID string) (*model.Run, err
 	}
 	control.cancelPersisted = true
 	if handleEnded(control.handle) {
-		return e.store.ReconcileCancelling(ctx, runID)
+		return e.reconcileCancellation(ctx, runID)
 	}
 	control.cancel()
 	return run, nil
