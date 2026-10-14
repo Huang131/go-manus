@@ -61,7 +61,7 @@ cancelling -> cancelled
 
 ~~~text
 snapshot_revision
-plan_id / plan_revision
+plan_id
 current_step_id
 steps[]
   - id

@@ -92,7 +92,6 @@ type RunStepSnapshot struct {
 type RunExecutionSnapshot struct {
 	SnapshotRevision  int                `json:"snapshot_revision"`
 	PlanID            string             `json:"plan_id"`
-	PlanRevision      int                `json:"plan_revision"`
 	PlanTitle         string             `json:"plan_title,omitempty"`
 	PlanGoal          string             `json:"plan_goal,omitempty"`
 	PlanLanguage      string             `json:"plan_language,omitempty"`

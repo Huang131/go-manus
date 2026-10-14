@@ -11,7 +11,6 @@ func TestBuildResumeMessagesRebuildsStableConversation(t *testing.T) {
 	snapshot := model.RunExecutionSnapshot{
 		SnapshotRevision: 2,
 		PlanID:           "plan-1",
-		PlanRevision:     1,
 		CurrentStepID:    "step-2",
 		Steps: []model.RunStepSnapshot{
 			{ID: "step-1", Description: "收集供应商信息", Status: model.RunStepStatusCompleted, ResultSummary: "已找到三家供应商", ArtifactRefs: []string{"file-1"}},

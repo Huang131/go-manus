@@ -55,7 +55,6 @@ func TestRunExecutionSnapshotValidateWaitingInput(t *testing.T) {
 	valid := RunExecutionSnapshot{
 		SnapshotRevision: 3,
 		PlanID:           "plan-1",
-		PlanRevision:     2,
 		CurrentStepID:    "step-2",
 		Steps: []RunStepSnapshot{
 			{ID: "step-1", Description: "research facts", Status: RunStepStatusCompleted, ResultSummary: "researched facts", ArtifactRefs: []string{"file-1"}},
