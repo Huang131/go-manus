@@ -201,22 +201,27 @@ func (e *RunExecutor) Start(ctx context.Context, runID string, messages []llmcor
 			e.removeControl(runID, control)
 			cancel()
 		}
+		control.handle.setResult(err)
 		return nil, fmt.Errorf("start run: %w", err)
 	}
 	if run == nil {
 		e.removeControl(runID, control)
 		cancel()
-		return nil, errors.New("start run returned nil run")
+		err := errors.New("start run returned nil run")
+		control.handle.setResult(err)
+		return nil, err
 	}
 	toolSet, err := e.provider.Acquire(run.SettingsSnapshot)
 	if err != nil {
 		// Run 已经进入 running，工具无法装配时必须立即收敛，不能遗留 active Run。
 		e.abortStart(ctx, runID, control)
+		control.handle.setResult(err)
 		return nil, fmt.Errorf("acquire run tools: %w", err)
 	}
 	if toolSet == nil {
 		err := errors.New("acquire run tools returned nil tool set")
 		e.abortStart(ctx, runID, control)
+		control.handle.setResult(err)
 		return nil, err
 	}
 	var contexts []attachment.FileContext
@@ -232,7 +237,9 @@ func (e *RunExecutor) Start(ctx context.Context, runID string, messages []llmcor
 		e.mu.Unlock()
 		toolSet.Release()
 		cancel()
-		return nil, fmt.Errorf("run %q execution handle was replaced", runID)
+		err := fmt.Errorf("run %q execution handle was replaced", runID)
+		control.handle.setResult(err)
+		return nil, err
 	}
 	control.admission.Lock()
 	defer control.admission.Unlock()

@@ -146,11 +146,15 @@ type blockingStartStore struct {
 	executorStoreStub
 	started chan struct{}
 	release chan struct{}
+	err     error
 }
 
 func (s *blockingStartStore) Start(ctx context.Context, runID string) (*model.Run, error) {
 	close(s.started)
 	<-s.release
+	if s.err != nil {
+		return nil, s.err
+	}
 	return s.executorStoreStub.Start(ctx, runID)
 }
 
@@ -396,6 +400,36 @@ func TestRunExecutorDuplicateStartReusesInFlightHandle(t *testing.T) {
 	waitExecutorDone(t, second)
 	if got, want := store.events(), []string{"start", "finish:succeeded"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("store events = %v, want %v", got, want)
+	}
+}
+
+func TestRunExecutorDuplicateStartCompletesSharedHandleWhenInitialStartFails(t *testing.T) {
+	store := &blockingStartStore{started: make(chan struct{}), release: make(chan struct{}), err: errors.New("database unavailable")}
+	executor := NewRunExecutor(store, &executorToolProviderStub{set: &executorToolSetStub{released: make(chan struct{})}}, &executorEngineStub{})
+
+	firstResult := make(chan error, 1)
+	go func() {
+		_, err := executor.Start(context.Background(), "run-1", nil)
+		firstResult <- err
+	}()
+	select {
+	case <-store.started:
+	case <-time.After(time.Second):
+		t.Fatal("first Start() did not reach persistence")
+	}
+
+	shared, err := executor.Start(context.Background(), "run-1", nil)
+	if err != nil || shared == nil {
+		t.Fatalf("duplicate Start() = %#v, %v, want shared handle", shared, err)
+	}
+	close(store.release)
+	if err := <-firstResult; err == nil {
+		t.Fatal("first Start() error = nil, want startup failure")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := shared.Wait(ctx); err == nil || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("shared handle Wait() error = %v, want startup failure", err)
 	}
 }
 
