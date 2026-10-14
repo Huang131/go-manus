@@ -640,6 +640,16 @@ func (r *PostgresRunRepository) ResumeWaitingInput(ctx context.Context, runID st
 	result := ResumeWaitingInputResult{Outcome: ResumeWaitingInputNoChange}
 	err := r.WithTx(ctx, func(repo RunRepository) error {
 		bound := repo.(*PostgresRunRepository)
+		// 同一 Run 的恢复请求必须串行化。若先查消息再更新状态，两个
+		// READ COMMITTED 事务都可能看不到回答，后者随后只得到一个
+		// NoChange，无法识别为幂等重试。行锁让后到事务在前者提交后
+		// 再读取消息，从而稳定返回 AlreadyApplied。
+		var lockedRunID string
+		if err := bound.queryer().QueryRow(ctx, `SELECT id FROM runs WHERE id = $1 FOR UPDATE`, runID).Scan(&lockedRunID); errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		} else if err != nil {
+			return err
+		}
 		existing, err := bound.messageByIdempotencyKey(ctx, runID, answer.IdempotencyKey)
 		if err != nil {
 			return err

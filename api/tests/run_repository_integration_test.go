@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -460,6 +461,64 @@ func TestRunRepo_WaitAndResume_UsesSnapshotRevisionAndInputIdempotency(t *testin
 	require.Len(t, messages, 4, "repeated input must not add messages")
 	assert.Equal(t, answer.ID, messages[2].ID)
 	assert.Equal(t, nextQuestion.ID, messages[3].ID)
+}
+
+func TestRunRepo_ConcurrentResumeSameInputIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	repo := testRunRepository(t)
+	run, question := createWaitingRunForRecovery(t, repo)
+	answerKey := "concurrent-answer-" + uuid.NewString()
+
+	answers := make([]*model.RunMessage, 2)
+	for i := range answers {
+		answers[i] = &model.RunMessage{
+			ID: uuid.NewString(), SessionID: run.SessionID, RunID: run.ID,
+			IdempotencyKey: answerKey, ReplyToMessageID: question.ID,
+			Role: model.RoleUser, Content: "继续执行", CreatedAt: time.Now().UTC(),
+		}
+	}
+
+	results := make(chan repository.ResumeWaitingInputResult, len(answers))
+	errs := make(chan error, len(answers))
+	var wg sync.WaitGroup
+	for _, answer := range answers {
+		answer := answer
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result, err := repo.ResumeWaitingInput(ctx, run.ID, 1, answer)
+			results <- result
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(results)
+	close(errs)
+
+	var resumed, alreadyApplied int
+	for result := range results {
+		switch result.Outcome {
+		case repository.ResumeWaitingInputResumed:
+			resumed++
+		case repository.ResumeWaitingInputAlreadyApplied:
+			alreadyApplied++
+		default:
+			t.Fatalf("unexpected concurrent resume outcome: %v", result.Outcome)
+		}
+	}
+	for err := range errs {
+		require.NoError(t, err)
+	}
+	assert.Equal(t, 1, resumed)
+	assert.Equal(t, 1, alreadyApplied)
+
+	got, err := repo.GetByID(ctx, run.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	assert.Equal(t, model.RunStatusRunning, got.Status)
+	messages, err := repo.ListMessages(ctx, run.ID)
+	require.NoError(t, err)
+	assert.Len(t, messages, 3, "concurrent duplicate input must persist exactly one answer")
 }
 
 func TestRunRepo_EnterWaitingInput_RollsBackWhenQuestionBelongsToAnotherSession(t *testing.T) {
