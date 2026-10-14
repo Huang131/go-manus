@@ -125,6 +125,17 @@ func (s fileLookupStub) GetBySessionAndID(_ context.Context, sessionID, id strin
 	return file, nil
 }
 
+type fileLookupHookStub struct {
+	lookup func()
+}
+
+func (s fileLookupHookStub) GetBySessionAndID(_ context.Context, _, _ string) (*model.File, error) {
+	if s.lookup != nil {
+		s.lookup()
+	}
+	return nil, nil
+}
+
 func TestRunApplicationServiceSubmitInputRetryDoesNotRevalidateDeletedAttachments(t *testing.T) {
 	store, _, _ := waitingRunFixture()
 	runs := NewRunService(store)
@@ -155,6 +166,41 @@ func TestRunApplicationServiceSubmitInputRetryDoesNotRevalidateDeletedAttachment
 	input.Content = "不同回答"
 	if _, err := service.SubmitInput(context.Background(), "run-1", input); err == nil {
 		t.Fatal("SubmitInput() accepted different content with the same idempotency key")
+	}
+}
+
+func TestRunApplicationServiceSubmitInputRechecksIdempotencyAfterAttachmentExpires(t *testing.T) {
+	store := &applicationRunStoreStub{
+		run:      &model.Run{ID: "run-1", SessionID: "session-1", Status: model.RunStatusWaitingInput},
+		resume:   &RunResume{Run: &model.Run{ID: "run-1", SessionID: "session-1", Status: model.RunStatusRunning}, AlreadyApplied: true},
+		messages: map[string][]*model.RunMessage{"run-1": nil},
+	}
+	input := SubmitInputRequest{
+		IdempotencyKey: "reply-1", ReplyToMessageID: "question-1", Content: "补充信息", Attachments: []string{"file-1"},
+	}
+	files := fileLookupHookStub{lookup: func() {
+		// 模拟另一个相同请求在首次幂等检查和附件读取之间已完成持久化，
+		// 随后附件又被清理的竞态窗口。
+		store.messages["run-1"] = []*model.RunMessage{{
+			RunID: "run-1", SessionID: "session-1", IdempotencyKey: input.IdempotencyKey,
+			ReplyToMessageID: input.ReplyToMessageID, Role: model.RoleUser,
+			Content: input.Content, Attachments: input.Attachments,
+		}}
+	}}
+	service := NewRunApplicationService(
+		store, &applicationExecutorStub{}, sessionLookupStub{}, files, settingsSourceStub{}, nil, "prompt-hash",
+	)
+
+	result, err := service.SubmitInput(context.Background(), "run-1", input)
+
+	if err != nil {
+		t.Fatalf("SubmitInput() error = %v, want idempotent result after attachment expiry", err)
+	}
+	if result == nil || result.Handle != nil || result.Run == nil || result.Run.Status != model.RunStatusRunning {
+		t.Fatalf("SubmitInput() = %#v, want already-applied run without a second execution", result)
+	}
+	if store.submittedRun != "run-1" {
+		t.Fatalf("SubmitInput() did not delegate duplicate validation, submitted run = %q", store.submittedRun)
 	}
 }
 

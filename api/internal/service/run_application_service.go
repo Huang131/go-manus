@@ -194,7 +194,17 @@ func (s *defaultRunApplicationService) SubmitInput(ctx context.Context, runID st
 	if !applied {
 		files, err = s.resolveFilesForRun(ctx, runID, input.Attachments)
 		if err != nil {
-			return nil, err
+			// 首次检查与附件读取之间，另一个相同请求可能已原子写入回答。
+			// 仅在第二次确认相同幂等键已存在时才进入领域层：这样既能让
+			// 重试跨过已清理的附件，也不会把无效附件持久化为一次新恢复。
+			appliedAfterFailure, checkErr := s.inputAlreadyApplied(ctx, runID, input.IdempotencyKey)
+			if checkErr != nil {
+				return nil, checkErr
+			}
+			if !appliedAfterFailure {
+				return nil, err
+			}
+			return s.submitAppliedInput(ctx, runID, input)
 		}
 	}
 	resume, err := s.runs.SubmitInput(ctx, runID, input)
@@ -213,6 +223,22 @@ func (s *defaultRunApplicationService) SubmitInput(ctx context.Context, runID st
 		return nil, err
 	}
 	return &ApplicationRun{Run: resume.Run, Handle: handle}, nil
+}
+
+// submitAppliedInput 让领域层复核已持久化回答的完整契约，并返回其当前 Run 快照。
+// 它只在应用层已确认同一幂等键存在时调用，不能作为附件校验失败的通用回退路径。
+func (s *defaultRunApplicationService) submitAppliedInput(ctx context.Context, runID string, input SubmitInputRequest) (*ApplicationRun, error) {
+	resume, err := s.runs.SubmitInput(ctx, runID, input)
+	if err != nil {
+		return nil, err
+	}
+	if resume == nil {
+		return nil, apperr.ToInternal(apperr.Internal("submit input returned empty result"))
+	}
+	if resume.StartExecution {
+		return nil, apperr.ToInternal(apperr.Internal("idempotent input unexpectedly requested execution start"))
+	}
+	return &ApplicationRun{Run: resume.Run}, nil
 }
 
 func (s *defaultRunApplicationService) inputAlreadyApplied(ctx context.Context, runID, idempotencyKey string) (bool, error) {
