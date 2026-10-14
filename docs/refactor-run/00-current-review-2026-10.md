@@ -48,9 +48,9 @@ MCP 动态 function 在发现时建立稳定索引，名称碰撞会拒绝初始
 - `SandboxID`：文件、VNC 和沙箱能力仍按 Session 关联。
 - MCP/A2A runtime 与 ToolProvider cleanup：服务热重载和关闭流程仍使用。
 
-## 需要解决的问题
+## 当前限制与演进条件
 
-1. **真实依赖验收仍待补齐**：需在可连接 PostgreSQL、Redis、MinIO 的环境复跑 Run 生命周期、取消竞争和 SSE 续读集成测试。
+1. **真实依赖验收已完成**：`make test-integration` 会独立启动 PostgreSQL、Redis、MinIO，覆盖 Run 生命周期、取消竞争和 SSE 续读；后续涉及这条链路的改动必须重跑该门禁。
 2. **执行仍是进程内模型**：当前不含 Worker、Lease、Outbox 或永久事件溯源；只有达到架构触发条件时才单独立项。
 3. **上下文预算仍是近似值**：当前没有 provider tokenizer，新增模型能力时需评估是否需要精确计量。
 

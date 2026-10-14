@@ -68,7 +68,7 @@ Plan/Step 首期作为 Run 内 JSONB 快照，不单独建立 Plan 历史表；�
 
 `waiting_input` 是没有存活执行 goroutine 的持久化状态，不持有旧 `ToolSet`。进入该状态时必须原子保存：
 
-- 当前 Plan revision、当前 step ID 和 step 状态。
+- Plan 标识、当前 step ID 和 step 状态。
 - 已完成步骤的稳定结果摘要及必要 artifact 引用。
 - 等待问题对应的 assistant message ID、step ID 和恢复方式。
 - 构造上下文所需的原始用户输入与消息关联。
