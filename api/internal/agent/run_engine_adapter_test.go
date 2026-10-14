@@ -62,7 +62,7 @@ func TestPlannerEngineAdapterConvertsCompletedFlow(t *testing.T) {
 
 func TestPlannerEngineAdapterWaitingInputBuildsResumableQuestion(t *testing.T) {
 	adapter := &PlannerEngineAdapter{LLM: &adapterLLM{responses: []*llmcore.LLMResponse{
-		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: "{\"message\":\"开始\",\"goal\":\"确认\",\"title\":\"任务\",\"language\":\"zh\",\"steps\":[{\"id\":\"step-1\",\"description\":\"确认\",\"user_question\":\"请确认\"}]}"}},
+		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: "{\"message\":\"开始\",\"goal\":\"确认\",\"title\":\"任务\",\"language\":\"zh\",\"steps\":[{\"id\":\"step-1\",\"description\":\"确认\",\"user_question\":\"请确认\"},{\"id\":\"step-2\",\"description\":\"确认后继续\"}]}"}},
 		{Message: llmcore.Message{Role: model.RoleAssistant, ToolCalls: []llmcore.ToolCall{{ID: "call-1", Type: "function", Function: llmcore.ToolCallFunction{Name: "waiting_tool_ask", Arguments: "{}"}}}}},
 	}}}
 	result, err := adapter.Execute(context.Background(), service.RunExecutionInput{
@@ -85,6 +85,9 @@ func TestPlannerEngineAdapterWaitingInputBuildsResumableQuestion(t *testing.T) {
 	}
 	if result.Snapshot.WaitingCheckpoint.QuestionMessageID != result.Question.ID {
 		t.Fatalf("checkpoint = %+v, question = %+v", result.Snapshot.WaitingCheckpoint, result.Question)
+	}
+	if result.Snapshot.CurrentStepID != "step-1" || result.Snapshot.WaitingCheckpoint.StepID != "step-1" {
+		t.Fatalf("waiting step = current %q checkpoint %q, want step-1", result.Snapshot.CurrentStepID, result.Snapshot.WaitingCheckpoint.StepID)
 	}
 }
 
@@ -205,6 +208,22 @@ func TestPlannerEngineAdapterPassesAttachmentContextToExecutionPrompt(t *testing
 	}
 	if countText(llm.requests[1], "关键结论：通过") == 0 {
 		t.Fatalf("execution prompt omitted attachment context: %#v", llm.requests[1])
+	}
+}
+
+func TestSnapshotFromPlanKeepsFirstIncompleteStepAsCurrent(t *testing.T) {
+	plan := &model.Plan{
+		ID: "plan-1",
+		Steps: []model.PlanStep{
+			{ID: "step-1", Description: "等待用户确认", Status: model.ExecutionStatusRunning, UserQuestion: "请确认"},
+			{ID: "step-2", Description: "后续步骤", Status: model.ExecutionStatusPending},
+		},
+	}
+
+	snapshot := snapshotFromPlan(plan, model.RunExecutionSnapshot{})
+
+	if snapshot.CurrentStepID != "step-1" {
+		t.Fatalf("current step = %q, want first incomplete step step-1", snapshot.CurrentStepID)
 	}
 }
 

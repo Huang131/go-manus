@@ -93,6 +93,8 @@ func snapshotFromPlan(plan *model.Plan, previous model.RunExecutionSnapshot) mod
 	snapshot.PlanGoal = plan.Goal
 	snapshot.PlanLanguage = plan.Language
 	snapshot.PlanMessage = plan.Message
+	// 每次都从当前计划推导执行位置，不能沿用上一版快照已经完成的步骤。
+	snapshot.CurrentStepID = ""
 	snapshot.Steps = make([]model.RunStepSnapshot, 0, len(plan.Steps))
 	for _, step := range plan.Steps {
 		status := model.RunStepStatusPending
@@ -105,7 +107,9 @@ func snapshotFromPlan(plan *model.Plan, previous model.RunExecutionSnapshot) mod
 			status = model.RunStepStatusFailed
 		}
 		snapshot.Steps = append(snapshot.Steps, model.RunStepSnapshot{ID: step.ID, Description: step.Description, Status: status, ResultSummary: step.Result, ArtifactRefs: append([]string(nil), step.Attachments...)})
-		if !step.Done() {
+		// 当前步骤必须是计划中第一个未完成步骤。后续 pending 步骤只是
+		// 执行队列，不能覆盖正在等待用户输入的步骤，否则恢复时会丢失问题上下文。
+		if !step.Done() && snapshot.CurrentStepID == "" {
 			snapshot.CurrentStepID = step.ID
 		}
 	}
