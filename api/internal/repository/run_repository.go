@@ -25,17 +25,26 @@ type RunRecoveryStats struct {
 	InvalidWaitingInput int
 }
 
-// ResumeWaitingInputResult 区分本次恢复、幂等重复和未发生状态迁移。
+// ResumeWaitingInputOutcome 区分本次恢复、幂等重复和未发生状态迁移。
 //
 // 仅 ResumeWaitingInputResumed 可以触发新的执行协程；AlreadyApplied 说明
 // 相同回答已由并发请求持久化，调用方只能返回已应用结果。
-type ResumeWaitingInputResult uint8
+type ResumeWaitingInputOutcome uint8
 
 const (
-	ResumeWaitingInputNoChange ResumeWaitingInputResult = iota
+	ResumeWaitingInputNoChange ResumeWaitingInputOutcome = iota
 	ResumeWaitingInputResumed
 	ResumeWaitingInputAlreadyApplied
 )
+
+// ResumeWaitingInputResult 是恢复事务的提交结果。
+//
+// 幂等命中时 Run 是事务内读取到的当前事实，避免调用方在并发推进后向客户端
+// 返回过期的 waiting_input 状态。首次恢复不需要重复读取，Run 保持 nil。
+type ResumeWaitingInputResult struct {
+	Outcome ResumeWaitingInputOutcome
+	Run     *model.Run
+}
 
 // RunRepository 按 Run 聚合持久化执行事实与长期消息。
 //
@@ -622,13 +631,13 @@ func (r *PostgresRunRepository) EnterWaitingInput(ctx context.Context, runID str
 // 对相同 Run 幂等键的重试返回 AlreadyApplied，不重复写入消息或重启执行。
 func (r *PostgresRunRepository) ResumeWaitingInput(ctx context.Context, runID string, expectedRevision int, answer *model.RunMessage) (ResumeWaitingInputResult, error) {
 	if err := validateMessage(answer); err != nil {
-		return ResumeWaitingInputNoChange, err
+		return ResumeWaitingInputResult{}, err
 	}
 	if answer.RunID != runID || answer.Role != model.RoleUser || answer.IdempotencyKey == "" || answer.ReplyToMessageID == "" {
-		return ResumeWaitingInputNoChange, fmt.Errorf("resumed input must be an idempotent user reply for this run")
+		return ResumeWaitingInputResult{}, fmt.Errorf("resumed input must be an idempotent user reply for this run")
 	}
 
-	result := ResumeWaitingInputNoChange
+	result := ResumeWaitingInputResult{Outcome: ResumeWaitingInputNoChange}
 	err := r.WithTx(ctx, func(repo RunRepository) error {
 		bound := repo.(*PostgresRunRepository)
 		existing, err := bound.messageByIdempotencyKey(ctx, runID, answer.IdempotencyKey)
@@ -643,9 +652,10 @@ func (r *PostgresRunRepository) ResumeWaitingInput(ctx context.Context, runID st
 			if err != nil {
 				return err
 			}
-			if run != nil && run.Status == model.RunStatusRunning && run.SnapshotRevision == expectedRevision {
-				result = ResumeWaitingInputAlreadyApplied
+			if run == nil {
+				return fmt.Errorf("run for existing input is missing")
 			}
+			result = ResumeWaitingInputResult{Outcome: ResumeWaitingInputAlreadyApplied, Run: run}
 			return nil
 		}
 
@@ -668,7 +678,7 @@ func (r *PostgresRunRepository) ResumeWaitingInput(ctx context.Context, runID st
 		if err := bound.insertMessage(ctx, answer); err != nil {
 			return fmt.Errorf("insert resumed input: %w", err)
 		}
-		result = ResumeWaitingInputResumed
+		result.Outcome = ResumeWaitingInputResumed
 		return nil
 	})
 	return result, err

@@ -106,12 +106,12 @@ type staleInputRetryStore struct {
 
 func (f *staleInputRetryStore) ResumeWaitingInput(_ context.Context, runID string, expectedRevision int, answer *model.RunMessage) (repository.ResumeWaitingInputResult, error) {
 	if f.run == nil || f.run.ID != runID || f.run.SnapshotRevision != expectedRevision {
-		return repository.ResumeWaitingInputNoChange, nil
+		return repository.ResumeWaitingInputResult{Outcome: repository.ResumeWaitingInputNoChange}, nil
 	}
 	f.run.Status = model.RunStatusRunning
 	f.run.WaitingMessageID = ""
 	f.messages = append(f.messages, answer)
-	return repository.ResumeWaitingInputAlreadyApplied, nil
+	return repository.ResumeWaitingInputResult{Outcome: repository.ResumeWaitingInputAlreadyApplied, Run: f.run}, nil
 }
 
 func TestRunServiceCreateReturnsConflictWhenSessionAlreadyActive(t *testing.T) {
@@ -202,12 +202,12 @@ func (f *fakeRunStore) EnterWaitingInput(_ context.Context, runID string, expect
 
 func (f *fakeRunStore) ResumeWaitingInput(_ context.Context, runID string, expectedRevision int, answer *model.RunMessage) (repository.ResumeWaitingInputResult, error) {
 	if f.run == nil || f.run.ID != runID || f.run.Status != model.RunStatusWaitingInput || f.run.SnapshotRevision != expectedRevision {
-		return repository.ResumeWaitingInputNoChange, nil
+		return repository.ResumeWaitingInputResult{Outcome: repository.ResumeWaitingInputNoChange}, nil
 	}
 	f.run.Status = model.RunStatusRunning
 	f.run.WaitingMessageID = ""
 	f.messages = append(f.messages, answer)
-	return repository.ResumeWaitingInputResumed, nil
+	return repository.ResumeWaitingInputResult{Outcome: repository.ResumeWaitingInputResumed}, nil
 }
 
 func (f *fakeRunStore) FinishTerminal(_ context.Context, runID string, terminal repository.TerminalTransition, final *model.RunMessage) (bool, error) {

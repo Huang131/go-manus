@@ -434,8 +434,14 @@ func (s *defaultRunService) SubmitInput(ctx context.Context, runID string, input
 	if err != nil {
 		return nil, normalizeRunError(err)
 	}
-	if resumeResult == repository.ResumeWaitingInputNoChange {
+	if resumeResult.Outcome == repository.ResumeWaitingInputNoChange {
 		return nil, s.statusConflict(ctx, runID, "waiting input revision is stale")
+	}
+	if resumeResult.Outcome == repository.ResumeWaitingInputAlreadyApplied {
+		if resumeResult.Run == nil {
+			return nil, apperr.ToInternal(apperr.Internal("idempotent input result is missing run"))
+		}
+		return &RunResume{Run: resumeResult.Run, AlreadyApplied: true}, nil
 	}
 	// ResumeWaitingInput 已在同一事务内将 waiting_input 变为 running；再次查询
 	// 只会引入一个“提交成功但刷新失败”的孤儿运行窗口，迁移结果本身已足够构造响应。
@@ -443,9 +449,6 @@ func (s *defaultRunService) SubmitInput(ctx context.Context, runID string, input
 	resumed.Status = model.RunStatusRunning
 	resumed.WaitingMessageID = ""
 	resumed.ExecutionSnapshot = run.ExecutionSnapshot.Clone()
-	if resumeResult == repository.ResumeWaitingInputAlreadyApplied {
-		return &RunResume{Run: &resumed, AlreadyApplied: true}, nil
-	}
 	return &RunResume{Run: &resumed, Messages: contextMessages, StartExecution: true}, nil
 }
 

@@ -290,7 +290,7 @@ func TestRunRepo_RecoverWaitingInput(t *testing.T) {
 		IdempotencyKey: uuid.NewString(), ReplyToMessageID: question.ID, Role: model.RoleUser, Content: "确认", CreatedAt: time.Now().UTC()}
 	resumeResult, err := repo.ResumeWaitingInput(ctx, validRun.ID, 1, answer)
 	require.NoError(t, err)
-	require.Equal(t, repository.ResumeWaitingInputResumed, resumeResult, "valid waiting run must still accept input after recovery")
+	require.Equal(t, repository.ResumeWaitingInputResumed, resumeResult.Outcome, "valid waiting run must still accept input after recovery")
 }
 
 func TestRunRepo_CancelWaitingInputClearsWaitingMessage(t *testing.T) {
@@ -416,23 +416,50 @@ func TestRunRepo_WaitAndResume_UsesSnapshotRevisionAndInputIdempotency(t *testin
 	}
 	resumeResult, err := repo.ResumeWaitingInput(ctx, run.ID, 1, answer)
 	require.NoError(t, err)
-	require.Equal(t, repository.ResumeWaitingInputResumed, resumeResult)
+	require.Equal(t, repository.ResumeWaitingInputResumed, resumeResult.Outcome)
 
 	resumeResult, err = repo.ResumeWaitingInput(ctx, run.ID, 1, answer)
 	require.NoError(t, err)
-	assert.Equal(t, repository.ResumeWaitingInputAlreadyApplied, resumeResult, "same client input must be idempotent")
+	assert.Equal(t, repository.ResumeWaitingInputAlreadyApplied, resumeResult.Outcome, "same client input must be idempotent")
+
+	nextQuestion := &model.RunMessage{
+		ID:        uuid.NewString(),
+		SessionID: sessionID,
+		RunID:     run.ID,
+		Role:      model.RoleAssistant,
+		Content:   "请确认下一步",
+		CreatedAt: time.Now().UTC(),
+	}
+	nextSnapshot := snapshot.Clone()
+	nextSnapshot.SnapshotRevision = 2
+	nextSnapshot.WaitingCheckpoint = &model.WaitingCheckpoint{
+		QuestionMessageID: nextQuestion.ID,
+		StepID:            "step-2",
+		ResumeMode:        model.ResumeModeContinueStep,
+	}
+	changed, err = repo.EnterWaitingInput(ctx, run.ID, 1, nextSnapshot, nextQuestion)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	resumeResult, err = repo.ResumeWaitingInput(ctx, run.ID, 1, answer)
+	require.NoError(t, err)
+	assert.Equal(t, repository.ResumeWaitingInputAlreadyApplied, resumeResult.Outcome, "a late duplicate input must never start a second execution")
+	require.NotNil(t, resumeResult.Run)
+	assert.Equal(t, model.RunStatusWaitingInput, resumeResult.Run.Status)
+	assert.Equal(t, nextQuestion.ID, resumeResult.Run.WaitingMessageID)
 
 	got, err := repo.GetByID(ctx, run.ID)
 	require.NoError(t, err)
 	require.NotNil(t, got)
-	assert.Equal(t, model.RunStatusRunning, got.Status)
-	assert.Equal(t, 1, got.SnapshotRevision)
-	assert.Empty(t, got.WaitingMessageID)
+	assert.Equal(t, model.RunStatusWaitingInput, got.Status)
+	assert.Equal(t, 2, got.SnapshotRevision)
+	assert.Equal(t, nextQuestion.ID, got.WaitingMessageID)
 
 	messages, err := repo.ListMessages(ctx, run.ID)
 	require.NoError(t, err)
-	require.Len(t, messages, 3, "stale wait and repeated input must not add messages")
+	require.Len(t, messages, 4, "repeated input must not add messages")
 	assert.Equal(t, answer.ID, messages[2].ID)
+	assert.Equal(t, nextQuestion.ID, messages[3].ID)
 }
 
 func TestRunRepo_EnterWaitingInput_RollsBackWhenQuestionBelongsToAnotherSession(t *testing.T) {
