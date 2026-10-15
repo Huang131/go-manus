@@ -31,7 +31,7 @@ class FileReplaceRequest(BaseModel):
 class FileSearchRequest(BaseModel):
     """文件内容查找请求结构体"""
     filepath: str = Field(..., description="要查找内容的文件绝对路径")
-    regex: str = Field(..., description="搜索正则表达式")
+    regex: str = Field(..., description="安全受限正则表达式（最多一个有限量词）")
     sudo: bool | None = Field(default=False, description="(可选)是否使用sudo权限")
 
 

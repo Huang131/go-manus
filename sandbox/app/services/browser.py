@@ -28,6 +28,9 @@ BROWSER_CLI_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bro
 NODE_BINARY = "node"
 # 截图落盘目录，与 Node CLI 默认控制台日志目录同源
 SCREENSHOT_DIR = "/tmp/browser/screenshots"
+# 当调用方在收到截图路径前断线时，Go 侧无从删除；保底按 TTL 回收孤儿文件。
+SCREENSHOT_TTL_SECONDS = 10 * 60
+SCREENSHOT_CLEANUP_INTERVAL_SECONDS = 60
 
 # 动作超时：导航和截图最慢，控制台日志读取不连浏览器、只需本地 IO
 # 这些上限必须小于 Go 侧 Sandbox.HTTPTimeout（api/config/defaults.go 的
@@ -59,6 +62,31 @@ class BrowserService:
 
     def __init__(self) -> None:
         self._action_lock = asyncio.Lock()
+        self._screenshot_cleanup_task: asyncio.Task[None] | None = None
+
+    def start_cleanup(self) -> None:
+        """启动周期性孤儿截图回收，避免清理依赖下一次截图请求。"""
+        if self._screenshot_cleanup_task is None or self._screenshot_cleanup_task.done():
+            self._screenshot_cleanup_task = asyncio.create_task(self._cleanup_screenshots_loop())
+
+    async def aclose(self) -> None:
+        """关闭服务并回收后台任务；请求中的动作由端点生命周期自然结束。"""
+        task = self._screenshot_cleanup_task
+        self._screenshot_cleanup_task = None
+        if task is None or task.done():
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    @classmethod
+    async def _cleanup_screenshots_loop(cls) -> None:
+        """按固定周期回收过期截图，任务取消时立即退出。"""
+        while True:
+            await asyncio.sleep(SCREENSHOT_CLEANUP_INTERVAL_SECONDS)
+            cls._cleanup_expired_screenshots()
 
     async def navigate(self, url: str, budget_ms: int | None = None) -> BrowserPageResult:
         """导航到指定地址并返回页面摘要"""
@@ -74,14 +102,41 @@ class BrowserService:
                          budget_ms: int | None = None) -> BrowserScreenshotResult:
         """截图并写入沙箱文件，返回文件路径供上层下载二进制"""
         os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+        self._cleanup_expired_screenshots()
         filepath = os.path.join(SCREENSHOT_DIR, f"{uuid.uuid4().hex}.png")
-        data = await self._run(
-            "screenshot",
-            {"path": filepath, "full_page": full_page},
-            SCREENSHOT_TIMEOUT_SECONDS,
-            budget_ms,
-        )
-        return BrowserScreenshotResult(**data)
+        try:
+            data = await self._run(
+                "screenshot",
+                {"path": filepath, "full_page": full_page},
+                SCREENSHOT_TIMEOUT_SECONDS,
+                budget_ms,
+            )
+            return BrowserScreenshotResult(**data)
+        except BaseException:
+            # Go 侧只会在拿到成功响应后负责删除；失败、超时和取消必须由沙箱自己清理。
+            try:
+                os.unlink(filepath)
+            except FileNotFoundError:
+                pass
+            raise
+
+    @staticmethod
+    def _cleanup_expired_screenshots() -> None:
+        """在创建新截图时回收过期 PNG，兜底处理客户端未收到路径的孤儿文件。"""
+        deadline = time.time() - SCREENSHOT_TTL_SECONDS
+        try:
+            entries = os.scandir(SCREENSHOT_DIR)
+        except FileNotFoundError:
+            return
+        with entries:
+            for entry in entries:
+                if not entry.is_file() or not entry.name.endswith(".png"):
+                    continue
+                try:
+                    if entry.stat().st_mtime < deadline:
+                        os.unlink(entry.path)
+                except FileNotFoundError:
+                    continue
 
     async def click(self, index: int | None = None, selector: str | None = None,
                     x: float | None = None, y: float | None = None,
@@ -221,8 +276,17 @@ class BrowserService:
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         except asyncio.TimeoutError:
-            await self._terminate(process)
             raise TimeoutException(f"浏览器动作 {op} 执行超时（{timeout}秒），页面可能仍在加载")
+        finally:
+            # communicate 被取消时不会进入 TimeoutError；统一在 finally 回收，避免 Node
+            # 继续持有 CDP 连接。shield 保证请求取消不会打断 kill/wait 清理任务。
+            if process.returncode is None:
+                cleanup = asyncio.create_task(self._terminate(process))
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    await cleanup
+                    raise
 
         return self._parse_result(op, stdout, stderr)
 

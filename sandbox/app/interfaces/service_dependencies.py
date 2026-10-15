@@ -27,11 +27,15 @@ def setup_services(app: FastAPI) -> None:
     """
     setattr(app.state, SUPERVISOR_STATE_KEY, SupervisorService())
     setattr(app.state, SHELL_STATE_KEY, ShellService())
-    setattr(app.state, BROWSER_STATE_KEY, BrowserService())
+    browser_service = BrowserService()
+    browser_service.start_cleanup()
+    setattr(app.state, BROWSER_STATE_KEY, browser_service)
 
 
 async def shutdown_services(app: FastAPI) -> None:
     """回收 setup_services 创建的资源，与构造一一对应。"""
+    # 关闭浏览器后台清理任务，避免应用重启遗留协程。
+    await getattr(app.state, BROWSER_STATE_KEY).aclose()
     # 关闭所有 Shell 会话进程与输出读取器，避免应用重启遗留子进程
     await getattr(app.state, SHELL_STATE_KEY).shutdown()
     # 取消待执行的超时销毁任务（只取消本地任务，不会关闭 supervisord）

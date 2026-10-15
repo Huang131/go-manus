@@ -6,6 +6,7 @@ import re
 import stat
 import shutil
 import tempfile
+import sre_parse
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import AsyncIterator, Iterator
@@ -29,6 +30,9 @@ from app.models.file import (
 )
 
 MAX_SEARCH_MATCHES = 10_000
+MAX_SEARCH_LINE_BYTES = 256 * 1024
+MAX_REGEX_REPEAT_COUNT = 1
+MAX_REGEX_REPEAT_MAX = 64
 MAX_FIND_FILES = 10_000
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 MAX_WRITE_BYTES = 10 * 1024 * 1024
@@ -58,6 +62,65 @@ def _truncate_utf8(text: str, max_bytes: int) -> str:
     if len(encoded) <= max_bytes:
         return text
     return encoded[:max_bytes].decode("utf-8", errors="ignore")
+
+
+def _has_unsafe_quantifier(tokens, repeat_count: list[int] | None = None,
+                           inside_repeat: bool = False) -> bool:
+    """只接受单个、有限次重复，避免 Python re 的不可中断回溯。"""
+    if repeat_count is None:
+        repeat_count = [0]
+    repeat_ops = {sre_parse.MAX_REPEAT, sre_parse.MIN_REPEAT}
+    if hasattr(sre_parse, "POSSESSIVE_REPEAT"):
+        repeat_ops.add(sre_parse.POSSESSIVE_REPEAT)
+    for operation, argument in tokens:
+        if operation in {sre_parse.GROUPREF, sre_parse.GROUPREF_EXISTS}:
+            return True
+        if operation in repeat_ops:
+            minimum, maximum, children = argument
+            repeat_count[0] += 1
+            if (inside_repeat or repeat_count[0] > MAX_REGEX_REPEAT_COUNT
+                    or maximum > MAX_REGEX_REPEAT_MAX
+                    or _has_unsafe_quantifier(children, repeat_count, True)
+                    or _repeat_contains_branch(children)):
+                return True
+            continue
+        if operation is sre_parse.SUBPATTERN:
+            if _has_unsafe_quantifier(argument[-1], repeat_count, inside_repeat):
+                return True
+        elif operation in {sre_parse.ASSERT, sre_parse.ASSERT_NOT}:
+            # lookahead/lookbehind 内部同样可以包含灾难性回溯表达式。
+            if _has_unsafe_quantifier(argument[1], repeat_count, inside_repeat):
+                return True
+        elif operation is sre_parse.BRANCH:
+            if any(_has_unsafe_quantifier(branch, repeat_count, inside_repeat) for branch in argument[1]):
+                return True
+    return False
+
+
+def _repeat_contains_branch(tokens) -> bool:
+    """量词包裹可分支表达式时拒绝，规避重叠分支回溯。"""
+    for operation, argument in tokens:
+        if operation is sre_parse.BRANCH:
+            return True
+        if operation is sre_parse.SUBPATTERN and _repeat_contains_branch(argument[-1]):
+            return True
+    return False
+
+
+def _compile_search_pattern(regex: str):
+    """编译受控正则，避免把不可中断的回溯任务提交到线程池。"""
+    if len(regex) > 256:
+        raise BadRequestException("正则表达式过长（上限 256 字符）")
+    try:
+        pattern = re.compile(regex)
+        parsed = sre_parse.parse(regex)
+    except Exception as exc:
+        raise BadRequestException(f"传递正则表达式[{regex}]出错: {exc}")
+    if _has_unsafe_quantifier(parsed):
+        raise BadRequestException(
+            "正则表达式只支持一个最多重复 64 次的量词，避免高 CPU 回溯"
+        )
+    return pattern
 
 
 class FileService:
@@ -452,13 +515,7 @@ class FileService:
     ) -> FileSearchResult:
         """根据传递的文件路径+匹配规则查询文件内符合的内容"""
         matches, line_numbers = [], []
-        # ReDoS 防护：限制模式长度（无复杂度分析能力，至少挡住超长病态模式）
-        if len(regex) > 256:
-            raise BadRequestException("正则表达式过长（上限 256 字符）")
-        try:
-            pattern = re.compile(regex)
-        except Exception as e:
-            raise BadRequestException(f"传递正则表达式[{regex}]出错: {str(e)}")
+        pattern = _compile_search_pattern(regex)
         if not sudo:
             self._ensure_regular_file(filepath)
             self._validate_read_limit()
@@ -469,6 +526,9 @@ class FileService:
                     line = chunk.text
                     bytes_seen += len(line.encode("utf-8"))
                     if bytes_seen > MAX_READ_BYTES:
+                        truncated = True
+                        break
+                    if len(line.encode("utf-8")) > MAX_SEARCH_LINE_BYTES or chunk.truncated:
                         truncated = True
                         break
                     if pattern.search(line.rstrip("\r\n")):
@@ -509,6 +569,10 @@ class FileService:
                             await asyncio.shield(self._stop_process(process))
                             break
                         line = line.rstrip("\r")
+                        if len(line.encode("utf-8")) > MAX_SEARCH_LINE_BYTES:
+                            truncated = True
+                            await asyncio.shield(self._stop_process(process))
+                            break
                         if pattern.search(line):
                             if len(matches) >= MAX_SEARCH_MATCHES:
                                 truncated = True
@@ -522,7 +586,10 @@ class FileService:
                         await asyncio.shield(self._stop_process(process))
                         break
                 if not truncated and pending:
-                    if pattern.search(pending.rstrip("\r")):
+                    pending_line = pending.rstrip("\r")
+                    if len(pending_line.encode("utf-8")) > MAX_SEARCH_LINE_BYTES:
+                        truncated = True
+                    elif pattern.search(pending_line):
                         if len(matches) >= MAX_SEARCH_MATCHES:
                             truncated = True
                         else:

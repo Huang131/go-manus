@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
 // 滚动方向取值，与沙箱侧 BrowserScrollRequest 的约束保持一致
@@ -85,7 +86,23 @@ func (c *BrowserClient) Screenshot(ctx context.Context, fullPage bool) ([]byte, 
 	if data.Path == "" {
 		return nil, fmt.Errorf("sandbox screenshot returned empty path")
 	}
-	return c.client.downloadBytes(ctx, data.Path)
+
+	// 截图是沙箱临时产物：无论下载成功、失败还是请求被取消，都必须尝试回收。
+	image, downloadErr := c.client.downloadBytes(ctx, data.Path)
+	cleanupCtx, cancelCleanup := context.WithTimeout(context.WithoutCancel(ctx), screenshotCleanupTimeout)
+	defer cancelCleanup()
+	if _, cleanupErr := c.client.DeleteFile(cleanupCtx, data.Path); cleanupErr != nil {
+		logger.Warn("清理浏览器截图临时文件失败", logger.String("path", data.Path), logger.Err(cleanupErr))
+		if downloadErr != nil {
+			return nil, fmt.Errorf("download screenshot: %v; cleanup screenshot: %w", downloadErr, cleanupErr)
+		}
+		// 图片已经成功取回，清理失败不应让调用方丢失可用结果；沙箱 TTL 会兜底回收。
+		return image, nil
+	}
+	if downloadErr != nil {
+		return nil, downloadErr
+	}
+	return image, nil
 }
 
 func (c *BrowserClient) Click(ctx context.Context, target BrowserTarget) (*model.ToolResult, error) {

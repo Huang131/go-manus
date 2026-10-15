@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Huang131/go-manus/api/config"
 )
@@ -200,15 +201,37 @@ func TestPostJSONErrorMapping(t *testing.T) {
 // JSON 信封里的 base64 会被中间环节截断。
 func TestScreenshotDownloadsBinary(t *testing.T) {
 	want := []byte("png-binary-payload")
+	deleted := make(chan struct{}, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/browser/screenshot":
 			writeEnvelope(w, http.StatusOK, http.StatusOK, "截图成功", `{"path":"/tmp/shot.png","bytes":18}`)
 		case "/api/file/download-file":
+			if r.Method != http.MethodGet {
+				t.Errorf("download method = %s, want GET", r.Method)
+			}
 			if got := r.URL.Query().Get("filepath"); got != "/tmp/shot.png" {
 				t.Errorf("filepath = %q, want /tmp/shot.png", got)
 			}
 			_, _ = w.Write(want)
+		case "/api/file/delete-file":
+			if r.Method != http.MethodPost {
+				t.Errorf("delete method = %s, want POST", r.Method)
+			}
+			if got := r.URL.Query().Get("filepath"); got != "" {
+				t.Errorf("delete filepath query = %q, want empty", got)
+			}
+			var body struct {
+				Filepath string `json:"filepath"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode delete request: %v", err)
+			}
+			if body.Filepath != "/tmp/shot.png" {
+				t.Errorf("delete filepath = %q, want /tmp/shot.png", body.Filepath)
+			}
+			deleted <- struct{}{}
+			writeEnvelope(w, http.StatusOK, http.StatusOK, "删除成功", `{"deleted":true}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -222,6 +245,96 @@ func TestScreenshotDownloadsBinary(t *testing.T) {
 	}
 	if string(got) != string(want) {
 		t.Fatalf("Screenshot() = %q, want %q", got, want)
+	}
+	select {
+	case <-deleted:
+	case <-time.After(time.Second):
+		t.Fatal("Screenshot() did not delete temporary file")
+	}
+}
+
+func TestScreenshotCleansUpWhenDownloadFails(t *testing.T) {
+	deleted := make(chan struct{}, 1)
+	client := newSandboxClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/browser/screenshot":
+			writeEnvelope(w, http.StatusOK, http.StatusOK, "截图成功", `{"path":"/tmp/failed-shot.png","bytes":18}`)
+		case "/api/file/download-file":
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+		case "/api/file/delete-file":
+			deleted <- struct{}{}
+			writeEnvelope(w, http.StatusOK, http.StatusOK, "删除成功", `{"deleted":true}`)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	if _, err := NewBrowserClient(client).Screenshot(context.Background(), false); err == nil {
+		t.Fatal("Screenshot() error = nil, want download error")
+	}
+	select {
+	case <-deleted:
+	case <-time.After(time.Second):
+		t.Fatal("Screenshot() did not clean up after download failure")
+	}
+}
+
+func TestScreenshotReturnsImageWhenCleanupFails(t *testing.T) {
+	want := []byte("png-binary-payload")
+	client := newSandboxClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/browser/screenshot":
+			writeEnvelope(w, http.StatusOK, http.StatusOK, "截图成功", `{"path":"/tmp/undeleted-shot.png","bytes":18}`)
+		case "/api/file/download-file":
+			_, _ = w.Write(want)
+		case "/api/file/delete-file":
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	got, err := NewBrowserClient(client).Screenshot(context.Background(), false)
+	if err != nil {
+		t.Fatalf("Screenshot() error = %v, want nil after successful download", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("Screenshot() = %q, want %q", got, want)
+	}
+}
+
+func TestScreenshotCleanupUsesBoundedContext(t *testing.T) {
+	cleanupStarted := make(chan struct{})
+	client := newSandboxClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/browser/screenshot":
+			writeEnvelope(w, http.StatusOK, http.StatusOK, "截图成功", `{"path":"/tmp/slow-cleanup.png","bytes":18}`)
+		case "/api/file/download-file":
+			_, _ = w.Write([]byte("png-binary-payload"))
+		case "/api/file/delete-file":
+			close(cleanupStarted)
+			// 故意比独立清理超时更久：客户端必须自行返回，不能沿用 5 秒 HTTP 超时。
+			time.Sleep(screenshotCleanupTimeout + time.Second)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	started := time.Now()
+	image, err := NewBrowserClient(client).Screenshot(context.Background(), false)
+	if err != nil {
+		t.Fatalf("Screenshot() error = %v", err)
+	}
+	if string(image) != "png-binary-payload" {
+		t.Fatalf("Screenshot() = %q, want downloaded image", image)
+	}
+	select {
+	case <-cleanupStarted:
+	case <-time.After(time.Second):
+		t.Fatal("Screenshot() did not start cleanup")
+	}
+	if elapsed := time.Since(started); elapsed > screenshotCleanupTimeout+time.Second {
+		t.Fatalf("Screenshot() cleanup took %s, want bounded by %s", elapsed, screenshotCleanupTimeout)
 	}
 }
 

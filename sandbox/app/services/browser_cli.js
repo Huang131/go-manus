@@ -29,9 +29,47 @@ const MAX_LOG_ITEM = 500; // 单条日志截断长度
 const MAX_EXEC_RESULT = 8000; // console_exec 返回值截断长度
 const MAX_VIEW_LINES = 1000; // console_view 最多回传行数
 const MAX_SNAPSHOT_ELEMENTS = 200; // snapshot 最多回传元素数，超出截断并标记 truncated
+const MAX_SCREENSHOT_PIXELS = 16 * 1024 * 1024; // 限制整页截图的渲染内存峰值
+const MAX_SCREENSHOT_BYTES = 64 * 1024 * 1024; // 与 Go 下载通道上限保持一致
 // console_view 返回日志的总字节上限（超出从最旧一行丢弃），可用 SANDBOX_MAX_VIEW_BYTES 覆盖，
 // 便于契约测试构造 >64KB 管道缓冲的大输出，验证 writeResult「刷盘回调再退出」不会截断
-const MAX_VIEW_BYTES = parseInt(process.env.SANDBOX_MAX_VIEW_BYTES || '20000', 10);
+const DEFAULT_MAX_VIEW_BYTES = 20000;
+const MAX_VIEW_BYTES = parsePositiveInteger(process.env.SANDBOX_MAX_VIEW_BYTES, DEFAULT_MAX_VIEW_BYTES);
+// 控制台日志只保留尾部，避免长期浏览把沙箱根分区写满。
+const DEFAULT_MAX_CONSOLE_LOG_BYTES = 5 * 1024 * 1024;
+const MAX_CONSOLE_LOG_BYTES = parsePositiveInteger(
+  process.env.SANDBOX_MAX_CONSOLE_LOG_BYTES,
+  DEFAULT_MAX_CONSOLE_LOG_BYTES,
+);
+
+/** 环境变量只接受正整数，非法值回退默认值，避免 Buffer.alloc 抛 RangeError。 */
+function parsePositiveInteger(raw, fallback) {
+  if (raw == null || !/^\d+$/.test(String(raw))) return fallback;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value > 0 ? value : fallback;
+}
+
+/** 在调用 Playwright 截图前限制页面像素数，避免整页渲染制造不可控内存峰值。 */
+function validateScreenshotDimensions(dimensions, fullPage) {
+  if (!fullPage) return;
+  const width = Number(dimensions && dimensions.width);
+  const height = Number(dimensions && dimensions.height);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    throw new ActionError('无法确定整页截图尺寸');
+  }
+  if (width * height > MAX_SCREENSHOT_PIXELS) {
+    throw new ActionError(
+      `整页截图尺寸过大（${Math.ceil(width)}x${Math.ceil(height)}），像素上限为 ${MAX_SCREENSHOT_PIXELS}`,
+    );
+  }
+}
+
+/** 截图超过 Go 下载通道上限时立即拒绝，避免留下无法消费的临时文件。 */
+function validateScreenshotBytes(byteLength) {
+  if (!Number.isSafeInteger(byteLength) || byteLength < 0 || byteLength > MAX_SCREENSHOT_BYTES) {
+    throw new ActionError(`截图文件过大（${byteLength}字节），大小上限为 ${MAX_SCREENSHOT_BYTES}字节`);
+  }
+}
 
 // 可交互元素选择器：快照编号与点击/输入定位共用同一集合，保证 index 语义一致
 const INTERACTIVE_SELECTOR = [
@@ -154,12 +192,42 @@ function attachLogCollector(page) {
       if (!logs.length) return;
       try {
         fs.mkdirSync(path.dirname(CONSOLE_LOG), { recursive: true });
-        fs.appendFileSync(CONSOLE_LOG, logs.join('\n') + '\n');
+        appendBoundedConsoleLog(logs.join('\n') + '\n');
       } catch (err) {
         process.stderr.write('write console log failed: ' + err.message + '\n');
       }
     },
   };
+}
+
+/** 追加日志后只保留尾部，读取量最多为日志上限，避免 trim 本身制造峰值。 */
+function appendBoundedConsoleLog(text) {
+  fs.appendFileSync(CONSOLE_LOG, text, 'utf8');
+  const stat = fs.statSync(CONSOLE_LOG);
+  if (stat.size <= MAX_CONSOLE_LOG_BYTES) return;
+
+  const start = stat.size - MAX_CONSOLE_LOG_BYTES;
+  const fd = fs.openSync(CONSOLE_LOG, 'r');
+  const tail = Buffer.alloc(MAX_CONSOLE_LOG_BYTES);
+  try {
+    fs.readSync(fd, tail, 0, tail.length, start);
+  } finally {
+    fs.closeSync(fd);
+  }
+  const firstLineBreak = tail.indexOf(0x0a);
+  const normalized = firstLineBreak >= 0 ? tail.subarray(firstLineBreak + 1) : tail;
+  const tempPath = `${CONSOLE_LOG}.${process.pid}.tmp`;
+  fs.writeFileSync(tempPath, normalized);
+  fs.renameSync(tempPath, CONSOLE_LOG);
+}
+
+/** 从 UTF-8 尾部按字节预算截取，跳过续字节以避免替换字符突破预算。 */
+function utf8Tail(text, maxBytes) {
+  const bytes = Buffer.from(text, 'utf8');
+  if (bytes.length <= maxBytes) return text;
+  let start = bytes.length - maxBytes;
+  while (start < bytes.length && (bytes[start] & 0xc0) === 0x80) start += 1;
+  return bytes.subarray(start).toString('utf8');
 }
 
 /** 打开（复用）CDP 页面：优先使用最新打开的标签页，保证与人工/VNC 视角一致 */
@@ -249,9 +317,20 @@ async function opScreenshot(params) {
   try {
     const out = String(params.path || '');
     if (!out) throw new ActionError('screenshot 缺少 path 参数');
-    const buffer = await page.screenshot({ fullPage: Boolean(params.full_page) });
+    const fullPage = Boolean(params.full_page);
+    const dimensions = await page.evaluate(
+      '({ width: Math.ceil(document.documentElement ? document.documentElement.scrollWidth : window.innerWidth), height: Math.ceil(document.documentElement ? document.documentElement.scrollHeight : window.innerHeight) })',
+    );
+    validateScreenshotDimensions(dimensions, fullPage);
+    const buffer = await page.screenshot({ fullPage: fullPage });
     fs.mkdirSync(path.dirname(out), { recursive: true });
     fs.writeFileSync(out, buffer);
+    try {
+      validateScreenshotBytes(buffer.length);
+    } catch (err) {
+      try { fs.unlinkSync(out); } catch (cleanupErr) { /* 主错误更有诊断价值 */ }
+      throw err;
+    }
     const info = await pageInfo(page);
     succeed(Object.assign(info, { path: out, bytes: buffer.length, logs: collector.logs.slice(-20) }));
   } finally {
@@ -371,26 +450,68 @@ async function opConsoleExec(params) {
   }
 }
 
-/** console_view：读取历史控制台日志尾部，无需连接浏览器 */
-function opConsoleView(params) {
+/** console_view：流式读取历史控制台日志尾部，无需把整个文件载入内存 */
+async function opConsoleView(params) {
   const want = Number(params.max_lines);
   const limit = Number.isFinite(want) && want > 0 ? Math.min(want, MAX_VIEW_LINES) : 100;
-  let all = [];
+  const tail = [];
+  let tailBytes = 0;
+  let total = 0;
+  let truncated = false;
+  let lineTail = '';
+  let lineHasContent = false;
+
+  const appendToLine = (segment) => {
+    lineHasContent = lineHasContent || /\S/.test(segment);
+    const next = lineTail + segment;
+    if (Buffer.byteLength(next, 'utf8') > MAX_VIEW_BYTES) {
+      lineTail = utf8Tail(next, MAX_VIEW_BYTES);
+      truncated = true;
+      return;
+    }
+    lineTail = next;
+  };
+  const finishLine = () => {
+    if (!lineHasContent) {
+      lineTail = '';
+      return;
+    }
+    // chunk 边界可能刚好落在 CRLF 中间，收尾时统一剥离行尾 CR。
+    if (lineTail.endsWith('\r')) lineTail = lineTail.slice(0, -1);
+    total += 1;
+    tail.push(lineTail);
+    tailBytes += Buffer.byteLength(lineTail, 'utf8');
+    while (tail.length > limit || (tail.length > 1 && tailBytes + tail.length - 1 > MAX_VIEW_BYTES)) {
+      const removingForBytes = tail.length <= limit;
+      const removed = tail.shift();
+      tailBytes -= Buffer.byteLength(removed, 'utf8');
+      // max_lines 是历史兼容的返回窗口，不改变 truncated 的字节预算语义。
+      if (removingForBytes) truncated = true;
+    }
+    lineTail = '';
+    lineHasContent = false;
+  };
+
   try {
-    all = fs.readFileSync(CONSOLE_LOG, 'utf8').split('\n').filter((line) => line.trim() !== '');
+    const stream = fs.createReadStream(CONSOLE_LOG, { encoding: 'utf8' });
+    try {
+      for await (const chunk of stream) {
+        const parts = chunk.split('\n');
+        for (let index = 0; index < parts.length - 1; index += 1) {
+          appendToLine(parts[index].endsWith('\r') ? parts[index].slice(0, -1) : parts[index]);
+          finishLine();
+        }
+        appendToLine(parts[parts.length - 1]);
+      }
+      finishLine();
+    } finally {
+      stream.destroy();
+    }
   } catch (err) {
     if (err.code !== 'ENOENT') throw err;
-    all = [];
+    total = 0;
   }
-  // 输出预算：在行数上限的基础上，再按总字节数从最旧一行起裁剪，
-  // 避免单行超长日志把返回体积撑爆管道与上下文
-  let tail = all.slice(-limit);
-  let truncated = false;
-  while (tail.length > 1 && Buffer.byteLength(tail.join('\n')) > MAX_VIEW_BYTES) {
-    tail = tail.slice(1);
-    truncated = true;
-  }
-  succeed({ lines: tail, total: all.length, truncated: truncated });
+  succeed({ lines: tail, total: total, truncated: truncated });
 }
 
 /** 动作分发表：新增动作只需在此登记并在 Python 侧补端点 */
@@ -427,9 +548,17 @@ async function main() {
   await handler(params);
 }
 
-main().catch((err) => {
+if (require.main === module) {
+  main().catch((err) => {
   // 动作类错误（元素找不到、参数缺失）与 Playwright 动作超时归为 4xx，
   // 其余（缺少依赖、CDP 连不上、脚本崩溃）归为环境不可用
   const action = err instanceof ActionError || (err && err.name === 'TimeoutError');
   fail((err && err.message) || err, action ? 'action' : 'env');
-});
+  });
+}
+
+module.exports = {
+  MAX_CONSOLE_LOG_BYTES,
+  validateScreenshotDimensions,
+  validateScreenshotBytes,
+};

@@ -51,7 +51,7 @@ func (t *FileTool) Parameters() map[string]interface{} {
 			},
 			"regex": map[string]interface{}{
 				"type":        "string",
-				"description": "搜索正则表达式",
+				"description": "安全受限正则表达式（最多一个、最多重复64次的有限量词；字面检索请直接使用普通文本）",
 			},
 			"old_str": map[string]interface{}{
 				"type":        "string",
