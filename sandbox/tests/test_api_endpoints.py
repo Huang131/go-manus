@@ -55,6 +55,9 @@ class FakeSupervisorService:
         return SupervisorTimeout(active=False)
 
 
+_STATE_MISSING = object()
+
+
 class ApiEndpointTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -64,11 +67,18 @@ class ApiEndpointTests(unittest.TestCase):
         app.dependency_overrides[get_file_service] = lambda: cls.file_service
         app.dependency_overrides[get_shell_service] = lambda: cls.shell_service
         # Supervisor 单例从 app.state 解析，中间件与端点共用该实例，故此处直接替换。
+        # 先记下原值，退出时还原，避免把 fake 泄漏给共享同一 app 的其他用例。
+        cls._saved_supervisor = getattr(app.state, SUPERVISOR_STATE_KEY, _STATE_MISSING)
         setattr(app.state, SUPERVISOR_STATE_KEY, cls.supervisor_service)
 
     @classmethod
     def tearDownClass(cls):
         app.dependency_overrides.clear()
+        if cls._saved_supervisor is _STATE_MISSING:
+            if hasattr(app.state, SUPERVISOR_STATE_KEY):
+                delattr(app.state, SUPERVISOR_STATE_KEY)
+        else:
+            setattr(app.state, SUPERVISOR_STATE_KEY, cls._saved_supervisor)
 
     async def request(self, method: str, path: str, payload: Any = None):
         """通过 ASGI 协议直接调用应用，避免测试依赖额外 HTTP 客户端。"""
@@ -174,6 +184,12 @@ class LifespanWiringTests(unittest.TestCase):
             def __init__(self):
                 events.append("browser:init")
 
+            def start_cleanup(self):
+                events.append("browser:start_cleanup")
+
+            async def aclose(self):
+                events.append("browser:aclose")
+
         class FakeSupervisor:
             def __init__(self):
                 events.append("supervisor:init")
@@ -191,14 +207,17 @@ class LifespanWiringTests(unittest.TestCase):
                     mock.patch("app.interfaces.service_dependencies.BrowserService", FakeBrowser):
                 async with test_app.router.lifespan_context(test_app):
                     # 启动阶段：setup_services 构造并挂载，provider 从 state 解析到同一实例
-                    self.assertEqual(events, ["supervisor:init", "shell:init", "browser:init"])
+                    self.assertEqual(events, ["supervisor:init", "shell:init", "browser:init", "browser:start_cleanup"])
                     self.assertIs(get_supervisor_service(request), getattr(test_app.state, SUPERVISOR_STATE_KEY))
                     self.assertIs(get_shell_service(request), getattr(test_app.state, SHELL_STATE_KEY))
                     self.assertIs(get_browser_service(request), getattr(test_app.state, BROWSER_STATE_KEY))
                 # 关闭阶段：shutdown_services 回收的正是启动时挂载的那一批实例
                 self.assertEqual(
                     events,
-                    ["supervisor:init", "shell:init", "browser:init", "shell:shutdown", "supervisor:aclose"],
+                    [
+                        "supervisor:init", "shell:init", "browser:init", "browser:start_cleanup", "browser:aclose",
+                        "shell:shutdown", "supervisor:aclose",
+                    ],
                 )
 
         asyncio.run(scenario())

@@ -7,28 +7,23 @@
 import asyncio
 import json
 import os
-import tempfile
 import unittest
-from pathlib import Path
 
 from app.services.browser import BROWSER_CLI_PATH, NODE_BINARY
+
+from support import TempFileMixin
 
 MAX_VIEW_BYTES_DEFAULT = 20000
 
 
-class BrowserCLIContractTests(unittest.IsolatedAsyncioTestCase):
+class BrowserCLIContractTests(TempFileMixin, unittest.IsolatedAsyncioTestCase):
     async def _run_console_view(self, max_lines=None, console_content="", extra_env=None):
         """以子进程调用 node browser_cli.js 执行 console_view，返回 (returncode, stdout, stderr)。"""
         env = dict(os.environ)
         env.pop("SANDBOX_MAX_VIEW_BYTES", None)
         if extra_env:
             env.update(extra_env)
-
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as log:
-            log.write(console_content)
-            log_path = log.name
-        self.addCleanup(Path(log_path).unlink, missing_ok=True)
-        env["SANDBOX_CONSOLE_LOG"] = log_path
+        env["SANDBOX_CONSOLE_LOG"] = self.write_temp_file(console_content)
 
         argv = [NODE_BINARY, BROWSER_CLI_PATH, json.dumps({"op": "console_view", "max_lines": max_lines})]
         process = await asyncio.create_subprocess_exec(
@@ -100,6 +95,65 @@ class BrowserCLIContractTests(unittest.IsolatedAsyncioTestCase):
         payload = json.loads(stdout.strip())
         self.assertFalse(payload["truncated"])
         self.assertEqual(payload["total"], 2000)
+
+    async def test_invalid_console_log_limit_falls_back_to_default(self):
+        """非法环境变量不能在日志刷盘路径触发 Buffer.alloc 的 RangeError。"""
+        script = (
+            "const cli = require(process.argv[1]);"
+            "process.stdout.write(String(cli.MAX_CONSOLE_LOG_BYTES));"
+        )
+        env = dict(os.environ)
+        env["SANDBOX_MAX_CONSOLE_LOG_BYTES"] = "invalid"
+        process = await asyncio.create_subprocess_exec(
+            NODE_BINARY,
+            "-e",
+            script,
+            BROWSER_CLI_PATH,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
+        stdout, stderr = await process.communicate()
+        self.assertEqual(process.returncode, 0, stderr.decode("utf-8", errors="replace"))
+        self.assertEqual(stdout.decode(), str(5 * 1024 * 1024))
+
+    async def test_full_page_screenshot_rejects_excessive_pixels(self):
+        """整页截图在调用 Playwright 前必须拒绝超出像素预算的页面。"""
+        script = (
+            "const cli = require(process.argv[1]);"
+            "try { cli.validateScreenshotDimensions({width: 20000, height: 2000}, true); }"
+            "catch (err) { process.stdout.write(err.name + ':' + err.message); }"
+        )
+        process = await asyncio.create_subprocess_exec(
+            NODE_BINARY,
+            "-e",
+            script,
+            BROWSER_CLI_PATH,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        self.assertEqual(process.returncode, 0, stderr.decode("utf-8", errors="replace"))
+        self.assertIn("整页截图尺寸过大", stdout.decode())
+
+    async def test_screenshot_bytes_rejects_api_unreadable_output(self):
+        """超过 Go 下载通道上限的 PNG 必须在沙箱侧被拒绝。"""
+        script = (
+            "const cli = require(process.argv[1]);"
+            "try { cli.validateScreenshotBytes(64 * 1024 * 1024 + 1); }"
+            "catch (err) { process.stdout.write(err.message); }"
+        )
+        process = await asyncio.create_subprocess_exec(
+            NODE_BINARY,
+            "-e",
+            script,
+            BROWSER_CLI_PATH,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        self.assertEqual(process.returncode, 0, stderr.decode("utf-8", errors="replace"))
+        self.assertIn("截图文件过大", stdout.decode())
 
     async def test_budget_split_never_exceeds_total_budget(self):
         from app.services.browser import BrowserService

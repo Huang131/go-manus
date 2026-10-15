@@ -9,16 +9,20 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.interfaces.errors.exceptions import AppException, BadRequestException, NotFoundException
+from app.interfaces.errors.exceptions import AppException, BadRequestException, NotFoundException, TimeoutException
 from app.interfaces.schemas.file import FileWriteRequest
 from app.interfaces.schemas.shell import ShellExecuteRequest, ShellWaitRequest
 from app.models.file import FileReadResult
 from app.models.shell import ConsoleRecord
+from app.services.browser import BrowserService
 from app.services.file import FileService
 from app.services.shell import ShellService
 
+from fakes import FakeProcess, FakeStream
+from support import TempFileMixin, process_gone, wait_until
 
-class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
+
+class ServiceRegressionTests(TempFileMixin, unittest.IsolatedAsyncioTestCase):
     async def test_long_shell_command_returns_running_after_wait_window(self):
         service = ShellService()
         started = time.monotonic()
@@ -52,16 +56,13 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
             kill_result = await service.kill_process("background-child-session")
 
         self.assertEqual(kill_result.status, "terminated")
-        for _ in range(20):
-            try:
-                os.kill(child_pid, 0)
-            except ProcessLookupError:
-                break
-            if Path(f"/proc/{child_pid}/stat").read_text(encoding="utf-8").split()[2] == "Z":
-                break
-            await asyncio.sleep(0.05)
-        else:
-            self.fail(f"后台子进程仍存活: {child_pid}")
+        # 条件等待“进程已消失”，替代固定次数轮询；/proc 仅作为僵尸态的补充判据。
+        await wait_until(
+            lambda: process_gone(child_pid),
+            timeout=1.0,
+            interval=0.05,
+            msg=f"后台子进程仍存活: {child_pid}",
+        )
 
     async def test_terminate_and_wait_falls_back_without_process_group_id(self):
         finished = asyncio.Event()
@@ -96,7 +97,7 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         execution = asyncio.create_task(
             service.exec_command("concurrent-session", tempfile.gettempdir(), "sleep 2")
         )
-        await asyncio.sleep(0.1)
+        await wait_until(lambda: "concurrent-session" in service.active_shells)
         started = time.monotonic()
         result = await service.read_shell_output("concurrent-session")
         elapsed = time.monotonic() - started
@@ -110,9 +111,11 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         execution = asyncio.create_task(
             service.exec_command("kill-concurrent-session", tempfile.gettempdir(), "trap '' TERM; sleep 10")
         )
-        await asyncio.sleep(0.1)
+        await wait_until(lambda: "kill-concurrent-session" in service.active_shells)
         termination = asyncio.create_task(service.kill_process("kill-concurrent-session"))
-        await asyncio.sleep(0.1)
+        # 让出一次调度：确保 kill 已进入终止流程（信号已发出）后再并发读取。
+        # 这是调度让步而非等待时长的 sleep，不受机器负载影响。
+        await asyncio.sleep(0)
         started = time.monotonic()
         result = await service.read_shell_output("kill-concurrent-session")
         self.assertEqual(result.session_id, "kill-concurrent-session")
@@ -138,29 +141,12 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         process.communicate.assert_not_awaited()
 
     async def test_sudo_read_stops_process_when_end_line_stops_consuming_output(self):
-        class Stream:
-            def __init__(self, chunks):
-                self.chunks = iter(chunks)
-
-            async def read(self, size=-1):
-                return next(self.chunks, b"")
-
-        class Process:
-            def __init__(self):
-                self.returncode = None
-                self.stdout = Stream([b"first line\n"])
-                self.stderr = Stream([])
-                self.terminated = False
-
-            def terminate(self):
-                self.terminated = True
-                self.returncode = 0
-
-            async def wait(self):
-                self.returncode = 0
-                return self.returncode
-
-        process = Process()
+        process = FakeProcess(
+            stdout=FakeStream([b"first line\n"]),
+            stderr=FakeStream([]),
+            terminate_returncode=0,
+            wait_returncode=0,
+        )
         with patch("app.services.file.asyncio.create_subprocess_exec", return_value=process):
             result = await FileService.read_file("/tmp/large.txt", sudo=True, end_line=1)
 
@@ -196,29 +182,12 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_sudo_search_stops_process_for_unterminated_long_line(self):
         import app.services.file as file_service_module
 
-        class Stream:
-            def __init__(self, chunks):
-                self.chunks = iter(chunks)
-
-            async def read(self, size=-1):
-                return next(self.chunks, b"")
-
-        class Process:
-            def __init__(self):
-                self.returncode = None
-                self.stdout = Stream([b"x" * 32])
-                self.stderr = Stream([])
-                self.terminated = False
-
-            def terminate(self):
-                self.terminated = True
-                self.returncode = 0
-
-            async def wait(self):
-                self.returncode = 0
-                return self.returncode
-
-        process = Process()
+        process = FakeProcess(
+            stdout=FakeStream([b"x" * 32]),
+            stderr=FakeStream([]),
+            terminate_returncode=0,
+            wait_returncode=0,
+        )
         with patch.object(file_service_module, "MAX_PENDING_BYTES", 16), \
                 patch.object(file_service_module.asyncio, "create_subprocess_exec", return_value=process):
             result = await FileService().search_in_file("/tmp/large.txt", "target", sudo=True)
@@ -229,29 +198,11 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_sudo_search_allows_many_short_lines_in_one_chunk(self):
         import app.services.file as file_service_module
 
-        class Stream:
-            def __init__(self, chunks):
-                self.chunks = iter(chunks)
-
-            async def read(self, size=-1):
-                return next(self.chunks, b"")
-
-        class Process:
-            def __init__(self):
-                self.returncode = None
-                self.stdout = Stream([b"target\n" * 4, b""])
-                self.stderr = Stream([])
-                self.terminated = False
-
-            def terminate(self):
-                self.terminated = True
-                self.returncode = 0
-
-            async def wait(self):
-                self.returncode = 0
-                return self.returncode
-
-        process = Process()
+        process = FakeProcess(
+            stdout=FakeStream([b"target\n" * 4, b""]),
+            stderr=FakeStream([]),
+            wait_returncode=0,
+        )
         with patch.object(file_service_module, "MAX_PENDING_BYTES", 8), \
                 patch.object(file_service_module.asyncio, "create_subprocess_exec", return_value=process):
             result = await FileService().search_in_file("/tmp/short-lines.txt", "target", sudo=True)
@@ -288,31 +239,16 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_sudo_read_terminates_process_when_request_is_cancelled(self):
         read_started = asyncio.Event()
 
-        class Stream:
-            async def read(self, size=-1):
-                read_started.set()
-                await asyncio.Event().wait()
+        async def block_on_read():
+            read_started.set()
+            await asyncio.Event().wait()
 
-        class Process:
-            def __init__(self):
-                self.returncode = None
-                self.stdout = Stream()
-                class EmptyStream:
-                    async def read(self, size=-1):
-                        return b""
-
-                self.stderr = EmptyStream()
-                self.terminated = False
-
-            def terminate(self):
-                self.terminated = True
-                self.returncode = -15
-
-            async def wait(self):
-                self.returncode = -15
-                return self.returncode
-
-        process = Process()
+        process = FakeProcess(
+            stdout=FakeStream(on_read=block_on_read),
+            stderr=FakeStream([]),
+            terminate_returncode=-15,
+            wait_returncode=-15,
+        )
         with patch("app.services.file.asyncio.create_subprocess_exec", return_value=process):
             request = asyncio.create_task(FileService.read_file("/tmp/cancelled.txt", sudo=True))
             await read_started.wait()
@@ -323,22 +259,11 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(process.terminated)
 
     async def test_sudo_write_terminates_process_when_request_is_cancelled(self):
-        class Process:
-            def __init__(self):
-                self.returncode = None
-                self.terminated = False
-
-            async def communicate(self, data):
-                raise asyncio.CancelledError
-
-            def terminate(self):
-                self.terminated = True
-                self.returncode = -15
-
-            async def wait(self):
-                self.returncode = -15
-
-        process = Process()
+        process = FakeProcess(
+            terminate_returncode=-15,
+            wait_returncode=-15,
+            communicate_error=asyncio.CancelledError(),
+        )
         with patch("app.services.file.asyncio.create_subprocess_exec", return_value=process):
             with self.assertRaises(asyncio.CancelledError):
                 await FileService().write_file("/tmp/cancelled.txt", "content", sudo=True)
@@ -346,27 +271,77 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(process.terminated)
 
     async def test_sudo_delete_terminates_process_when_request_is_cancelled(self):
-        class Process:
-            def __init__(self):
-                self.returncode = None
-                self.terminated = False
-
-            async def communicate(self):
-                raise asyncio.CancelledError
-
-            def terminate(self):
-                self.terminated = True
-                self.returncode = -15
-
-            async def wait(self):
-                self.returncode = -15
-
-        process = Process()
+        process = FakeProcess(
+            terminate_returncode=-15,
+            wait_returncode=-15,
+            communicate_error=asyncio.CancelledError(),
+        )
         with patch("app.services.file.asyncio.create_subprocess_exec", return_value=process):
             with self.assertRaises(asyncio.CancelledError):
                 await FileService().delete_file("/tmp/cancelled.txt", sudo=True)
 
         self.assertTrue(process.terminated)
+
+    async def test_browser_action_terminates_child_process_when_request_is_cancelled(self):
+        process = FakeProcess(terminate_returncode=-9, wait_returncode=-9)
+        process_started = asyncio.Event()
+
+        async def wait_for_action():
+            process_started.set()
+            await asyncio.Event().wait()
+
+        process.communicate = wait_for_action
+        service = BrowserService()
+        with patch("app.services.browser.asyncio.create_subprocess_exec", return_value=process):
+            action = asyncio.create_task(service._run_process("snapshot", {}, timeout=30))
+            await process_started.wait()
+            action.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await action
+
+        self.assertTrue(process.terminated)
+
+    async def test_browser_screenshot_removes_partial_file_when_action_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            service = BrowserService()
+            async def fail_after_writing(_op, payload, _timeout, _budget_ms):
+                Path(payload["path"]).write_bytes(b"partial screenshot")
+                raise TimeoutException("screenshot timed out")
+
+            with patch("app.services.browser.SCREENSHOT_DIR", directory), \
+                    patch.object(service, "_run", side_effect=fail_after_writing):
+                with self.assertRaises(TimeoutException):
+                    await service.screenshot(full_page=True)
+
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+    async def test_browser_screenshot_removes_expired_orphan_files(self):
+        import app.services.browser as browser_service_module
+
+        with tempfile.TemporaryDirectory() as directory:
+            expired = Path(directory, "expired.png")
+            expired.write_bytes(b"expired")
+            expired_at = time.time() - browser_service_module.SCREENSHOT_TTL_SECONDS - 1
+            os.utime(expired, (expired_at, expired_at))
+            recent = Path(directory, "recent.png")
+            recent.write_bytes(b"recent")
+
+            with patch("app.services.browser.SCREENSHOT_DIR", directory):
+                BrowserService._cleanup_expired_screenshots()
+
+            self.assertFalse(expired.exists())
+            self.assertTrue(recent.exists())
+
+    async def test_browser_cleanup_task_is_cancelled_when_service_closes(self):
+        """孤儿截图清理任务属于 BrowserService 生命周期，关闭时不能遗留后台协程。"""
+        service = BrowserService()
+        service.start_cleanup()
+        cleanup_task = service._screenshot_cleanup_task
+
+        await service.aclose()
+
+        self.assertIsNotNone(cleanup_task)
+        self.assertTrue(cleanup_task.cancelled())
 
     async def test_write_input_preserves_bad_request_error(self):
         service = ShellService()
@@ -456,9 +431,7 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_delete_file_moves_regular_remove_to_thread(self):
         import app.services.file as file_service_module
 
-        with tempfile.NamedTemporaryFile(delete=False) as file:
-            filepath = file.name
-        self.addCleanup(Path(filepath).unlink, missing_ok=True)
+        filepath = self.write_temp_file()
         calls = []
 
         async def run_in_thread(func, *args):
@@ -476,10 +449,7 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_long_unterminated_line_is_bounded_and_truncated(self):
         import app.services.file as file_service_module
 
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as file:
-            file.write("x" * 4096)
-            filepath = file.name
-        self.addCleanup(Path(filepath).unlink, missing_ok=True)
+        filepath = self.write_temp_file("x" * 4096)
         with patch.object(file_service_module, "MAX_PENDING_BYTES", 128):
             result = await FileService.read_file(filepath, max_length=None)
         self.assertTrue(result.truncated)
@@ -490,10 +460,7 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_long_utf8_line_respects_byte_limit(self):
         import app.services.file as file_service_module
 
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as file:
-            file.write("中" * 1000)
-            filepath = file.name
-        self.addCleanup(Path(filepath).unlink, missing_ok=True)
+        filepath = self.write_temp_file("中" * 1000)
         with patch.object(file_service_module, "MAX_PENDING_BYTES", 128):
             result = await FileService.read_file(filepath, max_length=None)
         content = result.content
@@ -513,10 +480,7 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(content, "new-append")
 
     async def test_search_matches_content_beyond_line_start(self):
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as file:
-            file.write("prefix target suffix\nother\n")
-            filepath = file.name
-        self.addCleanup(Path(filepath).unlink, missing_ok=True)
+        filepath = self.write_temp_file("prefix target suffix\nother\n")
         result = await FileService().search_in_file(filepath, "target")
         self.assertEqual(result.line_numbers, [0])
         self.assertEqual(result.matches, ["prefix target suffix"])
@@ -525,16 +489,68 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(BadRequestException):
             await FileService.read_file("/tmp/unused", start_line=3, end_line=2)
 
-    async def test_search_reports_truncation(self):
+    async def test_search_streams_until_match_limit(self):
         import app.services.file as file_service_module
 
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as file:
-            file.write("target\n" * 3)
-            filepath = file.name
-        self.addCleanup(Path(filepath).unlink, missing_ok=True)
+        filepath = self.write_temp_file("target\n" * 5)
+        lines_read = 0
+
+        def tracked_lines(_filepath):
+            nonlocal lines_read
+            for _ in range(5):
+                lines_read += 1
+                yield file_service_module._LineChunk("target\n")
+
         with patch.object(file_service_module, "MAX_SEARCH_MATCHES", 2):
-            result = await FileService().search_in_file(filepath, "target")
+            with patch.object(file_service_module.FileService, "_iter_file_lines", side_effect=tracked_lines):
+                result = await FileService().search_in_file(filepath, "target")
         self.assertEqual(result.line_numbers, [0, 1])
+        self.assertTrue(result.truncated)
+        self.assertEqual(lines_read, 3, "达到匹配上限后只应额外读取一行来确认截断")
+
+    async def test_search_rejects_nested_quantifiers_before_scanning(self):
+        import app.services.file as file_service_module
+
+        filepath = self.write_temp_file("a" * 20_000 + "!\n")
+        with patch.object(
+                file_service_module.FileService,
+                "_iter_file_lines",
+                side_effect=AssertionError("不应执行病态正则搜索"),
+        ):
+            with self.assertRaises(BadRequestException):
+                await FileService().search_in_file(filepath, "(a+)+$")
+
+    async def test_search_rejects_nested_quantifiers_inside_lookaround(self):
+        """环视也是正则 AST 的子树，不能成为 ReDoS 校验绕过路径。"""
+        import app.services.file as file_service_module
+
+        filepath = self.write_temp_file("a" * 20_000 + "!\n")
+        with patch.object(
+                file_service_module.FileService,
+                "_iter_file_lines",
+                side_effect=AssertionError("不应执行环视中的病态正则搜索"),
+        ):
+            with self.assertRaises(BadRequestException):
+                await FileService().search_in_file(filepath, "(?=(a+)+$)")
+
+    async def test_search_rejects_unbounded_quantifier_before_scanning(self):
+        import app.services.file as file_service_module
+
+        filepath = self.write_temp_file("a" * 20_000 + "!\n")
+        with patch.object(
+                file_service_module.FileService,
+                "_iter_file_lines",
+                side_effect=AssertionError("不应执行未受限正则搜索"),
+        ):
+            with self.assertRaises(BadRequestException):
+                await FileService().search_in_file(filepath, "a+")
+
+    async def test_search_truncates_lines_above_regex_work_limit(self):
+        import app.services.file as file_service_module
+
+        filepath = self.write_temp_file("a" * (file_service_module.MAX_SEARCH_LINE_BYTES + 1) + "\n")
+        result = await FileService().search_in_file(filepath, "a{1,64}")
+        self.assertEqual(result.matches, [])
         self.assertTrue(result.truncated)
 
     async def test_find_files_reports_truncation(self):
@@ -670,10 +686,7 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_read_file_streams_and_flags_truncated_content(self):
         import app.services.file as file_service_module
 
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as file:
-            file.write("abcdefgh\n" * 4)
-            filepath = file.name
-        self.addCleanup(Path(filepath).unlink, missing_ok=True)
+        filepath = self.write_temp_file("abcdefgh\n" * 4)
         with patch.object(file_service_module, "MAX_READ_BYTES", 1024):
             result = await FileService.read_file(filepath, max_length=10)
         self.assertTrue(result.truncated)
@@ -683,34 +696,16 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_read_file_handles_a_single_line_larger_than_chunk_size(self):
         import app.services.file as file_service_module
 
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as file:
-            file.write("x" * (file_service_module.READ_CHUNK_BYTES + 100))
-            filepath = file.name
-        self.addCleanup(Path(filepath).unlink, missing_ok=True)
+        filepath = self.write_temp_file("x" * (file_service_module.READ_CHUNK_BYTES + 100))
         with patch.object(file_service_module, "MAX_READ_BYTES", file_service_module.READ_CHUNK_BYTES + 200):
             result = await FileService.read_file(filepath, max_length=100)
         self.assertTrue(result.truncated)
         self.assertEqual(len(result.content), 100)
 
-    async def test_search_streams_until_match_limit(self):
-        import app.services.file as file_service_module
-
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as file:
-            file.write("target\n" * 5)
-            filepath = file.name
-        self.addCleanup(Path(filepath).unlink, missing_ok=True)
-        with patch.object(file_service_module, "MAX_SEARCH_MATCHES", 2):
-            result = await FileService().search_in_file(filepath, "target")
-        self.assertEqual(result.line_numbers, [0, 1])
-        self.assertTrue(result.truncated)
-
     async def test_replace_rejects_truncated_source(self):
         import app.services.file as file_service_module
 
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as file:
-            file.write("content\n" * 4)
-            filepath = file.name
-        self.addCleanup(Path(filepath).unlink, missing_ok=True)
+        filepath = self.write_temp_file("content\n" * 4)
         with patch.object(file_service_module, "MAX_READ_BYTES", 8):
             with self.assertRaises(BadRequestException):
                 await FileService().replace_in_file(filepath, "content", "changed")
@@ -718,10 +713,7 @@ class ServiceRegressionTests(unittest.IsolatedAsyncioTestCase):
     async def test_replace_rejects_oversized_result(self):
         import app.services.file as file_service_module
 
-        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as file:
-            file.write("old")
-            filepath = file.name
-        self.addCleanup(Path(filepath).unlink, missing_ok=True)
+        filepath = self.write_temp_file("old")
         with patch.object(file_service_module, "MAX_WRITE_BYTES", 2):
             with self.assertRaises(BadRequestException):
                 await FileService().replace_in_file(filepath, "old", "larger")
