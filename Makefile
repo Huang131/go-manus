@@ -5,7 +5,7 @@
 # 包含: nginx 网关 + UI (Next.js) + API (Go) + 沙箱 (Python) + postgres + redis + minio
 # ============================================================
 
-.PHONY: help
+.PHONY: help test-nginx-config
 
 # 默认目标
 help:
@@ -52,6 +52,7 @@ help:
 	@echo ""
 	@echo "=== 代码智能数据 ==="
 	@echo "  make check-graphify - 校验 Graphify 状态目录未被提交"
+	@echo "  make test-nginx-config - 校验 nginx 动态 Docker DNS 配置"
 	@echo "  make install-hooks  - 安装 pre-commit 钩子 (每个 clone 执行一次)"
 	@echo ""
 	@echo "=== 清理 ==="
@@ -61,6 +62,10 @@ help:
 # ============================================================
 # 标准部署 (含 nginx 网关)
 # ============================================================
+
+# 校验后端容器重建后网关仍能通过 Docker DNS 发现新地址。
+test-nginx-config:
+	sh scripts/test-nginx-config.sh
 
 # 启动所有服务 (nginx 网关模式)
 up:

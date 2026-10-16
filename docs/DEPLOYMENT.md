@@ -150,7 +150,8 @@ make clean           # 清理未使用的 Docker 资源
 docker-compose up -d --build
 docker-compose down
 docker-compose logs -f api
-docker-compose restart nginx
+# nginx 会经 Docker DNS 自动发现重建后的服务，无需因后端重建而重启。
+# 仅 nginx 配置文件变更后，才需要执行：docker-compose restart nginx
 ```
 
 ## 7. 健康检查
@@ -200,7 +201,7 @@ docker exec -it go-manus-postgres pg_dump -U postgres -d manus > backup_$(date +
 |------|---------|
 | 前端页面 404 | 确认通过 `http://localhost/`（80 端口）访问，不要直连 3000/8080 |
 | `/api/sessions/stream` 404 | 前端 `NEXT_PUBLIC_API_BASE_URL` 必须为 `/api`（见 ui/Dockerfile），不要写成绝对地址 |
-| nginx 502 Bad Gateway | 服务重启后 nginx 缓存的 upstream IP 可能过期，执行 `docker-compose restart nginx` |
+| nginx 502 Bad Gateway | 先执行 `docker-compose ps` 和 `docker-compose logs <service>`，确认后端服务已启动并通过健康检查；网关会在最多约 10 秒内经 Docker DNS 自动识别重建后的容器 IP，无需重启 nginx |
 | API 无法连接数据库 | 查看 `docker-compose logs api`，确认 `postgres` 已 healthy |
 | 容器一直重启 | 查看 `docker-compose ps` 的健康状态，`docker-compose logs <service>` 定位原因 |
 | LLM 调用失败 | 确认 `.env` 中 `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL_NAME` 已正确配置并 `docker-compose up -d api` 重启 |
