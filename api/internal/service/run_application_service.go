@@ -190,11 +190,9 @@ func (s *defaultRunApplicationService) Create(ctx context.Context, input CreateA
 	if run.Status != model.RunStatusPending {
 		return &ApplicationRun{Run: run}, nil
 	}
-	contexts := s.loadAttachments(ctx, files, input.Content)
-	executionCtx := context.WithoutCancel(ctx)
-	handle, err := s.executor.Start(executionCtx, run.ID, []llmcore.Message{{
+	handle, err := s.startExecution(ctx, run.ID, []llmcore.Message{{
 		Role: model.RoleUser, ContentText: input.Content, Attachments: append([]string(nil), input.AttachmentIDs...),
-	}}, contexts)
+	}}, files, input.Content)
 	if err != nil {
 		return nil, err
 	}
@@ -244,8 +242,7 @@ func (s *defaultRunApplicationService) SubmitInput(ctx context.Context, runID st
 	if !resume.StartExecution {
 		return &ApplicationRun{Run: resume.Run}, nil
 	}
-	contexts := s.loadAttachments(ctx, files, input.Content)
-	handle, err := s.executor.Start(context.WithoutCancel(ctx), runID, resume.Messages, contexts)
+	handle, err := s.startExecution(ctx, runID, resume.Messages, files, input.Content)
 	if err != nil {
 		return nil, err
 	}
@@ -420,4 +417,17 @@ func (s *defaultRunApplicationService) loadAttachments(ctx context.Context, file
 		return nil
 	}
 	return s.attachments.Load(ctx, files, message)
+}
+
+// startExecution 统一创建 Run 执行上下文，确保 Create 与 SubmitInput 对附件和取消语义保持一致。
+// 使用 WithoutCancel 是有意的：HTTP 请求结束后，已持久化的 Run 仍需继续执行。
+func (s *defaultRunApplicationService) startExecution(
+	ctx context.Context,
+	runID string,
+	messages []llmcore.Message,
+	files []model.File,
+	message string,
+) (*RunExecutionHandle, error) {
+	contexts := s.loadAttachments(ctx, files, message)
+	return s.executor.Start(context.WithoutCancel(ctx), runID, messages, contexts)
 }

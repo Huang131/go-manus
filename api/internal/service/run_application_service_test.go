@@ -266,6 +266,9 @@ func TestRunApplicationServiceCreateDoesNotLoadUnselectedHistoryFiles(t *testing
 	if loader.calls != 0 || len(executor.contexts) != 0 {
 		t.Fatalf("unselected history was loaded: loader calls=%d contexts=%+v", loader.calls, executor.contexts)
 	}
+	if executor.startCalls != 1 {
+		t.Fatalf("executor start calls = %d, want one execution without attachment loading", executor.startCalls)
+	}
 }
 
 func TestRunApplicationServiceCreateFreezesSettingsLoadsOwnedAttachmentsAndStarts(t *testing.T) {
