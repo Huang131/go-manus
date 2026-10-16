@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
@@ -9,6 +11,67 @@ import (
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
 )
+
+func TestPlanFailureReturnsFirstConcreteStepError(t *testing.T) {
+	plan := &model.Plan{Steps: []model.PlanStep{
+		{ID: "step-1", Status: model.ExecutionStatusCompleted},
+		{ID: "step-2", Status: model.ExecutionStatusFailed, Error: "模型拒绝执行"},
+	}}
+
+	if got := planFailure(plan); got == nil || got.Error() != "模型拒绝执行" {
+		t.Fatalf("planFailure() = %v, want step error", got)
+	}
+	if got := planFailure(&model.Plan{Steps: []model.PlanStep{{ID: "step-3", Status: model.ExecutionStatusFailed}}}); !errors.Is(got, errPlanStepFailed) {
+		t.Fatalf("planFailure() = %v, want errPlanStepFailed", got)
+	}
+}
+
+func TestPlannerReActFlowNonRecoverableStepEmitsOneFailedStepEvent(t *testing.T) {
+	rateLimit := &llmcore.ProviderError{
+		Kind:       llmcore.KindRateLimit,
+		StatusCode: 429,
+		Message:    "too many requests",
+	}
+	mock := &mockLLM{
+		responses: []*llmcore.LLMResponse{{Message: llmcore.Message{
+			Role:        model.RoleAssistant,
+			ContentText: `{"message":"开始","goal":"执行","title":"任务","language":"zh","steps":[{"id":"step-1","description":"执行"}]}`,
+		}}},
+		errs: []error{nil, rateLimit},
+	}
+	flow := NewPlannerReActFlow("session-1", defaultAgentSettings(), mock, nil)
+
+	var failedSteps []*model.StepEvent
+	var errorsSeen []*model.ErrorEvent
+	for event := range flow.Invoke(context.Background(), &TaskInput{
+		Message: llmcore.Message{Role: model.RoleUser, ContentText: "执行"},
+	}) {
+		switch typed := event.(type) {
+		case *model.StepEvent:
+			if typed.Status == model.StepEventStatusFailed {
+				failedSteps = append(failedSteps, typed)
+			}
+		case *model.ErrorEvent:
+			errorsSeen = append(errorsSeen, typed)
+		}
+	}
+
+	if len(failedSteps) != 1 {
+		t.Fatalf("failed step events = %d, want one", len(failedSteps))
+	}
+	if failedSteps[0].Step.Status != model.ExecutionStatusFailed || failedSteps[0].Step.Error == "" {
+		t.Fatalf("failed step event = %+v, want concrete failed status and error", failedSteps[0])
+	}
+	if len(errorsSeen) != 1 {
+		t.Fatalf("error events = %d, want one provider error", len(errorsSeen))
+	}
+	if !strings.Contains(errorsSeen[0].Message, "too many requests") {
+		t.Fatalf("error message = %q, want provider error", errorsSeen[0].Message)
+	}
+	if flow.GetStatus() != FlowStatusFailed {
+		t.Fatalf("flow status = %s, want failed", flow.GetStatus())
+	}
+}
 
 // TestPlannerReActFlow_StateTransitions 测试状态转换逻辑
 func TestPlannerReActFlow_StateTransitions(t *testing.T) {

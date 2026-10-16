@@ -170,3 +170,21 @@ func TestBaseAgent_InvokeWithEmptyRetry_RejectsLateSuccessAfterCancellation(t *t
 		t.Fatalf("LLM calls = %d, want 1 after cancellation", len(mock.calls))
 	}
 }
+
+func TestBaseAgent_InvokeWithEmptyRetryStopsOnNonRecoverableProviderError(t *testing.T) {
+	mock := &mockLLM{errs: []error{
+		&llmcore.ProviderError{Kind: llmcore.KindRateLimit, StatusCode: 429, Message: "inference exceeds tpm limit"},
+	}}
+	agent := NewBaseAgent("test", "session-1", defaultAgentSettings(), mock, nil)
+
+	_, attempts, err := agent.invokeWithEmptyRetry(context.Background(), &llm.LLMRequest{
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "hi"}},
+	}, 3)
+
+	if err == nil || !llmcore.IsNonRecoverableLLMError(err) {
+		t.Fatalf("error = %v, want non-recoverable provider error", err)
+	}
+	if attempts != 1 || len(mock.calls) != 1 {
+		t.Fatalf("attempts = %d, calls = %d, want one attempt", attempts, len(mock.calls))
+	}
+}

@@ -217,6 +217,9 @@ func (a *BaseAgent) invokeWithEmptyRetry(ctx context.Context, req *llm.LLMReques
 			if ctx.Err() != nil {
 				return nil, attempt, ctx.Err()
 			}
+			if llmcore.IsNonRecoverableLLMError(err) {
+				return nil, attempt, err
+			}
 			lastErr = err
 			// LLM 错误：注入空 assistant + 重试提示，然后继续
 			current.Messages = append(current.Messages,
@@ -394,6 +397,9 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
+			if llmcore.IsNonRecoverableLLMError(err) {
+				return nil, fmt.Errorf("LLM 调用不可恢复: %w", err)
+			}
 			// LLM 调用失败，尝试重试
 			for retry := 0; retry < a.settings.MaxRetries; retry++ {
 				logger.WarnContext(ctx, "LLM 调用失败，执行重试",
@@ -419,6 +425,9 @@ func (a *BaseAgent) invoke(ctx context.Context, systemPrompt, query string, publ
 				}
 				if ctx.Err() != nil {
 					return nil, ctx.Err()
+				}
+				if llmcore.IsNonRecoverableLLMError(err) {
+					return nil, fmt.Errorf("LLM 调用不可恢复: %w", err)
 				}
 			}
 

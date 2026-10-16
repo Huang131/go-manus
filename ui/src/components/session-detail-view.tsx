@@ -76,6 +76,8 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
   const lastSendRef = useRef<{message: string; files: FileInfo[]; modelId?: string} | null>(null)
   const [autoRetry, setAutoRetry] = useState<{message: string; files: FileInfo[]} | null>(null)
   const [initialMessageSentSessionId, setInitialMessageSentSessionId] = useState<string | null>(null)
+  const [selectedHistoryFileIDs, setSelectedHistoryFileIDs] = useState<string[]>([])
+  const selectedHistoryFiles = files.filter((file) => selectedHistoryFileIDs.includes(file.id))
 
   // 按会话持久化模型选择：刷新页面后保持该会话上次的选择（无记录则 Auto）。
   // localStorage 仅在客户端 effect 中访问，避免 SSR 水合不一致。
@@ -87,6 +89,7 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
     // 会话切换时清理上一个会话的重试状态。
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setAutoRetry(null)
+    setSelectedHistoryFileIDs([])
     if (!sessionId) {
       setSelectedModelId(AUTO_MODEL_ID)
       return
@@ -271,6 +274,10 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
     setFileListOpen(true)
   }, [refreshFiles])
 
+  const handleRemoveReferencedFile = useCallback((fileID: string) => {
+    setSelectedHistoryFileIDs((previous) => previous.filter((id) => id !== fileID))
+  }, [])
+
   const handleFileClick = useCallback((file: AttachmentFile) => {
     setPreviewFile(file)
     setPreviewTool(null)
@@ -378,6 +385,8 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
                 onFileListOpenChange={setFileListOpen}
                 onFetchFiles={refreshFiles}
                 onFileClick={handleFileClick}
+                selectedFileIDs={selectedHistoryFileIDs}
+                onSelectedFileIDsChange={setSelectedHistoryFileIDs}
               />
             </div>
 
@@ -467,6 +476,9 @@ export function SessionDetailView({ sessionId, initialMessage, initialAttachment
                 modelId={selectedModelId}
                 onModelIdChange={handleModelSelect}
                 sessionId={sessionId}
+                referencedFiles={selectedHistoryFiles}
+                onRemoveReferencedFile={handleRemoveReferencedFile}
+                onClearReferencedFiles={() => setSelectedHistoryFileIDs([])}
                 isRunning={session?.status === 'running'}
                 onStop={handleStop}
               />

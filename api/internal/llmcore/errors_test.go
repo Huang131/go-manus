@@ -1,6 +1,9 @@
 package llmcore
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 // TestIsDeterministicKind 锁定每个 Kind 的确定性归类（单一事实源的守护测试）。
 // 该归类同时决定两个决策，任何一侧的语义变化都会在此暴露：
@@ -45,5 +48,51 @@ func TestProviderErrorFallbackableConsistency(t *testing.T) {
 			t.Errorf("kind=%s: Fallbackable=%v, want %v（与 IsDeterministicKind 分叉）",
 				kind, pe.Fallbackable, wantFallbackable)
 		}
+	}
+}
+
+func TestIsNonRecoverableLLMError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "provider rate limit",
+			err:  &ProviderError{Kind: KindRateLimit, StatusCode: 429, Message: "too many requests"},
+			want: true,
+		},
+		{
+			name: "quota exhausted text",
+			err:  &ProviderError{Kind: KindUnknown, Message: "account has reached the set usage limit"},
+			want: true,
+		},
+		{
+			name: "model paused text",
+			err:  &ProviderError{Kind: KindUnknown, Message: "the model service has been paused"},
+			want: true,
+		},
+		{
+			name: "raw tpm limit text",
+			err:  errors.New("inference exceeds tpm/rpm limit"),
+			want: true,
+		},
+		{
+			name: "raw 429 text",
+			err:  errors.New("HTTP 429 too many requests"),
+			want: true,
+		},
+		{
+			name: "ordinary server error",
+			err:  &ProviderError{Kind: KindServer, StatusCode: 503, Message: "temporarily unavailable"},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsNonRecoverableLLMError(tt.err); got != tt.want {
+				t.Fatalf("IsNonRecoverableLLMError() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

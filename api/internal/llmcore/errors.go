@@ -3,6 +3,7 @@ package llmcore
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // ErrorKind 上游错误分类
@@ -73,6 +74,41 @@ func IsKind(err error, kind ErrorKind) bool {
 		return pe.Kind == kind
 	}
 	return false
+}
+
+// IsNonRecoverableLLMError 判断当前 Run 不应在同一模型上继续重试的上游错误。
+// 配额耗尽、模型暂停和 429 都需要等待外部状态变化，继续调用只会污染上下文并加剧限流。
+func IsNonRecoverableLLMError(err error) bool {
+	var providerErr *ProviderError
+	if errors.As(err, &providerErr) {
+		if providerErr.Kind == KindRateLimit || providerErr.StatusCode == 429 {
+			return true
+		}
+		if hasNonRecoverableMessage(providerErr.Message) {
+			return true
+		}
+	}
+	return hasNonRecoverableMessage(errString(err))
+}
+
+func hasNonRecoverableMessage(message string) bool {
+	message = strings.ToLower(message)
+	return strings.Contains(message, "429") ||
+		strings.Contains(message, "too many requests") ||
+		strings.Contains(message, "usage limit") ||
+		strings.Contains(message, "quota exceeded") ||
+		strings.Contains(message, "tpm/rpm limit") ||
+		(strings.Contains(message, "quota") && (strings.Contains(message, "exhaust") || strings.Contains(message, "limit") || strings.Contains(message, "reached"))) ||
+		strings.Contains(message, "model service has been paused") ||
+		strings.Contains(message, "model has been paused") ||
+		strings.Contains(message, "service has been paused")
+}
+
+func errString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // NewProviderError 构造 ProviderError

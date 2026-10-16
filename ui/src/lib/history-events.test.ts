@@ -78,6 +78,31 @@ test('无追踪事件的新 Run 从执行快照恢复计划和步骤但不伪造
   assert.equal((events[2].data as { step: { status: string } }).step.status, 'running')
 })
 
+test('失败 Run 在没有错误追踪事件时仍恢复持久化错误说明', () => {
+  const history: RunHistoryPage = {
+    items: [{
+      run: {
+        id: 'run-failed',
+        session_id: 'session-1',
+        status: 'failed',
+        error_message: 'provider deepseek/deepseek-v4-flash error [rate_limit] status=429: usage limit',
+        created_at: '2026-10-16T00:00:00Z',
+        updated_at: '2026-10-16T00:01:00Z',
+      },
+      messages: [{ id: 'user-failed', session_id: 'session-1', run_id: 'run-failed', role: 'user', content: '分析文档', created_at: '2026-10-16T00:00:00Z' }],
+      events: [],
+    }],
+    total: 1,
+    limit: 50,
+    offset: 0,
+  }
+
+  const events = historyToEvents(history, [])
+
+  assert.deepEqual(events.map((event) => event.type), ['message', 'error'])
+  assert.equal((events[1].data as { message: string }).message, history.items[0].run.error_message)
+})
+
 test('同一 Run 的多轮 waiting 消息与追踪事件保持持久化顺序', () => {
   const history: RunHistoryPage = {
     items: [{

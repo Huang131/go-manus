@@ -232,15 +232,40 @@ func (s settingsSourceStub) GetAgentSettings(context.Context) (*settings.AgentSe
 }
 
 type attachmentLoaderStub struct {
+	calls       int
 	seenFiles   []model.File
 	seenMessage string
 	result      []attachment.FileContext
 }
 
 func (s *attachmentLoaderStub) Load(_ context.Context, files []model.File, message string) []attachment.FileContext {
+	s.calls++
 	s.seenFiles = append([]model.File(nil), files...)
 	s.seenMessage = message
 	return append([]attachment.FileContext(nil), s.result...)
+}
+
+func TestRunApplicationServiceCreateDoesNotLoadUnselectedHistoryFiles(t *testing.T) {
+	store := &applicationRunStoreStub{}
+	executor := &applicationExecutorStub{}
+	loader := &attachmentLoaderStub{}
+	service := NewRunApplicationService(
+		store, nil, executor, sessionLookupStub{session: &model.Session{ID: "session-1"}},
+		fileLookupStub{files: map[string]*model.File{
+			"history-file": {ID: "history-file", SessionID: "session-1", Filename: "history.md"},
+		}},
+		settingsSourceStub{}, loader, "prompt-hash",
+	)
+
+	_, err := service.Create(context.Background(), CreateApplicationRunInput{
+		SessionID: "session-1", IdempotencyKey: "request-1", Content: "总结本轮内容",
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if loader.calls != 0 || len(executor.contexts) != 0 {
+		t.Fatalf("unselected history was loaded: loader calls=%d contexts=%+v", loader.calls, executor.contexts)
+	}
 }
 
 func TestRunApplicationServiceCreateFreezesSettingsLoadsOwnedAttachmentsAndStarts(t *testing.T) {

@@ -153,6 +153,8 @@ export type FileInfo = {
   extension: string;
   content_type: string;
   size: number;
+  created_at?: string;
+  session_id?: string;
   [key: string]: unknown;
 };
 

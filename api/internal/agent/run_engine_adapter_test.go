@@ -210,6 +210,45 @@ func TestPlannerEngineAdapterFailsOnTracePersistenceError(t *testing.T) {
 	}
 }
 
+func TestPlannerEngineAdapterReturnsNonRecoverableFlowError(t *testing.T) {
+	rateLimit := &llmcore.ProviderError{
+		Kind:       llmcore.KindRateLimit,
+		StatusCode: 429,
+		Provider:   "deepseek",
+		Model:      "deepseek-v4-flash",
+		Message:    "account has reached the set usage limit",
+	}
+	adapter := &PlannerEngineAdapter{LLM: &adapterLLM{responses: nil}}
+	// adapterLLM 默认不会返回错误，因此用专门的 LLM 注入 provider 错误。
+	adapter.LLM = &failingAdapterLLM{err: rateLimit}
+
+	result, err := adapter.Execute(context.Background(), service.RunExecutionInput{
+		RunID: "run-1", SessionID: "session-1", Settings: adapterSettings(),
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "分析文档"}},
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Kind != service.RunExecutionFailed {
+		t.Fatalf("result kind = %q, want failed", result.Kind)
+	}
+	if result.Error == nil || !strings.Contains(result.Error.Error(), "usage limit") {
+		t.Fatalf("result error = %v, want concrete provider error", result.Error)
+	}
+}
+
+type failingAdapterLLM struct {
+	err error
+}
+
+func (m *failingAdapterLLM) Invoke(context.Context, *llm.LLMRequest) (*llmcore.LLMResponse, error) {
+	return nil, m.err
+}
+
+func (m *failingAdapterLLM) ModelName() string    { return "failing" }
+func (m *failingAdapterLLM) Temperature() float64 { return 0 }
+func (m *failingAdapterLLM) MaxTokens() int       { return 1024 }
+
 func TestPlannerEngineAdapterPassesAttachmentContextToExecutionPrompt(t *testing.T) {
 	llm := &adapterLLM{responses: []*llmcore.LLMResponse{
 		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: "{\"message\":\"开始\",\"goal\":\"分析\",\"title\":\"任务\",\"language\":\"zh\",\"steps\":[{\"id\":\"step-1\",\"description\":\"分析附件\"}]}"}},

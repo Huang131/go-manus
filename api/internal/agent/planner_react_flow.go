@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"runtime/debug"
 	"sync"
@@ -17,11 +18,14 @@ import (
 	"github.com/Huang131/go-manus/api/pkg/logger"
 )
 
+var errPlanStepFailed = errors.New("plan step failed")
+
 // PlannerReActFlow 规划与执行流
 type PlannerReActFlow struct {
 	mu        sync.Mutex
 	status    FlowStatus
 	plan      *model.Plan
+	failure   error
 	sessionID string
 	settings  settings.AgentSettings
 	llm       llm.LLM
@@ -80,6 +84,20 @@ func (f *PlannerReActFlow) setPlan(plan *model.Plan) {
 	f.mu.Lock()
 	f.plan = plan
 	f.mu.Unlock()
+}
+
+// setFailure 保存可对用户和持久化层展示的失败原因，避免终态 Run 丢失上游错误。
+func (f *PlannerReActFlow) setFailure(err error) {
+	f.mu.Lock()
+	f.failure = err
+	f.mu.Unlock()
+}
+
+// Failure 返回 Flow 的终态失败原因。
+func (f *PlannerReActFlow) Failure() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.failure
 }
 
 // RestorePlan 恢复等待输入 Run 的计划和上下文，并跳过重新规划阶段。
@@ -231,6 +249,7 @@ func (f *PlannerReActFlow) handlePlanning(ctx context.Context, input *TaskInput,
 			return true
 		}
 		logger.ErrorContext(ctx, "Planner 创建计划失败", logger.Err(err))
+		f.setFailure(err)
 		if !f.emitEvent(ctx, ch, model.NewErrorEvent(err.Error())) {
 			return true
 		}
@@ -269,6 +288,7 @@ func (f *PlannerReActFlow) handleExecuting(ctx context.Context, input *TaskInput
 		if !f.emitEvent(ctx, ch, model.NewErrorEvent("计划为空，无法执行")) {
 			return true
 		}
+		f.setFailure(fmt.Errorf("计划为空，无法执行"))
 		f.setStatus(FlowStatusFailed)
 		return false
 	}
@@ -316,11 +336,20 @@ func (f *PlannerReActFlow) handleExecuting(ctx context.Context, input *TaskInput
 			return true
 		}
 		logger.ErrorContext(ctx, "ReActAgent 执行步骤失败", logger.Err(err))
+		step.Status = model.ExecutionStatusFailed
+		step.Error = err.Error()
+		f.setPlan(plan)
 		if !f.emitEvent(ctx, ch, model.NewStepEvent(*step, model.StepEventStatusFailed)) {
 			return true
 		}
-		step.Status = model.ExecutionStatusFailed
-		step.Error = err.Error()
+		if llmcore.IsNonRecoverableLLMError(err) {
+			if !f.emitEvent(ctx, ch, model.NewErrorEvent(err.Error())) {
+				return true
+			}
+			f.setFailure(err)
+			f.setStatus(FlowStatusFailed)
+			return false
+		}
 	} else if outcome != nil && outcome.Kind == OutcomeFatalFailure {
 		// 步骤业务执行失败（模型返回 success=false 或 JSON 解析失败）：
 		// Outcome 是控制信号，step 只保存供计划展示和恢复的领域状态。
@@ -358,6 +387,7 @@ func (f *PlannerReActFlow) handleWaiting() bool {
 func (f *PlannerReActFlow) handleUpdating(ctx context.Context, ch chan<- model.BaseEvent) bool {
 	plan := f.planSnapshot()
 	if plan == nil {
+		f.setFailure(fmt.Errorf("更新计划时计划为空"))
 		f.setStatus(FlowStatusFailed)
 		return false
 	}
@@ -410,6 +440,12 @@ func (f *PlannerReActFlow) handleSummarizing(ctx context.Context, ch chan<- mode
 				return true
 			}
 			logger.WarnContext(ctx, "ReActAgent 总结任务失败", logger.Err(err))
+			f.setFailure(err)
+			if !f.emitEvent(ctx, ch, model.NewErrorEvent(err.Error())) {
+				return true
+			}
+			f.setStatus(FlowStatusFailed)
+			return false
 		} else {
 			if !emitted && !f.emitEvent(ctx, ch, model.NewMessageEvent(model.RoleAssistant, summary)) {
 				return true
@@ -425,11 +461,31 @@ func (f *PlannerReActFlow) handleSummarizing(ctx context.Context, ch chan<- mode
 
 	// 总结完成后按计划结果选择终态：含失败步骤进入 failed，否则 completed。
 	if planHasFailedStep(plan) {
+		if f.Failure() == nil {
+			f.setFailure(planFailure(plan))
+		}
 		f.setStatus(FlowStatusFailed)
 	} else {
 		f.setStatus(FlowStatusCompleted)
 	}
 	return false
+}
+
+// planFailure 把步骤失败原因提升到 Run 终态，确保前端能看到具体错误而不是空 error_message。
+func planFailure(plan *model.Plan) error {
+	if plan == nil {
+		return nil
+	}
+	for _, step := range plan.Steps {
+		if step.Status != model.ExecutionStatusFailed {
+			continue
+		}
+		if step.Error != "" {
+			return errors.New(step.Error)
+		}
+		return fmt.Errorf("%w: %s", errPlanStepFailed, step.ID)
+	}
+	return nil
 }
 
 // handleCompleted 标记计划成功完成并发出终态事件；该状态必定终止流

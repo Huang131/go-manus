@@ -70,14 +70,19 @@ func (a *PlannerEngineAdapter) Execute(ctx context.Context, input service.RunExe
 	if ctx.Err() != nil || flow.GetStatus() == FlowStatusCancelled {
 		return service.RunExecutionResult{Kind: service.RunExecutionCancelled, Snapshot: snapshotFromPlan(plan, input.Snapshot)}, nil
 	}
+	if flow.GetStatus() == FlowStatusFailed {
+		return service.RunExecutionResult{
+			Kind:     service.RunExecutionFailed,
+			Snapshot: snapshotFromPlan(plan, input.Snapshot),
+			Text:     lastAssistant,
+			Error:    flow.Failure(),
+		}, nil
+	}
 	if plan == nil {
 		return service.RunExecutionResult{Kind: service.RunExecutionFailed, Error: fmt.Errorf("planner returned no plan")}, nil
 	}
 	if flow.GetStatus() == FlowStatusWaiting {
 		return waitingResult(plan, input)
-	}
-	if flow.GetStatus() == FlowStatusFailed {
-		return service.RunExecutionResult{Kind: service.RunExecutionFailed, Snapshot: snapshotFromPlan(plan, input.Snapshot), Text: lastAssistant}, nil
 	}
 	return service.RunExecutionResult{
 		Kind:     service.RunExecutionSucceeded,

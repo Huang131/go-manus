@@ -277,6 +277,28 @@ func TestRunServiceCreateBuildsIdempotentAggregate(t *testing.T) {
 	}
 }
 
+func TestRunServiceFinishPersistsConcreteFailureMessage(t *testing.T) {
+	store := newFakeRunStore()
+	store.run = &model.Run{
+		ID: "run-1", SessionID: "session-1", Status: model.RunStatusRunning,
+		SettingsSnapshot: settings.DefaultAgentSettings(), PromptHash: "prompt-v1",
+	}
+
+	err := NewRunService(store).Finish(context.Background(), store.run.ID, RunExecutionResult{
+		Kind:  RunExecutionFailed,
+		Error: errors.New("provider deepseek/deepseek-v4-flash error [rate_limit] status=429: usage limit"),
+	})
+	if err != nil {
+		t.Fatalf("Finish() error = %v", err)
+	}
+	if store.run.Status != model.RunStatusFailed || store.run.ErrorCode != "execution_failed" {
+		t.Fatalf("run terminal state = %#v, want failed execution", store.run)
+	}
+	if store.run.ErrorMessage != "provider deepseek/deepseek-v4-flash error [rate_limit] status=429: usage limit" {
+		t.Fatalf("error_message = %q, want provider detail", store.run.ErrorMessage)
+	}
+}
+
 func TestRunServiceStartAndEnterWaitingInputUseCurrentRevision(t *testing.T) {
 	store := newFakeRunStore()
 	now := time.Now().UTC()

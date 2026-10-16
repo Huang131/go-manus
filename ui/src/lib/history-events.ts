@@ -42,9 +42,20 @@ export function historyToEvents(history: RunHistoryPage, files: SessionFile[]): 
       appendSnapshotEvents(events, item.run)
       appendMessages(events, messages.filter((message) => message.role !== 'user'), fileMap)
     }
+    appendPersistedFailure(events, item.run, traceEvents)
   }
 
   return events
+}
+
+/**
+ * 追踪写入异常时，仍用 Run 终态保存的错误文本恢复用户可见错误。
+ * 有 error trace 时以 trace 为准，避免刷新后重复展示。
+ */
+function appendPersistedFailure(events: SSEEventData[], run: Run, traceEvents: RunTraceEvent[]): void {
+  if (run.status !== 'failed' || !run.error_message) return
+  if (traceEvents.some((event) => event.event_type === 'error')) return
+  events.push({ type: 'error', data: { message: run.error_message } } as SSEEventData)
 }
 
 type HistoryTimelineEntry = {

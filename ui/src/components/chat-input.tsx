@@ -12,6 +12,7 @@ import {ArrowUp, FileText, Paperclip, XCircle, Loader2, Pause} from 'lucide-reac
 import {Button} from '@/components/ui/button'
 import {fileApi} from '@/lib/api/file'
 import type {FileInfo} from '@/lib/api/types'
+import {mergeAttachmentFiles} from '@/lib/session-files'
 import {toast} from 'sonner'
 
 interface ChatInputProps {
@@ -24,6 +25,12 @@ interface ChatInputProps {
   disabled?: boolean
   /** 当前会话 ID，上传附件时会关联到该会话 */
   sessionId?: string | null
+  /** 用户本轮显式选择复用的历史文件 */
+  referencedFiles?: FileInfo[]
+  /** 移除一个显式选择的历史文件 */
+  onRemoveReferencedFile?: (fileId: string) => void
+  /** 发送或外部清空时同步清除历史文件选择 */
+  onClearReferencedFiles?: () => void
   /** 任务是否正在运行中 */
   isRunning?: boolean
   /** 点击暂停按钮的回调 */
@@ -39,7 +46,7 @@ export interface ChatInputRef {
 }
 
 export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
-  ({ className, onInputValueChange, onSend, disabled = false, sessionId, isRunning = false, onStop, modelId: modelIdProp, onModelIdChange }, ref) => {
+  ({ className, onInputValueChange, onSend, disabled = false, sessionId, referencedFiles = [], onRemoveReferencedFile, onClearReferencedFiles, isRunning = false, onStop, modelId: modelIdProp, onModelIdChange }, ref) => {
     // 受控/非受控双模式：父组件传 modelId 则受控（支持外部干预，如切 Auto 重试）；
     // 不传则内部自持，默认 Auto。
     const [internalModelId, setInternalModelId] = useState<string>(AUTO_MODEL_ID)
@@ -62,6 +69,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
     const [sending, setSending] = useState(false)
     const [inputValue, setInputValue] = useState('')
     const [files, setFiles] = useState<FileInfo[]>([])
+    const attachedFiles = mergeAttachmentFiles(files, referencedFiles)
     const fileInputRef = useRef<HTMLInputElement>(null)
     const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -79,10 +87,11 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
         textareaRef.current?.focus()
       },
       getInputValue: () => inputValue,
-      getFiles: () => files,
+      getFiles: () => attachedFiles,
       clear: () => {
         setInputValue('')
         setFiles([])
+        onClearReferencedFiles?.()
         onInputValueChange?.('')
       },
     }))
@@ -118,7 +127,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
           setFiles((prev) => [...prev, ...uploadedFiles])
           toast.success(`成功上传 ${uploadedFiles.length} 个文件`)
         }
-      } catch (error) {
+      } catch {
         toast.error('文件上传过程中发生错误')
       } finally {
         setUploading(false)
@@ -135,6 +144,7 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
 
     const handleRemoveFile = (fileId: string) => {
       setFiles((prev) => prev.filter((file) => file.id !== fileId))
+      onRemoveReferencedFile?.(fileId)
     }
 
     const handleSend = async () => {
@@ -151,10 +161,11 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
       if (onSend) {
         setSending(true)
         try {
-          await onSend(trimmedMessage, files, modelId === AUTO_MODEL_ID ? undefined : modelId)
+          await onSend(trimmedMessage, attachedFiles, modelId === AUTO_MODEL_ID ? undefined : modelId)
           // 发送成功后清空输入框和文件列表
           setInputValue('')
           setFiles([])
+          onClearReferencedFiles?.()
           onInputValueChange?.('')
         } catch (error) {
           // 错误处理由 onSend 内部处理
@@ -176,11 +187,11 @@ export const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(
     return (
     <div className={cn('flex flex-col bg-white w-full rounded-2xl py-3 border shadow-sm', className)}>
       {/* 顶部的文件列表 */}
-      {files.length > 0 && (
+      {attachedFiles.length > 0 && (
         <div className="w-full px-4 mb-1">
           <ScrollArea className="w-full whitespace-nowrap">
             <div className="flex w-max space-x-4 pb-4">
-              {files.map((file) => (
+              {attachedFiles.map((file) => (
                 <Item
                   key={file.id}
                   variant="muted"

@@ -42,6 +42,10 @@ export interface SessionHeaderProps {
   onFetchFiles?: () => void | Promise<void>
   /** 点击文件时的预览回调 */
   onFileClick?: (file: AttachmentFile) => void
+  /** 本轮对话中用户显式选中的历史文件 ID */
+  selectedFileIDs?: string[]
+  /** 历史文件选择变更；不选择则本轮不传递任何历史附件 */
+  onSelectedFileIDsChange?: (fileIDs: string[]) => void
 }
 
 export function SessionHeader({
@@ -52,6 +56,8 @@ export function SessionHeader({
   onFileListOpenChange,
   onFetchFiles,
   onFileClick,
+  selectedFileIDs = [],
+  onSelectedFileIDsChange,
 }: SessionHeaderProps) {
   const [mounted, setMounted] = useState(false)
   const [internalOpen, setInternalOpen] = useState(false)
@@ -120,6 +126,14 @@ export function SessionHeader({
     }
   }, [onFileClick, setOpenState])
 
+  const handleFileSelection = useCallback((fileID: string, checked: boolean) => {
+    if (!onSelectedFileIDsChange) return
+    const next = checked
+      ? [...new Set([...selectedFileIDs, fileID])]
+      : selectedFileIDs.filter((id) => id !== fileID)
+    onSelectedFileIDsChange(next)
+  }, [onSelectedFileIDsChange, selectedFileIDs])
+
   useEffect(() => {
     setMounted(true)
   }, [])
@@ -166,8 +180,24 @@ export function SessionHeader({
                           <ItemDescription className="text-xs">
                             {file.extension.replace(/^\./, '')} · {formatFileSize(file.size)}
                           </ItemDescription>
+                          <ItemDescription className="text-xs break-all">
+                            {file.filepath}
+                          </ItemDescription>
+                          {file.created_at && (
+                            <ItemDescription className="text-xs">
+                              上传于 {new Date(file.created_at).toLocaleString()}
+                            </ItemDescription>
+                          )}
                         </ItemContent>
                         <ItemActions>
+                          <input
+                            type="checkbox"
+                            checked={selectedFileIDs.includes(file.id)}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={(event) => handleFileSelection(file.id, event.target.checked)}
+                            aria-label={`在本轮引用 ${file.filename}`}
+                            className="size-4 cursor-pointer"
+                          />
                           <Button
                             variant="ghost"
                             size="icon-xs"
