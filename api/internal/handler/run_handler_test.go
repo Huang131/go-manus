@@ -224,7 +224,11 @@ func TestRunHandlerSubmitInputPassesRequestedModel(t *testing.T) {
 
 func TestRunHandlerListBySessionPassesPagination(t *testing.T) {
 	app := &runHandlerAppStub{history: &service.RunHistoryPage{
-		Items: []service.RunHistoryItem{{Run: &model.Run{ID: "run-1", SessionID: "session-1"}, Messages: []*model.RunMessage{{ID: "message-1", Content: "你好"}}}},
+		Items: []service.RunHistoryItem{{
+			Run:      &model.Run{ID: "run-1", SessionID: "session-1"},
+			Messages: []*model.RunMessage{{ID: "message-1", Content: "你好"}},
+			Events:   []*model.RunTraceEvent{{RunID: "run-1", Type: model.EventTypeToolCalling, Data: []byte(`{"tool":"search"}`)}},
+		}},
 		Total: 1, Limit: 20, Offset: 5,
 	}}
 	router := setupRouter()
@@ -242,4 +246,16 @@ func TestRunHandlerListBySessionPassesPagination(t *testing.T) {
 	data, ok := responseBody.Data.(map[string]interface{})
 	require.True(t, ok)
 	require.Equal(t, float64(1), data["total"])
+	items, ok := data["items"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, items, 1)
+	item, ok := items[0].(map[string]interface{})
+	require.True(t, ok)
+	events, ok := item["events"].([]interface{})
+	require.True(t, ok)
+	require.Len(t, events, 1)
+	event, ok := events[0].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, "tool_calling", event["event_type"])
+	require.Equal(t, map[string]interface{}{"tool": "search"}, event["data"])
 }

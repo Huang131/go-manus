@@ -174,6 +174,7 @@ type repositories struct {
 	session   repository.SessionRepository   // 会话仓库
 	file      repository.FileRepository      // 文件仓库
 	run       repository.RunRepository       // Run 聚合仓库
+	trace     repository.RunTraceRepository  // Run 长期回放事件仓库
 }
 
 // newRepositories 根据数据库连接创建所有仓库实例。
@@ -189,6 +190,7 @@ func newRepositories(db *infrastructure.Postgres) repositories {
 		session:   repository.NewSessionRepository(db),
 		file:      repository.NewFileRepository(db),
 		run:       repository.NewRunRepository(db),
+		trace:     repository.NewRunTraceRepository(db),
 	}
 }
 
@@ -778,9 +780,15 @@ func (a *App) initRunExecution(clients *externalClients) error {
 	if a.OSS != nil {
 		loader = attachment.NewLoader(a.OSS)
 	}
-	var publisher service.RunEventPublisher
+	var redisPublisher service.RunEventPublisher
 	if clients.mq != nil {
-		publisher = service.NewRedisRunEventPublisher(clients.mq)
+		redisPublisher = service.NewRedisRunEventPublisher(clients.mq)
+	}
+	var publisher service.RunEventPublisher
+	if a.repos.trace != nil {
+		publisher = service.NewRunTraceEventPublisher(a.repos.trace, redisPublisher)
+	} else {
+		publisher = redisPublisher
 	}
 	a.RunExecutor = service.NewRunExecutorWithEventPublisher(
 		a.RunService,
@@ -789,7 +797,7 @@ func (a *App) initRunExecution(clients *externalClients) error {
 		publisher,
 	)
 	a.RunApplication = service.NewRunApplicationService(
-		a.RunService, a.RunExecutor, a.repos.session, a.repos.file,
+		a.RunService, a.repos.trace, a.RunExecutor, a.repos.session, a.repos.file,
 		a.AppConfigSvc, loader, agent.DefaultPromptCatalog().Hash(),
 	)
 	return nil

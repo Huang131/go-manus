@@ -24,8 +24,9 @@ type RunApplicationService interface {
 
 // RunHistoryItem 是 UI 恢复会话时间线所需的持久化消息视图。
 type RunHistoryItem struct {
-	Run      *model.Run          `json:"run"`
-	Messages []*model.RunMessage `json:"messages"`
+	Run      *model.Run             `json:"run"`
+	Messages []*model.RunMessage    `json:"messages"`
+	Events   []*model.RunTraceEvent `json:"events"`
 }
 
 type RunHistoryPage struct {
@@ -61,6 +62,12 @@ type runApplicationStore interface {
 	RequestCancel(ctx context.Context, runID string) (*model.Run, error)
 }
 
+// runTraceEventStore 是历史回放所需的最小追踪事件读取边界。
+// 将它与 Run 聚合仓储拆开，避免 RunService 因只读回放能力而扩大职责。
+type runTraceEventStore interface {
+	ListTraceEventsByRunIDs(ctx context.Context, runIDs []string) (map[string][]*model.RunTraceEvent, error)
+}
+
 type runApplicationExecutor interface {
 	Start(ctx context.Context, runID string, messages []llmcore.Message, contexts ...[]attachment.FileContext) (*RunExecutionHandle, error)
 	Cancel(ctx context.Context, runID string) (*model.Run, error)
@@ -84,6 +91,7 @@ type attachmentLoader interface {
 
 type defaultRunApplicationService struct {
 	runs        runApplicationStore
+	traces      runTraceEventStore
 	executor    runApplicationExecutor
 	sessions    sessionLookup
 	files       fileLookup
@@ -95,6 +103,7 @@ type defaultRunApplicationService struct {
 // NewRunApplicationService 创建应用层编排服务。
 func NewRunApplicationService(
 	runs runApplicationStore,
+	traces runTraceEventStore,
 	executor runApplicationExecutor,
 	sessions sessionLookup,
 	files fileLookup,
@@ -103,7 +112,7 @@ func NewRunApplicationService(
 	promptHash string,
 ) RunApplicationService {
 	return &defaultRunApplicationService{
-		runs: runs, executor: executor, sessions: sessions, files: files,
+		runs: runs, traces: traces, executor: executor, sessions: sessions, files: files,
 		settings: settingsSource, attachments: attachments, promptHash: strings.TrimSpace(promptHash),
 	}
 }
@@ -323,12 +332,23 @@ func (s *defaultRunApplicationService) ListBySessionID(ctx context.Context, sess
 	if err != nil {
 		return nil, apperr.ToInternal(err)
 	}
+	eventsByRunID := make(map[string][]*model.RunTraceEvent)
+	if s.traces != nil {
+		eventsByRunID, err = s.traces.ListTraceEventsByRunIDs(ctx, runIDs)
+		if err != nil {
+			return nil, apperr.ToInternal(err)
+		}
+	}
 	page := &RunHistoryPage{Items: make([]RunHistoryItem, 0, len(runs)), Total: total, Limit: limit, Offset: offset}
 	for _, run := range runs {
 		if run == nil {
 			continue
 		}
-		page.Items = append(page.Items, RunHistoryItem{Run: run, Messages: messagesByRunID[run.ID]})
+		events := eventsByRunID[run.ID]
+		if events == nil {
+			events = make([]*model.RunTraceEvent, 0)
+		}
+		page.Items = append(page.Items, RunHistoryItem{Run: run, Messages: messagesByRunID[run.ID], Events: events})
 	}
 	return page, nil
 }

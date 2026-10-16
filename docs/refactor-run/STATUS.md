@@ -14,7 +14,7 @@
 | 5. API/UI/SSE | complete | `c1cefeb`、`7cdfafe`、本轮 Run API 测试对齐 | Run API、Last-Event-ID、Run 历史读取、UI 切换和旧 Session Chat/Stop 路由删除已完成；完整真实依赖 HTTP 验收已通过 |
 | 6. 遗留删除 | complete | `2bd649d`、`afcedfd`、`2e3fa27` | 6A、6B、6C 已完成；Run 切换后的 migration、存储与 HTTP 生命周期已在真实依赖环境验收 |
 
-阶段完成后的维护修复：`5afb9de`（移除 Settings 镜像）、`e3bed19`（批量加载历史消息）、`9e12be5`（完成事件流短期保留）、`22a7563`（同步 Graphify 0.10 工作流）、`e464338`（执行结果持久化失败主动收敛）、`24dad2a`（启动恢复遗留 Run）、`40ac6c9`（活跃 Run 阻止 Session 删除）。这些提交不改变 Run/Session 阶段状态，只收紧已完成架构的运行可靠性和维护入口。当前 SSE 过期游标边界已由真实 Redis 组件测试和 HTTP 集成测试覆盖。
+阶段完成后的维护修复：`5afb9de`（移除 Settings 镜像）、`e3bed19`（批量加载历史消息）、`9e12be5`（完成事件流短期保留）、`22a7563`（同步 Graphify 0.10 工作流）、`e464338`（执行结果持久化失败主动收敛）、`24dad2a`（启动恢复遗留 Run）、`40ac6c9`（活跃 Run 阻止 Session 删除），以及本轮 Run trace 回放补强。这些提交不改变 Run/Session 阶段状态，只收紧已完成架构的运行可靠性和维护入口。当前 SSE 过期游标边界已由真实 Redis 组件测试和 HTTP 集成测试覆盖。
 
 允许状态：`pending`、`in_progress`、`complete`、`blocked`。
 
@@ -23,10 +23,10 @@
 ```text
 SessionHandler -> RunApplicationService -> RunExecutor
               -> PlannerEngineAdapter -> PlannerReActFlow -> LLM + ToolSet
-              -> RunRepository + RunEventStream
+              -> RunRepository + RunTraceRepository + RunEventStream
 ```
 
-当前生产执行入口是 Run API：创建、提交输入、取消、查询和 Run SSE 均通过 Run 应用边界完成。Session SSE 只推送会话列表，不承载 Run 事件。执行事实、终态消息和实时事件只写 Run/Message 与 Run Stream，不再调用旧 Task registry 或写入 `sessions.events`。Session 仅保存会话元数据；列表接口额外返回从 runs 查询得到的 `active_run_status` 只读投影。`AgentService` 只作为工具与配置装配协作者存在。`ToolRegistry`、MCP/A2A ToolSet 引用生命周期已完成，不属于本方案待办。
+当前生产执行入口是 Run API：创建、提交输入、取消、查询和 Run SSE 均通过 Run 应用边界完成。Session SSE 只推送会话列表，不承载 Run 事件。执行事实和终态消息写入 Run/Message；六类受控 UI trace 写入 `run_trace_events`；Redis Stream 仍是短期实时通道，不再调用旧 Task registry 或写入 `sessions.events`。`message_delta`、`message_done`、`shell_output` 不进入长期 trace，截图等大对象只保存已有对象存储引用。Session 仅保存会话元数据；列表接口额外返回从 runs 查询得到的 `active_run_status` 只读投影。`AgentService` 只作为工具与配置装配协作者存在。`ToolRegistry`、MCP/A2A ToolSet 引用生命周期已完成，不属于本方案待办。
 
 ## 最近验证基线
 
@@ -46,7 +46,7 @@ go vet ./...
 
 ## 最近完成：检查点 5B UI 消费 Run 生命周期
 
-UI 不再调用 Session Chat 或 Stop：顶层消息请求创建 Run，`waiting_input` 回答以持久化的 `waiting_message_id` 提交给同一 Run，取消调用 Run Cancel，SSE 按 Run ID 与 `Last-Event-ID` 续读。刷新页面时 UI 从 `GET /sessions/:sessionId/runs` 读取 Run/Message 历史重建基础时间线，不再读取已经停止写入的 `sessions.events`。新 Run 会清空前一 Run 的游标；等待恢复保持同一 Run 游标，避免漏读恢复后的事件。
+UI 不再调用 Session Chat 或 Stop：顶层消息请求创建 Run，`waiting_input` 回答以持久化的 `waiting_message_id` 提交给同一 Run，取消调用 Run Cancel，SSE 按 Run ID 与 `Last-Event-ID` 续读。刷新页面时 UI 从 `GET /sessions/:sessionId/runs` 读取 Run/Message/受控 trace 历史重建时间线，不再读取已经停止写入的 `sessions.events`。有 trace 的 Run 按 sequence 恢复计划、步骤和工具过程；没有 trace 的 Run 只从 execution snapshot 恢复计划和步骤，不伪造工具过程。新 Run 会清空前一 Run 的游标；等待恢复保持同一 Run 游标，避免漏读恢复后的事件。
 
 验证结果：
 

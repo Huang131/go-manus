@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -185,6 +186,27 @@ func TestPlannerEngineAdapterPublishesFlowEventsWithoutChangingResult(t *testing
 	events := publisher.snapshot()
 	if len(events) == 0 {
 		t.Fatal("event publisher received no flow events")
+	}
+}
+
+func TestPlannerEngineAdapterFailsOnTracePersistenceError(t *testing.T) {
+	publisher := &adapterEventPublisher{err: service.ErrRunTracePersistence}
+	adapter := &PlannerEngineAdapter{LLM: &adapterLLM{responses: []*llmcore.LLMResponse{
+		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: "{\"message\":\"开始\",\"goal\":\"完成\",\"title\":\"任务\",\"language\":\"zh\",\"steps\":[{\"id\":\"step-1\",\"description\":\"执行\"}]}"}},
+	}}}
+	result, err := adapter.Execute(context.Background(), service.RunExecutionInput{
+		RunID: "run-1", SessionID: "session-1", Settings: adapterSettings(),
+		Messages:       []llmcore.Message{{Role: model.RoleUser, ContentText: "执行"}},
+		EventPublisher: publisher,
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Kind != service.RunExecutionFailed {
+		t.Fatalf("result kind = %q, want %q", result.Kind, service.RunExecutionFailed)
+	}
+	if !errors.Is(result.Error, service.ErrRunTracePersistence) {
+		t.Fatalf("result error = %v, want trace persistence error", result.Error)
 	}
 }
 

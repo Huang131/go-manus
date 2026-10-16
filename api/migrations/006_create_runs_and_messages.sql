@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS runs (
     error_message       TEXT,
     started_at          TIMESTAMP,
     finished_at         TIMESTAMP,
-    created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    created_at          TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
     CONSTRAINT chk_runs_status CHECK (status IN (
         'pending', 'running', 'waiting_input', 'cancelling',
@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS messages (
     role                VARCHAR(32) NOT NULL CHECK (role IN ('user', 'assistant')),
     content             TEXT NOT NULL,
     attachments         JSONB NOT NULL DEFAULT '[]'::jsonb,
-    created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
+    created_at          TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     CONSTRAINT uq_messages_run_idempotency UNIQUE (run_id, idempotency_key)
 );
 

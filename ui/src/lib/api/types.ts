@@ -235,9 +235,18 @@ export type Run = {
   [key: string]: unknown;
 };
 
+export type RunTraceEvent = {
+  run_id: string;
+  sequence: number;
+  event_type: Extract<SSEEventType, "plan" | "step" | "tool_calling" | "tool_called" | "wait" | "error">;
+  data: unknown;
+  created_at: string;
+};
+
 export type RunHistoryItem = {
   run: Run;
   messages: RunMessage[];
+  events: RunTraceEvent[];
 };
 
 export type RunHistoryPage = {
@@ -265,6 +274,17 @@ export type PlanEvent = {
   [key: string]: unknown;
 };
 
+export type PlanEnvelopeEvent = {
+  plan: PlanEvent & {
+    id?: string;
+    title?: string;
+    goal?: string;
+    language?: string;
+    message?: string;
+  };
+  status?: string;
+};
+
 /**
  * 步骤事件
  */
@@ -273,6 +293,11 @@ export type StepEvent = {
   status: ExecutionStatus;
   description: string;
   [key: string]: unknown;
+};
+
+export type StepEnvelopeEvent = {
+  step: StepEvent;
+  status?: ExecutionStatus | string;
 };
 
 /**
@@ -353,8 +378,8 @@ export type SSEEventData =
   | ({ type: "message_done"; data: MessageDoneEvent } & SSEEventMeta)
   | ({ type: "stream_error"; data: { message: string } } & SSEEventMeta)
   | ({ type: "title"; data: { title: string } } & SSEEventMeta)
-  | ({ type: "plan"; data: PlanEvent } & SSEEventMeta)
-  | ({ type: "step"; data: StepEvent } & SSEEventMeta)
+  | ({ type: "plan"; data: PlanEvent | PlanEnvelopeEvent } & SSEEventMeta)
+  | ({ type: "step"; data: StepEvent | StepEnvelopeEvent } & SSEEventMeta)
   | ({ type: "tool_calling"; data: ToolCallingEvent } & SSEEventMeta)
   | ({ type: "tool_called"; data: ToolCalledEvent } & SSEEventMeta)
   | ({ type: "shell_output"; data: ShellOutputEvent } & SSEEventMeta)

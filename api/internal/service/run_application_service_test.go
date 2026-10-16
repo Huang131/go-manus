@@ -13,18 +13,20 @@ import (
 )
 
 type applicationRunStoreStub struct {
-	run           *model.Run
-	createInput   CreateRunInput
-	resume        *RunResume
-	submittedRun  string
-	history       []*model.Run
-	historyTotal  int
-	messages      map[string][]*model.RunMessage
-	batchCalls    int
-	singleCalls   int
-	historyLimit  int
-	historyOffset int
-	getErr        error
+	run             *model.Run
+	createInput     CreateRunInput
+	resume          *RunResume
+	submittedRun    string
+	history         []*model.Run
+	historyTotal    int
+	messages        map[string][]*model.RunMessage
+	batchCalls      int
+	traceEvents     map[string][]*model.RunTraceEvent
+	traceBatchCalls int
+	singleCalls     int
+	historyLimit    int
+	historyOffset   int
+	getErr          error
 }
 
 func (s *applicationRunStoreStub) Create(_ context.Context, input CreateRunInput) (*model.Run, error) {
@@ -82,6 +84,19 @@ func (s *applicationRunStoreStub) ListMessagesByRunIDs(_ context.Context, runIDs
 		result[runID] = append([]*model.RunMessage(nil), s.messages[runID]...)
 	}
 	return result, nil
+}
+
+func (s *applicationRunStoreStub) ListTraceEventsByRunIDs(_ context.Context, runIDs []string) (map[string][]*model.RunTraceEvent, error) {
+	s.traceBatchCalls++
+	result := make(map[string][]*model.RunTraceEvent, len(runIDs))
+	for _, runID := range runIDs {
+		result[runID] = append([]*model.RunTraceEvent(nil), s.traceEvents[runID]...)
+	}
+	return result, nil
+}
+
+func (s *applicationRunStoreStub) ListByRunIDs(ctx context.Context, runIDs []string) (map[string][]*model.RunTraceEvent, error) {
+	return s.ListTraceEventsByRunIDs(ctx, runIDs)
 }
 
 type applicationExecutorStub struct {
@@ -144,7 +159,7 @@ func TestRunApplicationServiceSubmitInputRetryDoesNotRevalidateDeletedAttachment
 		"file-1": {ID: "file-1", SessionID: "session-1", Filename: "extra.txt"},
 	}}
 	service := NewRunApplicationService(
-		runs, executor, sessionLookupStub{session: &model.Session{ID: "session-1"}},
+		runs, nil, executor, sessionLookupStub{session: &model.Session{ID: "session-1"}},
 		&files, settingsSourceStub{}, &attachmentLoaderStub{}, "prompt-hash",
 	)
 	input := SubmitInputRequest{IdempotencyKey: "reply-1", ReplyToMessageID: "question-1", Content: "补充信息", Attachments: []string{"file-1"}}
@@ -188,7 +203,7 @@ func TestRunApplicationServiceSubmitInputRechecksIdempotencyAfterAttachmentExpir
 		}}
 	}}
 	service := NewRunApplicationService(
-		store, &applicationExecutorStub{}, sessionLookupStub{}, files, settingsSourceStub{}, nil, "prompt-hash",
+		store, nil, &applicationExecutorStub{}, sessionLookupStub{}, files, settingsSourceStub{}, nil, "prompt-hash",
 	)
 
 	result, err := service.SubmitInput(context.Background(), "run-1", input)
@@ -234,7 +249,7 @@ func TestRunApplicationServiceCreateFreezesSettingsLoadsOwnedAttachmentsAndStart
 	loader := &attachmentLoaderStub{result: []attachment.FileContext{{Filename: "report.txt", Content: "结论"}}}
 	cfg := settings.AgentSettings{MaxIterations: 7, MaxRetries: 2, MaxSearchResults: 5}
 	service := NewRunApplicationService(
-		store, executor, sessionLookupStub{session: &model.Session{ID: "session-1"}},
+		store, nil, executor, sessionLookupStub{session: &model.Session{ID: "session-1"}},
 		fileLookupStub{files: map[string]*model.File{"file-1": {ID: "file-1", SessionID: "session-1", Filename: "report.txt"}}},
 		settingsSourceStub{value: &cfg}, loader, "prompt-hash",
 	)
@@ -263,7 +278,7 @@ func TestRunApplicationServiceCreateReturnsStartedRunWithoutRefresh(t *testing.T
 	store := &applicationRunStoreStub{getErr: errors.New("refresh created run failed")}
 	executor := &applicationExecutorStub{}
 	service := NewRunApplicationService(
-		store, executor, sessionLookupStub{session: &model.Session{ID: "session-1"}},
+		store, nil, executor, sessionLookupStub{session: &model.Session{ID: "session-1"}},
 		nil, settingsSourceStub{}, nil, "prompt-hash",
 	)
 
@@ -290,7 +305,7 @@ func TestRunApplicationServiceCreateRetryDoesNotRevalidateDeletedAttachments(t *
 		"file-1": {ID: "file-1", SessionID: "session-1", Filename: "report.txt"},
 	}}
 	service := NewRunApplicationService(
-		NewRunService(store), executor, sessionLookupStub{session: &model.Session{ID: "session-1"}},
+		NewRunService(store), nil, executor, sessionLookupStub{session: &model.Session{ID: "session-1"}},
 		&files, settingsSource, nil, "prompt-hash",
 	)
 	input := CreateApplicationRunInput{
@@ -336,7 +351,7 @@ func TestRunApplicationServiceCreateRechecksIdempotencyAfterAttachmentExpires(t 
 	}}
 	executor := &applicationExecutorStub{}
 	service := NewRunApplicationService(
-		store, executor, sessionLookupStub{session: &model.Session{ID: input.SessionID}},
+		store, nil, executor, sessionLookupStub{session: &model.Session{ID: input.SessionID}},
 		files, settingsSourceStub{}, nil, "prompt-hash",
 	)
 
@@ -355,7 +370,7 @@ func TestRunApplicationServiceCreateRechecksIdempotencyAfterAttachmentExpires(t 
 
 func TestRunApplicationServiceCreateRejectsAttachmentOutsideSession(t *testing.T) {
 	service := NewRunApplicationService(
-		&applicationRunStoreStub{}, &applicationExecutorStub{}, sessionLookupStub{session: &model.Session{ID: "session-1"}},
+		&applicationRunStoreStub{}, nil, &applicationExecutorStub{}, sessionLookupStub{session: &model.Session{ID: "session-1"}},
 		fileLookupStub{files: map[string]*model.File{"file-2": {ID: "file-2", SessionID: "other-session"}}},
 		settingsSourceStub{}, nil, "prompt-hash",
 	)
@@ -378,7 +393,7 @@ func TestRunApplicationServiceSubmitInputRestartsWithOwnedAttachmentContext(t *t
 	executor := &applicationExecutorStub{}
 	loader := &attachmentLoaderStub{result: []attachment.FileContext{{Filename: "extra.txt", Content: "补充正文"}}}
 	service := NewRunApplicationService(
-		store, executor, sessionLookupStub{},
+		store, nil, executor, sessionLookupStub{},
 		fileLookupStub{files: map[string]*model.File{"file-1": {ID: "file-1", SessionID: "session-1", Filename: "extra.txt"}}},
 		settingsSourceStub{}, loader, "prompt-hash",
 	)
@@ -394,30 +409,44 @@ func TestRunApplicationServiceSubmitInputRestartsWithOwnedAttachmentContext(t *t
 	}
 }
 
-func TestRunApplicationServiceListHistoryBatchesMessages(t *testing.T) {
+func TestRunApplicationServiceListHistoryBatchesMessagesAndTraceEvents(t *testing.T) {
 	first := &model.Run{ID: "run-1", SessionID: "session-1"}
 	second := &model.Run{ID: "run-2", SessionID: "session-1"}
+	third := &model.Run{ID: "run-3", SessionID: "session-1"}
 	store := &applicationRunStoreStub{
-		history:      []*model.Run{first, nil, second},
-		historyTotal: 2,
+		history:      []*model.Run{first, nil, second, third},
+		historyTotal: 3,
 		messages: map[string][]*model.RunMessage{
 			"run-1": {{RunID: "run-1", Content: "first"}},
 			"run-2": {{RunID: "run-2", Content: "second"}},
 		},
+		traceEvents: map[string][]*model.RunTraceEvent{
+			"run-1": {{RunID: "run-1", Type: model.EventTypeToolCalling, Data: []byte(`{"tool":"search"}`)}},
+			"run-2": {{RunID: "run-2", Type: model.EventTypeToolCalled, Data: []byte(`{"result":"second"}`)}},
+		},
 	}
-	svc := NewRunApplicationService(store, &applicationExecutorStub{}, nil, nil, nil, nil, "prompt-hash")
+	svc := NewRunApplicationService(store, store, &applicationExecutorStub{}, nil, nil, nil, nil, "prompt-hash")
 
 	page, err := svc.ListBySessionID(context.Background(), "session-1", 20, 5)
 	if err != nil {
 		t.Fatalf("ListBySessionID() error = %v", err)
 	}
-	if store.batchCalls != 1 || store.singleCalls != 0 {
-		t.Fatalf("message reads = batch:%d single:%d, want batch:1 single:0", store.batchCalls, store.singleCalls)
+	if store.batchCalls != 1 || store.singleCalls != 0 || store.traceBatchCalls != 1 {
+		t.Fatalf("history reads = messages batch:%d single:%d traces batch:%d, want messages batch:1 single:0 traces batch:1", store.batchCalls, store.singleCalls, store.traceBatchCalls)
 	}
-	if len(page.Items) != 2 || page.Items[0].Messages[0].Content != "first" || page.Items[1].Messages[0].Content != "second" {
+	if len(page.Items) != 3 || page.Items[0].Messages[0].Content != "first" || page.Items[1].Messages[0].Content != "second" {
 		t.Fatalf("history page = %+v, want messages grouped by run", page)
 	}
-	if page.Total != 2 || page.Limit != 20 || page.Offset != 5 {
-		t.Fatalf("pagination = %+v, want total=2 limit=20 offset=5", page)
+	if got := page.Items[0].Events; len(got) != 1 || got[0].Type != model.EventTypeToolCalling {
+		t.Fatalf("first history events = %+v, want run-1 trace event", got)
+	}
+	if got := page.Items[1].Events; len(got) != 1 || got[0].Type != model.EventTypeToolCalled {
+		t.Fatalf("second history events = %+v, want run-2 trace event", got)
+	}
+	if page.Items[2].Events == nil {
+		t.Fatal("run without trace events returned nil Events, want empty slice")
+	}
+	if page.Total != 3 || page.Limit != 20 || page.Offset != 5 {
+		t.Fatalf("pagination = %+v, want total=3 limit=20 offset=5", page)
 	}
 }

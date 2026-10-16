@@ -6,7 +6,8 @@ import { sessionApi } from '@/lib/api/session'
 import { runApi } from '@/lib/api/run'
 import { StreamEndError } from '@/lib/api/fetch'
 import { normalizeEvent } from '@/lib/session-events'
-import type { Run, RunHistoryPage, SessionDetail, SSEEventData, SessionFile } from '@/lib/api/types'
+import { historyToEvents } from '@/lib/history-events'
+import type { Run, SessionDetail, SSEEventData, SessionFile } from '@/lib/api/types'
 
 export type UseSessionDetailResult = {
   session: SessionDetail | null
@@ -356,26 +357,4 @@ export function useSessionDetail(sessionId: string | null): UseSessionDetailResu
     streamingText,
     cancelRun,
   }
-}
-
-function historyToEvents(history: RunHistoryPage, files: SessionFile[]): SSEEventData[] {
-  const fileMap = new Map(files.map((file) => [file.id, file]))
-  const events: SSEEventData[] = []
-  for (const item of [...history.items].reverse()) {
-    for (const message of item.messages) {
-      events.push({
-        type: 'message',
-        data: {
-          role: message.role,
-          message: message.content,
-          message_id: message.id,
-          attachments: (message.attachments || []).map((id) => {
-            const file = fileMap.get(id)
-            return { file_id: id, filename: file?.filename || id, size: file?.size || 0 }
-          }),
-        },
-      } as SSEEventData)
-    }
-  }
-  return events
 }

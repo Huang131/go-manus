@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/Huang131/go-manus/api/internal/llm"
 	"github.com/Huang131/go-manus/api/internal/llmcore"
 	"github.com/Huang131/go-manus/api/internal/model"
+	"github.com/Huang131/go-manus/api/internal/repository"
 	"github.com/Huang131/go-manus/api/internal/service"
 )
 
@@ -47,6 +49,56 @@ func TestInitRunExecutionBuildsRunApplicationBoundary(t *testing.T) {
 	}
 	app.AgentService.Shutdown()
 }
+
+func TestInitRunExecutionCreatesTracePublisherWithoutRedis(t *testing.T) {
+	app := &App{
+		RunService:   service.NewRunService(nil),
+		AgentService: agent.NewAgentService(context.Background(), nil, nil, nil, nil, nil),
+		repos:        repositories{trace: &bootstrapRunTraceStore{}},
+	}
+	if err := app.initRunExecution(&externalClients{llm: &runBootstrapLLMStub{}}); err != nil {
+		t.Fatalf("initRunExecution() error = %v", err)
+	}
+	publisher := reflect.ValueOf(app.RunExecutor).Elem().FieldByName("publisher")
+	if publisher.IsNil() {
+		t.Fatal("RunExecutor publisher is nil; trace persistence must work without Redis")
+	}
+	app.AgentService.Shutdown()
+}
+
+func TestInitRunExecutionKeepsRedisPublisherWithoutTraceStore(t *testing.T) {
+	app := &App{
+		RunService:   service.NewRunService(nil),
+		AgentService: agent.NewAgentService(context.Background(), nil, nil, nil, nil, nil),
+	}
+	if err := app.initRunExecution(&externalClients{llm: &runBootstrapLLMStub{}, mq: &mockMessageQueue{}}); err != nil {
+		t.Fatalf("initRunExecution() error = %v", err)
+	}
+	publisher := reflect.ValueOf(app.RunExecutor).Elem().FieldByName("publisher")
+	if publisher.IsNil() {
+		t.Fatal("RunExecutor publisher is nil")
+	}
+	if got, want := publisher.Elem().Type(), reflect.TypeOf(&service.RedisRunEventPublisher{}); got != want {
+		t.Fatalf("publisher type = %s, want %s for Redis-only startup", got, want)
+	}
+	app.AgentService.Shutdown()
+}
+
+type bootstrapRunTraceStore struct{}
+
+func (*bootstrapRunTraceStore) Append(context.Context, string, *model.RunTraceEvent) error {
+	return nil
+}
+
+func (*bootstrapRunTraceStore) ListByRunIDs(context.Context, []string) (map[string][]*model.RunTraceEvent, error) {
+	return nil, nil
+}
+
+func (*bootstrapRunTraceStore) ListTraceEventsByRunIDs(context.Context, []string) (map[string][]*model.RunTraceEvent, error) {
+	return nil, nil
+}
+
+var _ repository.RunTraceRepository = (*bootstrapRunTraceStore)(nil)
 
 type runBootstrapLLMStub struct{}
 

@@ -25,6 +25,7 @@ services:
       - ./api/migrations/005_normalize_agent_settings.sql:/docker-entrypoint-initdb.d/005_normalize_agent_settings.sql
       - ./api/migrations/006_create_runs_and_messages.sql:/docker-entrypoint-initdb.d/006_create_runs_and_messages.sql
       - ./api/migrations/007_remove_legacy_session_execution.sql:/docker-entrypoint-initdb.d/007_remove_legacy_session_execution.sql
+      - ./api/migrations/008_create_run_trace_events.sql:/docker-entrypoint-initdb.d/008_create_run_trace_events.sql
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     networks:

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/Huang131/go-manus/api/internal/llm"
@@ -38,10 +39,18 @@ func (a *PlannerEngineAdapter) Execute(ctx context.Context, input service.RunExe
 		return service.RunExecutionResult{Kind: service.RunExecutionFailed, Error: fmt.Errorf("run has no user message")}, nil
 	}
 
+	flowCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	var lastAssistant string
-	for event := range flow.Invoke(ctx, &TaskInput{Message: *message, AttachmentContexts: input.AttachmentContexts}) {
-		if input.EventPublisher != nil {
+	var tracePersistenceErr error
+	for event := range flow.Invoke(flowCtx, &TaskInput{Message: *message, AttachmentContexts: input.AttachmentContexts}) {
+		if input.EventPublisher != nil && tracePersistenceErr == nil {
 			if err := input.EventPublisher.Publish(ctx, input.RunID, event); err != nil {
+				if errors.Is(err, service.ErrRunTracePersistence) {
+					tracePersistenceErr = err
+					cancel()
+					continue
+				}
 				logger.WarnContext(ctx, "发布 Run 实时事件失败",
 					logger.String("run_id", input.RunID), logger.Err(err))
 			}
@@ -51,6 +60,13 @@ func (a *PlannerEngineAdapter) Execute(ctx context.Context, input service.RunExe
 		}
 	}
 	plan := flow.GetPlan()
+	if tracePersistenceErr != nil {
+		return service.RunExecutionResult{
+			Kind:     service.RunExecutionFailed,
+			Snapshot: snapshotFromPlan(plan, input.Snapshot),
+			Error:    tracePersistenceErr,
+		}, nil
+	}
 	if ctx.Err() != nil || flow.GetStatus() == FlowStatusCancelled {
 		return service.RunExecutionResult{Kind: service.RunExecutionCancelled, Snapshot: snapshotFromPlan(plan, input.Snapshot)}, nil
 	}
