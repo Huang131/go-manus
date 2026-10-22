@@ -298,6 +298,8 @@ export type StepEvent = {
   id: string;
   status: ExecutionStatus;
   description: string;
+  result?: string;
+  error?: string;
   [key: string]: unknown;
 };
 

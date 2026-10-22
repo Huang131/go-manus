@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
-import { CheckIcon, ChevronDown, Languages } from 'lucide-react'
+import { AlertCircle, CheckIcon, ChevronDown, Languages } from 'lucide-react'
 import { ManusIcon } from '@/components/manus-icon'
 import { ToolUse } from '@/components/tool-use'
 import { AttachmentsMessage } from '@/components/attachments-message'
@@ -154,7 +154,10 @@ function StepBlock({
 }) {
   const [expanded, setExpanded] = useState(true)
   const { data, tools } = stepItem
-  const isCompleted = data.status === 'completed'
+  const result = typeof data.result === 'string' ? data.result : ''
+  const error = typeof data.error === 'string' ? data.error : ''
+  // 步骤失败时 result 可能就是同一条错误，详情只展示一次。
+  const visibleResult = result !== error ? result : ''
 
   return (
     <div className={cn('flex flex-col mt-3', className)}>
@@ -173,10 +176,13 @@ function StepBlock({
         <div className="flex flex-row gap-2 justify-start items-center truncate min-w-0 flex-1">
           <div
             className={cn(
-              'w-4 h-4 flex-shrink-0 flex items-center justify-center border rounded-[15px] bg-gray-300'
+              'w-4 h-4 flex-shrink-0 flex items-center justify-center border rounded-[15px]',
+              data.status === 'failed' ? 'border-red-500 bg-red-500' : 'border-gray-300 bg-gray-300'
             )}
           >
-            <CheckIcon className="text-white" size={10} />
+            {data.status === 'failed'
+              ? <AlertCircle className="text-white" size={10} />
+              : <CheckIcon className="text-white" size={10} />}
           </div>
           <div className="truncate font-medium markdown-content min-w-0">
             {data.description}
@@ -186,7 +192,7 @@ function StepBlock({
           />
         </div>
       </div>
-      {expanded && tools.length > 0 && (
+      {expanded && (tools.length > 0 || visibleResult || error) && (
         <div className="flex">
           <div className="w-6 relative flex-shrink-0">
             <div className="absolute left-[7px] top-2 bottom-0 w-[1px] border-l border-dashed border-gray-300" />
@@ -197,6 +203,20 @@ function StepBlock({
                 <ToolUse data={tool} onClick={onToolClick ? () => onToolClick(tool) : undefined} />
               </ToolRow>
             ))}
+            {visibleResult && (
+              <div className="rounded-md bg-gray-50 px-3 py-2">
+                <div className="mb-1 text-xs font-medium text-gray-500">执行结果</div>
+                <MarkdownContent content={visibleResult} />
+              </div>
+            )}
+            {error && (
+              <div className="rounded-md bg-red-50 px-3 py-2 text-red-700">
+                <div className="mb-1 flex items-center gap-1 text-xs font-medium">
+                  <AlertCircle size={13} />失败原因
+                </div>
+                <MarkdownContent content={error} className="[&_p]:text-red-700 [&_li]:text-red-700" />
+              </div>
+            )}
           </div>
         </div>
       )}

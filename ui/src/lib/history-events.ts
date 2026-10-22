@@ -12,6 +12,7 @@ type SnapshotStep = {
   description: string
   status: 'pending' | 'running' | 'completed' | 'failed'
   result_summary?: string
+  error_summary?: string
   artifact_refs?: string[]
 }
 
@@ -242,6 +243,7 @@ function appendSnapshotEvents(events: SSEEventData[], run: Run): void {
     description: step.description,
     status: step.status,
     result_summary: step.result_summary,
+    error_summary: step.error_summary,
     artifact_refs: step.artifact_refs,
   }))
   events.push({
@@ -261,7 +263,16 @@ function appendSnapshotEvents(events: SSEEventData[], run: Run): void {
   for (const step of steps) {
     events.push({
       type: 'step',
-      data: { step: { ...step, id: step.id, description: step.description }, status: step.status },
+      data: {
+        step: {
+          ...step,
+          id: step.id,
+          description: step.description,
+          result: step.result_summary,
+          error: step.error_summary,
+        },
+        status: step.status,
+      },
     } as SSEEventData)
   }
 }

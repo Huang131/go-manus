@@ -3,7 +3,33 @@ import test from 'node:test'
 
 import { eventsToTimeline } from './session-events'
 import { historyToEvents } from './history-events'
-import type { RunHistoryPage } from './api/types'
+import type { RunHistoryPage, SSEEventData } from './api/types'
+
+test('长 Markdown 总结的流式完成正文与刷新后历史正文一致', () => {
+  const summary = '# 文档总结\n\n' + '完整章节、流程、配置与术语。\n'.repeat(40)
+  const streamed: SSEEventData[] = [
+    { type: 'message_delta', data: { message_id: 'summary-1', delta: summary.slice(0, 50), sequence: 1 } },
+    { type: 'message_delta', data: { message_id: 'summary-1', delta: summary.slice(50), sequence: 2 } },
+    { type: 'message_done', data: { message_id: 'summary-1', content: summary } },
+  ]
+  const history: RunHistoryPage = {
+    items: [{
+      run: {
+        id: 'run-summary', session_id: 'session-1', status: 'succeeded',
+        created_at: '2026-10-16T00:00:00Z', updated_at: '2026-10-16T00:01:00Z',
+      },
+      messages: [{
+        id: 'summary-1', session_id: 'session-1', run_id: 'run-summary', role: 'assistant',
+        content: summary, created_at: '2026-10-16T00:01:00Z',
+      }],
+      events: [],
+    }], total: 1, limit: 50, offset: 0,
+  }
+  const live = eventsToTimeline(streamed).filter((item) => item.kind === 'assistant')
+  const restored = eventsToTimeline(historyToEvents(history, [])).filter((item) => item.kind === 'assistant')
+  assert.deepEqual(live.map((item) => item.data.message), [summary])
+  assert.deepEqual(restored.map((item) => item.data.message), [summary])
+})
 
 test('按 Run 的持久化追踪恢复计划、步骤和已完成工具调用', () => {
   const history: RunHistoryPage = {
@@ -76,6 +102,38 @@ test('无追踪事件的新 Run 从执行快照恢复计划和步骤但不伪造
   assert.deepEqual(events.map((event) => event.type), ['message', 'plan', 'step'])
   assert.equal((events[1].data as { plan: { id: string } }).plan.id, 'plan-2')
   assert.equal((events[2].data as { step: { status: string } }).step.status, 'running')
+})
+
+test('从执行快照分别恢复步骤结果和失败说明，并兼容旧快照', () => {
+  const history: RunHistoryPage = {
+    items: [{
+      run: {
+        id: 'run-snapshot', session_id: 'session-1', status: 'failed',
+        created_at: '2026-10-16T00:00:00Z', updated_at: '2026-10-16T00:01:00Z',
+        execution_snapshot: {
+          plan_id: 'plan-snapshot', steps: [
+            { id: 'step-ok', description: '读取', status: 'completed', result_summary: '读取完整正文' },
+            { id: 'step-failed', description: '分析', status: 'failed', result_summary: '已读取部分内容', error_summary: '分析失败' },
+          ],
+        },
+      },
+      messages: [], events: [],
+    }], total: 1, limit: 50, offset: 0,
+  }
+  const steps = eventsToTimeline(historyToEvents(history, [])).filter((item) => item.kind === 'step')
+  assert.equal(steps[0].data.result, '读取完整正文')
+  assert.equal(steps[1].data.result, '已读取部分内容')
+  assert.equal(steps[1].data.error, '分析失败')
+
+  const legacyHistory = structuredClone(history)
+  const legacyRun = legacyHistory.items[0].run
+  if (legacyRun.execution_snapshot && typeof legacyRun.execution_snapshot === 'object') {
+    const snapshot = legacyRun.execution_snapshot as { steps: Array<Record<string, unknown>> }
+    delete snapshot.steps[1].error_summary
+  }
+  const legacySteps = eventsToTimeline(historyToEvents(legacyHistory, [])).filter((item) => item.kind === 'step')
+  assert.equal(legacySteps[1].data.result, '已读取部分内容')
+  assert.equal(legacySteps[1].data.error, undefined)
 })
 
 test('失败 Run 在没有错误追踪事件时仍恢复持久化错误说明', () => {
