@@ -194,6 +194,25 @@ export function ManusSettings() {
     }
   }, [])
 
+  const handleMCPEdit = useCallback(async (serverName: string, value: unknown): Promise<boolean> => {
+    try {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('MCP 配置必须是 JSON 对象')
+      const server = value as ListMCPServerItem
+      if (server.name !== serverName) throw new Error('编辑时不能修改 MCP 服务名称')
+      const config = normalizeMCPConfig({servers: [server]})
+      await configApi.addMCPServer(config)
+      try {
+        const data = await configApi.getMCPServers()
+        setMcpServers(data?.servers ?? [])
+      } catch { /* 配置已保存，刷新失败时保留当前视图 */ }
+      toast.success('MCP 配置已保存')
+      return true
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '保存失败')
+      return false
+    }
+  }, [])
+
   // ---- A2A 操作 ----
   const handleA2AToggle = useCallback(async (id: string, enabled: boolean) => {
     setA2aServers((prev) =>
@@ -244,6 +263,28 @@ export function ManusSettings() {
       return true
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '添加失败')
+      return false
+    }
+  }, [])
+
+  const handleA2AEdit = useCallback(async (id: string, value: unknown): Promise<boolean> => {
+    try {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('A2A 配置必须是 JSON 对象')
+      const server = value as ListA2AServerItem
+      if (server.id !== id) throw new Error('编辑时不能修改 A2A Agent ID')
+      if (typeof server.url !== 'string') throw new Error('url 必须是字符串')
+      const url = new URL(server.url)
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('url 必须使用 HTTP 或 HTTPS')
+      if (typeof server.enabled !== 'boolean') throw new Error('enabled 必须是布尔值')
+      await configApi.addA2AServer({servers: [{...server, url: url.toString()}]})
+      try {
+        const data = await configApi.getA2AServers()
+        setA2aServers(data?.servers ?? [])
+      } catch { /* 配置已保存，刷新失败时保留当前视图 */ }
+      toast.success('A2A 配置已保存')
+      return true
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '保存失败')
       return false
     }
   }, [])
@@ -319,6 +360,7 @@ export function ManusSettings() {
                 onToggleEnabled={handleA2AToggle}
                 onDelete={handleA2ADelete}
                 onAdd={handleA2AAdd}
+                onEdit={handleA2AEdit}
               />
             )}
             {activeSetting === 'mcp-setting' && (
@@ -328,6 +370,7 @@ export function ManusSettings() {
                 onToggleEnabled={handleMCPToggle}
                 onDelete={handleMCPDelete}
                 onAdd={handleMCPAdd}
+                onEdit={handleMCPEdit}
               />
             )}
           </div>

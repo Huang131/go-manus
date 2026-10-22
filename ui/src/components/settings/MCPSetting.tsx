@@ -19,6 +19,7 @@ import {Field, FieldDescription, FieldGroup, FieldLegend, FieldSet} from '@/comp
 import {Item, ItemContent, ItemGroup, ItemTitle} from '@/components/ui/item'
 import {Switch} from '@/components/ui/switch'
 import {Textarea} from '@/components/ui/textarea'
+import {RawJsonEditor} from './RawJsonEditor'
 import type {ListMCPServerItem, MCPConfig, MCPServerConfig} from '@/lib/api'
 
 export function normalizeMCPConfig(value: unknown): MCPConfig {
@@ -27,17 +28,27 @@ export function normalizeMCPConfig(value: unknown): MCPConfig {
   }
   const raw = value as {servers?: unknown; mcpServers?: unknown}
   if (Array.isArray(raw.servers)) {
-    return {servers: raw.servers as MCPServerConfig[]}
+    const servers = raw.servers as MCPServerConfig[]
+    if (servers.length !== 1 || !servers[0] || typeof servers[0] !== 'object') throw new Error('请提供且仅提供一个 MCP 服务对象')
+    const server = servers[0] as MCPServerConfig
+    if (!server.name?.trim() || typeof server.command !== 'string' || !server.command.trim()) throw new Error('MCP 配置必须包含 name 和 command')
+    if (server.args !== undefined && (!Array.isArray(server.args) || server.args.some((item) => typeof item !== 'string'))) throw new Error('args 必须是字符串数组')
+    if (server.env !== undefined && (!server.env || typeof server.env !== 'object' || Array.isArray(server.env) || Object.values(server.env).some((item) => typeof item !== 'string'))) throw new Error('env 必须是字符串对象')
+    if (server.enabled !== undefined && typeof server.enabled !== 'boolean') throw new Error('enabled 必须是布尔值')
+    if (server.timeout !== undefined && (!Number.isInteger(server.timeout) || server.timeout < 1)) throw new Error('timeout 必须是正整数')
+    if (server.max_retries !== undefined && (!Number.isInteger(server.max_retries) || server.max_retries < 0)) throw new Error('max_retries 必须是非负整数')
+    return {servers}
   }
-  if (!raw.mcpServers || typeof raw.mcpServers !== 'object') {
+  if (!raw.mcpServers || typeof raw.mcpServers !== 'object' || Array.isArray(raw.mcpServers)) {
     throw new Error('MCP 配置必须包含 servers 或 mcpServers')
   }
+  if (Object.keys(raw.mcpServers as object).length !== 1) throw new Error('每次只能添加或编辑一个 MCP 服务')
   const servers = Object.entries(raw.mcpServers as Record<string, MCPServerConfig>).map(([name, config]) => ({
-    ...config,
+    ...(config && typeof config === 'object' ? config : {}),
     name,
-    enabled: config.enabled ?? true,
+    enabled: config && typeof config === 'object' ? config.enabled ?? true : true,
   }))
-  return {servers}
+  return normalizeMCPConfig({servers})
 }
 
 // ==================== MCP 服务器 ====================
@@ -48,9 +59,10 @@ type MCPSettingProps = {
   onToggleEnabled: (serverName: string, enabled: boolean) => void
   onDelete: (serverName: string) => void
   onAdd: (config: string) => Promise<boolean>
+  onEdit: (serverName: string, value: unknown) => Promise<boolean>
 }
 
-export function MCPSetting({servers, loading, onToggleEnabled, onDelete, onAdd}: MCPSettingProps) {
+export function MCPSetting({servers, loading, onToggleEnabled, onDelete, onAdd, onEdit}: MCPSettingProps) {
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [addConfig, setAddConfig] = useState('')
   const [adding, setAdding] = useState(false)
@@ -170,6 +182,7 @@ export function MCPSetting({servers, loading, onToggleEnabled, onDelete, onAdd}:
                         {!server.enabled && <Badge>禁用</Badge>}
                       </div>
                       <div className="flex items-center justify-center gap-2">
+                        <RawJsonEditor title={server.name} description="保存会合并更新该服务，名称不可修改；环境变量只在此编辑器中显示。" value={server} onSave={(value) => onEdit(server.name, value)}/>
                         <Button
                           type="button"
                           variant="ghost"

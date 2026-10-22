@@ -88,6 +88,8 @@ export type ListMCPServerItem = {
   command?: string;
   args?: string[];
   env?: Record<string, string>;
+  timeout?: number;
+  max_retries?: number;
 };
 
 /**
@@ -106,6 +108,8 @@ export type MCPServerConfig = {
   env?: Record<string, string>;
   command?: string;
   args?: string[];
+  timeout?: number;
+  max_retries?: number;
 };
 
 /**

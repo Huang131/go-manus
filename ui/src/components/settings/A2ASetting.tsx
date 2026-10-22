@@ -20,6 +20,7 @@ import {Input} from '@/components/ui/input'
 import {Item, ItemContent, ItemGroup, ItemTitle} from '@/components/ui/item'
 import {Switch} from '@/components/ui/switch'
 import type {ListA2AServerItem} from '@/lib/api'
+import {RawJsonEditor} from './RawJsonEditor'
 
 // ==================== A2A Agent 配置 ====================
 
@@ -29,9 +30,10 @@ type A2ASettingProps = {
   onToggleEnabled: (id: string, enabled: boolean) => void
   onDelete: (id: string) => void
   onAdd: (baseUrl: string) => Promise<boolean>
+  onEdit: (id: string, value: unknown) => Promise<boolean>
 }
 
-export function A2ASetting({servers, loading, onToggleEnabled, onDelete, onAdd}: A2ASettingProps) {
+export function A2ASetting({servers, loading, onToggleEnabled, onDelete, onAdd, onEdit}: A2ASettingProps) {
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [addUrl, setAddUrl] = useState('')
   const [adding, setAdding] = useState(false)
@@ -136,6 +138,7 @@ export function A2ASetting({servers, loading, onToggleEnabled, onDelete, onAdd}:
                         {!server.enabled && <Badge>禁用</Badge>}
                       </div>
                       <div className="flex items-center justify-center gap-2">
+                        <RawJsonEditor title={server.id} description="保存会合并更新该 Agent，ID 不可修改。" value={server} onSave={(value) => onEdit(server.id, value)}/>
                         <Button
                           type="button"
                           variant="ghost"
