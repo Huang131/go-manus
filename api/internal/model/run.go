@@ -85,6 +85,7 @@ type RunStepSnapshot struct {
 	Description   string        `json:"description"`
 	Status        RunStepStatus `json:"status"`
 	ResultSummary string        `json:"result_summary,omitempty"`
+	ErrorSummary  string        `json:"error_summary,omitempty"`
 	ArtifactRefs  []string      `json:"artifact_refs,omitempty"`
 }
 

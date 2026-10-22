@@ -58,6 +58,11 @@ func (a *PlannerEngineAdapter) Execute(ctx context.Context, input service.RunExe
 		if messageEvent, ok := event.(*model.MessageEvent); ok && messageEvent.Role == model.RoleAssistant {
 			lastAssistant = messageEvent.Message
 		}
+		// 流式消息没有普通 message 事件；完成事件携带聚合正文，须作为终态消息持久化，
+		// 这样流式展示与刷新后的历史恢复才能使用完全相同的内容。
+		if messageDone, ok := event.(*model.MessageDoneEvent); ok {
+			lastAssistant = messageDone.Content
+		}
 	}
 	plan := flow.GetPlan()
 	if tracePersistenceErr != nil {
@@ -127,7 +132,7 @@ func snapshotFromPlan(plan *model.Plan, previous model.RunExecutionSnapshot) mod
 		case model.ExecutionStatusFailed:
 			status = model.RunStepStatusFailed
 		}
-		snapshot.Steps = append(snapshot.Steps, model.RunStepSnapshot{ID: step.ID, Description: step.Description, Status: status, ResultSummary: step.Result, ArtifactRefs: append([]string(nil), step.Attachments...)})
+		snapshot.Steps = append(snapshot.Steps, model.RunStepSnapshot{ID: step.ID, Description: step.Description, Status: status, ResultSummary: step.Result, ErrorSummary: step.Error, ArtifactRefs: append([]string(nil), step.Attachments...)})
 		// 当前步骤必须是计划中第一个未完成步骤。后续 pending 步骤只是
 		// 执行队列，不能覆盖正在等待用户输入的步骤，否则恢复时会丢失问题上下文。
 		if !step.Done() && snapshot.CurrentStepID == "" {
@@ -163,7 +168,7 @@ func planFromSnapshot(snapshot model.RunExecutionSnapshot) (*model.Plan, error) 
 		plan.Steps = append(plan.Steps, model.PlanStep{
 			ID: step.ID, Description: step.Description, Status: status,
 			Success: status == model.ExecutionStatusCompleted,
-			Result:  step.ResultSummary, Attachments: append([]string(nil), step.ArtifactRefs...),
+			Result:  step.ResultSummary, Error: step.ErrorSummary, Attachments: append([]string(nil), step.ArtifactRefs...),
 		})
 	}
 	return plan, nil

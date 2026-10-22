@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -93,5 +94,27 @@ func TestNewPromptCatalogRejectsIncompleteDefinition(t *testing.T) {
 				t.Fatal("NewPromptCatalog() error = nil")
 			}
 		})
+	}
+}
+
+func TestSummaryPromptSupportsDetailedDocumentAnalysis(t *testing.T) {
+	prompt := DefaultPromptCatalog().MustText(PromptSummarize)
+	for _, phrase := range []string{"文档分析", "完整", "章节", "操作流程", "不确定"} {
+		if !strings.Contains(prompt, phrase) {
+			t.Errorf("summary prompt missing %q", phrase)
+		}
+	}
+	for _, limit := range []string{"150 字", "1-3 句话", "300 字"} {
+		if strings.Contains(prompt, limit) {
+			t.Errorf("summary prompt retains fixed length limit %q", limit)
+		}
+	}
+}
+
+func TestSystemPromptAllowsFullMarkdownReportsWhenRequested(t *testing.T) {
+	for _, phrase := range []string{"完整 Markdown", "分析、总结或报告", "明确要求生成文件"} {
+		if !strings.Contains(systemPromptContent, phrase) {
+			t.Errorf("system prompt missing %q", phrase)
+		}
 	}
 }

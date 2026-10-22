@@ -61,6 +61,72 @@ func TestPlannerEngineAdapterConvertsCompletedFlow(t *testing.T) {
 	}
 }
 
+func TestPlannerEngineAdapterPersistsStreamingSummaryAsFinalText(t *testing.T) {
+	summary := "# 文档总结\n\n" + strings.Repeat("这是完整的 Markdown 正文内容，用于确认长总结不会被截断。\n", 16)
+	llm := &adapterStreamingLLM{adapterLLM: adapterLLM{responses: []*llmcore.LLMResponse{
+		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: `{"message":"开始","goal":"完成","title":"任务","language":"zh","steps":[{"id":"step-1","description":"执行"}]}`}},
+		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: `{"success":true,"result":"步骤结果"}`}},
+		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: summary}},
+	}}}
+	publisher := &adapterEventPublisher{}
+	adapter := &PlannerEngineAdapter{LLM: llm}
+	result, err := adapter.Execute(context.Background(), service.RunExecutionInput{
+		RunID: "run-summary", SessionID: "session-summary", Settings: adapterSettings(),
+		Messages: []llmcore.Message{{Role: model.RoleUser, ContentText: "总结文档"}},
+		Tools:    []toolspkg.Tool{waitingOutcomeTool{}}, EventPublisher: publisher,
+	})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if result.Text != summary {
+		t.Fatalf("final text = %q, want streamed summary", result.Text)
+	}
+	var completed string
+	var deltas strings.Builder
+	doneCount := 0
+	for _, event := range publisher.snapshot() {
+		if done, ok := event.(*model.MessageDoneEvent); ok {
+			completed = done.Content
+			doneCount++
+		}
+		if delta, ok := event.(*model.MessageDeltaEvent); ok {
+			deltas.WriteString(delta.Delta)
+		}
+	}
+	if doneCount != 1 || deltas.String() != summary {
+		t.Fatalf("stream emitted %d completions and %q, want one complete summary", doneCount, deltas.String())
+	}
+	if completed != result.Text {
+		t.Fatalf("persisted text = %q, streamed completion = %q", result.Text, completed)
+	}
+	summaryRequest := llm.requests[len(llm.requests)-1]
+	if strings.Contains(summaryRequest[0].ContentText, "返回 JSON") {
+		t.Fatal("summary system prompt still requires ReAct JSON output")
+	}
+}
+
+type adapterStreamingLLM struct{ adapterLLM }
+
+func (m *adapterStreamingLLM) Stream(ctx context.Context, request *llm.LLMRequest) (<-chan llmcore.LLMDelta, error) {
+	response, err := m.adapterLLM.Invoke(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	content := []rune(response.Message.ContentText)
+	chunkSize := (len(content) + 2) / 3
+	ch := make(chan llmcore.LLMDelta, 4)
+	for start := 0; start < len(content); start += chunkSize {
+		end := start + chunkSize
+		if end > len(content) {
+			end = len(content)
+		}
+		ch <- llmcore.LLMDelta{ContentText: string(content[start:end])}
+	}
+	ch <- llmcore.LLMDelta{FinishReason: llmcore.FinishReasonStop}
+	close(ch)
+	return ch, nil
+}
+
 func TestPlannerEngineAdapterWaitingInputBuildsResumableQuestion(t *testing.T) {
 	adapter := &PlannerEngineAdapter{LLM: &adapterLLM{responses: []*llmcore.LLMResponse{
 		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: "{\"message\":\"开始\",\"goal\":\"确认\",\"title\":\"任务\",\"language\":\"zh\",\"steps\":[{\"id\":\"step-1\",\"description\":\"确认\",\"user_question\":\"请确认\"},{\"id\":\"step-2\",\"description\":\"确认后继续\"}]}"}},
@@ -285,6 +351,24 @@ func TestSnapshotFromPlanKeepsFirstIncompleteStepAsCurrent(t *testing.T) {
 
 	if snapshot.CurrentStepID != "step-1" {
 		t.Fatalf("current step = %q, want first incomplete step step-1", snapshot.CurrentStepID)
+	}
+}
+
+func TestPlanStepErrorSurvivesExecutionSnapshotRoundTrip(t *testing.T) {
+	plan := &model.Plan{ID: "plan-1", Steps: []model.PlanStep{{
+		ID: "step-1", Description: "分析文档", Status: model.ExecutionStatusFailed,
+		Result: "已读取部分内容", Error: "模型请求超时",
+	}, {ID: "step-2", Description: "等待用户选择重试", Status: model.ExecutionStatusRunning}}}
+
+	snapshot := snapshotFromPlan(plan, model.RunExecutionSnapshot{WaitingCheckpoint: &model.WaitingCheckpoint{
+		QuestionMessageID: "question-1", StepID: "step-2", ResumeMode: model.ResumeModeContinueStep,
+	}})
+	restored, err := planFromSnapshot(snapshot)
+	if err != nil {
+		t.Fatalf("planFromSnapshot() error = %v", err)
+	}
+	if got := restored.Steps[0]; got.Result != "已读取部分内容" || got.Error != "模型请求超时" {
+		t.Fatalf("restored step = %+v, want result and independent error", got)
 	}
 }
 

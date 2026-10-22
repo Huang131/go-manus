@@ -360,13 +360,6 @@ func (f *PlannerReActFlow) handleExecuting(ctx context.Context, input *TaskInput
 		if !f.emitEvent(ctx, ch, model.NewStepEvent(*step, model.StepEventStatusCompleted)) {
 			return true
 		}
-
-		// 发送步骤结果消息
-		if step.Result != "" {
-			if !f.emitEvent(ctx, ch, model.NewMessageEvent(model.RoleAssistant, step.Result)) {
-				return true
-			}
-		}
 	}
 	// ExecuteStep 操作的是本轮快照，执行结果需要写回 flow，供后续更新计划和外部查询使用。
 	f.setPlan(plan)
@@ -433,7 +426,7 @@ func (f *PlannerReActFlow) handleSummarizing(ctx context.Context, ch chan<- mode
 	// 空步骤计划如果流转到这里，说明上游已经出了结构化输出问题。
 	plan := f.planSnapshot()
 	if plan != nil && len(plan.Steps) > 0 {
-		summary, attachments, emitted, err := f.react.Summarize(ctx)
+		summary, emitted, err := f.react.Summarize(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
 				f.setStatus(FlowStatusCancelled)
@@ -449,9 +442,6 @@ func (f *PlannerReActFlow) handleSummarizing(ctx context.Context, ch chan<- mode
 		} else {
 			if !emitted && !f.emitEvent(ctx, ch, model.NewMessageEvent(model.RoleAssistant, summary)) {
 				return true
-			}
-			for _, att := range attachments {
-				logger.InfoContext(ctx, "任务生成附件", logger.String("filepath", att))
 			}
 		}
 	} else {

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -539,9 +540,10 @@ func TestRunServiceFinishPersistsTerminalMessageWithRunState(t *testing.T) {
 	store.run.Status = model.RunStatusRunning
 	service := NewRunService(store)
 	snapshot := model.RunExecutionSnapshot{SnapshotRevision: 2, PlanID: "plan-1", CurrentStepID: "step-2"}
+	summary := "# 完整文档总结\n\n" + strings.Repeat("文档的章节、操作流程和模块术语。\n", 40)
 
 	err := service.Finish(context.Background(), store.run.ID, RunExecutionResult{
-		Kind: RunExecutionSucceeded, Snapshot: snapshot, Text: "分析完成",
+		Kind: RunExecutionSucceeded, Snapshot: snapshot, Text: summary,
 	})
 	if err != nil {
 		t.Fatalf("Finish() error = %v", err)
@@ -552,7 +554,7 @@ func TestRunServiceFinishPersistsTerminalMessageWithRunState(t *testing.T) {
 	if store.terminal.Snapshot.SnapshotRevision != 2 {
 		t.Fatalf("terminal snapshot = %+v", store.terminal.Snapshot)
 	}
-	if len(store.messages) != 3 || store.messages[2].Role != model.RoleAssistant || store.messages[2].Content != "分析完成" {
+	if len(store.messages) != 3 || store.messages[2].Role != model.RoleAssistant || store.messages[2].Content != summary {
 		t.Fatalf("terminal messages = %+v", store.messages)
 	}
 }

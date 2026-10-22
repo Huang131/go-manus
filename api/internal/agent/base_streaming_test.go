@@ -55,15 +55,12 @@ func TestReActAgentSummarizeReportsWhetherDeltasWereEmitted(t *testing.T) {
 	events := make(chan model.BaseEvent, 4)
 	agent.SetEventCh(events)
 
-	summary, attachments, emitted, err := agent.Summarize(context.Background())
+	summary, emitted, err := agent.Summarize(context.Background())
 	if err != nil {
 		t.Fatalf("Summarize() error = %v", err)
 	}
 	if summary != "你好" {
 		t.Fatalf("summary = %q, want 你好", summary)
-	}
-	if len(attachments) != 0 {
-		t.Fatalf("attachments = %v, want none", attachments)
 	}
 	if !emitted {
 		t.Fatal("emitted = false, want true for streaming LLM")

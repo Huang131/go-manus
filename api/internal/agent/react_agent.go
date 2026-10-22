@@ -54,7 +54,7 @@ func (a *ReActAgent) ExecuteStep(ctx context.Context, plan *model.Plan, step *mo
 	prompt = strings.Replace(prompt, "{language}", plan.Language, 1)
 	prompt = strings.Replace(prompt, "{step}", step.Description, 1)
 
-	// 总结阶段是面向用户的纯文本输出，不能叠加要求结构化 JSON 的 ReAct 系统提示。
+	// 步骤 JSON 格式由 execution 提示词约定，通用系统提示负责交互行为。
 	systemPrompt := catalog.MustText(PromptSystem)
 
 	// 使用完整的 ReAct 循环调用 LLM（记忆以原生消息注入，不再拼字符串）
@@ -122,44 +122,32 @@ func (a *ReActAgent) ExecuteStep(ctx context.Context, plan *model.Plan, step *mo
 }
 
 // Summarize 总结任务执行结果
-func (a *ReActAgent) Summarize(ctx context.Context) (string, []string, bool, error) {
+func (a *ReActAgent) Summarize(ctx context.Context) (string, bool, error) {
 	// 构建提示词
 	catalog := DefaultPromptCatalog()
 	prompt := catalog.MustText(PromptSummarize)
 
-	// 添加系统提示词
-	systemPrompt := catalog.MustText(PromptSystem) + "\n" + catalog.MustText(PromptReActSystem)
+	// 总结结果直接面向用户，不能继承要求 JSON 的 ReAct 步骤输出约束。
+	systemPrompt := catalog.MustText(PromptSystem)
 
 	// 构建消息历史：system + 记忆原生消息 + 总结请求
 	messages, err := a.buildConversationMessages(systemPrompt, prompt, nil)
 	if err != nil {
-		return "", nil, false, fmt.Errorf("构建总结上下文失败: %w", err)
+		return "", false, fmt.Errorf("构建总结上下文失败: %w", err)
 	}
 
-	// 总结面向用户展示，使用非结构化文本流以便前端按 token 增量渲染。
-	// 若模型仍返回旧版 JSON，下面的解析逻辑仍可兼容并提取 message。
+	// 总结正文以 Markdown 流式展示并原样持久化，不在流完成后再转换格式。
 	request, err := a.prepareLLMRequest(&llm.LLMRequest{
 		Messages: messages,
 	})
 	if err != nil {
-		return "", nil, false, fmt.Errorf("构建总结上下文失败: %w", err)
+		return "", false, fmt.Errorf("构建总结上下文失败: %w", err)
 	}
 	resp, emitted, err := a.invokeLLMWithEmission(ctx, request, true)
 	if err != nil {
-		return "", nil, false, fmt.Errorf("LLM调用失败: %w", err)
-	}
-
-	// 解析响应（使用 JSON 修复解析器）
-	var result struct {
-		Message     string   `json:"message"`
-		Attachments []string `json:"attachments"`
-	}
-
-	if err := a.jsonParser.Parse(resp.Message.ContentText, &result); err != nil {
-		// 如果 JSON 解析失败，返回原始内容
-		return resp.Message.ContentText, nil, emitted, nil
+		return "", false, fmt.Errorf("LLM调用失败: %w", err)
 	}
 
 	logger.InfoContext(ctx, "ReActAgent 任务总结完成")
-	return result.Message, result.Attachments, emitted, nil
+	return resp.Message.ContentText, emitted, nil
 }

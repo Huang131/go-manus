@@ -26,6 +26,31 @@ func TestPlanFailureReturnsFirstConcreteStepError(t *testing.T) {
 	}
 }
 
+func TestPlannerReActFlowKeepsStepResultsInStepEvents(t *testing.T) {
+	llm := &adapterLLM{responses: []*llmcore.LLMResponse{
+		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: `{"message":"开始","goal":"完成","title":"任务","language":"zh","steps":[{"id":"step-1","description":"执行"}]}`}},
+		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: `{"success":true,"result":"中间步骤结果"}`}},
+		{Message: llmcore.Message{Role: model.RoleAssistant, ContentText: "正式结果"}},
+	}}
+	flow := NewPlannerReActFlow("session-1", defaultAgentSettings(), llm, nil)
+	var stepResult string
+	for event := range flow.Invoke(context.Background(), &TaskInput{Message: llmcore.Message{Role: model.RoleUser, ContentText: "分析文档"}}) {
+		switch typed := event.(type) {
+		case *model.StepEvent:
+			if typed.Status == model.StepEventStatusCompleted {
+				stepResult = typed.Step.Result
+			}
+		case *model.MessageEvent:
+			if typed.Message == "中间步骤结果" {
+				t.Error("step result duplicated as assistant message")
+			}
+		}
+	}
+	if stepResult != "中间步骤结果" {
+		t.Fatalf("step result = %q, want preserved step detail", stepResult)
+	}
+}
+
 func TestPlannerReActFlowNonRecoverableStepEmitsOneFailedStepEvent(t *testing.T) {
 	rateLimit := &llmcore.ProviderError{
 		Kind:       llmcore.KindRateLimit,
