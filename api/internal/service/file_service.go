@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	toolspkg "github.com/Huang131/go-manus/api/internal/agent/tools"
 	"github.com/Huang131/go-manus/api/internal/apperr"
 	"github.com/Huang131/go-manus/api/internal/model"
 	"github.com/Huang131/go-manus/api/internal/repository"
@@ -28,6 +29,20 @@ type FileService interface {
 	GetFileInfo(ctx context.Context, id string) (*model.File, error)
 	GetFileInfoForSession(ctx context.Context, sessionID, id string) (*model.File, error)
 	DeleteFile(ctx context.Context, id string) error
+}
+
+// AttachmentReaderAdapter 将文件服务以最小接口暴露给原生附件工具。
+type AttachmentReaderAdapter struct{ Service FileService }
+
+func (a AttachmentReaderAdapter) DownloadAttachment(ctx context.Context, sessionID, id string) (toolspkg.AttachmentInfo, io.ReadCloser, error) {
+	if a.Service == nil {
+		return toolspkg.AttachmentInfo{}, nil, ErrStorageUnavailable
+	}
+	file, reader, err := a.Service.DownloadFileForSession(ctx, sessionID, id)
+	if err != nil {
+		return toolspkg.AttachmentInfo{}, nil, err
+	}
+	return toolspkg.AttachmentInfo{ID: file.ID, Filename: file.Filename, MimeType: file.MimeType}, reader, nil
 }
 
 // FileStorage 对象存储接口，抽象底层存储实现。

@@ -53,6 +53,7 @@ function getToolDescription(kind: ToolKind): string {
     browser: '浏览器',
     search: '搜索',
     file: '文件',
+    attachment: '会话附件',
     mcp: 'MCP 服务',
     a2a: 'A2A 智能体',
     message: '消息',
@@ -68,6 +69,7 @@ function renderToolIcon(kind: ToolKind) {
     case 'browser': return <Globe {...props} />
     case 'search': return <Search {...props} />
     case 'file': return <FileSearch {...props} />
+    case 'attachment': return <FileSearch {...props} />
     case 'mcp': return <Wrench {...props} />
     case 'a2a': return <Bot {...props} />
     default: return <Monitor {...props} />

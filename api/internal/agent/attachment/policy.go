@@ -40,6 +40,7 @@ const (
 
 // FileContext 单个附件加载后的内容片段，供 LLM 消费
 type FileContext struct {
+	FileID   string   `json:"file_id"`
 	Filename string   `json:"filename"`
 	Filepath string   `json:"filepath"`
 	MimeType string   `json:"mime_type"`

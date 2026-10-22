@@ -796,6 +796,7 @@ func (a *App) initRunExecution(clients *externalClients) error {
 		&agent.PlannerEngineAdapter{LLM: clients.llm},
 		publisher,
 	)
+	a.RunExecutor.SetAttachmentReader(service.AttachmentReaderAdapter{Service: a.FileService})
 	a.RunApplication = service.NewRunApplicationService(
 		a.RunService, a.repos.trace, a.RunExecutor, a.repos.session, a.repos.file,
 		a.AppConfigSvc, loader, agent.DefaultPromptCatalog().Hash(),

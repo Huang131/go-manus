@@ -34,6 +34,7 @@ const TOOL_COMPONENTS: Record<ToolKind, ComponentType<{ label: string; onClick?:
   message: MessageTool,
   bash: BashTool,
   file: FileTool,
+  attachment: DefaultTool,
   search: SearchTool,
   browser: BrowserTool,
   mcp: McpTool,

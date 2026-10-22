@@ -149,7 +149,7 @@ const executionPromptContent = `你正在执行任务中的一个步骤。
 
 注意：
 - 优先基于已内联的"附件内容"作答，附件路径本身不代表正文
-- 必要时再调用 file.read 工具读取完整文件
+- 对截断内容可使用 attachment 工具，以 file_id 和 offset/limit 分页读取本轮已授权文本附件
 - 如附件是二进制或截断状态，请显式说明`
 
 // summarizePromptContent 总结提示词。

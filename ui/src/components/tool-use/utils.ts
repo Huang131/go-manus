@@ -4,6 +4,7 @@ export type ToolKind =
   | 'message'
   | 'bash'
   | 'file'
+  | 'attachment'
   | 'search'
   | 'browser'
   | 'mcp'
@@ -37,6 +38,7 @@ export function getToolKind(data: ToolEvent | null | undefined): ToolKind {
   if (name === 'file' || name.includes('file')) {
     return 'file'
   }
+  if (name === 'attachment') return 'attachment'
   if (name === 'mcp' || name.startsWith('mcp_')) {
     return 'mcp'
   }
@@ -104,6 +106,7 @@ export function getFriendlyToolLabel(data: ToolEvent | null | undefined): string
         return filepath ? `正在访问文件 ${truncate(filepath, 60)}` : dirPath ? `正在访问目录 ${truncate(dirPath, 60)}` : '正在访问文件'
     }
   }
+  if (name === 'attachment') return '正在读取会话附件'
 
   if (name === 'browser' || fn.startsWith('browser_')) {
     switch (action || fn) {

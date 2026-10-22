@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"io"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -358,6 +360,39 @@ func TestRunExecutorPassesAttachmentContextsToEngine(t *testing.T) {
 	}
 	if len(engine.seen.AttachmentContexts) != 1 || engine.seen.AttachmentContexts[0].Content != "正文" {
 		t.Fatalf("Engine attachment contexts = %+v, want loaded attachment body", engine.seen.AttachmentContexts)
+	}
+}
+
+type attachmentReaderForRunStub struct{}
+
+func (attachmentReaderForRunStub) DownloadAttachment(context.Context, string, string) (toolspkg.AttachmentInfo, io.ReadCloser, error) {
+	return toolspkg.AttachmentInfo{}, io.NopCloser(strings.NewReader("正文")), nil
+}
+
+func TestRunExecutorScopesAttachmentToolToCurrentContexts(t *testing.T) {
+	engine := &executorEngineStub{result: RunExecutionResult{Kind: RunExecutionSucceeded}}
+	executor := NewRunExecutor(&executorStoreStub{}, &executorToolProviderStub{set: &executorToolSetStub{released: make(chan struct{})}}, engine)
+	executor.SetAttachmentReader(attachmentReaderForRunStub{})
+	contexts := []attachment.FileContext{{FileID: "selected-file", Filename: "selected.txt"}}
+	handle, err := executor.Start(context.Background(), "run-1", nil, contexts)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := handle.Wait(context.Background()); err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	var attachmentTool toolspkg.Tool
+	for _, tool := range engine.seen.Tools {
+		if tool.Name() == toolspkg.ToolNameAttachment {
+			attachmentTool = tool
+		}
+	}
+	if attachmentTool == nil {
+		t.Fatal("attachment tool missing for explicitly selected file")
+	}
+	result, err := attachmentTool.Invoke(context.Background(), map[string]interface{}{"file_id": "unselected-file"})
+	if err != nil || result.Success {
+		t.Fatalf("unselected file result=%+v err=%v", result, err)
 	}
 }
 

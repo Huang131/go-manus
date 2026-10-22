@@ -54,6 +54,7 @@ func (l *Loader) loadOne(ctx context.Context, f model.File, userMessage string, 
 
 	if IsLikelyBinary(f.MimeType) {
 		return FileContext{
+			FileID:   f.ID,
 			Filename: f.Filename,
 			Filepath: f.Filepath,
 			MimeType: f.MimeType,
@@ -64,6 +65,7 @@ func (l *Loader) loadOne(ctx context.Context, f model.File, userMessage string, 
 
 	if f.ID == "" || f.Key == "" {
 		return FileContext{
+			FileID:   f.ID,
 			Filename: f.Filename,
 			Filepath: f.Filepath,
 			MimeType: f.MimeType,
@@ -78,6 +80,7 @@ func (l *Loader) loadOne(ctx context.Context, f model.File, userMessage string, 
 			logger.String("file_id", f.ID),
 			logger.Err(err))
 		return FileContext{
+			FileID:   f.ID,
 			Filename: f.Filename,
 			Filepath: f.Filepath,
 			MimeType: f.MimeType,
@@ -93,6 +96,7 @@ func (l *Loader) loadOne(ctx context.Context, f model.File, userMessage string, 
 			logger.String("file_id", f.ID),
 			logger.Err(err))
 		return FileContext{
+			FileID:   f.ID,
 			Filename: f.Filename,
 			Filepath: f.Filepath,
 			MimeType: f.MimeType,
@@ -104,6 +108,7 @@ func (l *Loader) loadOne(ctx context.Context, f model.File, userMessage string, 
 	content := normalizeText(data)
 	size := int64(len(content))
 	base := FileContext{
+		FileID:   f.ID,
 		Filename: f.Filename,
 		Filepath: f.Filepath,
 		MimeType: f.MimeType,
